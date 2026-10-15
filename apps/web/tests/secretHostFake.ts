@@ -30,7 +30,9 @@ export const sealedForAnother = (words: string): string => {
 	return sealSecret(words, theirs);
 };
 
-export const fence = (armor: string) => `\`\`\`age\n${armor}\n\`\`\``;
+/** A secret's fence, called `label` where one is given. */
+export const fence = (armor: string, label = '') =>
+	`\`\`\`age${label === '' ? '' : ` ${label}`}\n${armor}\n\`\`\``;
 
 /** The words each secret in `markdown` opens to, in order: at any depth, as remark finds them. */
 export const openedIn = (markdown: string) =>

@@ -463,6 +463,92 @@ describe('a secret in raw mode', () => {
 	});
 });
 
+/**
+ * A secret's label in raw mode: the words after `age` on its opening line,
+ * changed in its panel as they are typed, with nothing sealed.
+ */
+describe('a secret’s label in raw mode', () => {
+	const labelField = (container: HTMLElement) =>
+		container.querySelector<HTMLInputElement>('.secret-label-field');
+	const name = (container: HTMLElement, words: string) => {
+		const into = labelField(container);
+		if (into === null) throw new Error('no label');
+		into.value = words;
+		into.dispatchEvent(new InputEvent('input', { bubbles: true }));
+	};
+
+	it('changes only the opening line as it is typed, inside a list, the user’s edit', async () => {
+		const armor = sealed('listed');
+		const indented = armor.split('\n').join('\n  ');
+		const fake = fakeHost();
+		const h = mount(`- item\n\n  \`\`\`age Front door\n  ${indented}\n  \`\`\`\n`, fake.host);
+		await h.revealed('listed');
+		expect(labelField(h.container)?.value).toBe('Front door');
+
+		name(h.container, 'Back door');
+
+		expect(h.text()).toBe(`- item\n\n  \`\`\`age Back door\n  ${indented}\n  \`\`\`\n`);
+		expect(h.onUserEdit).toHaveBeenCalledTimes(1);
+		expect(fake.seal).not.toHaveBeenCalled();
+
+		name(h.container, '');
+		expect(h.text()).toBe(`- item\n\n  \`\`\`age\n  ${indented}\n  \`\`\`\n`);
+	});
+
+	it('stays as it is as the words are kept, and both go back with Cancel', async () => {
+		const armor = sealed('the door code');
+		const body = `${fence(armor, 'Front door')}\n`;
+		const h = mount(body, fakeHost().host);
+		await h.revealed('the door code');
+
+		h.type('the new code');
+		name(h.container, 'Back door');
+		expect(h.text().startsWith('```age Back door\n')).toBe(true);
+		expect(h.opened()).toEqual(['the new code']);
+
+		h.press('Cancel');
+
+		expect(h.text()).toBe(body);
+	});
+
+	it('goes back with Cancel where it is all that changed', async () => {
+		const armor = sealed('the door code');
+		const body = `${fence(armor, 'Front door')}\n`;
+		const h = mount(body, fakeHost().host);
+		await h.revealed('the door code');
+		name(h.container, 'Back door');
+
+		h.press('Cancel');
+
+		expect(h.text()).toBe(body);
+	});
+
+	it('goes in with a new secret’s first words, where it was typed before them', async () => {
+		const fake = fakeHost();
+		const h = mount('First line\n', fake.host);
+		await h.inserted(fake.insert, 3);
+
+		name(h.container, 'Locker');
+		expect(h.onUserEdit).not.toHaveBeenCalled();
+		h.type('1234');
+
+		expect(h.text()).toMatch(/^First line\n\n```age Locker\n[\s\S]+\n```\n$/u);
+		expect(h.opened()).toEqual(['1234']);
+	});
+
+	it('is shown in the panel as the text has it, once changed there', async () => {
+		const armor = sealed('the door code');
+		const h = mount(`${fence(armor, 'Front door')}\n`, fakeHost().host);
+		await h.revealed('the door code');
+		const at = '```age '.length;
+
+		h.view.dispatch({ changes: { from: at, to: at + 'Front'.length, insert: 'Side' } });
+		await Promise.resolve();
+
+		expect(labelField(h.container)?.value).toBe('Side door');
+	});
+});
+
 describe('inserting a secret in raw mode', () => {
 	it('opens an empty panel under the cursor’s line, and inserts nothing where nothing is typed', async () => {
 		const fake = fakeHost();

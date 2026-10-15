@@ -10,9 +10,10 @@ import { normalizePath } from './paths.js';
 
 /**
  * Secrets in a note (docs/ARCHITECTURE.md §3, "Secrets", and §7): a fenced block
- * whose info string is `age` and whose text is an armored age file. The fence
- * says nothing else. Milkdown keeps only a fence's first word, and everything
- * about how the file was made is in its own header.
+ * whose info string is `age` and whose text is an armored age file. After `age`
+ * the fence may say what the secret is, in the user's words and in plain text
+ * (`secretLabel`), and nothing else: everything about how the file was made is
+ * in its own header.
  */
 
 /** The info string of a fence that holds a secret. */
@@ -37,6 +38,16 @@ export const secretFile = (
 /** Whether a fenced block is a secret. */
 export const isSecretBlock = (language: string | null | undefined, text: string): boolean =>
 	secretFile(language, text) !== undefined;
+
+/**
+ * What a secret's fence calls it, from the rest of its info string after `age`
+ * (a fence's `meta`): shown where the secret is closed in place of the app's
+ * own word for one. Plain text, read by anyone who can read the note.
+ */
+export const secretLabel = (meta: string | null | undefined): string | undefined => {
+	const label = meta?.trim() ?? '';
+	return label === '' ? undefined : label;
+};
 
 /** The text of every secret in a note's body, in order, at any depth. */
 export const secretBlocksIn = (body: string): string[] => {

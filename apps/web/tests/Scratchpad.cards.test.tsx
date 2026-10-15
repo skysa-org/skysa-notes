@@ -129,6 +129,13 @@ describe('what a card shows', () => {
 		expect(screen.getByRole('button', { name: 'Options for “Secret”' })).toBeDefined();
 	});
 
+	it('is a secret’s label for a note with no name that opens with one called something', () => {
+		renderPad({
+			notes: [card('1', { body: `${fence(sealed('the code'), 'Door code')}\n\nMilk\n` })],
+		});
+		expect(screen.getByRole('button', { name: 'Options for “Door code”' })).toBeDefined();
+	});
+
 	it('is "Empty note" for a note with nothing in it', () => {
 		renderPad({ notes: [card('1')] });
 		expect(screen.getByText('Empty note')).toBeDefined();

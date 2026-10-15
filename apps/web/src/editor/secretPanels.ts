@@ -1,6 +1,6 @@
 import { t } from '../i18n/t.js';
 import type { Sealer, SecretHost } from './secretHost.js';
-import { createSecretPanel, type SecretPanel } from './secretPanel.js';
+import { createSecretPanel, LABEL_MAX, type SecretPanel } from './secretPanel.js';
 
 /**
  * The panels a note's editor has open, and what Done, Cancel, leaving, the
@@ -18,21 +18,35 @@ import { createSecretPanel, type SecretPanel } from './secretPanel.js';
  * words to lose. Done closes the panel; Cancel puts the block back as it was
  * revealed. A new secret ("Insert secret") is a panel where it will go, and
  * nothing typed in it inserts nothing.
+ *
+ * A secret's label is not sealed: it is plain text on its fence, and kept as
+ * it is typed by changing only that. A new secret's waits for its first
+ * words, which put its block in the note.
  */
 
 /** The key a new secret's panel is held under, which no armor can be. */
 export const DRAFT = '';
 
 /**
- * A panel open. `from` is the armor its block had when it was revealed, which
- * Cancel puts back; none for a new secret, whose Cancel takes out the block
- * its words were kept in, if any were. `seal` is how its words are kept.
+ * A panel open. `from` is the armor its block had when it was revealed, and
+ * `fromLabel` its label, which Cancel puts back; none for a new secret, whose
+ * Cancel takes out the block its words were kept in, if any were. `seal` is
+ * how its words are kept.
  */
 export interface Open {
 	readonly panel: SecretPanel;
 	readonly from: string | undefined;
+	readonly fromLabel: string;
 	readonly seal: Sealer;
 }
+
+/**
+ * What a label typed is written as, on the line that opens the fence: one line,
+ * with no backtick, which would end a fence's info string, and no longer than
+ * the field allows.
+ */
+export const labelToWrite = (typed: string): string =>
+	typed.replace(/\s+/gu, ' ').replaceAll('`', '').trim().slice(0, LABEL_MAX).trim();
 
 /**
  * The panels open in one editor, by the armor of the block each shows — or
@@ -113,13 +127,20 @@ export interface SecretDocument {
 	/** Whether a block with the armor `key` is in the document. */
 	readonly has: (key: string) => boolean;
 	/**
-	 * `armor` in place of the block with the armor `key`; or — a new secret's
-	 * first words — as a block of its own where `at` says, which `draftAt`
-	 * gave, or at the end of the note.
+	 * `armor` in place of the block with the armor `key`, its label as it is;
+	 * or — a new secret's first words — as a block of its own called `label`
+	 * where `at` says, which `draftAt` gave, or at the end of the note.
 	 */
-	readonly put: (key: string, armor: string, at: number | undefined) => void;
-	/** The block with the armor `key` changed back to `from`, or, with no `from`, taken out. */
-	readonly putBack: (key: string, from: string | undefined) => void;
+	readonly put: (key: string, armor: string, at: number | undefined, label: string) => void;
+	/**
+	 * The block with the armor `key` changed back to `from` and `label`, or,
+	 * with no `from`, taken out.
+	 */
+	readonly putBack: (key: string, from: string | undefined, label: string) => void;
+	/** The label of the block with the armor `key`, as its fence says it; none where it has none. */
+	readonly label: (key: string) => string;
+	/** The block with the armor `key` called `label`, its armor as it is. */
+	readonly relabel: (key: string, label: string) => void;
 	/** Where a new secret's panel is, if one is begun. */
 	readonly draftAt: () => number | undefined;
 	/** A new secret begun at the cursor. */
@@ -161,12 +182,30 @@ const keep = (doc: SecretDocument, panels: SecretPanels, panel: SecretPanel): vo
 	// Held under the new armor first: the block changes under the panel as it
 	// is put in, and what draws it looks for it by that.
 	panels.rekey(panel, armor);
-	doc.put(key, armor, doc.draftAt());
+	const label = panel.label();
+	doc.put(key, armor, doc.draftAt(), labelToWrite(label));
+	if (key === DRAFT) panel.markLabel(label);
 	if (caret !== undefined) {
 		queueMicrotask(() => {
 			panel.focus(caret);
 		});
 	}
+};
+
+/**
+ * What is in `panel`'s label kept, where it is new: the block's fence changed
+ * to say it, as the user's edit, with nothing sealed. A new secret's waits for
+ * its words (`keep`).
+ */
+const keepLabel = (doc: SecretDocument, panels: SecretPanels, panel: SecretPanel): void => {
+	const found = panels.find(panel);
+	if (found === undefined || !panel.labelChanged() || doc.closed()) return;
+	const [key] = found;
+	if (key === DRAFT) return;
+	const typed = panel.label();
+	panel.markLabel(typed);
+	const label = labelToWrite(typed);
+	if (labelToWrite(doc.label(key)) !== label) doc.relabel(key, label);
 };
 
 /**
@@ -176,12 +215,14 @@ const keep = (doc: SecretDocument, panels: SecretPanels, panel: SecretPanel): vo
  */
 const done = (doc: SecretDocument, panels: SecretPanels, panel: SecretPanel): void => {
 	keep(doc, panels, panel);
+	keepLabel(doc, panels, panel);
 	const found = panels.find(panel);
 	if (found === undefined || panel.changed()) return;
 	const [key, { from }] = found;
 	panels.remove(panel);
 	if (key === DRAFT && doc.draftAt() !== undefined) doc.endDraft();
-	if (key !== DRAFT && from === undefined && panel.words() === '') doc.putBack(key, undefined);
+	if (key !== DRAFT && from === undefined && panel.words() === '')
+		doc.putBack(key, undefined, '');
 	doc.focus();
 };
 
@@ -190,10 +231,11 @@ const cancel = (doc: SecretDocument, panels: SecretPanels, panel: SecretPanel): 
 	const found = panels.find(panel);
 	panels.remove(panel);
 	if (found === undefined) return;
-	const [key, { from }] = found;
+	const [key, { from, fromLabel }] = found;
 	if (key === DRAFT && doc.draftAt() !== undefined) doc.endDraft();
-	// Typed in since it was revealed.
-	if (key !== DRAFT && key !== from) doc.putBack(key, from);
+	// Typed in since it was revealed, its words or its label.
+	if (key !== DRAFT && (key !== from || doc.label(key) !== fromLabel))
+		doc.putBack(key, from, fromLabel);
 	doc.focus();
 };
 
@@ -202,12 +244,17 @@ const panelFor = (
 	doc: SecretDocument,
 	host: SecretHost,
 	panels: SecretPanels,
-	words: string
+	words: string,
+	label: string
 ): SecretPanel => {
 	const panel: SecretPanel = createSecretPanel({
 		words,
+		label,
 		onInput: () => {
 			keep(doc, panels, panel);
+		},
+		onLabel: () => {
+			keepLabel(doc, panels, panel);
 		},
 		onDone: () => {
 			done(doc, panels, panel);
@@ -244,8 +291,9 @@ export const reveal = async (
 	// a pull changed it under the unlock: a panel for no block would hold the
 	// words, undrawn, until the next edit closed it.
 	if (panels.get(armor) !== undefined || doc.closed() || !doc.has(armor)) return undefined;
-	const panel = panelFor(doc, host, panels, opened.words);
-	panels.set(armor, { panel, from: armor, seal: opened.seal });
+	const fromLabel = doc.label(armor);
+	const panel = panelFor(doc, host, panels, opened.words, fromLabel.trim());
+	panels.set(armor, { panel, from: armor, fromLabel, seal: opened.seal });
 	panel.focus();
 	return undefined;
 };
@@ -302,8 +350,8 @@ export const insertSecret = async (
 	if (begun()) return;
 	const seal = await host.begin();
 	if (seal === undefined || doc.closed() || begun()) return;
-	const panel = panelFor(doc, host, panels, '');
-	panels.set(DRAFT, { panel, from: undefined, seal });
+	const panel = panelFor(doc, host, panels, '', '');
+	panels.set(DRAFT, { panel, from: undefined, fromLabel: '', seal });
 	doc.beginDraft();
 	panel.focus();
 };
@@ -315,6 +363,7 @@ export const insertSecret = async (
 export const keepAll = (doc: SecretDocument, panels: SecretPanels): void => {
 	panels.all().forEach(([, { panel }]) => {
 		keep(doc, panels, panel);
+		keepLabel(doc, panels, panel);
 	});
 };
 

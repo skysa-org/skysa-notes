@@ -264,6 +264,10 @@ export const editor = {
 		/** What the closed block says in place of its words. */
 		label: 'Secret',
 		reveal: 'Reveal',
+		/** Over a revealed secret's words: what the closed secret is called, in place of "Secret". */
+		labelField: 'Label',
+		/** Under the label: where it shows, and that it is plain text. */
+		labelHint: 'Shown when the secret is closed. Not encrypted.',
 		/** On the block's bar while it is selected: takes it out of the note. */
 		remove: 'Delete secret',
 		/** Said on the block where it cannot be revealed. */
