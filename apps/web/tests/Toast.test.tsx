@@ -54,4 +54,25 @@ describe('Toast', () => {
 		fireEvent.pointerDown(link);
 		expect(onDismiss).not.toHaveBeenCalled();
 	});
+
+	it('opens what it is about here, with a button, and goes as it does', () => {
+		const onDismiss = vi.fn();
+		const onChoose = vi.fn();
+		render(
+			<Toast
+				message="This device cannot open secrets in this source yet."
+				tone="warning"
+				action={{ label: 'Open Secrets', onChoose }}
+				onDismiss={onDismiss}
+			/>
+		);
+
+		expect(screen.queryByRole('link')).toBeNull();
+		const open = screen.getByRole('button', { name: 'Open Secrets' });
+		fireEvent.pointerDown(open);
+		expect(onDismiss).not.toHaveBeenCalled();
+		fireEvent.click(open);
+		expect(onChoose).toHaveBeenCalledTimes(1);
+		expect(onDismiss).toHaveBeenCalledTimes(1);
+	});
 });
