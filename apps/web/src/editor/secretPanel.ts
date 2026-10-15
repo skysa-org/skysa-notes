@@ -117,7 +117,7 @@ export const createSecretPanel = ({
 	name.setAttribute('autocomplete', 'off');
 	name.setAttribute('data-1p-ignore', '');
 	name.setAttribute('data-lpignore', 'true');
-	name.value = label;
+	name.setAttribute('value', label);
 	name.addEventListener('input', (event) => {
 		if (!(event instanceof InputEvent && event.isComposing)) onLabel();
 	});
@@ -236,6 +236,7 @@ export const createSecretPanel = ({
 		},
 		setLabel: (next) => {
 			if (document.activeElement === name || next === name.value) return;
+			// eslint-disable-next-line functional/immutable-data -- what is in a field is set by assigning to it
 			name.value = next;
 			keptLabel.current = next;
 		},
