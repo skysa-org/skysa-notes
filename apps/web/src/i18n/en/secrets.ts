@@ -56,7 +56,10 @@ export const secrets = {
 	},
 	/** Two of the new key's groups, typed back before setup goes on. */
 	check: {
-		text: 'To be sure it was kept, type two of its groups.',
+		/** {first} and {second} count from 1, as the groups are numbered. */
+		text: 'To be sure it was kept, type its groups {first} and {second}.',
+		/** The two fields, read out together. */
+		label: 'Two groups of the recovery key',
 		/** A group's field. {number} counts from 1. */
 		group: 'Group {number}',
 		wrong: 'That is not group {number}.',
@@ -218,7 +221,7 @@ export const secrets = {
 		unlock: 'Unlock',
 		lockNow: 'Lock now',
 		change: 'Change how this device unlocks',
-		replaceKey: 'Replace key…',
+		replaceKey: 'Replace this source’s key',
 		remove: 'Remove from this device',
 		removeTitle: 'Remove the key from this device?',
 		removeText:

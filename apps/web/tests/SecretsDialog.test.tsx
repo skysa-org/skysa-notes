@@ -167,6 +167,31 @@ describe('setting a source up', () => {
 		).toBe(key && encodeIdentity(key));
 	});
 
+	it('keeps Print and Copy by the key, and asks two groups back in cells side by side', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
+		// What is done with the key is by it; the row is for going on.
+		expect(buttonRow()).toEqual(['Cancel', 'Next']);
+		expect(toolsOf()).toEqual(['Print', 'Copy']);
+
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		expect(screen.getByText('To be sure it was kept, type its groups 2 and 7.')).toBeTruthy();
+		const cells = screen.getByRole('group', { name: 'Two groups of the recovery key' });
+		expect(
+			[...cells.querySelectorAll('input')].map((cell) => cell.getAttribute('aria-label'))
+		).toEqual(['Group 2', 'Group 7']);
+		expect(buttonRow()).toEqual(['Cancel', 'Back', 'Check']);
+
+		// Both typed into the first: it fills, and goes on into the second.
+		await h.user.click(screen.getByLabelText('Group 2'));
+		await h.user.keyboard(`${shown[1] ?? ''}${shown[6] ?? ''}`);
+		expect(document.activeElement).toBe(screen.getByLabelText('Group 7'));
+		await h.user.click(screen.getByRole('button', { name: 'Check' }));
+		expect(await screen.findByRole('radio', { name: 'PIN' })).toBeTruthy();
+	});
+
 	it('says which group was wrong, and goes back to the key', async () => {
 		const h = await setup({ record: { state: 'none' } });
 		h.open();
@@ -221,6 +246,9 @@ describe('setting a source up', () => {
 			'2 secrets in this source were made with a different key. They stay locked unless that key is added too.'
 		);
 		expect(screen.getByText('They are in 2 notes.')).toBeTruthy();
+		// The other ways on are in the step; the row is Continue's.
+		expect(optionsOf()).toEqual(['Use that key instead', 'Add it as well']);
+		expect(buttonRow()).toEqual(['Cancel', 'Continue']);
 
 		await h.user.click(screen.getByRole('button', { name: 'Add it as well' }));
 		await typeKey(h, encodeIdentity(older));
@@ -444,6 +472,14 @@ describe('setting a source up', () => {
 const closeButton = () =>
 	document.querySelector<HTMLButtonElement>('.modal-head button[aria-label="Close"]');
 
+/** What a step can go on to besides its answer, in the step itself. */
+const optionsOf = (): (string | null)[] =>
+	[...document.querySelectorAll('.dialog-options button')].map((button) => button.textContent);
+
+/** What is done with what a step shows, by it. */
+const toolsOf = (): (string | null)[] =>
+	[...document.querySelectorAll('.dialog-tools button')].map((button) => button.textContent);
+
 /** The one row of buttons the dialog has, by what each says. */
 const buttonRow = (): (string | null)[] => {
 	const rows = document.querySelectorAll('.dialog-actions');
@@ -639,6 +675,27 @@ describe('an enrolled device', () => {
 		expect(h.lock.isUnlocked('c1')).toBe(false);
 	});
 
+	it('puts what it goes on to in the step, and keeps its row to unlocking, locking and removing', async () => {
+		const h = await enrolled();
+		h.open();
+		await screen.findByText('Locked now.');
+		expect(optionsOf()).toEqual([
+			'Change how this device unlocks',
+			'Replace this source’s key',
+		]);
+		expect(buttonRow()).toEqual(['Remove from this device', 'Unlock']);
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await screen.findByText(/^Unlocked now\./u);
+		// Nothing asked: no answer on the right, and the ✕ has the focus.
+		expect(buttonRow()).toEqual(['Lock now', 'Remove from this device']);
+		expect(optionsOf()).toEqual([
+			'Change how this device unlocks',
+			'Replace this source’s key',
+		]);
+	});
+
 	it('changes how it unlocks, unlocking first where it is locked', async () => {
 		const h = await enrolled();
 		h.open();
@@ -776,9 +833,11 @@ describe('replacing the source’s key', () => {
 			secretBlocksIn(note.body)
 		);
 
-	/** Replace key…, Use a key I have, and `identity` typed: what replacing with it will do is said. */
+	/** Replace this source’s key, Use a key I have, and `identity` typed: what replacing with it will do is said. */
 	const pasted = async (h: Harness, identity: Uint8Array) => {
-		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Replace this source’s key' })
+		);
 		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
 		await typeKey(h, encodeIdentity(identity));
 		await screen.findByRole('button', { name: 'Replace key' });
@@ -793,7 +852,9 @@ describe('replacing the source’s key', () => {
 		const before = await h.db.notes.toArray();
 		h.open();
 
-		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Replace this source’s key' })
+		);
 		expect(
 			screen.getByText(/version history, can still be opened with the old key\.$/u)
 		).toBeTruthy();
@@ -843,7 +904,9 @@ describe('replacing the source’s key', () => {
 		const h = await ready();
 		await secretIn(h.db, h.identity);
 		h.open();
-		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Replace this source’s key' })
+		);
 		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
 
 		await typeKey(h, encodeIdentity(h.identity));
@@ -923,7 +986,9 @@ describe('replacing the source’s key', () => {
 	it('takes no key to replace it with where the folder names none by the time it is typed', async () => {
 		const h = await ready();
 		h.open();
-		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Replace this source’s key' })
+		);
 		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
 		expect(await screen.findByLabelText('Recovery key')).toBeTruthy();
 
@@ -1052,7 +1117,9 @@ describe('replacing the source’s key', () => {
 		const h = await ready();
 		h.lock.lock();
 		h.open();
-		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Replace this source’s key' })
+		);
 		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
 		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
 		await typeKey(h, encodeIdentity(generateIdentity()));
@@ -1125,7 +1192,9 @@ describe('replacing the source’s key', () => {
 		const h = await ready();
 		await secretIn(h.db, h.identity);
 		h.open({ age });
-		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Replace this source’s key' })
+		);
 		await h.user.click(screen.getByRole('button', { name: 'Make a new key' }));
 		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
 		await h.user.click(screen.getByRole('button', { name: 'Next' }));
