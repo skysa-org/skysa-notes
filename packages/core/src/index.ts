@@ -161,6 +161,8 @@ export {
 	RELAY_PUSHED_INTERVAL_MS,
 } from './relay.js';
 
+export * from './age/index.js';
 export * from './hash.js';
 export * from './markdown/index.js';
 export * from './paths.js';
+export * from './secrets.js';

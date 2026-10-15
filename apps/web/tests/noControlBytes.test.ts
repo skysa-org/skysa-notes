@@ -78,6 +78,18 @@ const SKIP_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
 const BINARY =
 	/\.(?:png|jpg|jpeg|gif|webp|avif|ico|svgz|woff2?|ttf|otf|eot|pdf|zip|gz|br|zst|tar|7z|mp3|mp4|m4a|mov|webm|wasm|node|docx|xlsx|pptx)$/i;
 
+/**
+ * Folders of files that are bytes by design and have no extension to say so:
+ * the C2SP age test vectors, copied as they are published so they can be
+ * updated by copying again (`packages/core/tests/age/testkit/README.md`), and
+ * marked `binary` in `.gitattributes`. Their README is still text, and checked.
+ */
+const BINARY_FOLDERS = [join(repo, 'packages', 'core', 'tests', 'age', 'testkit')];
+
+const isBinary = (path: string): boolean =>
+	(BINARY.test(path) || BINARY_FOLDERS.some((folder) => dirname(path) === folder)) &&
+	!path.endsWith('.md');
+
 const filesUnder = (dir: string): string[] =>
 	readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
 		// A symlink is followed nowhere: the file it points at is either inside
@@ -151,7 +163,7 @@ describe('every source file', () => {
 		expect(files).toContain(here);
 
 		const offenders = files
-			.filter((path) => !BINARY.test(path))
+			.filter((path) => !isBinary(path))
 			.flatMap((path) => {
 				const bytes = readFileSync(path);
 				// The value, not the index: asking for it directly is what makes it
