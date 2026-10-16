@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ChannelState, FillChannel } from '../src/fill/channel.js';
 import { FillPage } from '../src/fill/FillPage.js';
 import { BOOKMARKLET_REVISION, FILL_MESSAGE, FILL_VERSION } from '../src/fill/protocol.js';
+import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 
 /**
  * The fill window (docs/ARCHITECTURE.md §7, "Filling in on a site"): what it
@@ -14,9 +15,19 @@ import { BOOKMARKLET_REVISION, FILL_MESSAGE, FILL_VERSION } from '../src/fill/pr
  * and the page's site once it does.
  */
 
-afterEach(() => {
+const opened: NotesDatabase[] = [];
+
+afterEach(async () => {
 	cleanup();
+	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
+
+/** A store of its own, with nothing in it, for the logins a hello looks for (`FillLogins.test.tsx`). */
+const fresh = (): NotesDatabase => {
+	const db = createDatabase(`fill-page-${crypto.randomUUID()}`);
+	opened.push(db);
+	return db;
+};
 
 /** A channel whose state the test moves on. */
 const channelAt = (first: ChannelState) => {
@@ -67,7 +78,7 @@ const hello = (origin: string, b = BOOKMARKLET_REVISION): ChannelState => {
 describe('the fill window', () => {
 	it('says it is reaching the page, then that it is still waiting, then names the site', () => {
 		const { channel, move } = channelAt({ state: 'waiting', slow: false });
-		render(<FillPage channel={channel} />);
+		render(<FillPage channel={channel} db={fresh()} />);
 
 		expect(screen.getByRole('status').textContent).toBe('Reaching the page…');
 		expect(document.title).toBe('Fill in');
@@ -83,7 +94,7 @@ describe('the fill window', () => {
 
 	it('marks a page over http as not secure, and names its port', () => {
 		const { channel } = channelAt(hello('http://router.example:8080'));
-		render(<FillPage channel={channel} />);
+		render(<FillPage channel={channel} db={fresh()} />);
 
 		expect(
 			screen.getByRole('heading', { name: 'Fill in on router.example:8080' })
@@ -93,7 +104,7 @@ describe('the fill window', () => {
 
 	it('says, opened by no page, how to use it, with the way to Passwords', () => {
 		const { channel } = channelAt({ state: 'alone' });
-		render(<FillPage channel={channel} />);
+		render(<FillPage channel={channel} db={fresh()} />);
 
 		expect(screen.getByText(/^This window could not reach a page/u)).toBeDefined();
 		expect(screen.getByRole('button', { name: 'Open Passwords' })).toBeDefined();
@@ -101,18 +112,18 @@ describe('the fill window', () => {
 
 	it('says which is behind, the app or the bookmarklet, where it cannot read it', () => {
 		const newer = channelAt({ state: 'newer' });
-		render(<FillPage channel={newer.channel} />);
+		render(<FillPage channel={newer.channel} db={fresh()} />);
 		expect(screen.getByText(/^This bookmarklet is newer than the app/u)).toBeDefined();
 		cleanup();
 
 		const older = channelAt({ state: 'older' });
-		render(<FillPage channel={older.channel} />);
+		render(<FillPage channel={older.channel} db={fresh()} />);
 		expect(screen.getByText(/^This bookmarklet is out of date/u)).toBeDefined();
 	});
 
 	it('says where a newer bookmarklet is, for one that still works', () => {
 		const { channel } = channelAt(hello('https://example.com', BOOKMARKLET_REVISION - 1));
-		render(<FillPage channel={channel} />);
+		render(<FillPage channel={channel} db={fresh()} />);
 
 		expect(screen.getByText(/^A newer bookmarklet is in Passwords/u)).toBeDefined();
 	});
