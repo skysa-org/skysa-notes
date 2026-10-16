@@ -3639,11 +3639,17 @@ button.icon.account-devices-count {
 	color: var(--muted);
 }
 
+/* As tall as the headings at the top of the columns (`.pane-header` with a
+   button in it) and the place rows, its rule included, so the rule under it
+   lines up with the one under the notebooks' heading beside it. The field is
+   centred in that height rather than padded to it: shorter than the bar, it
+   would leave the row a few pixels short of it. */
 .passwords-filter {
 	display: flex;
 	align-items: center;
 	gap: var(--space-s);
-	padding: var(--space-s) var(--gutter);
+	min-block-size: calc(var(--control) + 2 * var(--bar-block) + 1px);
+	padding: 0 var(--gutter);
 	border-block-end: 1px solid var(--border);
 	color: var(--muted);
 }
