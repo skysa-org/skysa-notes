@@ -6,8 +6,8 @@
 export const secrets = {
 	/** In the gear's menu and a source's `⋯`. */
 	menu: {
-		setUp: 'Set up vault…',
-		open: 'Vault…',
+		setUp: 'Set up vault',
+		open: 'Vault',
 	},
 	title: 'Vault',
 	checking: 'Checking whether this source has a vault set up…',

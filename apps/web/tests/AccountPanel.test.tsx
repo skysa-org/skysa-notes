@@ -861,7 +861,7 @@ describe('AccountPanel, downloading every note', () => {
 			'Re-scan from scratch',
 			'Show clipboard',
 			'Hide scratchpad',
-			'Set up vault…',
+			'Set up vault',
 		]);
 	});
 
@@ -1086,7 +1086,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
-				'Set up vault…',
+				'Set up vault',
 				'Disconnect',
 			]);
 		});
@@ -2309,7 +2309,7 @@ describe('AccountPanel, secrets for a source', () => {
 		const sync = fakeSync({ phase: 'idle' });
 		await connected(sync);
 
-		await choose(user, 'Set up vault…');
+		await choose(user, 'Set up vault');
 		const dialog = await screen.findByRole('dialog', { name: 'Vault' });
 		expect(sync.keyFile.refresh).toHaveBeenCalledWith('c1');
 
@@ -2324,8 +2324,8 @@ describe('AccountPanel, secrets for a source', () => {
 		const db = await connected(fakeSync({ phase: 'idle' }));
 		await db.keyFiles.put({ connectionId: 'c1', state: 'ok', recipient: 'age1…' });
 
-		await offered(user, 'Vault…');
-		expect(gearLabels()).not.toContain('Set up vault…');
+		await offered(user, 'Vault');
+		expect(gearLabels()).not.toContain('Set up vault');
 	});
 
 	it('is not offered where nothing syncs the source', async () => {
@@ -5107,7 +5107,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
-				'Set up vault…',
+				'Set up vault',
 				'Disconnect',
 			]);
 		});
@@ -5190,7 +5190,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
-				'Set up vault…',
+				'Set up vault',
 				'Disconnect',
 			]);
 		});
@@ -5258,7 +5258,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		const db = await connected(sync);
 
 		await openOptions(user, 'OneDrive');
-		await user.click(await screen.findByRole('button', { name: 'Set up vault…' }));
+		await user.click(await screen.findByRole('button', { name: 'Set up vault' }));
 
 		expect(await screen.findByRole('dialog', { name: 'Vault' })).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe('c2');
@@ -5275,7 +5275,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Rename',
 				'Sync now',
 				'Re-scan from scratch',
-				'Set up vault…',
+				'Set up vault',
 				'Download all notes',
 				'Disconnect',
 			]);
