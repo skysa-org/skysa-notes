@@ -3778,6 +3778,13 @@ button.icon.account-devices-count {
 	font-family: var(--font-mono);
 }
 
+/* The password as dots, in a text field rather than a password field: a
+   browser offers to save what is typed into one of those. Chrome, Safari and
+   Firefox (114 on) draw it so. */
+.password-entry input.password-masked {
+	-webkit-text-security: disc;
+}
+
 .password-hint {
 	margin: 0;
 	color: var(--muted);

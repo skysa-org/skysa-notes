@@ -795,7 +795,7 @@ const useDrafts = ({
 	onStoreFailed: () => void;
 }) => {
 	const [draft, setDraft] = useState<NoteRecord | null>(null);
-	/** Each draft is stored once, however many edits ask. */
+	/** Each draft is stored once, however many edits ask, and asked again where that failed. */
 	const storing = useRef(new Map<string, Promise<boolean>>());
 
 	// Stored, and a note now: let it go, in render rather than an effect, so no
@@ -840,6 +840,7 @@ const useDrafts = ({
 					return true;
 				},
 				() => {
+					storing.current.delete(note.id);
 					onStoreFailed();
 					return false;
 				}
@@ -1602,11 +1603,12 @@ const Home = () => {
 				// Back where it was, open. By the row's own path, not the one it
 				// was deleted at: once sync has purged the row the note is made
 				// again, under a conflict name if something took the old one. A
-				// scratch note is back on the wall, its card not opened over it.
+				// scratch note is back on the wall, its card not opened over it,
+				// and a password in the passwords, however deep in their folder.
 				select(
 					isScratchPath(restored.path)
 						? { folder: SCRATCHPAD_FOLDER, note: undefined }
-						: { note: restored.id, folder: parentPath(restored.path) },
+						: { note: restored.id, folder: placeFolder(restored.path) },
 					{ replace: true, note: restored }
 				);
 			})

@@ -1,4 +1,5 @@
 import {
+	isVaultPath,
 	readVaultPayload,
 	VAULT_FOLDER,
 	vaultArmor,
@@ -17,6 +18,7 @@ import { openSecret } from '../src/secrets/age.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote, draftNote, getNote } from '../src/store/notes.js';
+import { updateNote } from './noteRows.js';
 import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.js';
 
 /**
@@ -81,6 +83,29 @@ const Harness = ({
 	);
 };
 
+/** The vault's items, as they are on the device and not deleted. */
+const liveItems = async () =>
+	(await db.notes.toArray()).filter((row) => row.deletedLocally === 0 && isVaultPath(row.path));
+
+/** Long enough for what was queued to be written. */
+const settle = () =>
+	act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	});
+
+/** The item as the route held it when it was opened, and never read again: a write or more behind. */
+const Behind = ({ note, host }: { note: NoteRecord; host: SecretHost }) => (
+	<PasswordItem
+		note={note}
+		draft={undefined}
+		host={host}
+		onProblem={() => undefined}
+		onDelete={() => undefined}
+		onClose={() => undefined}
+		onOpen={() => undefined}
+	/>
+);
+
 const show = async (
 	note: NoteRecord,
 	host: SecretHost,
@@ -100,7 +125,7 @@ describe('a password, opened', () => {
 
 		expect(await screen.findByText('ada@example.com')).toBeDefined();
 		expect(screen.getByText('Recovery codes in the safe.')).toBeDefined();
-		expect(screen.getByLabelText('Hidden').textContent).toBe('••••••••');
+		expect(screen.getByRole('img', { name: 'Hidden' }).textContent).toBe('••••••••');
 		expect(screen.queryByText('c0rrect horse')).toBeNull();
 		// Opened as it was shown, asking nothing.
 		expect(host.open).toHaveBeenCalledTimes(1);
@@ -226,6 +251,28 @@ describe('editing a password', () => {
 		expect(await screen.findByText('grace')).toBeDefined();
 	});
 
+	it('opens at the label, draws the password as dots in a text field, and closes to Edit', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('GitHub'), host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		const label = await screen.findByLabelText('Label');
+		await waitFor(() => {
+			expect(document.activeElement).toBe(label);
+		});
+		// Not a password field, whose words a browser offers to save.
+		const password = screen.getByLabelText<HTMLInputElement>('Password');
+		expect(password.type).toBe('text');
+		expect(password.classList.contains('password-masked')).toBe(true);
+		await user.click(screen.getByRole('button', { name: 'Show password' }));
+		expect(password.classList.contains('password-masked')).toBe(false);
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit' }));
+		});
+	});
+
 	it('is put back as it was opened by Cancel, its armor byte for byte', async () => {
 		const { host } = fakeHost();
 		const note = await item('GitHub');
@@ -286,6 +333,107 @@ describe('editing a password', () => {
 	});
 });
 
+describe('editing a password, the store moving under it', () => {
+	it('opens a second Edit on what the first wrote, though the item shown is behind it', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const user = userEvent.setup();
+		render(<Behind note={note} host={host} />);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await user.type(await screen.findByLabelText('Password'), '!');
+		await waitFor(async () => {
+			expect((await storedFields(note.id))?.password).toBe('c0rrect horse!');
+		});
+		await user.click(screen.getByRole('button', { name: 'Done' }));
+
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await user.type(await screen.findByLabelText('Label'), ' work');
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id, scope))?.title).toBe('GitHub work');
+		});
+		// The label changed, and the password was not put back as it was.
+		expect((await storedFields(note.id))?.password).toBe('c0rrect horse!');
+	});
+
+	it('is not put back by Cancel over what a pull brought since, nor beside it', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await user.type(await screen.findByLabelText('Password'), '!');
+		await waitFor(async () => {
+			expect((await storedFields(note.id))?.password).toBe('c0rrect horse!');
+		});
+		const pulled = vaultBody(sealed(vaultPayload({ ...FIELDS, username: 'grace' })));
+		await updateNote(db, note.id, { body: pulled, bodyOrigin: 'pulled' });
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(await screen.findByText('grace')).toBeDefined();
+		await settle();
+		expect((await liveItems()).map((row) => row.body)).toEqual([pulled]);
+	});
+
+	it('takes away, on Cancel, the copy its edit went into after a pull replaced the item', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		const pulled = vaultBody(sealed(vaultPayload({ ...FIELDS, username: 'grace' })));
+		await updateNote(db, note.id, { body: pulled, bodyOrigin: 'pulled' });
+		await user.type(await screen.findByLabelText('Password'), '!');
+		await waitFor(async () => {
+			expect(await liveItems()).toHaveLength(2);
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(async () => {
+			expect((await liveItems()).map((row) => row.id)).toEqual([note.id]);
+		});
+		expect((await getNote(db, note.id, scope))?.body).toBe(pulled);
+	});
+
+	it('does not name its file over a label pulled since', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await user.type(await screen.findByLabelText('Label'), ' work');
+		await waitFor(async () => {
+			expect((await getNote(db, note.id, scope))?.title).toBe('GitHub work');
+		});
+		await updateNote(db, note.id, { title: 'GitHub (phone)', bodyOrigin: 'pulled' });
+
+		await user.click(screen.getByRole('button', { name: 'Done' }));
+		await settle();
+
+		const after = await getNote(db, note.id, scope);
+		expect(after?.title).toBe('GitHub (phone)');
+		expect(after?.path).toBe(note.path);
+	});
+
+	it('is named after its label where it is left with the form open', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await user.type(await screen.findByLabelText('Label'), ' work');
+		await waitFor(async () => {
+			expect((await getNote(db, note.id, scope))?.title).toBe('GitHub work');
+		});
+
+		cleanup();
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id, scope))?.path).toBe(
+				`${VAULT_FOLDER}/github-work.md`
+			);
+		});
+	});
+});
+
 describe('a new password', () => {
 	const begun = () =>
 		draftNote({
@@ -296,26 +444,25 @@ describe('a new password', () => {
 		});
 
 	/** The draft's harness: the note shown is the draft until it is stored, as the route has it. */
+	const storeOf = (draft: NoteRecord) => () =>
+		createNote(db, { ...scope, folderPath: VAULT_FOLDER, id: draft.id }).then(() => true);
+
 	const New = ({
 		draft,
 		host,
 		onClose,
+		store = storeOf(draft),
 	}: {
 		draft: NoteRecord;
 		host: SecretHost;
 		onClose: () => void;
+		store?: () => Promise<boolean>;
 	}) => {
 		const stored = useNote(draft.id);
 		return (
 			<PasswordItem
 				note={stored ?? draft}
-				draft={{
-					store: () =>
-						createNote(db, { ...scope, folderPath: VAULT_FOLDER, id: draft.id }).then(
-							() => true
-						),
-					setMode: () => undefined,
-				}}
+				draft={{ store, setMode: () => undefined }}
 				host={host}
 				onProblem={() => undefined}
 				onDelete={() => undefined}
@@ -380,6 +527,85 @@ describe('a new password', () => {
 			expect(onClose).toHaveBeenCalled();
 		});
 		expect(await getNote(db, draft.id, scope)).toBeUndefined();
+	});
+
+	const NOT_STORED =
+		'This password is not saved yet. Press Done to try again, or copy what you typed somewhere safe.';
+
+	it('stays open on what was typed where the device could not keep it, and Done tries again', async () => {
+		const { host } = fakeHost();
+		const draft = begun();
+		const refusing = { current: true };
+		const store = vi.fn(() => (refusing.current ? Promise.resolve(false) : storeOf(draft)()));
+		const user = userEvent.setup();
+		render(<New draft={draft} host={host} onClose={() => undefined} store={store} />);
+
+		await user.type(await screen.findByLabelText('Password'), 'pw');
+		expect(await screen.findByText(NOT_STORED)).toBeDefined();
+		await user.click(screen.getByRole('button', { name: 'Done' }));
+		await settle();
+		expect(screen.getByLabelText<HTMLInputElement>('Password').value).toBe('pw');
+
+		refusing.current = false;
+		await user.click(screen.getByRole('button', { name: 'Done' }));
+
+		await waitFor(async () => {
+			expect((await storedFields(draft.id))?.password).toBe('pw');
+		});
+		await waitFor(() => {
+			expect(screen.queryByLabelText('Password')).toBeNull();
+		});
+		expect(screen.queryByText(NOT_STORED)).toBeNull();
+	});
+
+	it('is not closed by the lock while the device cannot keep what was typed', async () => {
+		const fake = fakeHost();
+		const draft = begun();
+		const user = userEvent.setup();
+		render(
+			<New
+				draft={draft}
+				host={fake.host}
+				onClose={() => undefined}
+				store={() => Promise.resolve(false)}
+			/>
+		);
+		await user.type(await screen.findByLabelText('Password'), 'pw');
+		await screen.findByText(NOT_STORED);
+
+		act(() => {
+			fake.lock();
+		});
+		await settle();
+
+		expect(screen.getByLabelText<HTMLInputElement>('Password').value).toBe('pw');
+	});
+
+	it('shows what was written once Done, while the route still holds the draft', async () => {
+		const { host } = fakeHost();
+		const draft = begun();
+		const user = userEvent.setup();
+		// The route a render behind: the draft, with no body, though the store has it.
+		render(
+			<PasswordItem
+				note={draft}
+				draft={{ store: storeOf(draft), setMode: () => undefined }}
+				host={host}
+				onProblem={() => undefined}
+				onDelete={() => undefined}
+				onClose={() => undefined}
+				onOpen={() => undefined}
+			/>
+		);
+		await user.type(await screen.findByLabelText('Username'), 'ada');
+		await waitFor(async () => {
+			expect((await storedFields(draft.id))?.username).toBe('ada');
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Done' }));
+
+		expect(await screen.findByText('ada')).toBeDefined();
+		expect(screen.queryByText('This password cannot be read by this version of the app.')).toBeNull();
 	});
 
 	it('is not begun where the source cannot take one, and says nothing itself', async () => {
