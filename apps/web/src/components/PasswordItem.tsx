@@ -663,7 +663,7 @@ export const PasswordItem = ({
 						<FieldButton
 							icon={revealed ? 'eye-off' : 'eye'}
 							label={revealed ? t('passwords.item.hide') : t('passwords.item.show')}
-										onClick={() => {
+							onClick={() => {
 								setRevealed((now) => !now);
 							}}
 						/>
@@ -731,7 +731,7 @@ export const PasswordItem = ({
 												? t('passwords.item.hide')
 												: t('passwords.item.show')
 										}
-																onClick={() => {
+										onClick={() => {
 											setRevealed((now) => !now);
 										}}
 									/>

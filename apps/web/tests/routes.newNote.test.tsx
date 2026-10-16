@@ -22,13 +22,14 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 const DROPBOX = 'c-dropbox';
 
-/** How many notes the store refuses to make before it makes them again. */
-const refusing = vi.hoisted(() => ({ current: 0 }));
+/** How many notes the store refuses to make before it makes them again, and how many it was asked to. */
+const refusing = vi.hoisted(() => ({ current: 0, asked: 0 }));
 vi.mock('../src/store/notes.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof Notes>();
 	return {
 		...actual,
 		createNote: (...args: Parameters<typeof actual.createNote>) => {
+			refusing.asked += 1;
 			if (refusing.current === 0) return actual.createNote(...args);
 			refusing.current -= 1;
 			return Promise.reject(new Error('The device refused it.'));
@@ -39,6 +40,7 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 afterEach(async () => {
 	cleanup();
 	refusing.current = 0;
+	refusing.asked = 0;
 	await db.notes.clear();
 	await db.folders.clear();
 	await db.opQueue.clear();
@@ -162,7 +164,7 @@ describe('a notebook with nothing in it', () => {
 		});
 	});
 
-	it('is stored at a later keystroke where the first could not store it', async () => {
+	it('is stored at a later keystroke where the first could not store it, asked again once', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		await openApp();
 		await begun();
@@ -176,6 +178,8 @@ describe('a notebook with nothing in it', () => {
 		await waitFor(async () => {
 			expect((await db.notes.toArray()).map((note) => note.body)).toEqual(['milk']);
 		});
+		// Not answered with the refusal kept from the first, and made once.
+		expect(refusing.asked).toBe(2);
 	});
 
 	it('stores the note when a file is pasted into it, and the file beside it', async () => {

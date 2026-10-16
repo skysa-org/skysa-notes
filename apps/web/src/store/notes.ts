@@ -741,7 +741,9 @@ export const restoreVaultItem = (
 	base: EditBase
 ): Promise<NoteRecord | undefined> =>
 	db.transaction('rw', writerTables(db), async () =>
-		(await vaultItemAsBegun(db, base)) === undefined ? undefined : saveVaultItem(db, typed, base)
+		(await vaultItemAsBegun(db, base)) === undefined
+			? undefined
+			: saveVaultItem(db, typed, base)
 	);
 
 /**

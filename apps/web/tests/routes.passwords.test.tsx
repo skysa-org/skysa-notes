@@ -196,6 +196,27 @@ describe('a password', () => {
 	});
 });
 
+describe('a password deeper in their folder', () => {
+	it('is brought back open in the passwords by the undo', async () => {
+		await inbox();
+		await createNote(db, {
+			...scope,
+			folderPath: `${VAULT_FOLDER}/old`,
+			title: 'Old',
+			body: 'Not an item.\n',
+		});
+		const { user } = await openPasswords();
+		await user.click(await screen.findByRole('button', { name: /^Old/u }));
+		const open = await screen.findByRole('region', { name: 'Old' });
+		await user.click(within(open).getByRole('button', { name: 'Delete' }));
+
+		await user.click(await screen.findByRole('button', { name: 'Undo' }));
+
+		await screen.findByRole('region', { name: 'Old' });
+		expect(await list()).toBeDefined();
+	});
+});
+
 describe('a new password', () => {
 	it('is not begun on a device that cannot make one, which is told why and the way on', async () => {
 		await inbox();

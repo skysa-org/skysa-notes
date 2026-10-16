@@ -605,7 +605,9 @@ describe('a new password', () => {
 		await user.click(screen.getByRole('button', { name: 'Done' }));
 
 		expect(await screen.findByText('ada')).toBeDefined();
-		expect(screen.queryByText('This password cannot be read by this version of the app.')).toBeNull();
+		expect(
+			screen.queryByText('This password cannot be read by this version of the app.')
+		).toBeNull();
 	});
 
 	it('is not begun where the source cannot take one, and says nothing itself', async () => {
