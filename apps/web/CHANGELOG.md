@@ -1,5 +1,20 @@
 # @skysa/web
 
+## 1.11.0
+
+### Minor Changes
+
+- 9d50ea5: A password has a Site: the web address it fills in on, and the sites under it, encrypted with the username and password. It is a field after the label, which says when what is in it is not a web address. An item whose label is a web address is offered "Use github.com as the site" while its Site is empty. Opened, an item shows its Site's address with Open, in place of its label's.
+- 4ffc523: The fill window, the app's own page at `/fill`, and the bookmarklet that opens it over a site's sign-in page: what they say to each other, and what the window says while it waits for the page, cannot reach one, or is opened by a bookmarklet of another version. The window takes the page to be the origin the browser stamped on its message, never what the page says, and answers that origin alone.
+- 2a461a8: Fill on sites: the fill window unlocks each source's vault as the app does, lists the passwords whose Site fills in on the page, and fills one in (or copies it, where the page has no fields). It closes once it has filled, and when its lock locks.
+- 73fe100: Passwords: Fill on sites, a button in the list's header that sets up the bookmarklet. Drag its link to your bookmarks bar, or copy it to make a bookmark on a phone. The dialog also says where it does not work, and that the fill window never asks for your recovery key.
+- 0374b08: Fill on sites remembers a password typed on the site. The fill window offers to save it, with the page as its Site, or, where it is the new password of the one login saved there for that username, to update that login. An Update keeps the password it replaces, and Passwords shows it as a Previous password, with Show and Copy.
+
+### Patch Changes
+
+- Updated dependencies [96d73b5]
+  - @skysa/core@1.11.0
+
 ## 1.10.3
 
 ### Patch Changes
