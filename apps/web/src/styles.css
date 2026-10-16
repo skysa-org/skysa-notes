@@ -6215,3 +6215,43 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 		height: 1.5rem;
 	}
 }
+
+/* The fill window (src/fill/): a narrow page of its own, opened over a site's
+   sign-in page by the bookmarklet (docs/ARCHITECTURE.md §7, "Filling in on a
+   site"). */
+.fill-page {
+	display: grid;
+	gap: var(--space-m);
+	max-width: 30rem;
+	margin: 0 auto;
+	padding: var(--space-l);
+	line-height: 1.5;
+}
+
+.fill-page p {
+	margin: 0;
+}
+
+.fill-page > button {
+	justify-self: start;
+}
+
+.fill-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-xs) var(--space-s);
+}
+
+.fill-header h1 {
+	margin: 0;
+	font-size: 1.25rem;
+	overflow-wrap: anywhere;
+}
+
+/* Beside the heading, for a page over http:. */
+.fill-insecure {
+	color: var(--bad);
+	font-size: 0.8125rem;
+	font-weight: 600;
+}

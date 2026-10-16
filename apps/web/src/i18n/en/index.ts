@@ -6,6 +6,7 @@ import { common } from './common.js';
 import { connect } from './connect.js';
 import { editor } from './editor.js';
 import { exporting } from './exporting.js';
+import { fill } from './fill.js';
 import { find } from './find.js';
 import { firstImport } from './firstImport.js';
 import { importing } from './importing.js';
@@ -43,6 +44,7 @@ export const en = {
 	scratchpad,
 	secrets,
 	passwords,
+	fill,
 	notebooks,
 	notes,
 	rows,

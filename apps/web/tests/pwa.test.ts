@@ -161,6 +161,14 @@ describe('the service worker', () => {
 		expect(shellAnswers('/about?x=1')).toBe(false);
 	});
 
+	it('leaves the fill window to its own page, which the precache answers', () => {
+		// `fill.html` is precached as every page is (`**/*.html`), and Workbox
+		// answers `/fill` with it before any navigation route (`cleanURLs`).
+		// Answered with the shell, the bookmarklet would open the whole app.
+		expect(shellAnswers('/fill')).toBe(false);
+		expect(workbox.globPatterns?.some((pattern) => pattern.includes('html'))).toBe(true);
+	});
+
 	it('answers every route the router has with the shell', () => {
 		// So a route added under `src/routes` cannot be left out of the allowlist.
 		const paths = Object.keys(createRouter({ routeTree }).routesByPath);

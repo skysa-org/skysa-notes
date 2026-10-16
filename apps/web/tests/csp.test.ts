@@ -217,9 +217,16 @@ describe('Content-Security-Policy', () => {
 		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
 	});
 
-	it('has no inline script in the page for it to block', () => {
-		const html = read('index.html');
+	it.each(['index.html', 'fill.html'])('has no inline script in %s for it to block', (page) => {
+		const html = read(page);
 		expect(html.match(/<script\b[^>]*>/g)?.every((tag) => /\bsrc=/.test(tag))).toBe(true);
+	});
+
+	it('sends no Cross-Origin-Opener-Policy, which would cut the fill window off from its page', () => {
+		// The bookmarklet opens /fill from a site's page, and the two talk by
+		// postMessage over the opener (docs/ARCHITECTURE.md §9). Any value but
+		// `unsafe-none` on /fill puts it in a browsing context group of its own.
+		expect(read('public/_headers')).not.toMatch(/^\s*Cross-Origin-Opener-Policy\s*:/imu);
 	});
 });
 
@@ -228,5 +235,10 @@ describe('zod under the policy', () => {
 		const imports = read('src/main.tsx').match(/^import .*$/gm) ?? [];
 		expect(imports[0]).toBe("import './jitless.js';");
 		expect(z.config().jitless).toBe(true);
+	});
+
+	it('is told so first in the fill window too, a page of its own', () => {
+		const imports = read('src/fill/main.tsx').match(/^import .*$/gm) ?? [];
+		expect(imports[0]).toBe("import '../jitless.js';");
 	});
 });
