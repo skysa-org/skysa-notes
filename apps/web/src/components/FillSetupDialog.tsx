@@ -2,13 +2,15 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 import { bookmarkletUrl } from '../fill/bookmarklet.js';
 import { t } from '../i18n/t.js';
-import { Dialog, DialogActions } from './Dialog.js';
+import { Dialog } from './Dialog.js';
 
 /**
  * Setting up the bookmarklet that fills in on sites (docs/ARCHITECTURE.md §7,
  * "Filling in on a site"), from Passwords: its link, to drag to the bookmarks
- * bar, and Copy, for a phone, where a bookmark's address is pasted in; and
- * what it does, and where it does not work.
+ * bar, and Copy beside it, for a phone, where a bookmark's address is pasted
+ * in; and what it does, and where it does not work. It asks nothing, so the
+ * ✕ is its way out and has the focus, at the top, where the link is: an
+ * answer in its row would take the focus, and scroll the link out of sight.
  *
  * The link is the one `javascript:` address in the app, and is never run
  * here. React refuses to write one into an `href`, so it is made by hand; a
@@ -81,9 +83,27 @@ export const FillSetupDialog = ({
 			cancel={false}
 		>
 			<p>{t('fill.setup.intro')}</p>
-			<p className="fill-bookmarklet-holder">
+			<div className="fill-bookmarklet-holder">
 				<span ref={holder} />
-			</p>
+				<button
+					type="button"
+					onClick={() => {
+						void copy(address).then(
+							() => {
+								setSaid('copied');
+							},
+							() => {
+								setSaid('notCopied');
+							}
+						);
+					}}
+				>
+					{t('fill.setup.copy')}
+				</button>
+			</div>
+			<div className="secrets-said" role="status">
+				{said !== 'nothing' && <p>{t(`fill.setup.said.${said}`)}</p>}
+			</div>
 			<h3>{t('fill.setup.computerHeading')}</h3>
 			<p>{t('fill.setup.computer')}</p>
 			<h3>{t('fill.setup.phoneHeading')}</h3>
@@ -100,29 +120,6 @@ export const FillSetupDialog = ({
 				<li>{t('fill.setup.origin', { origin })}</li>
 				<li>{t('fill.setup.outdated')}</li>
 			</ul>
-			<div className="secrets-said" role="status">
-				{said !== 'nothing' && <p>{t(`fill.setup.said.${said}`)}</p>}
-			</div>
-			<DialogActions
-				primary={
-					<button
-						type="button"
-						className="primary"
-						onClick={() => {
-							void copy(address).then(
-								() => {
-									setSaid('copied');
-								},
-								() => {
-									setSaid('notCopied');
-								}
-							);
-						}}
-					>
-						{t('fill.setup.copy')}
-					</button>
-				}
-			/>
 		</Dialog>
 	);
 };
