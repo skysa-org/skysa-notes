@@ -234,6 +234,34 @@ describe('a new password', () => {
 	});
 });
 
+describe('searching', () => {
+	it('finds a password by its label only while the passwords are shown, and opens it in them', async () => {
+		await inbox();
+		await item('GitHub');
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, false);
+		const user = userEvent.setup();
+		const router = await openApp();
+		const search = screen.getByRole('combobox', { name: 'Search notes' });
+
+		await user.type(search, 'github');
+		expect(await screen.findByText('Nothing matches “github”.')).toBeDefined();
+		await user.clear(search);
+
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
+		await row();
+		await user.type(search, 'github');
+		const found = await screen.findByRole('option', { name: /GitHub/u });
+		expect(found.textContent).toContain('Passwords');
+		await user.click(found);
+
+		const open = await screen.findByRole('region', { name: 'GitHub' });
+		expect(await within(open).findByRole('button', { name: 'Unlock' })).toBeDefined();
+		expect(hashIn(router)).toBe('passwords/github');
+		expect(await list()).toBeDefined();
+		expect(screen.queryByLabelText('Note title')).toBeNull();
+	});
+});
+
 describe('in a window too narrow for three panes', () => {
 	const notebookTrigger = () => screen.getByRole('button', { name: /^Notebook: / });
 	const noteTrigger = () => screen.queryByRole('button', { name: /^Note: / });

@@ -7,7 +7,9 @@ import {
 	getPreference,
 	setCodeDisplay,
 	setDefaultEditorMode,
+	setPreference,
 } from '../src/store/prefs.js';
+import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../src/store/vault.js';
 
 let db: NotesDatabase;
 
@@ -53,5 +55,27 @@ describe('preferences', () => {
 	it('reads anything but "true" as off', async () => {
 		await db.prefs.put({ key: 'codeBlockWrap', value: 'sometimes' });
 		expect((await getCodeDisplay(db)).wrap).toBe(false);
+	});
+});
+
+describe('how a password is made', () => {
+	it('is twenty characters with symbols until chosen, then as chosen, kept in bounds', async () => {
+		expect(await getGeneratorOptions(db)).toEqual(GENERATOR_DEFAULT);
+		expect(GENERATOR_DEFAULT).toEqual({ length: 20, symbols: true });
+
+		await setGeneratorOptions(db, { length: 12, symbols: false });
+		expect(await getGeneratorOptions(db)).toEqual({ length: 12, symbols: false });
+
+		await setGeneratorOptions(db, { length: 500, symbols: true });
+		expect(await getGeneratorOptions(db)).toEqual({ length: 64, symbols: true });
+	});
+
+	it('falls back rather than trusting what it cannot read', async () => {
+		for (const junk of ['not json', '[]', '{"length":"12","symbols":true}', '{"length":12}']) {
+			await setPreference(db, 'passwordGenerator', junk);
+			expect(await getGeneratorOptions(db)).toEqual(GENERATOR_DEFAULT);
+		}
+		await setPreference(db, 'passwordGenerator', '{"length":3,"symbols":false}');
+		expect(await getGeneratorOptions(db)).toEqual({ length: 8, symbols: false });
 	});
 });

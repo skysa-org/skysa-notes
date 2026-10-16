@@ -1,5 +1,6 @@
 import {
 	isVaultPath,
+	PASSWORD_LENGTH,
 	readVaultPayload,
 	VAULT_FOLDER,
 	vaultArmor,
@@ -18,6 +19,7 @@ import { openSecret } from '../src/secrets/age.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote, draftNote, getNote } from '../src/store/notes.js';
+import { GENERATOR_DEFAULT, getGeneratorOptions } from '../src/store/vault.js';
 import { updateNote } from './noteRows.js';
 import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.js';
 
@@ -33,6 +35,7 @@ afterEach(async () => {
 	await db.notes.clear();
 	await db.folders.clear();
 	await db.opQueue.clear();
+	await db.prefs.clear();
 });
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };
@@ -222,7 +225,7 @@ describe('editing a password', () => {
 		const user = await show(note, host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
 
-		const username = screen.getByLabelText('Username');
+		const username = await screen.findByLabelText('Username');
 		await user.clear(username);
 		await user.type(username, 'grace');
 		await waitFor(async () => {
@@ -278,7 +281,7 @@ describe('editing a password', () => {
 		const note = await item('GitHub');
 		const user = await show(note, host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
-		await user.type(screen.getByLabelText('Password'), '!');
+		await user.type(await screen.findByLabelText('Password'), '!');
 		await user.type(screen.getByLabelText('Label'), ' old');
 		await waitFor(async () => {
 			expect((await storedFields(note.id))?.password).toBe('c0rrect horse!');
@@ -291,7 +294,8 @@ describe('editing a password', () => {
 			expect(stored?.body).toBe(note.body);
 			expect(stored?.title).toBe('GitHub');
 		});
-		expect(screen.getByRole('heading', { name: 'GitHub' })).toBeDefined();
+		// The heading is the item as the route has it, a render behind the store.
+		expect(await screen.findByRole('heading', { name: 'GitHub' })).toBeDefined();
 	});
 
 	it('is closed by the lock, with what was typed already in the item', async () => {
@@ -299,7 +303,7 @@ describe('editing a password', () => {
 		const note = await item('GitHub');
 		const user = await show(note, fake.host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
-		await user.type(screen.getByLabelText('Notes'), 'PIN 1234');
+		await user.type(await screen.findByLabelText('Notes'), 'PIN 1234');
 
 		act(() => {
 			fake.lock();
@@ -319,7 +323,7 @@ describe('editing a password', () => {
 		const note = await item('GitHub', FIELDS, vaultBody(sealed(later)));
 		const user = await show(note, host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
-		await user.type(screen.getByLabelText('Username'), 'x');
+		await user.type(await screen.findByLabelText('Username'), 'x');
 
 		await waitFor(async () => {
 			const stored = await getNote(db, note.id, scope);
@@ -431,6 +435,158 @@ describe('editing a password, the store moving under it', () => {
 				`${VAULT_FOLDER}/github-work.md`
 			);
 		});
+	});
+});
+
+describe('a password made by Generate', () => {
+	const generate = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Generate' });
+
+	/** Edit pressed, and the form open with its generator ready: what was chosen last read. */
+	const ready = async (user: ReturnType<typeof userEvent.setup>) => {
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await waitFor(() => {
+			expect(generate().disabled).toBe(false);
+		});
+	};
+	it('fills the password, shows it, and is kept as any change is', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const user = await show(note, host);
+		await ready(user);
+
+		await user.click(screen.getByRole('button', { name: 'Generate' }));
+
+		const made = screen.getByLabelText<HTMLInputElement>('Password');
+		expect(made.type).toBe('text');
+		expect(made.value).toHaveLength(PASSWORD_LENGTH.initial);
+		await waitFor(async () => {
+			expect((await storedFields(note.id))?.password).toBe(made.value);
+		});
+	});
+
+	it('is made at the length and with the symbols chosen, which this device keeps', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('GitHub'), host);
+		await ready(user);
+		const length = screen.getByLabelText('Length');
+		await user.clear(length);
+		await user.type(length, '12');
+		await user.click(screen.getByRole('checkbox', { name: 'Symbols' }));
+
+		await user.click(screen.getByRole('button', { name: 'Generate' }));
+
+		const made = screen.getByLabelText<HTMLInputElement>('Password').value;
+		expect(made).toMatch(/^[a-zA-Z\d]{12}$/u);
+		await waitFor(async () => {
+			expect(await getGeneratorOptions(db)).toEqual({ length: 12, symbols: false });
+		});
+	});
+
+	it('holds a length out of reach to 8 to 64 once it is left', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('GitHub'), host);
+		await ready(user);
+		const length = screen.getByLabelText<HTMLInputElement>('Length');
+		await user.clear(length);
+		await user.type(length, '500');
+		await user.tab();
+
+		await waitFor(() => {
+			expect(length.value).toBe(String(PASSWORD_LENGTH.max));
+		});
+	});
+
+	it('leaves the length as it was for a box left empty or holding no number', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('GitHub'), host);
+		await ready(user);
+		await user.clear(screen.getByLabelText('Length'));
+
+		await user.click(screen.getByRole('button', { name: 'Generate' }));
+
+		expect(screen.getByLabelText<HTMLInputElement>('Password').value).toHaveLength(
+			PASSWORD_LENGTH.initial
+		);
+		expect(screen.getByLabelText<HTMLInputElement>('Length').value).toBe(
+			String(PASSWORD_LENGTH.initial)
+		);
+		expect(await getGeneratorOptions(db)).toEqual(GENERATOR_DEFAULT);
+		expect(screen.getByText('A new password was made, and is shown above.')).toBeDefined();
+	});
+
+	it('keeps a length entered with Enter, and the form open', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('GitHub'), host);
+		await ready(user);
+		const length = screen.getByLabelText('Length');
+		await user.clear(length);
+		await user.type(length, '32{Enter}');
+
+		await waitFor(async () => {
+			expect((await getGeneratorOptions(db)).length).toBe(32);
+		});
+		expect(screen.getByRole('group', { name: 'Make a new password' })).toBeDefined();
+		expect(screen.getByLabelText('Label')).toBeDefined();
+	});
+
+	it('stores a new item it fills in', async () => {
+		const { host } = fakeHost();
+		const draft = draftNote({ ...scope, folderPath: VAULT_FOLDER, taken: [] });
+		const user = userEvent.setup();
+		render(
+			<PasswordItem
+				note={draft}
+				draft={{
+					store: () =>
+						createNote(db, { ...scope, folderPath: VAULT_FOLDER, id: draft.id }).then(
+							() => true
+						),
+					setMode: () => undefined,
+				}}
+				host={host}
+				onProblem={() => undefined}
+				onDelete={() => undefined}
+				onClose={() => undefined}
+				onOpen={() => undefined}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(generate().disabled).toBe(false);
+		});
+		await user.click(generate());
+
+		const made = screen.getByLabelText<HTMLInputElement>('Password').value;
+		await waitFor(async () => {
+			expect((await storedFields(draft.id))?.password).toBe(made);
+		});
+	});
+});
+
+describe('a label that is a web address', () => {
+	it('opens from the item, locked or not, and is not offered for words', async () => {
+		const { host } = fakeHost();
+		vi.mocked(host.open).mockResolvedValue({ state: 'locked' });
+		await show(await item('github.com/login'), host);
+
+		const open = await screen.findByRole('button', { name: 'Open github.com/login' });
+		expect(open.getAttribute('title')).toBe('https://github.com/login');
+		cleanup();
+
+		await show(await item('My bank', FIELDS), host);
+		await screen.findByRole('button', { name: 'Unlock' });
+		expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
+	});
+
+	it('is not offered while the item is edited', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('github.com'), host);
+		await screen.findByRole('button', { name: 'Open github.com' });
+
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		await screen.findByLabelText('Label');
+		expect(screen.queryByRole('button', { name: 'Open github.com' })).toBeNull();
 	});
 });
 

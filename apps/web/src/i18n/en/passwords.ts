@@ -41,6 +41,8 @@ export const passwords = {
 		copyPassword: 'Copy password',
 		copied: 'Copied.',
 		notCopied: 'That could not be put on the clipboard.',
+		/** The label's address, as a screen reader names its button: `{address}` is where it goes, shortened. */
+		openAddress: 'Open {address}',
 		edit: 'Edit',
 		delete: 'Delete',
 		done: 'Done',
@@ -65,5 +67,15 @@ export const passwords = {
 		/** A change to an item that could not be written on this device. */
 		notSaved:
 			'Changes to this password are not being saved on this device. Copy what you typed somewhere safe, then reload.',
+	},
+	/** Generate, under the password being edited, and how it makes one. */
+	generate: {
+		/** The generator's controls, together. */
+		group: 'Make a new password',
+		make: 'Generate',
+		length: 'Length',
+		symbols: 'Symbols',
+		/** Said once Generate has filled the password in. */
+		made: 'A new password was made, and is shown above.',
 	},
 } as const;

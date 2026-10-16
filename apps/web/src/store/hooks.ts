@@ -36,7 +36,7 @@ import {
 import { getScratchpadShown, isScratchNote } from './scratchpad.js';
 import { createNoteSearch, type NoteHit, type NoteSearch } from './search.js';
 import { buildFolderTree, type FolderNode, keptTree, withPins } from './tree.js';
-import { getPasswordsShown, listVaultNotes } from './vault.js';
+import { getPasswordsShown, isVaultNote, listVaultNotes } from './vault.js';
 
 /**
  * Live reads from IndexedDB. `useLiveQuery` re-runs its query whenever a write
@@ -533,20 +533,36 @@ export const useNoteSearch = (query: string, focused = false): NoteHit[] | undef
 /**
  * Every note a search may find: all of them, but a scratch note only where its
  * source's scratchpad is shown on this device, since that is the only place
- * one can be opened (docs/ARCHITECTURE.md §7, "The scratchpad"); and never a
- * password, which no search result opens.
+ * one can be opened (docs/ARCHITECTURE.md §7, "The scratchpad"), and a
+ * password only where its source's passwords are, for the same reason
+ * ("Passwords in the vault"). A password is found by its label alone: its
+ * body is one fence, which the index makes nothing (`withoutArmor`).
  */
 const searchable = async (): Promise<NoteRecord[]> => {
-	const notes = (await listNotesEverywhere(db)).filter((note) => !isVaultPath(note.path));
-	const sources = [...new Set(notes.filter(isScratchNote).map((note) => note.connectionId))];
-	const shown = new Set(
-		(
-			await Promise.all(
-				sources.map(async (id) => ((await getScratchpadShown(db, id)) ? id : undefined))
-			)
-		).filter((id) => id !== undefined)
-	);
-	return notes.filter((note) => !isScratchNote(note) || shown.has(note.connectionId));
+	const notes = await listNotesEverywhere(db);
+	/** The sources with a note `kept` holds, which this device shows them for. */
+	const shownIn = async (
+		kept: (note: NoteRecord) => boolean,
+		shown: (database: typeof db, connectionId: string) => Promise<boolean>
+	): Promise<ReadonlySet<string>> => {
+		const sources = [...new Set(notes.filter(kept).map((note) => note.connectionId))];
+		return new Set(
+			(
+				await Promise.all(
+					sources.map(async (id) => ((await shown(db, id)) ? id : undefined))
+				)
+			).filter((id) => id !== undefined)
+		);
+	};
+	const [scratch, passwords] = await Promise.all([
+		shownIn(isScratchNote, getScratchpadShown),
+		shownIn(isVaultNote, getPasswordsShown),
+	]);
+	return notes.filter((note) => {
+		if (isScratchNote(note)) return scratch.has(note.connectionId);
+		if (isVaultNote(note)) return passwords.has(note.connectionId);
+		return true;
+	});
 };
 
 /**

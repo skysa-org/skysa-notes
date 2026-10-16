@@ -20,7 +20,9 @@ import {
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
 import { setNotebookPin, setNotePinned } from '../src/store/pins.js';
 import { getCodeDisplay, setCodeDisplay } from '../src/store/prefs.js';
+import { setPasswordsShown } from '../src/store/vault.js';
 import { holdTheNotes } from './heldNotes.js';
+import { sealed } from './secretHostFake.js';
 
 /**
  * `useLooseNoteCount` is what decides whether the sidebar's "Loose notes" row
@@ -369,12 +371,40 @@ describe('useNoteSearch', () => {
 		});
 	});
 
-	it('never finds a password, by its label or anything else', async () => {
-		await createNote(db, { title: 'Heap of logins', body: 'heap\n', folderPath: VAULT_FOLDER });
-		const { result } = renderHook(() => useNoteSearch('heap'));
-
+	it('finds a password by its label only while its source shows the passwords, as they are turned on and off', async () => {
+		const armor = sealed('{"username":"heap"}');
+		const body = `\`\`\`age\n${armor}\n\`\`\`\n`;
+		await createNote(db, { title: 'Heap of logins', body, folderPath: VAULT_FOLDER });
+		// Another source's, whose passwords are not shown here.
+		await createNote(db, {
+			connectionId: 'c-other',
+			title: 'Heap elsewhere',
+			body,
+			folderPath: VAULT_FOLDER,
+		});
+		const { result, unmount } = renderHook(() => useNoteSearch('heap'));
+		const titles = () => result.current?.map((hit) => hit.note.title).sort();
 		await waitFor(() => {
-			expect(result.current?.map((hit) => hit.note.title)).toEqual(['Compost']);
+			expect(titles()).toEqual(['Compost']);
+		});
+
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
+		await waitFor(() => {
+			expect(titles()).toEqual(['Compost', 'Heap of logins']);
+		});
+
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, false);
+		await waitFor(() => {
+			expect(titles()).toEqual(['Compost']);
+		});
+		unmount();
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
+
+		// By its label, and never by its armor.
+		const piece = armor.split('\n')[2]?.slice(0, 12) ?? '';
+		const byArmor = renderHook(() => useNoteSearch(piece));
+		await waitFor(() => {
+			expect(byArmor.result.current).toEqual([]);
 		});
 	});
 
