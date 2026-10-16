@@ -20,7 +20,9 @@ import {
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
 import { setNotebookPin, setNotePinned } from '../src/store/pins.js';
 import { getCodeDisplay, setCodeDisplay } from '../src/store/prefs.js';
+import { setPasswordsShown } from '../src/store/vault.js';
 import { holdTheNotes } from './heldNotes.js';
+import { sealed } from './secretHostFake.js';
 
 /**
  * `useLooseNoteCount` is what decides whether the sidebar's "Loose notes" row
@@ -369,12 +371,34 @@ describe('useNoteSearch', () => {
 		});
 	});
 
-	it('never finds a password, by its label or anything else', async () => {
-		await createNote(db, { title: 'Heap of logins', body: 'heap\n', folderPath: VAULT_FOLDER });
-		const { result } = renderHook(() => useNoteSearch('heap'));
+	it('finds a password by its label only while its source shows the passwords', async () => {
+		const armor = sealed('{"username":"heap"}');
+		await createNote(db, {
+			title: 'Heap of logins',
+			body: `\`\`\`age\n${armor}\n\`\`\`\n`,
+			folderPath: VAULT_FOLDER,
+		});
+		const hidden = renderHook(() => useNoteSearch('heap'));
+		await waitFor(() => {
+			expect(hidden.result.current?.map((hit) => hit.note.title)).toEqual(['Compost']);
+		});
+		hidden.unmount();
+
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
+		const shown = renderHook(() => useNoteSearch('heap'));
 
 		await waitFor(() => {
-			expect(result.current?.map((hit) => hit.note.title)).toEqual(['Compost']);
+			expect(shown.result.current?.map((hit) => hit.note.title).sort()).toEqual([
+				'Compost',
+				'Heap of logins',
+			]);
+		});
+		// By its label, and never by its armor.
+		const piece = armor.split('\n')[2]?.slice(0, 12) ?? '';
+		shown.unmount();
+		const byArmor = renderHook(() => useNoteSearch(piece));
+		await waitFor(() => {
+			expect(byArmor.result.current).toEqual([]);
 		});
 	});
 

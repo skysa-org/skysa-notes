@@ -3778,6 +3778,39 @@ button.icon.account-devices-count {
 	font-family: var(--font-mono);
 }
 
+/* Generate, under the password, with how it makes one beside it. */
+.password-generator {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-xs) var(--space-s);
+}
+
+.password-form .password-generator label {
+	margin: 0;
+}
+
+.password-form .password-generator input[type='number'] {
+	inline-size: 4.5rem;
+}
+
+.password-form .password-generator-symbols {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
+}
+
+.password-form .password-generator-symbols input {
+	inline-size: auto;
+}
+
+/* The label's address, a link's chip in the item rather than floating over a
+   note, so without the chip's shadow. */
+.password-link {
+	margin-block-end: var(--space-m);
+	box-shadow: none;
+}
+
 .password-hint {
 	margin: 0;
 	color: var(--muted);

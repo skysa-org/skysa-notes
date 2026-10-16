@@ -11,6 +11,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 import type { AttachmentProblem } from '../editor/attachHost.js';
 import { Icon } from '../editor/icons.js';
+import { linkAddress, openLink } from '../editor/links.js';
 import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
 import { t } from '../i18n/t.js';
 import { db, type NoteRecord } from '../store/db.js';
@@ -18,6 +19,8 @@ import { deleteNote, type EditBase, isUnnamed, renameNote, saveVaultItem } from 
 import { titleShown } from '../store/titles.js';
 import { useNoteSecrets } from './noteSecrets.js';
 import type { NoteDraft } from './NoteView.js';
+import { PasswordGenerator } from './PasswordGenerator.js';
+import { labelLink } from './passwordLink.js';
 
 /**
  * A password in the vault, in the note's column (docs/ARCHITECTURE.md §7,
@@ -156,6 +159,28 @@ const FieldButton = ({
 		<Icon name={icon} />
 	</button>
 );
+
+/**
+ * A label that is a web address, opened in the browser as a link's chip opens
+ * one (`labelLink`). The label is plain, so it is there locked too.
+ */
+const LabelLink = ({ url }: { url: URL }) => {
+	const address = linkAddress(url);
+	return (
+		<button
+			type="button"
+			className="link-chip-open password-link"
+			title={url.href}
+			aria-label={t('passwords.item.openAddress', { address })}
+			onClick={() => {
+				openLink(url);
+			}}
+		>
+			<Icon name="open" />
+			<span className="link-chip-address">{address}</span>
+		</button>
+	);
+};
 
 export const PasswordItem = ({
 	note,
@@ -543,6 +568,14 @@ export const PasswordItem = ({
 							}}
 						/>
 					</div>
+					<PasswordGenerator
+						onMade={(made) => {
+							field('password')(made);
+							// Shown, as it is new: the user is about to copy it into the
+							// site, and checks it there.
+							setRevealed(true);
+						}}
+					/>
 					<label htmlFor={ids.notes}>{t('passwords.item.notes')}</label>
 					<textarea
 						id={ids.notes}
@@ -640,6 +673,9 @@ export const PasswordItem = ({
 		);
 	})();
 
+	// Not while the label is being typed, when the address would come and go.
+	const link = editing === null ? labelLink(labelOf(note)) : undefined;
+
 	// Deleted from what it shows, whatever it holds, but not while it is
 	// opening or locked, when what it is has not been seen.
 	const deletable = editing === null && view.state !== 'opening' && view.state !== 'locked';
@@ -670,7 +706,10 @@ export const PasswordItem = ({
 					</div>
 				)}
 			</div>
-			<div className="password-body">{body}</div>
+			<div className="password-body">
+				{link !== undefined && <LabelLink url={link} />}
+				{body}
+			</div>
 			{secrets.dialog}
 		</section>
 	);

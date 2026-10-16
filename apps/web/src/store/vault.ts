@@ -1,4 +1,11 @@
-import { isVaultPath, VAULT_FOLDER } from '@skysa/core';
+import {
+	isVaultPath,
+	PASSWORD_LENGTH,
+	passwordLength,
+	type PasswordOptions,
+	VAULT_FOLDER,
+} from '@skysa/core';
+import { z } from 'zod';
 
 import { t } from '../i18n/t.js';
 import { type NoteRecord, type NotesDatabase } from './db.js';
@@ -70,3 +77,41 @@ export const filterByLabel = (notes: readonly NoteRecord[], query: string): Note
 		? [...notes]
 		: notes.filter((note) => folded(titleShown(note.title)).includes(wanted));
 };
+
+/** The key for how this device makes a new password. */
+const GENERATOR_KEY = 'passwordGenerator';
+
+/** How a new password is made unless the user has chosen: twenty characters, symbols in. */
+export const GENERATOR_DEFAULT: PasswordOptions = {
+	length: PASSWORD_LENGTH.initial,
+	symbols: true,
+};
+
+const generatorSchema = z.object({ length: z.number(), symbols: z.boolean() });
+
+/**
+ * How this device makes a new password (docs/ARCHITECTURE.md §7, "Passwords
+ * in the vault"): the length and whether there are symbols, as last chosen
+ * here. For every source, since it is about the sites the user has, not where
+ * their passwords are kept.
+ */
+export const getGeneratorOptions = async (db: NotesDatabase): Promise<PasswordOptions> => {
+	const stored = await getPreference(db, GENERATOR_KEY);
+	const read = (() => {
+		try {
+			return generatorSchema.safeParse(JSON.parse(stored ?? ''));
+		} catch {
+			return undefined;
+		}
+	})();
+	return read?.success === true
+		? { length: passwordLength(read.data.length), symbols: read.data.symbols }
+		: GENERATOR_DEFAULT;
+};
+
+export const setGeneratorOptions = (db: NotesDatabase, options: PasswordOptions): Promise<void> =>
+	setPreference(
+		db,
+		GENERATOR_KEY,
+		JSON.stringify({ length: passwordLength(options.length), symbols: options.symbols })
+	);
