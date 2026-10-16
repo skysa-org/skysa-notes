@@ -274,9 +274,17 @@ const CardLine = ({ line }: { line: PreviewLine }) => {
 			style={indent > 0 ? { paddingInlineStart: `${String(indent * 1.4)}em` } : undefined}
 		>
 			{line.marker !== undefined && <Marker marker={line.marker} depth={line.depth} />}
-			<span className="scratch-card-words">
+			<span
+				className="scratch-card-words"
+				// A chip that starts its line has no room before it (`styles.css`).
+				data-embed-first={line.runs[0]?.embed === undefined ? undefined : true}
+			>
 				{line.runs.map((run, at) => (
 					<Fragment key={at}>
+						{/* Two chips with nothing between them — files put in
+						    together — as far apart as two with a space between,
+						    and their names not run together for a screen reader. */}
+						{run.embed !== undefined && line.runs[at - 1]?.embed !== undefined && ' '}
 						{run.embed === undefined ? (
 							marked(run.text, run.marks, run.href)
 						) : (

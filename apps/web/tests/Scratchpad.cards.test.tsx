@@ -236,6 +236,36 @@ describe('what a card shows', () => {
 		expect(screen.getByRole('button', { name: /^Paid:\s?Lamp receipt$/ })).toBeDefined();
 	});
 
+	it('says which lines start with a chip, which the stylesheet gives no room before', () => {
+		renderPad({
+			notes: [
+				card('1', {
+					body: '[Lamp receipt](lamp-receipt-1a2b3c4d.pdf)\n\nPaid: [Rug receipt](rug-receipt-1a2b3c4d.pdf)\n',
+				}),
+			],
+		});
+
+		const starting = [
+			...document.querySelectorAll(
+				'.scratch-card-words[data-embed-first] > .scratch-card-chip:first-child'
+			),
+		].map((chip) => chip.querySelector('.attachment-name')?.textContent);
+
+		expect(starting).toEqual(['Lamp receipt']);
+	});
+
+	it('puts a space between two chips with nothing between them, as between two with one', () => {
+		renderPad({
+			notes: [
+				card('1', {
+					body: '[Lamp](lamp-1a2b3c4d.pdf)[Rug](rug-1a2b3c4d.pdf) [Desk](desk-1a2b3c4d.pdf)\n',
+				}),
+			],
+		});
+
+		expect(document.querySelector('.scratch-card-words')?.textContent).toBe('Lamp Rug Desk');
+	});
+
 	it('draws a list’s bullets, numbers and boxes, out of the card’s name', () => {
 		renderPad({
 			notes: [

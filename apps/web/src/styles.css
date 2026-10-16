@@ -2375,7 +2375,35 @@ button.danger {
 	position: relative;
 	display: inline-block;
 	max-width: 100%;
+	/* Room round it, so chips put in together stand apart: files dropped at
+	   once go in one after another with nothing between them, and a run of
+	   chips that wraps had its rows all but touching. A margin rather than a
+	   space in the note, which would be a change to its markdown. */
+	margin: var(--space-3xs);
 	vertical-align: bottom;
+}
+
+/* None before one that starts its line, so the chip lines up with the words
+   above it. ProseMirror draws an empty image (`ProseMirror-separator`) before
+   an inline atom at the start of a paragraph or right after another atom — a
+   chip, a picture, a line break — and never after words, so that image first
+   in the paragraph, or after a line break, is what says a chip starts its
+   line. `:first-child` cannot: words are not elements, so a chip after them is
+   a first child too. A chip that a wrap puts at the start of a line keeps its
+   room, since where lines wrap is not something CSS can match. */
+.editor-rich-surface .ProseMirror-separator:first-child + .attachment,
+.editor-rich-surface br + .ProseMirror-separator + .attachment {
+	margin-inline-start: 0;
+}
+
+/* Two chips with nothing between them — files put in together go in one
+   after another — as far apart as two with a space between: a space's width
+   on top of the room each has. The same empty image, between two atoms, is
+   what tells them from two with a space between, which a selector cannot
+   see. A space is a quarter of an em or a little more in the system fonts
+   and most others, and 0.26em is within a fraction of a pixel of each. */
+.editor-rich-surface .attachment + .ProseMirror-separator + .attachment {
+	margin-inline-start: calc(var(--space-3xs) + 0.26em);
 }
 
 .attachment-chip {
@@ -4192,7 +4220,16 @@ button.icon.account-devices-count {
 }
 
 .scratch-card-chip {
+	/* As in the note (`.attachment`): chips side by side stand apart, and
+	   none before the first in its line. */
+	margin: var(--space-3xs);
 	vertical-align: bottom;
+}
+
+/* Words are not elements, so a chip after them is a first child too: the line
+   says when it starts with what it embeds (`CardLine`). */
+.scratch-card-words[data-embed-first] > .scratch-card-chip:first-child {
+	margin-inline-start: 0;
 }
 
 /* The whole card opens it, its foot included, all but the tools along that

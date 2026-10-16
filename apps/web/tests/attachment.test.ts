@@ -163,6 +163,34 @@ const selectChip = (mounted: Awaited<ReturnType<typeof mount>>) => {
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('a chip', () => {
+	it('can be told apart where it starts its line, which the stylesheet gives no room before', async () => {
+		// `styles.css` keys on what ProseMirror draws: an empty image before an
+		// inline atom first in its paragraph or after another, and none after
+		// words. Should that change, a chip after words would lose its room.
+		const { root } = await mount(
+			'[a.pdf](a.pdf)[b.pdf](b.pdf)\n\nsee [c.pdf](c.pdf)\n\nline  \n[d.pdf](d.pdf)\n'
+		);
+
+		const starting = [
+			...root.querySelectorAll(
+				'.ProseMirror-separator:first-child + .attachment, br + .ProseMirror-separator + .attachment'
+			),
+		].map((chip) => chip.querySelector('.attachment-name')?.textContent);
+
+		expect(starting).toEqual(['a.pdf', 'd.pdf']);
+	});
+
+	it('can be told apart where another is right before it, which the stylesheet sets a space apart', async () => {
+		// The same empty image, between two atoms; none where a space is.
+		const { root } = await mount('[a.pdf](a.pdf)[b.pdf](b.pdf) [c.pdf](c.pdf)\n');
+
+		const touching = [
+			...root.querySelectorAll('.attachment + .ProseMirror-separator + .attachment'),
+		].map((chip) => chip.querySelector('.attachment-name')?.textContent);
+
+		expect(touching).toEqual(['b.pdf']);
+	});
+
 	it("shows the file's kind and its name, and tells a screen reader both", async () => {
 		const { chips } = await mount('See [Q3 report.pdf](q3-1a2b3c4d.pdf "Figures") here.\n');
 		const [chip] = chips();
