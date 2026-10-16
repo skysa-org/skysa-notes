@@ -372,9 +372,9 @@ describe('the search results', () => {
 	});
 });
 
-describe('the scratchpad’s row', () => {
+describe('the scratchpad’s row, and the passwords’', () => {
 	it('is as tall as the headings beside it', () => {
-		expect(declarations('.scratchpad-row > button.row')).toContain(
+		expect(declarations('.place-row > button.row')).toContain(
 			'min-block-size: calc(var(--control) + 2 * var(--bar-block))'
 		);
 	});
@@ -382,7 +382,7 @@ describe('the scratchpad’s row', () => {
 	it('starts at the gutter on a touch screen too, its mark and name across', () => {
 		// The touch rule for rows centres them along their main axis, which
 		// for a row of words is top to bottom and for this one side to side.
-		const own = declarations('.scratchpad-row > button.row');
+		const own = declarations('.place-row > button.row');
 		expect(own).toContain('flex-direction: row');
 		expect(own).toContain('justify-content: start');
 	});

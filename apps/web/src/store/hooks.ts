@@ -36,6 +36,7 @@ import {
 import { getScratchpadShown, isScratchNote } from './scratchpad.js';
 import { createNoteSearch, type NoteHit, type NoteSearch } from './search.js';
 import { buildFolderTree, type FolderNode, keptTree, withPins } from './tree.js';
+import { getPasswordsShown, listVaultNotes } from './vault.js';
 
 /**
  * Live reads from IndexedDB. `useLiveQuery` re-runs its query whenever a write
@@ -587,3 +588,38 @@ export const useScratchpadShown = (connectionId: string | undefined): boolean | 
 /** Count of notes with unpushed edits, for the sync indicator in Phase 2. */
 export const useDirtyCount = (): number | undefined =>
 	useLiveQuery(() => db.notes.where('dirty').equals(1).count(), []);
+
+/**
+ * A source's passwords, by label; `undefined` until read for this source
+ * (docs/ARCHITECTURE.md §7, "Passwords in the vault").
+ */
+export const useVaultItems = (connectionId: string | undefined): NoteRecord[] | undefined => {
+	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
+	const result = useLiveQuery(async () => {
+		if (connectionId === undefined) {
+			before.current = new Map();
+			return undefined;
+		}
+		// A row unchanged since the read before is the object it was then, so
+		// it is not drawn again (`keptRows`).
+		const notes = keptRows(before.current, await listVaultNotes(db, connectionId));
+		before.current = new Map(notes.map((note) => [note.id, note]));
+		return { connectionId, notes };
+	}, [connectionId]);
+	return result?.connectionId === connectionId ? result?.notes : undefined;
+};
+
+/**
+ * Whether a source shows its passwords on this device; `undefined` until read
+ * for this source.
+ */
+export const usePasswordsShown = (connectionId: string | undefined): boolean | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined
+				? undefined
+				: { connectionId, shown: await getPasswordsShown(db, connectionId) },
+		[connectionId]
+	);
+	return result?.connectionId === connectionId ? result?.shown : undefined;
+};

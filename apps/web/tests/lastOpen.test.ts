@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { ROOT, VAULT_FOLDER } from '@skysa/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
@@ -96,6 +96,13 @@ describe('remembering where the user was', () => {
 });
 
 describe('which note to open', () => {
+	it('never opens a password the URL names in a notebook, but the notebook’s own', async () => {
+		const agenda = await createNote(db, { folderPath: 'Work', title: 'Agenda' });
+		const password = await createNote(db, { folderPath: VAULT_FOLDER, title: 'GitHub' });
+
+		expect(await pick('Work', password.id)).toBe(agenda.id);
+	});
+
 	it('is the one asked for, wherever it is, while it is there', async () => {
 		const asked = await createNote(db, { folderPath: 'Home', title: 'Asked' });
 		await createNote(db, { folderPath: 'Work', title: 'Other' });

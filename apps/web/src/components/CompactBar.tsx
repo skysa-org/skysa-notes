@@ -83,6 +83,7 @@ const PANE_ELEMENT: Record<Pane, string> = {
 	notebooks: '.sidebar',
 	// The scratchpad is in the notes' place (docs/ARCHITECTURE.md §7, "The
 	// scratchpad").
+	// The passwords' list is a `.note-list`.
 	notes: '.note-list, .scratchpad',
 };
 
@@ -516,6 +517,13 @@ export interface CompactBarProps {
 	 * `note`, or with none its first words.
 	 */
 	scratchpad?: boolean;
+	/**
+	 * The passwords are open (docs/ARCHITECTURE.md §7, "Passwords in the
+	 * vault"): the notebook's dropdown says so, and the note's is there only
+	 * while an item is open, to go back to the list from; with none, the list
+	 * is what shows.
+	 */
+	passwords?: boolean;
 }
 
 /**
@@ -541,6 +549,7 @@ export const CompactBar = ({
 	fieldRef,
 	onOrigins,
 	scratchpad = false,
+	passwords = false,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const renaming = useRenaming(renamings);
@@ -573,7 +582,7 @@ export const CompactBar = ({
 		const sources = trigger('sources');
 		const notebooks = trigger('notebooks');
 		// None in the scratchpad: the scratchpad opens out of the notebook's,
-		// which says "Scratchpad".
+		// which says "Scratchpad". Nor in the passwords with no item open.
 		const notes = trigger('notes') ?? notebooks;
 		if (sources === null || notebooks === null || notes === null) return;
 		const across = bar.getBoundingClientRect();
@@ -650,7 +659,7 @@ export const CompactBar = ({
 				/>
 				{scratchpad ? (
 					card && <CardName title={title} keep={keep} panel={panel} />
-				) : (
+				) : passwords && note === undefined ? null : (
 					<PaneTrigger
 						pane="notes"
 						label={t('shell.compact.note', { value: title })}

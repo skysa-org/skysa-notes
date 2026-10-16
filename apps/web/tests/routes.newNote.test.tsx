@@ -2,13 +2,14 @@ import { EditorView } from '@codemirror/view';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MODE_LABELS } from '../src/editor/mode.js';
 import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import type * as Notes from '../src/store/notes.js';
 import { createNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 
@@ -21,8 +22,25 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 const DROPBOX = 'c-dropbox';
 
+/** How many notes the store refuses to make before it makes them again, and how many it was asked to. */
+const refusing = vi.hoisted(() => ({ current: 0, asked: 0 }));
+vi.mock('../src/store/notes.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Notes>();
+	return {
+		...actual,
+		createNote: (...args: Parameters<typeof actual.createNote>) => {
+			refusing.asked += 1;
+			if (refusing.current === 0) return actual.createNote(...args);
+			refusing.current -= 1;
+			return Promise.reject(new Error('The device refused it.'));
+		},
+	};
+});
+
 afterEach(async () => {
 	cleanup();
+	refusing.current = 0;
+	refusing.asked = 0;
 	await db.notes.clear();
 	await db.folders.clear();
 	await db.opQueue.clear();
@@ -144,6 +162,24 @@ describe('a notebook with nothing in it', () => {
 		await waitFor(async () => {
 			expect((await db.notes.toArray()).map((note) => note.body)).toEqual(['milk']);
 		});
+	});
+
+	it('is stored at a later keystroke where the first could not store it, asked again once', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await openApp();
+		await begun();
+		refusing.current = 1;
+
+		typeInText('m');
+		expect(await screen.findByText('That note could not be made.')).toBeDefined();
+		typeInText('ilk');
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await db.notes.toArray()).map((note) => note.body)).toEqual(['milk']);
+		});
+		// Not answered with the refusal kept from the first, and made once.
+		expect(refusing.asked).toBe(2);
 	});
 
 	it('stores the note when a file is pasted into it, and the file beside it', async () => {

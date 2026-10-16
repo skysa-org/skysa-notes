@@ -26,6 +26,7 @@ import {
 	type Unlock,
 	type UnlockedKeys,
 } from '../store/secretKeys.js';
+import { getPasswordsShown, setPasswordsShown } from '../store/vault.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
 import { Dialog, DialogActions, DialogOption, DialogOptions } from './Dialog.js';
 import { GroupCells, SIZES, spilled } from './GroupCells.js';
@@ -470,25 +471,71 @@ const RekeyReady = ({
 	</div>
 );
 
+/**
+ * Whether this device shows the source's passwords under its notebooks
+ * (docs/ARCHITECTURE.md §7, "Passwords in the vault"): a switch, which says
+ * what it is and that it is this device's alone. `undefined` until read.
+ */
+const PasswordsSwitch = ({
+	shown,
+	onChange,
+}: {
+	shown: boolean | undefined;
+	onChange: (shown: boolean) => void;
+}) => {
+	const labelId = useId();
+	const textId = useId();
+	return (
+		<div className="dialog-options">
+			<button
+				type="button"
+				role="switch"
+				className="dialog-option dialog-switch"
+				aria-checked={shown === true}
+				aria-labelledby={labelId}
+				aria-describedby={textId}
+				disabled={shown === undefined}
+				onClick={() => {
+					onChange(shown !== true);
+				}}
+			>
+				<span className="dialog-switch-words">
+					<span id={labelId}>{t('passwords.toggle.label')}</span>
+					<span id={textId} className="muted">
+						{t('passwords.toggle.text')}
+					</span>
+				</span>
+				<span className="switch-track" aria-hidden="true">
+					<span className="switch-thumb" />
+				</span>
+			</button>
+		</div>
+	);
+};
+
 /** This device, enrolled: how it unlocks, whether it is unlocked now, and what can be done. */
 const Device = ({
 	kind,
 	unlocked,
 	error,
+	passwords,
 	onUnlock,
 	onLock,
 	onChange,
 	onReplaceKey,
 	onRemove,
+	onPasswords,
 }: {
 	kind: UnlockKind;
 	unlocked: boolean;
 	error: string | undefined;
+	passwords: boolean | undefined;
 	onUnlock: () => void;
 	onLock: () => void;
 	onChange: () => void;
 	onReplaceKey: () => void;
 	onRemove: () => void;
+	onPasswords: (shown: boolean) => void;
 }) => (
 	<div className="secrets-step">
 		<p>{t(`secrets.device.unlocksWith.${kind}`)}</p>
@@ -502,6 +549,7 @@ const Device = ({
 			<DialogOption onClick={onChange}>{t('secrets.device.change')}</DialogOption>
 			<DialogOption onClick={onReplaceKey}>{t('secrets.device.replaceKey')}</DialogOption>
 		</DialogOptions>
+		<PasswordsSwitch shown={passwords} onChange={onPasswords} />
 		{/* Unlocked, there is nothing it asks: the ✕ has the focus. */}
 		<DialogActions
 			primary={
@@ -651,6 +699,10 @@ export const SecretsDialog = ({
 		[database, connectionId]
 	);
 	const unlocked = useSyncExternalStore(lock.subscribe, () => lock.isUnlocked(connectionId));
+	const passwordsShown = useLiveQuery(
+		() => getPasswordsShown(database, connectionId),
+		[database, connectionId]
+	);
 
 	/**
 	 * The keys this dialog made or read from what was typed: filled with zeros
@@ -1147,6 +1199,10 @@ export const SecretsDialog = ({
 						kind={kind}
 						unlocked={unlocked}
 						error={error}
+						passwords={passwordsShown}
+						onPasswords={(shown) => {
+							void setPasswordsShown(database, connectionId, shown);
+						}}
 						onUnlock={() => {
 							go({ kind: 'unlock', then: 'device' });
 						}}

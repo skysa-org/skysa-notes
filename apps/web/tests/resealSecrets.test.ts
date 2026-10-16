@@ -1,4 +1,13 @@
-import { armor, encrypt, secretBlocksIn } from '@skysa/core';
+import {
+	armor,
+	encrypt,
+	readVaultPayload,
+	secretBlocksIn,
+	VAULT_FOLDER,
+	vaultArmor,
+	vaultBody,
+	vaultPayload,
+} from '@skysa/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -114,6 +123,27 @@ describe('encrypting a source’s secrets to its new key', () => {
 		);
 		expect(await noteById(db, plain.id)).toEqual(before.find((note) => note.id === plain.id));
 		expect(await noteById(db, theirs.id)).toEqual(before.find((note) => note.id === theirs.id));
+	});
+
+	it('encrypts a password in the vault afresh, and it is still an item', async () => {
+		const db = await setup();
+		const fields = { username: 'ada', password: 'pw', notes: '' };
+		const item = await createNote(db, {
+			connectionId: 'c1',
+			folderPath: VAULT_FOLDER,
+			title: 'GitHub',
+			body: vaultBody(sealedFor(vaultPayload(fields), old)),
+		});
+
+		expect(await resealSecrets(db, 'c1', input)).toEqual({
+			secrets: 1,
+			notes: 1,
+			stopped: false,
+		});
+
+		const armorNow = vaultArmor(await bodyOf(db, item));
+		expect(armorNow).toBeDefined();
+		expect(readVaultPayload(openSecret(armorNow ?? '', [fresh]))?.fields).toEqual(fields);
 	});
 
 	it('says what it would do before it does it', async () => {

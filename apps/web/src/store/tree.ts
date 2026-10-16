@@ -1,8 +1,9 @@
-import { ancestorPaths, basename, isScratchPath, parentPath, ROOT } from '@skysa/core';
+import { ancestorPaths, basename, isScratchPath, isVaultPath, parentPath, ROOT } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { type NotebookPin, pinnedFirst, pinnedToEnds } from './pins.js';
 import { SCRATCHPAD_LABEL } from './scratchpad.js';
+import { PASSWORDS_LABEL } from './vault.js';
 
 /**
  * Flat folder paths in, a nested tree out. Kept pure and separate from the
@@ -207,10 +208,12 @@ export const LOOSE_NOTES_LABEL = t('notebooks.looseNotes');
 
 /**
  * What to call a folder in a pane heading. Only the root needs a name, and the
- * scratchpad's folder, which is no notebook and is not called by its path.
+ * scratchpad's folder and the passwords', which are no notebook and are not
+ * called by their path.
  */
 export const folderLabel = (path: string): string => {
 	if (path === ROOT) return LOOSE_NOTES_LABEL;
+	if (isVaultPath(path)) return PASSWORDS_LABEL;
 	return isScratchPath(path) ? SCRATCHPAD_LABEL : path;
 };
 

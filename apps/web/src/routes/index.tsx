@@ -3,11 +3,13 @@ import {
 	type ConnectGate,
 	type EntitlementCode,
 	isScratchPath,
+	isVaultPath,
 	isWithin,
 	parentPath,
 	rebasePath,
 	ROOT,
 	SCRATCHPAD_FOLDER,
+	VAULT_FOLDER,
 } from '@skysa/core';
 import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,11 +42,14 @@ import {
 	type ScratchEditing,
 } from '../components/NoteView.js';
 import { type Notice, NotifyContext } from '../components/notify.js';
+import { PasswordItem } from '../components/PasswordItem.js';
+import { Passwords } from '../components/Passwords.js';
 import { CardSheet, ScratchModal, Scratchpad } from '../components/Scratchpad.js';
 import { NoteSearchField, SearchQuery } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast } from '../components/Toast.js';
+import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
@@ -87,6 +92,7 @@ import {
 	useNotesUnderFolder,
 	useNoteToOpen,
 	useOpenNotebooks,
+	usePasswordsShown,
 	usePinnedTree,
 	useScratchpadShown,
 	useSourceContents,
@@ -97,7 +103,9 @@ import { type LastOpen, noteIsUnder, pickNote, rememberOpen } from '../store/las
 import { createLiveEdits } from '../store/liveEdits.js';
 import {
 	createNote,
+	deleteNote,
 	draftNote,
+	getNote,
 	isUnnamed,
 	moveNote,
 	saveNoteBody,
@@ -122,6 +130,7 @@ import {
 	findNamedPlace,
 	fragmentOf,
 	heldPlace,
+	isAppFolder,
 	type NamedPlace,
 	type Place,
 	placeFolder,
@@ -786,7 +795,7 @@ const useDrafts = ({
 	onStoreFailed: () => void;
 }) => {
 	const [draft, setDraft] = useState<NoteRecord | null>(null);
-	/** Each draft is stored once, however many edits ask. */
+	/** Each draft is stored once, however many edits ask, and asked again where that failed. */
 	const storing = useRef(new Map<string, Promise<boolean>>());
 
 	// Stored, and a note now: let it go, in render rather than an effect, so no
@@ -831,6 +840,7 @@ const useDrafts = ({
 					return true;
 				},
 				() => {
+					storing.current.delete(note.id);
 					onStoreFailed();
 					return false;
 				}
@@ -890,6 +900,7 @@ const useOpenPlace = ({
 	pins,
 	startable,
 	scratchpad,
+	passwords,
 	onStoreFailed,
 }: {
 	activeConnection: string | undefined;
@@ -910,6 +921,8 @@ const useOpenPlace = ({
 	 * the scratchpad can be open; `undefined` until read.
 	 */
 	scratchpad: boolean | undefined;
+	/** The same for its passwords (docs/ARCHITECTURE.md §7, "Passwords in the vault"). */
+	passwords: boolean | undefined;
 	onStoreFailed: () => void;
 }) => {
 	const router = useRouter();
@@ -968,20 +981,19 @@ const useOpenPlace = ({
 	// before the one it names.
 	const folder = resolving
 		? undefined
-		: openFolderPath(
-				tree,
-				requestedFolder,
-				looseNoteCount,
-				rememberedFolder(lastOpen),
-				scratchpad
-			);
-	const inScratchpad = folder === SCRATCHPAD_FOLDER;
+		: openFolderPath(tree, requestedFolder, looseNoteCount, rememberedFolder(lastOpen), {
+				[SCRATCHPAD_FOLDER]: scratchpad,
+				[VAULT_FOLDER]: passwords,
+			});
+	/** The scratchpad or the passwords: a place that is no notebook. */
+	const inAppPlace = isAppFolder(folder);
 	const remembered = folder === undefined ? undefined : lastOpen?.notes[folder];
 	const pinnedNotes = pins?.notes;
 	const toOpen = useNoteToOpen({
 		connectionId: activeConnection,
-		// The scratchpad opens on its cards, never on a note: nothing to pick.
-		folder: inScratchpad ? undefined : folder,
+		// The scratchpad opens on its cards, never on a note, and the passwords
+		// on their list: nothing to pick.
+		folder: inAppPlace ? undefined : folder,
 		open: noteId,
 		remembered,
 		pinned: pinnedNotes,
@@ -990,7 +1002,15 @@ const useOpenPlace = ({
 	});
 
 	const found = useNoteRead(noteId);
-	const storedNote = found ?? undefined;
+	// A password is open only in the passwords: named anywhere else — by an
+	// address kept from while they were shown — it is no note to show there,
+	// and the place picks one of its own (`pickNote`).
+	const storedNote =
+		found === null ||
+		found === undefined ||
+		(isVaultPath(found.path) && folder !== VAULT_FOLDER)
+			? undefined
+			: found;
 	// A note asked for and not read yet: the pane says it is opening rather
 	// than that nothing is open, which is what it said while the read was held
 	// up behind another tab's write (2026-10-10).
@@ -1102,17 +1122,18 @@ const useOpenPlace = ({
 		begin,
 	]);
 
-	// The scratchpad, open as the place remembered or fallen back to, is put
-	// in the entry as a notebook the app opens by itself is (`show` above).
+	// The scratchpad, or the passwords, open as the place remembered or fallen
+	// back to, is put in the entry as a notebook the app opens by itself is
+	// (`show` above).
 	useEffect(() => {
-		if (!inScratchpad || !settled || requestedFolder === SCRATCHPAD_FOLDER) return;
+		if (!isAppFolder(folder) || !settled || requestedFolder === folder) return;
 		go(
-			{ folder: SCRATCHPAD_FOLDER },
+			{ folder },
 			standing === 'left'
 				? { replace: false, panel: heldPanel(router.history.location.state) }
 				: { replace: true }
 		);
-	}, [inScratchpad, settled, requestedFolder, standing, go, router]);
+	}, [folder, settled, requestedFolder, standing, go, router]);
 
 	// The hash says by path what the entry holds by id, and follows the note
 	// when it is renamed or moved, here or on another device.
@@ -1141,8 +1162,9 @@ const useOpenPlace = ({
 		folder,
 		noteId,
 		// The scratchpad is remembered, and not the card open in it: the app
-		// opens on the cards, not on one of them over the rest.
-		openNote: inScratchpad ? undefined : storedNote,
+		// opens on the cards, not on one of them over the rest. Nor the password
+		// open: the app opens on the list, not on an item, locked or asking.
+		openNote: inAppPlace ? undefined : storedNote,
 		lastOpen,
 	});
 
@@ -1163,26 +1185,27 @@ const useOpenPlace = ({
 
 /**
  * Which notebook to open, as `selectedFolderPath` has it, or the scratchpad
- * (docs/ARCHITECTURE.md §7, "The scratchpad"): asked for, or remembered with
- * nothing asked for, while the source shows it. Not yet known while whether it
- * does is still being read. A scratchpad hidden is a notebook deleted: the
- * place falls back as from one.
+ * (docs/ARCHITECTURE.md §7, "The scratchpad") or the passwords ("Passwords in
+ * the vault"): asked for, or remembered with nothing asked for, while the
+ * source shows it, as `shown` says by folder. Not yet known while whether it
+ * does is still being read. One hidden is a notebook deleted: the place falls
+ * back as from one.
  */
 const openFolderPath = (
 	tree: FolderNode[] | undefined,
 	requested: string | undefined,
 	looseNoteCount: number | undefined,
 	remembered: string | null | undefined,
-	scratchpad: boolean | undefined
+	shown: Readonly<Record<string, boolean | undefined>>
 ): string | undefined => {
-	const asked = (requested ?? remembered) === SCRATCHPAD_FOLDER;
-	if (asked && scratchpad === true) return SCRATCHPAD_FOLDER;
-	if (asked && scratchpad === undefined) return undefined;
+	const asked = requested ?? remembered;
+	if (isAppFolder(asked) && shown[asked] === true) return asked;
+	if (isAppFolder(asked) && shown[asked] === undefined) return undefined;
 	return selectedFolderPath(
 		tree,
-		requested === SCRATCHPAD_FOLDER ? undefined : requested,
+		isAppFolder(requested) ? undefined : requested,
 		looseNoteCount,
-		remembered === SCRATCHPAD_FOLDER ? null : remembered
+		isAppFolder(remembered) ? null : remembered
 	);
 };
 
@@ -1206,10 +1229,10 @@ const canMakeNote = (folder: string | undefined, modal: boolean): boolean =>
 
 /**
  * Whether the folder open is a notebook, which can be moved: not the root,
- * which holds the loose notes, and not the scratchpad.
+ * which holds the loose notes, and not the scratchpad or the passwords.
  */
 const isNotebook = (folder: string | undefined): folder is string =>
-	folder !== undefined && folder !== ROOT && !isScratchPath(folder);
+	folder !== undefined && folder !== ROOT && !isScratchPath(folder) && !isVaultPath(folder);
 
 /**
  * Whether the app behind is out of reach: held by a source's first import, or
@@ -1218,8 +1241,11 @@ const isNotebook = (folder: string | undefined): folder is string =>
 const covered = (held: SyncStateRecord | undefined, modal: boolean): boolean =>
 	held !== undefined || modal;
 
-/** The sidebar's scratchpad row, while this device shows the source's scratchpad. */
-const scratchpadRow = (
+/**
+ * The sidebar's scratchpad row, while this device shows the source's
+ * scratchpad; and its passwords' row, the same while it shows them.
+ */
+const placeRow = (
 	shown: boolean | undefined,
 	selected: boolean,
 	onSelect: () => void
@@ -1253,8 +1279,9 @@ const useListedNotes = (
 	pins: Pins | undefined,
 	tree: FolderNode[] | undefined
 ) => {
-	// The scratchpad lists its cards itself (`useScratchpad`).
-	const listed = folder !== undefined && isScratchPath(folder) ? undefined : folder;
+	// The scratchpad lists its cards itself (`useScratchpad`), and the
+	// passwords their items (`usePasswords`).
+	const listed = isAppFolder(folder) ? undefined : folder;
 	const stored = useNotesUnderFolder(listed, connectionId);
 	const own = useMemo(
 		() => stored?.filter((note) => parentPath(note.path) === folder),
@@ -1344,6 +1371,7 @@ const Home = () => {
 	}, []);
 
 	const scratchpadShown = useScratchpadShown(activeConnection);
+	const passwordsShown = usePasswordsShown(activeConnection);
 	const place = useOpenPlace({
 		activeConnection,
 		sources,
@@ -1352,11 +1380,14 @@ const Home = () => {
 		pins,
 		startable: canBegin(source, held),
 		scratchpad: scratchpadShown,
+		passwords: passwordsShown,
 		onStoreFailed: noteNotMade,
 	});
 	const { folder, noteId, openNote, storedNote, opening, go, openedOver } = place;
 	/** The scratchpad is open, in the notes' place (docs/ARCHITECTURE.md §7). */
 	const inScratchpad = folder === SCRATCHPAD_FOLDER;
+	/** The passwords are open, in the notes' place ("Passwords in the vault"). */
+	const inPasswords = folder === VAULT_FOLDER;
 	const { own, notes, unsavedNoteId } = useListedNotes(
 		activeConnection,
 		folder,
@@ -1572,11 +1603,12 @@ const Home = () => {
 				// Back where it was, open. By the row's own path, not the one it
 				// was deleted at: once sync has purged the row the note is made
 				// again, under a conflict name if something took the old one. A
-				// scratch note is back on the wall, its card not opened over it.
+				// scratch note is back on the wall, its card not opened over it,
+				// and a password in the passwords, however deep in their folder.
 				select(
 					isScratchPath(restored.path)
 						? { folder: SCRATCHPAD_FOLDER, note: undefined }
-						: { note: restored.id, folder: parentPath(restored.path) },
+						: { note: restored.id, folder: placeFolder(restored.path) },
 					{ replace: true, note: restored }
 				);
 			})
@@ -1599,6 +1631,10 @@ const Home = () => {
 		// The scratchpad's new note is its box's.
 		if (inScratchpad) {
 			scratch.take();
+			return;
+		}
+		if (inPasswords) {
+			passwords.add();
 			return;
 		}
 		// The root holds loose notes that arrived from the remote folder; the app
@@ -1777,6 +1813,37 @@ const Home = () => {
 	});
 	useOpenWhenShown(activeConnection, scratchpadShown, scratch.show);
 
+	const passwords = usePasswords({
+		active: inPasswords,
+		connectionId: activeConnection,
+		noteId,
+		begin: place.begin,
+		select,
+		compact,
+		setPanel,
+		setRest,
+	});
+
+	/**
+	 * Delete a password, taken away at once with the notice's undo, as a note
+	 * is; the list is what shows in its place.
+	 */
+	const deletePassword = (note: NoteRecord) => {
+		const home = { connectionId: note.connectionId };
+		void deleteNote(db, note.id, home)
+			.then(() => getNote(db, note.id, home).catch(() => undefined))
+			.then((row) => {
+				setDeleted(row ?? note);
+				setBeside(null);
+				if (noteIdRef.current === note.id) {
+					select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
+				}
+			})
+			.catch(() => {
+				setProblem({ message: t('passwords.item.notDeleted'), tone: 'error' });
+			});
+	};
+
 	/**
 	 * Escape puts down whatever is being moved, from wherever the focus is. On
 	 * the document rather than on the sidebar: a move started from the palette
@@ -1929,7 +1996,8 @@ const Home = () => {
 	});
 
 	// A note begun and not stored has nowhere to move from yet.
-	useNoteMove(storedNote, moving, pickUp, scratch.moveOpen);
+	// Nor a password, which is no note to put in a notebook.
+	useNoteMove(inPasswords ? undefined : storedNote, moving, pickUp, scratch.moveOpen);
 	useKeepOnInstall();
 
 	useShortcuts();
@@ -1973,6 +2041,7 @@ const Home = () => {
 	 * scratchpad's. In a wide one the scratchpad has the column too.
 	 */
 	const noteColumn = () => {
+		if (inPasswords) return passwordColumn();
 		if (!inScratchpad) return noteEditor();
 		if (!compact) return null;
 		if (scratch.card !== undefined) {
@@ -1985,6 +2054,42 @@ const Home = () => {
 			);
 		}
 		return <section className="note-view empty" aria-label={t('shell.notePane')} />;
+	};
+
+	/**
+	 * What is in the note's column in the passwords: the item open, or, with
+	 * none, what to do, or in a compact window an empty pane behind the list.
+	 * Keyed by the item, so nothing one showed is there as another opens.
+	 */
+	const passwordColumn = () => {
+		if (openNote !== undefined && openNote.deletedLocally === 0 && isVaultPath(openNote.path)) {
+			return (
+				<PasswordItem
+					key={openNote.id}
+					note={openNote}
+					draft={place.noteDraft}
+					onProblem={setProblem}
+					onDelete={deletePassword}
+					// Not `select`, which would take down what the item had to
+					// say: why a new one could not be begun.
+					onClose={() => {
+						go({ folder: VAULT_FOLDER }, { replace: true, notePath: undefined });
+					}}
+					onOpen={(note) => {
+						select({ folder: VAULT_FOLDER, note: note.id }, { replace: true, note });
+					}}
+				/>
+			);
+		}
+		if (compact)
+			return <section className="note-view empty" aria-label={t('shell.notePane')} />;
+		return (
+			<section className="note-view empty" aria-label={t('shell.notePane')}>
+				<p className="muted placeholder">
+					{opening ? t('passwords.item.opening') : t('passwords.none')}
+				</p>
+			</section>
+		);
 	};
 
 	/** The scratchpad, in the notes' place. */
@@ -2054,6 +2159,7 @@ const Home = () => {
 								// "Scratchpad" if it has a name or words to go by.
 								note={scratch.barNote(openNote)}
 								scratchpad={inScratchpad}
+								passwords={inPasswords}
 								liveEdits={liveEdits}
 								renamings={renamings}
 								panel={panel}
@@ -2159,11 +2265,19 @@ const Home = () => {
 							if (activeConnection !== undefined)
 								void setNotebookPin(db, activeConnection, path, pin);
 						}}
-						scratchpad={scratchpadRow(scratchpadShown, inScratchpad, scratch.show)}
+						scratchpad={placeRow(scratchpadShown, inScratchpad, scratch.show)}
+						passwords={placeRow(passwordsShown, inPasswords, passwords.show)}
 					/>
 
 					{inScratchpad ? (
 						scratchPane()
+					) : inPasswords ? (
+						<Passwords
+							items={passwords.items}
+							selectedId={noteId}
+							onSelect={passwords.choose}
+							onAdd={passwords.add}
+						/>
 					) : (
 						<NoteList
 							notes={notes}

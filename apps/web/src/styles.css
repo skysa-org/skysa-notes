@@ -3597,15 +3597,21 @@ button.icon.account-devices-count {
 /* Its row, above the notebooks' heading, apart from them by the same rule,
    and as tall as the headings at the top of the other columns (`.pane-header`
    with a button in it), so the rules under the three line up. Its mark on
-   the gutter, where their words begin. */
+   the gutter, where their words begin. The passwords' row (docs/ARCHITECTURE.md
+   §7, "Passwords in the vault") is the same row under the notebooks, ruled
+   off above them, between the tree, which scrolls, and the account's foot. */
 .scratchpad-row {
 	border-block-end: 1px solid var(--border);
+}
+
+.passwords-row {
+	border-block-start: 1px solid var(--border);
 }
 
 /* A row across rather than a column, so `start`: the touch screen's
    `justify-content: center` for rows, which centres their words top to
    bottom, would centre these side to side. */
-.scratchpad-row > button.row {
+.place-row > button.row {
 	flex-direction: row;
 	justify-content: start;
 	align-items: center;
@@ -3613,9 +3619,183 @@ button.icon.account-devices-count {
 	min-block-size: calc(var(--control) + 2 * var(--bar-block));
 }
 
-.scratchpad-row .toolbar-icon {
+.place-row .toolbar-icon {
 	flex: none;
 	color: var(--muted);
+}
+
+/* The passwords' list (docs/ARCHITECTURE.md §7, "Passwords in the vault"): a
+   note list whose rows are a key and a label across, started at the gutter on
+   a touch screen too, as the place rows are. */
+.passwords button.row {
+	flex-direction: row;
+	justify-content: start;
+	align-items: center;
+	gap: var(--space-s);
+}
+
+.passwords button.row .toolbar-icon {
+	flex: none;
+	color: var(--muted);
+}
+
+.passwords-filter {
+	display: flex;
+	align-items: center;
+	gap: var(--space-s);
+	padding: var(--space-s) var(--gutter);
+	border-block-end: 1px solid var(--border);
+	color: var(--muted);
+}
+
+.passwords-filter input {
+	flex: 1;
+	min-width: 0;
+	padding: 0.35rem 0.5rem;
+	font: inherit;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+/* An item, in the note's column: its label over its fields, which read as a
+   list of names and values, each value's buttons at its end. */
+.password-label {
+	display: flex;
+	align-items: center;
+	gap: var(--space-s);
+	min-width: 0;
+	margin: 0;
+	font-size: 1.15rem;
+	line-height: 1.75rem;
+	font-weight: 600;
+}
+
+.password-label > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.password-label .toolbar-icon {
+	flex: none;
+	color: var(--muted);
+}
+
+.password-header-actions {
+	display: flex;
+	flex: none;
+	gap: var(--space-s);
+}
+
+.password-body {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: var(--space-m) var(--gutter);
+}
+
+.password-fields {
+	display: grid;
+	gap: var(--space-m);
+	max-width: 36rem;
+	margin: 0;
+}
+
+.password-field dt {
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+.password-field dd {
+	display: flex;
+	align-items: center;
+	gap: var(--space-xs);
+	min-height: 1.75rem;
+	margin: 0;
+}
+
+.password-value {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	user-select: text;
+}
+
+.password-shown {
+	font-family: var(--font-mono);
+}
+
+.password-notes {
+	white-space: pre-wrap;
+}
+
+.password-said {
+	margin-block: var(--space-m) 0;
+}
+
+.password-said:empty {
+	margin: 0;
+}
+
+.password-form {
+	display: grid;
+	gap: var(--space-xs);
+	max-width: 36rem;
+}
+
+.password-form label {
+	margin-block-start: var(--space-s);
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+.password-form input,
+.password-form textarea {
+	inline-size: 100%;
+	min-width: 0;
+	padding: 0.4rem 0.6rem;
+	font: inherit;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.password-form textarea {
+	resize: vertical;
+}
+
+.password-entry {
+	display: flex;
+	align-items: center;
+	gap: var(--space-xs);
+}
+
+.password-entry input {
+	flex: 1;
+	font-family: var(--font-mono);
+}
+
+/* The password as dots, in a text field rather than a password field: a
+   browser offers to save what is typed into one of those. Chrome, Safari and
+   Firefox (114 on) draw it so. */
+.password-entry input.password-masked {
+	-webkit-text-security: disc;
+}
+
+.password-hint {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.75rem;
+}
+
+.password-actions {
+	display: flex;
+	justify-content: end;
+	gap: var(--space-s);
+	margin-block-start: var(--space-m);
 }
 
 .scratchpad {
@@ -5123,6 +5303,47 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 
 .modal button.dialog-option + .dialog-option {
 	border-block-start: 1px solid var(--border);
+}
+
+/* A switch in a row of its own (`role="switch"`): what it is, and under that
+   what it does, with the track at the row's end, the thumb at its end while it
+   is on. The passwords' in the Vault dialog. */
+.dialog-switch-words {
+	display: grid;
+	gap: 0.125rem;
+}
+
+.dialog-switch-words .muted {
+	font-size: 0.8125rem;
+}
+
+.switch-track {
+	position: relative;
+	flex: none;
+	inline-size: 2.25rem;
+	block-size: 1.25rem;
+	border-radius: 999px;
+	background: var(--border);
+	transition: background-color var(--duration-s) var(--ease-out);
+}
+
+.switch-thumb {
+	position: absolute;
+	inset-block-start: 0.125rem;
+	inset-inline-start: 0.125rem;
+	inline-size: 1rem;
+	block-size: 1rem;
+	border-radius: 50%;
+	background: var(--bg);
+	transition: inset-inline-start var(--duration-s) var(--ease-out);
+}
+
+[aria-checked='true'] > .switch-track {
+	background: var(--accent);
+}
+
+[aria-checked='true'] > .switch-track > .switch-thumb {
+	inset-inline-start: 1.125rem;
 }
 
 /* The chevron turned to point on, to the step the row goes to. */

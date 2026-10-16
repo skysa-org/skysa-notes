@@ -1,4 +1,4 @@
-import { ancestorPaths, basename, isScratchPath, ROOT } from '@skysa/core';
+import { ancestorPaths, basename, isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 import {
 	type CSSProperties,
 	type KeyboardEvent,
@@ -13,7 +13,7 @@ import {
 } from 'react';
 
 import { useCommand } from '../commands/context.js';
-import { Icon } from '../editor/icons.js';
+import { Icon, type IconName } from '../editor/icons.js';
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
 import { type NotebookPin } from '../store/pins.js';
@@ -21,6 +21,7 @@ import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
 import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../store/tree.js';
+import { PASSWORDS_LABEL } from '../store/vault.js';
 import { AttachedFiles } from './AttachedFiles.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
@@ -125,35 +126,50 @@ export interface SidebarProps {
 	 * way to open it.
 	 */
 	scratchpad?: { selected: boolean; onSelect: () => void } | undefined;
+	/**
+	 * The source's passwords (docs/ARCHITECTURE.md §7, "Passwords in the
+	 * vault"), a row under the notebooks while this device shows them.
+	 */
+	passwords?: { selected: boolean; onSelect: () => void } | undefined;
 }
 
 /**
  * The notebook the palette's commands are about, of the folder selected. The
  * root is selectable while it holds loose notes and is not a notebook: it
  * cannot be renamed, moved or deleted, and a notebook made "inside" it is a
- * top-level one anyway. Nor is the scratchpad one.
+ * top-level one anyway. Nor is the scratchpad one, or the passwords.
  */
 const notebookOpen = (selectedFolder: string | undefined): string | undefined =>
-	selectedFolder === undefined || selectedFolder === ROOT || isScratchPath(selectedFolder)
+	selectedFolder === undefined ||
+	selectedFolder === ROOT ||
+	isScratchPath(selectedFolder) ||
+	isVaultPath(selectedFolder)
 		? undefined
 		: selectedFolder;
 
 /**
- * The scratchpad's row, above the notebooks: not one of them, so it is never a
- * place to put something being moved, and is not offered while something is.
- * As tall as the headings at the top of the other columns, so the rules under
- * them line up across the window.
+ * The row of a place that is no notebook: the scratchpad's, above the
+ * notebooks, and the passwords', under them. Not one of the notebooks, so it is
+ * never a place to put something being moved, and is not offered while
+ * something is. As tall as the headings at the top of the other columns, so the
+ * rules under the scratchpad's line up across the window.
  */
-const ScratchpadRow = ({
+const PlaceRow = ({
+	className,
+	icon,
+	label,
 	selected,
 	onSelect,
 	moving,
 }: {
+	className: string;
+	icon: IconName;
+	label: string;
 	selected: boolean;
 	onSelect: () => void;
 	moving: boolean;
 }) => (
-	<div className="scratchpad-row">
+	<div className={`place-row ${className}`}>
 		<button
 			type="button"
 			className={selected ? 'row selected' : 'row'}
@@ -161,8 +177,8 @@ const ScratchpadRow = ({
 			disabled={moving}
 			onClick={onSelect}
 		>
-			<Icon name="scratchpad" />
-			<span className="row-label">{SCRATCHPAD_LABEL}</span>
+			<Icon name={icon} />
+			<span className="row-label">{label}</span>
 		</button>
 	</div>
 );
@@ -1065,6 +1081,7 @@ export const Sidebar = ({
 	onOpenNotebooks,
 	onPinFolder,
 	scratchpad,
+	passwords,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -1192,7 +1209,10 @@ export const Sidebar = ({
 	return (
 		<nav className="sidebar" aria-label={t('notebooks.title')}>
 			{scratchpad !== undefined && (
-				<ScratchpadRow
+				<PlaceRow
+					className="scratchpad-row"
+					icon="scratchpad"
+					label={SCRATCHPAD_LABEL}
 					selected={scratchpad.selected}
 					onSelect={scratchpad.onSelect}
 					moving={moving !== null}
@@ -1298,6 +1318,17 @@ export const Sidebar = ({
 					onClose={() => {
 						setMenu(null);
 					}}
+				/>
+			)}
+
+			{passwords !== undefined && (
+				<PlaceRow
+					className="passwords-row"
+					icon="key"
+					label={PASSWORDS_LABEL}
+					selected={passwords.selected}
+					onSelect={passwords.onSelect}
+					moving={moving !== null}
 				/>
 			)}
 
