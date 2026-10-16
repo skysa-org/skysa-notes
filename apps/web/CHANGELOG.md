@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.10.2
+
+### Patch Changes
+
+- d4f2bd9: The vault's menu items on the gear and a source's `⋯` say "Vault" and "Set up vault", without an ellipsis, as every other menu item does.
+- @skysa/core@1.10.2
+
 ## 1.10.1
 
 ### Patch Changes
