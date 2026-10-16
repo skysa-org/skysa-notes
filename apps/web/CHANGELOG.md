@@ -1,5 +1,16 @@
 # @skysa/web
 
+## 1.10.0
+
+### Minor Changes
+
+- ebd9748: Search: a press on the empty search field lists the notes opened lately on this device, newest first, from every source, leaving out the note on screen. Scratch cards and password items are not listed.
+
+### Patch Changes
+
+- 3e5ec83: Passwords: the filter row is as tall as the column headings and the Scratchpad row, so the rule under it lines up with the one under Notebooks.
+- @skysa/core@1.10.0
+
 ## 1.9.0
 
 ### Minor Changes

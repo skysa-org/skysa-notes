@@ -1,5 +1,9 @@
 # @skysa/core
 
+## 1.10.0
+
+No changes in this release.
+
 ## 1.9.0
 
 ### Minor Changes
