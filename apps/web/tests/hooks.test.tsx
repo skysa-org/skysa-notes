@@ -371,31 +371,37 @@ describe('useNoteSearch', () => {
 		});
 	});
 
-	it('finds a password by its label only while its source shows the passwords', async () => {
+	it('finds a password by its label only while its source shows the passwords, as they are turned on and off', async () => {
 		const armor = sealed('{"username":"heap"}');
+		const body = `\`\`\`age\n${armor}\n\`\`\`\n`;
+		await createNote(db, { title: 'Heap of logins', body, folderPath: VAULT_FOLDER });
+		// Another source's, whose passwords are not shown here.
 		await createNote(db, {
-			title: 'Heap of logins',
-			body: `\`\`\`age\n${armor}\n\`\`\`\n`,
+			connectionId: 'c-other',
+			title: 'Heap elsewhere',
+			body,
 			folderPath: VAULT_FOLDER,
 		});
-		const hidden = renderHook(() => useNoteSearch('heap'));
+		const { result, unmount } = renderHook(() => useNoteSearch('heap'));
+		const titles = () => result.current?.map((hit) => hit.note.title).sort();
 		await waitFor(() => {
-			expect(hidden.result.current?.map((hit) => hit.note.title)).toEqual(['Compost']);
+			expect(titles()).toEqual(['Compost']);
 		});
-		hidden.unmount();
 
 		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
-		const shown = renderHook(() => useNoteSearch('heap'));
-
 		await waitFor(() => {
-			expect(shown.result.current?.map((hit) => hit.note.title).sort()).toEqual([
-				'Compost',
-				'Heap of logins',
-			]);
+			expect(titles()).toEqual(['Compost', 'Heap of logins']);
 		});
+
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, false);
+		await waitFor(() => {
+			expect(titles()).toEqual(['Compost']);
+		});
+		unmount();
+		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
+
 		// By its label, and never by its armor.
 		const piece = armor.split('\n')[2]?.slice(0, 12) ?? '';
-		shown.unmount();
 		const byArmor = renderHook(() => useNoteSearch(piece));
 		await waitFor(() => {
 			expect(byArmor.result.current).toEqual([]);
