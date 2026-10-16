@@ -921,6 +921,18 @@ code {
 	cursor: pointer;
 }
 
+/* Over the notes opened lately, listed before anything is typed: the same
+   small capitals as the scratchpad's groups, since it names a group too. */
+.search-heading {
+	margin: 0;
+	padding: var(--space-s) var(--gutter) var(--space-2xs);
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+
 /* The highlight follows the keyboard, so it is on the row rather than on
    `:hover`, as the palette's is: with both, the mouse and the arrows would
    light two rows at once. It starts on the first, which is what Enter opens. */

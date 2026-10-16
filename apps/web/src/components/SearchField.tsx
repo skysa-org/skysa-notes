@@ -11,7 +11,7 @@ import {
 
 import { t } from '../i18n/t.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
-import { useNoteSearch } from '../store/hooks.js';
+import { useNoteSearch, useRecentNotes } from '../store/hooks.js';
 import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
 import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
@@ -28,6 +28,11 @@ import { editedAt } from './editedAt.js';
  * is still there behind them, and choosing an answer is the end of the search:
  * the note opens, the field empties, and the list goes.
  *
+ * Before anything is typed, the list is the notes opened lately on this
+ * device, under a heading that says so (`store/recentNotes.ts`): what is
+ * looked for is often what was being read a minute ago. The first letter
+ * makes it the search.
+ *
  * A combobox driving a listbox, as the command palette is: the cursor stays in
  * the field, the arrows move the highlight (`aria-activedescendant`), Enter
  * opens the highlighted note, and Escape empties the field. A press on a row
@@ -40,6 +45,11 @@ export interface SearchFieldProps {
 	onQuery: (query: string) => void;
 	/** Matches for `query`, or undefined while the first one is being answered. */
 	results?: readonly NoteHit[] | undefined;
+	/**
+	 * The notes opened lately, newest first, listed while the field is empty.
+	 * With none, an empty field lists nothing.
+	 */
+	recent?: readonly NoteRecord[] | undefined;
 	/**
 	 * The query `results` answer, where that is not `query`: a step behind it
 	 * while the answers to the latest letter are worked out (`NoteSearchField`).
@@ -104,6 +114,85 @@ const Excerpt = ({ hit }: { hit: NoteHit }) => (
 );
 
 /**
+ * A note in the list: a match, with its excerpt, or a note opened lately.
+ * The row is the option, with nothing focusable in it: ARIA gives `option`
+ * presentational children.
+ */
+const Row = ({
+	id,
+	note,
+	hit,
+	active,
+	sourceName,
+	onChoose,
+}: {
+	id: string;
+	note: NoteRecord;
+	hit: NoteHit | undefined;
+	active: boolean;
+	sourceName: SearchFieldProps['sourceName'];
+	onChoose: (note: NoteRecord) => void;
+}) => (
+	<li
+		id={id}
+		role="option"
+		aria-selected={active}
+		className={active ? 'search-result active' : 'search-result'}
+		onMouseDown={(event) => {
+			event.preventDefault();
+			onChoose(note);
+		}}
+	>
+		<span className="note-title">{titleShown(note.title)}</span>
+		{/* Which source and which notebook, because the list crosses all of
+		    them and two notes can share a title. */}
+		<span className="note-meta">
+			{[
+				sourceName?.(note.connectionId),
+				folderLabel(parentPath(note.path)),
+				editedAt(note.updatedAt),
+			]
+				.filter((part) => part !== undefined)
+				.join(' · ')}
+		</span>
+		{hit !== undefined && <Excerpt hit={hit} />}
+	</li>
+);
+
+/**
+ * What the list offers: while there is a search, its matches, and before
+ * anything is typed, the notes opened lately.
+ */
+const offered = (
+	query: string,
+	asked: string,
+	results: readonly NoteHit[] | undefined,
+	recent: readonly NoteRecord[] | undefined
+) => {
+	const typed = query.trim() !== '';
+	// Both: the answers are for `asked`, and an empty field is no search
+	// whatever was last asked — the list of the letters just deleted is not
+	// left under it for a frame, for Enter to open one of.
+	const searching = typed && asked.trim() !== '';
+	const hits = searching ? (results ?? []).slice(0, SEARCH_LIMIT) : [];
+	// Only before anything is typed. A letter the answers have not caught up
+	// with yet is a search already, and these are not its answers.
+	const recents = typed ? [] : (recent ?? []);
+	// The first letter, its answers a draw behind it (`NoteSearchField`): where
+	// the notes opened lately were listed, the list stays, empty, until the
+	// answers fill it. Taken away and put back, it showed the note between the
+	// two for as long as a phone takes to answer, a fifth of a second (#275),
+	// and its status region came back with its words already in it.
+	const waiting = typed && !searching && (recent?.length ?? 0) > 0;
+	return {
+		searching,
+		waiting,
+		hits,
+		options: searching ? hits.map((hit) => hit.note) : recents,
+	};
+};
+
+/**
  * Whether the list is showing, and the ways it goes: Escape, a press anywhere
  * outside the field and the list, and a choice. Typing or coming back to the
  * field with a query in it shows it again.
@@ -129,6 +218,7 @@ export const SearchField = ({
 	query,
 	onQuery,
 	results,
+	recent,
 	onChoose,
 	sourceName,
 	fieldRef,
@@ -143,15 +233,13 @@ export const SearchField = ({
 	const [at, setAt] = useState(0);
 	const id = useId();
 
-	// Both: the answers are for `asked`, and an empty field is no search
-	// whatever was last asked — the list of the letters just deleted is not
-	// left under it for a frame, for Enter to open one of.
-	const searching = query.trim() !== '' && asked.trim() !== '';
-	const shown = searching ? (results ?? []).slice(0, SEARCH_LIMIT) : [];
-	const listed = open && searching;
-	const cursor = shown.length === 0 ? 0 : Math.min(at, shown.length - 1);
-	const active = listed ? shown[cursor] : undefined;
-	const optionId = (hit: NoteHit) => `${id}-${noteRef(hit.note)}`;
+	const { searching, waiting, hits, options } = offered(query, asked, results, recent);
+	// A search that matched nothing is still a list, which says so; the notes
+	// opened lately, none of them, are none.
+	const listed = open && (searching || waiting || options.length > 0);
+	const cursor = options.length === 0 ? 0 : Math.min(at, options.length - 1);
+	const active = listed ? options[cursor] : undefined;
+	const optionId = (note: NoteRecord) => `${id}-${noteRef(note)}`;
 
 	// The highlight is an `aria-activedescendant` rather than focus, so nothing
 	// moves it into view on its own.
@@ -164,6 +252,8 @@ export const SearchField = ({
 	const choose = (note: NoteRecord) => {
 		onQuery('');
 		setOpen(false);
+		// From the top next time, which is what Enter is to open then.
+		setAt(0);
 		// Put away, so a phone's keyboard goes with the list and the note is
 		// what is being read.
 		field.current?.blur();
@@ -196,8 +286,19 @@ export const SearchField = ({
 						setOpen(true);
 					}}
 					onFocus={() => {
+						// From the top each time the list comes back: the notes
+						// opened lately are not the ones they were when the
+						// highlight was last moved, and Enter opens what it is on.
+						if (!open) setAt(0);
 						setOpen(true);
 						onFocusChange?.(true);
+					}}
+					// A press on the field it is already in: after Escape the
+					// cursor stays, and the notes opened lately are what a press
+					// there is for.
+					onClick={() => {
+						if (!open) setAt(0);
+						setOpen(true);
 					}}
 					onBlur={(event) => {
 						// Not when the window lost the focus and the field kept
@@ -214,23 +315,24 @@ export const SearchField = ({
 							// to delete what they wrote, one character at a time.
 							onQuery('');
 							setOpen(false);
+							setAt(0);
 							onDismiss?.();
 							return;
 						}
-						if (!listed || shown.length === 0) return;
+						if (!listed || options.length === 0) return;
 						if (event.key === 'ArrowDown') {
 							event.preventDefault();
-							setAt((cursor + 1) % shown.length);
+							setAt((cursor + 1) % options.length);
 							return;
 						}
 						if (event.key === 'ArrowUp') {
 							event.preventDefault();
-							setAt((cursor - 1 + shown.length) % shown.length);
+							setAt((cursor - 1 + options.length) % options.length);
 							return;
 						}
 						if (event.key === 'Enter' && active !== undefined) {
 							event.preventDefault();
-							choose(active.note);
+							choose(active);
 						}
 					}}
 				/>
@@ -243,43 +345,35 @@ export const SearchField = ({
 					    screen-reader user most needs told. Always here while the
 					    list is, empty when there is nothing to say — VoiceOver
 					    often stays silent about a region that appears with its
-					    words already in it. */}
+					    words already in it. So it is here under the notes opened
+					    lately too, for the first letter's answers to be told. */}
 					<p className="muted placeholder" role="status">
-						{statusFor(asked, results)}
+						{searching ? statusFor(asked, results) : ''}
 					</p>
-					{shown.length > 0 && (
-						<ul id={`${id}-list`} role="listbox" aria-label={t('search.results')}>
-							{shown.map((hit, index) => (
-								// The row is the option, with nothing focusable in it:
-								// ARIA gives `option` presentational children.
-								<li
-									key={noteRef(hit.note)}
-									id={optionId(hit)}
-									role="option"
-									aria-selected={index === cursor}
-									className={
-										index === cursor ? 'search-result active' : 'search-result'
-									}
-									onMouseDown={(event) => {
-										event.preventDefault();
-										choose(hit.note);
-									}}
-								>
-									<span className="note-title">{titleShown(hit.note.title)}</span>
-									{/* Which source and which notebook, because a
-									    search crosses all of them and two notes can
-									    share a title. */}
-									<span className="note-meta">
-										{[
-											sourceName?.(hit.note.connectionId),
-											folderLabel(parentPath(hit.note.path)),
-											editedAt(hit.note.updatedAt),
-										]
-											.filter((part) => part !== undefined)
-											.join(' · ')}
-									</span>
-									<Excerpt hit={hit} />
-								</li>
+					{!searching && !waiting && (
+						<p className="search-heading" id={`${id}-recent`}>
+							{t('search.recent')}
+						</p>
+					)}
+					{options.length > 0 && (
+						<ul
+							id={`${id}-list`}
+							role="listbox"
+							aria-label={searching ? t('search.results') : undefined}
+							aria-labelledby={searching ? undefined : `${id}-recent`}
+						>
+							{options.map((note, index) => (
+								<Row
+									key={noteRef(note)}
+									id={optionId(note)}
+									note={note}
+									// A match's excerpt; a note opened lately has
+									// none, since nothing was asked of it.
+									hit={hits[index]}
+									active={index === cursor}
+									sourceName={sourceName}
+									onChoose={choose}
+								/>
 							))}
 						</ul>
 					)}
@@ -292,7 +386,9 @@ export const SearchField = ({
 /**
  * The search field with the notes' answers: they are searched for here, so the
  * index is this field's, and goes when it does (`useNoteSearch`). It is begun
- * as the field takes the cursor rather than at the first letter.
+ * as the field takes the cursor rather than at the first letter. The notes
+ * opened lately are read then too (`useRecentNotes`), less the one on screen,
+ * which there is no going back to.
  *
  * The answers follow the field a step behind (`useDeferredValue`): a letter goes
  * into the field at once, and its matches and their excerpts are worked out
@@ -300,13 +396,26 @@ export const SearchField = ({
  * key on a phone for a fifth of a second, for matches the next key would
  * replace (#275). Until they are ready the last letter's stay up.
  */
-export const NoteSearchField = (
-	props: Omit<SearchFieldProps, 'results' | 'asked' | 'onFocusChange'>
-) => {
+export const NoteSearchField = ({
+	showing,
+	...props
+}: Omit<SearchFieldProps, 'results' | 'recent' | 'asked' | 'onFocusChange'> & {
+	/** The note on screen, as a `noteRef`, if one is. */
+	showing?: string | undefined;
+}) => {
 	const [focused, setFocused] = useState(false);
 	const asked = useDeferredValue(props.query);
 	const results = useNoteSearch(asked, focused);
-	return <SearchField {...props} results={results} asked={asked} onFocusChange={setFocused} />;
+	const recent = useRecentNotes(focused, showing);
+	return (
+		<SearchField
+			{...props}
+			results={results}
+			recent={recent}
+			asked={asked}
+			onFocusChange={setFocused}
+		/>
+	);
 };
 
 /**

@@ -3,6 +3,8 @@ export const search = {
 	/** The field's label and placeholder. */
 	field: 'Search notes',
 	results: 'Search results',
+	/** Over the notes opened lately, listed while nothing is typed. */
+	recent: 'Recently opened',
 	searching: 'Searching…',
 	noMatch: 'Nothing matches “{query}”.',
 	/** More notes matched than are listed; `{count}` is how many are. */

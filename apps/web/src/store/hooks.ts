@@ -33,6 +33,7 @@ import {
 	getFormatToolbarShown,
 	setCodeDisplay,
 } from './prefs.js';
+import { listRecentNotes } from './recentNotes.js';
 import { getScratchpadShown, isScratchNote } from './scratchpad.js';
 import { createNoteSearch, type NoteHit, type NoteSearch } from './search.js';
 import { buildFolderTree, type FolderNode, keptTree, withPins } from './tree.js';
@@ -564,6 +565,19 @@ const searchable = async (): Promise<NoteRecord[]> => {
 		return true;
 	});
 };
+
+/**
+ * The notes opened lately on this device, newest first, for the search field
+ * to list before anything is typed in it (`store/recentNotes.ts`), less `skip`,
+ * the note on screen, as a `noteRef`. Read only while `open` — while the field
+ * has the cursor — as the search's own notes are: nobody is offered them
+ * otherwise. `undefined` while not, and until first read.
+ */
+export const useRecentNotes = (open: boolean, skip: string | undefined): NoteRecord[] | undefined =>
+	useLiveQuery(
+		() => (open ? listRecentNotes(db, skip) : Promise.resolve(undefined)),
+		[open, skip]
+	);
 
 /**
  * The notes of a source's scratchpad, newest made first; `undefined` until read

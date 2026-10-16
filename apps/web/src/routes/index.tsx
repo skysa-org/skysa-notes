@@ -115,6 +115,7 @@ import {
 import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { type Pins, setNotebookPin, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
+import { rememberRecent } from '../store/recentNotes.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { nameShown, titleShown } from '../store/titles.js';
@@ -743,6 +744,11 @@ const rememberedFolder = (lastOpen: LastOpen | undefined): string | null | undef
  * theirs back over each other for as long as both were open (#305). Whether
  * the memory says so already is the write's to ask (`rememberOpen`), of what
  * is stored.
+ *
+ * The note is put at the head of the notes opened lately as well, for the
+ * search field to offer (`store/recentNotes.ts`): at once, since that list is
+ * no place to be restored, and the memory of the place has nothing to do
+ * with it.
  */
 const useRememberOpen = ({
 	connectionId,
@@ -771,6 +777,10 @@ const useRememberOpen = ({
 		if (connectionId === undefined || folder === undefined || !read) return;
 		void rememberOpen(db, connectionId, folder, note);
 	}, [connectionId, folder, note, read]);
+	useEffect(() => {
+		if (connectionId === undefined || note === undefined) return;
+		void rememberRecent(db, connectionId, note);
+	}, [connectionId, note]);
 };
 
 /**
@@ -1164,6 +1174,8 @@ const useOpenPlace = ({
 		// The scratchpad is remembered, and not the card open in it: the app
 		// opens on the cards, not on one of them over the rest. Nor the password
 		// open: the app opens on the list, not on an item, locked or asking.
+		// Nor is either among the notes opened lately, which are notes only
+		// (the owner's choice, 2026-10-15).
 		openNote: inAppPlace ? undefined : storedNote,
 		lastOpen,
 	});
@@ -1412,6 +1424,8 @@ const Home = () => {
 		const found = sources.find((each) => each.connectionId === connectionId);
 		return found === undefined ? undefined : tabName(found, sources);
 	};
+	/** The note on screen, which the notes opened lately leave out. */
+	const showing = storedNote === undefined ? undefined : noteRef(storedNote);
 
 	/**
 	 * A window too narrow for three panes. The notebooks and the notes become
@@ -2176,6 +2190,7 @@ const Home = () => {
 								}}
 								onChoose={openResult}
 								sourceName={resultSourceName}
+								showing={showing}
 								searchOpen={searchOpen}
 								onSearchOpen={setSearchOpen}
 								fieldRef={searchField}
@@ -2191,6 +2206,7 @@ const Home = () => {
 										onQuery={setQuery}
 										onChoose={openResult}
 										sourceName={resultSourceName}
+										showing={showing}
 										fieldRef={searchField}
 									/>
 								}

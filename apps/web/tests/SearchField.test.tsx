@@ -261,3 +261,137 @@ describe('choosing an answer', () => {
 		);
 	});
 });
+
+describe('before anything is typed', () => {
+	const recentList = () => screen.queryByRole('listbox', { name: 'Recently opened' });
+
+	it('lists the notes opened lately, under a heading that says so', async () => {
+		const user = userEvent.setup();
+		render(<Harness recent={[note('Birds'), note('Rivers')]} />);
+
+		await user.click(field());
+
+		const listed = within(recentList() as HTMLElement).getAllByRole('option');
+		expect(listed.map((row) => row.querySelector('.note-title')?.textContent)).toEqual([
+			'Birds',
+			'Rivers',
+		]);
+		expect(screen.getByText('Recently opened')).toBeDefined();
+		expect(field().getAttribute('aria-expanded')).toBe('true');
+		// Where each is, as a match says; and no excerpt, since nothing was asked.
+		expect(screen.getAllByText(/^work ·/)).toHaveLength(2);
+		expect(document.querySelector('.note-excerpt')).toBeNull();
+	});
+
+	it('lists nothing while none have been opened', async () => {
+		const user = userEvent.setup();
+		render(<Harness recent={[]} />);
+
+		await user.click(field());
+
+		expect(recentList()).toBeNull();
+		expect(field().getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('give way to the search at the first letter, before its answers come', async () => {
+		const user = userEvent.setup();
+		render(<Harness recent={[note('Birds')]} asked="" />);
+		await user.click(field());
+
+		await user.keyboard('h');
+
+		expect(recentList()).toBeNull();
+		expect(screen.queryByRole('option', { name: /Birds/ })).toBeNull();
+		expect(screen.queryByText('Recently opened')).toBeNull();
+	});
+
+	it('leave the list standing, empty, until the first letter is answered', async () => {
+		// The answers are a draw behind the field (`NoteSearchField`). Taken
+		// away meanwhile, a phone showed the note under a list that filled the
+		// screen, and the status region came back already saying its words,
+		// which a screen reader does not announce.
+		const user = userEvent.setup();
+		const { rerender } = render(<Harness recent={[note('Birds')]} asked="" />);
+		await user.click(field());
+		await user.keyboard('h');
+		const status = screen.getByRole('status');
+		expect(status.textContent).toBe('');
+		expect(field().getAttribute('aria-activedescendant')).toBeNull();
+
+		rerender(<Harness recent={[note('Birds')]} asked="h" results={[]} />);
+
+		expect(screen.getByRole('status')).toBe(status);
+		expect(status.textContent).toBe('Nothing matches “h”.');
+	});
+
+	it('start from the first each time they are listed again', async () => {
+		// The notes opened lately change between one time and the next, so a
+		// highlight left on the fourth would open whichever note is fourth now.
+		const user = userEvent.setup();
+		render(<Harness recent={[note('Birds'), note('Rivers')]} />);
+		await user.click(field());
+		await user.keyboard('{ArrowDown}');
+
+		await user.click(document.body);
+		await user.click(field());
+
+		expect(screen.getByRole('option', { name: /Birds/ }).getAttribute('aria-selected')).toBe(
+			'true'
+		);
+	});
+
+	it('come back as the field is emptied', async () => {
+		const user = userEvent.setup();
+		render(<Harness initial="heron" recent={[note('Birds')]} />);
+		await user.click(field());
+		expect(recentList()).toBeNull();
+
+		await user.clear(field());
+
+		expect(recentList()).not.toBeNull();
+	});
+
+	it('are chosen as a match is, from the keyboard', async () => {
+		const onChoose = vi.fn();
+		const recent = [note('Birds'), note('Rivers')];
+		const user = userEvent.setup();
+		render(<Harness recent={recent} onChoose={onChoose} />);
+		await user.click(field());
+
+		await user.keyboard('{ArrowDown}{Enter}');
+
+		expect(onChoose).toHaveBeenCalledWith(recent[1]);
+		expect(recentList()).toBeNull();
+		expect(document.activeElement).not.toBe(field());
+	});
+
+	it('are chosen with a press, and start from the first the next time', async () => {
+		const onChoose = vi.fn();
+		const recent = [note('Birds'), note('Rivers')];
+		const user = userEvent.setup();
+		render(<Harness recent={recent} onChoose={onChoose} />);
+		await user.click(field());
+		await user.keyboard('{ArrowDown}');
+
+		await user.click(screen.getByRole('option', { name: /Rivers/ }));
+		await user.click(field());
+
+		expect(onChoose).toHaveBeenCalledWith(recent[1]);
+		expect(screen.getByRole('option', { name: /Birds/ }).getAttribute('aria-selected')).toBe(
+			'true'
+		);
+	});
+
+	it('go on Escape, and come back on a press on the field the cursor is still in', async () => {
+		const user = userEvent.setup();
+		render(<Harness recent={[note('Birds')]} />);
+		await user.click(field());
+
+		await user.keyboard('{Escape}');
+		expect(recentList()).toBeNull();
+		expect(document.activeElement).toBe(field());
+
+		await user.click(field());
+		expect(recentList()).not.toBeNull();
+	});
+});
