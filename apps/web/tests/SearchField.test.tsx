@@ -302,6 +302,42 @@ describe('before anything is typed', () => {
 
 		expect(recentList()).toBeNull();
 		expect(screen.queryByRole('option', { name: /Birds/ })).toBeNull();
+		expect(screen.queryByText('Recently opened')).toBeNull();
+	});
+
+	it('leave the list standing, empty, until the first letter is answered', async () => {
+		// The answers are a draw behind the field (`NoteSearchField`). Taken
+		// away meanwhile, a phone showed the note under a list that filled the
+		// screen, and the status region came back already saying its words,
+		// which a screen reader does not announce.
+		const user = userEvent.setup();
+		const { rerender } = render(<Harness recent={[note('Birds')]} asked="" />);
+		await user.click(field());
+		await user.keyboard('h');
+		const status = screen.getByRole('status');
+		expect(status.textContent).toBe('');
+		expect(field().getAttribute('aria-activedescendant')).toBeNull();
+
+		rerender(<Harness recent={[note('Birds')]} asked="h" results={[]} />);
+
+		expect(screen.getByRole('status')).toBe(status);
+		expect(status.textContent).toBe('Nothing matches “h”.');
+	});
+
+	it('start from the first each time they are listed again', async () => {
+		// The notes opened lately change between one time and the next, so a
+		// highlight left on the fourth would open whichever note is fourth now.
+		const user = userEvent.setup();
+		render(<Harness recent={[note('Birds'), note('Rivers')]} />);
+		await user.click(field());
+		await user.keyboard('{ArrowDown}');
+
+		await user.click(document.body);
+		await user.click(field());
+
+		expect(screen.getByRole('option', { name: /Birds/ }).getAttribute('aria-selected')).toBe(
+			'true'
+		);
 	});
 
 	it('come back as the field is emptied', async () => {

@@ -178,7 +178,18 @@ const offered = (
 	// Only before anything is typed. A letter the answers have not caught up
 	// with yet is a search already, and these are not its answers.
 	const recents = typed ? [] : (recent ?? []);
-	return { searching, hits, options: searching ? hits.map((hit) => hit.note) : recents };
+	// The first letter, its answers a draw behind it (`NoteSearchField`): where
+	// the notes opened lately were listed, the list stays, empty, until the
+	// answers fill it. Taken away and put back, it showed the note between the
+	// two for as long as a phone takes to answer, a fifth of a second (#275),
+	// and its status region came back with its words already in it.
+	const waiting = typed && !searching && (recent?.length ?? 0) > 0;
+	return {
+		searching,
+		waiting,
+		hits,
+		options: searching ? hits.map((hit) => hit.note) : recents,
+	};
 };
 
 /**
@@ -222,10 +233,10 @@ export const SearchField = ({
 	const [at, setAt] = useState(0);
 	const id = useId();
 
-	const { searching, hits, options } = offered(query, asked, results, recent);
+	const { searching, waiting, hits, options } = offered(query, asked, results, recent);
 	// A search that matched nothing is still a list, which says so; the notes
 	// opened lately, none of them, are none.
-	const listed = open && (searching || options.length > 0);
+	const listed = open && (searching || waiting || options.length > 0);
 	const cursor = options.length === 0 ? 0 : Math.min(at, options.length - 1);
 	const active = listed ? options[cursor] : undefined;
 	const optionId = (note: NoteRecord) => `${id}-${noteRef(note)}`;
@@ -275,6 +286,10 @@ export const SearchField = ({
 						setOpen(true);
 					}}
 					onFocus={() => {
+						// From the top each time the list comes back: the notes
+						// opened lately are not the ones they were when the
+						// highlight was last moved, and Enter opens what it is on.
+						if (!open) setAt(0);
 						setOpen(true);
 						onFocusChange?.(true);
 					}}
@@ -282,6 +297,7 @@ export const SearchField = ({
 					// cursor stays, and the notes opened lately are what a press
 					// there is for.
 					onClick={() => {
+						if (!open) setAt(0);
 						setOpen(true);
 					}}
 					onBlur={(event) => {
@@ -334,7 +350,7 @@ export const SearchField = ({
 					<p className="muted placeholder" role="status">
 						{searching ? statusFor(asked, results) : ''}
 					</p>
-					{!searching && (
+					{!searching && !waiting && (
 						<p className="search-heading" id={`${id}-recent`}>
 							{t('search.recent')}
 						</p>
