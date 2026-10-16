@@ -1,11 +1,13 @@
 import {
 	EMPTY_VAULT_FIELDS,
 	isEmptyVaultFields,
+	type PreviousPassword,
 	readVaultPayload,
 	vaultArmor,
 	vaultBody,
 	type VaultFields,
 	vaultPayload,
+	vaultPrevious,
 	vaultUrls,
 	withVaultUrls,
 } from '@skysa/core';
@@ -27,6 +29,8 @@ import {
 	saveVaultItem,
 } from '../store/notes.js';
 import { titleShown } from '../store/titles.js';
+import { editedAt } from './editedAt.js';
+import { KEEP_OUT } from './keepOut.js';
 import { useNoteSecrets } from './noteSecrets.js';
 import type { NoteDraft } from './NoteView.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
@@ -104,17 +108,6 @@ const sealedBody = (
 	}
 };
 
-/** Kept out of the fields: spelling, suggestions, and the password managers that would fill them. */
-const KEEP_OUT = {
-	spellCheck: false,
-	autoComplete: 'off',
-	autoCapitalize: 'off',
-	autoCorrect: 'off',
-	writingsuggestions: 'false',
-	'data-1p-ignore': '',
-	'data-lpignore': 'true',
-} as const;
-
 export interface PasswordItemProps {
 	note: NoteRecord;
 	/** Given while `note` is a new item, begun and not stored (`NoteDraft`). */
@@ -162,6 +155,82 @@ const FieldButton = ({
 	<button type="button" className="icon" title={label} aria-label={label} onClick={onClick}>
 		<Icon name={icon} />
 	</button>
+);
+
+/** A password an Update replaced, hidden until it is shown, with when it was. */
+const PreviousPasswordField = ({
+	previous,
+	copy,
+}: {
+	previous: PreviousPassword;
+	copy: (text: string) => void;
+}) => {
+	const [revealed, setRevealed] = useState(false);
+	const when = Date.parse(previous.replacedAt);
+	return (
+		<Field
+			label={
+				Number.isNaN(when)
+					? t('passwords.item.previous')
+					: t('passwords.item.previousUntil', { date: editedAt(when) })
+			}
+			actions={
+				<>
+					<FieldButton
+						icon={revealed ? 'eye-off' : 'eye'}
+						label={
+							revealed
+								? t('passwords.item.hidePrevious')
+								: t('passwords.item.showPrevious')
+						}
+						onClick={() => {
+							setRevealed((now) => !now);
+						}}
+					/>
+					<FieldButton
+						icon="copy"
+						label={t('passwords.item.copyPrevious')}
+						onClick={() => {
+							copy(previous.password);
+						}}
+					/>
+				</>
+			}
+		>
+			{revealed ? (
+				<code className="password-shown">{previous.password}</code>
+			) : (
+				<span role="img" aria-label={t('passwords.item.hidden')}>
+					{MASK}
+				</span>
+			)}
+		</Field>
+	);
+};
+
+/**
+ * The passwords an item had before, newest first (`vaultPrevious`), each a
+ * field of its own under its password: what Update from the fill window keeps
+ * (docs/ARCHITECTURE.md §7, "Filling in on a site"). None where it has none,
+ * or keeps them in a shape this version does not know.
+ */
+const PreviousPasswords = ({
+	kept,
+	copy,
+}: {
+	kept: Readonly<Record<string, unknown>>;
+	copy: (text: string) => void;
+}) => (
+	<>
+		{(vaultPrevious(kept) ?? []).map((previous, place) => (
+			<PreviousPasswordField
+				// Newest first, and only ever added to at the front.
+				key={`${String(place)}:${previous.replacedAt}`}
+				previous={previous}
+				copy={copy}
+			/>
+		))}
+	</>
 );
 
 /**
@@ -877,6 +946,7 @@ export const PasswordItem = ({
 							</span>
 						)}
 					</Field>
+					<PreviousPasswords kept={view.kept} copy={copy} />
 					<Field label={t('passwords.item.notes')}>
 						{fields.notes === '' ? (
 							blank

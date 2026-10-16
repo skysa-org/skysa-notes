@@ -47,6 +47,13 @@ export const passwords = {
 		hide: 'Hide password',
 		copyUsername: 'Copy username',
 		copyPassword: 'Copy password',
+		/** A password an Update from the fill window replaced, kept with the item. */
+		previous: 'Previous password',
+		/** The same, with the day it was replaced: `{date}` is that day. */
+		previousUntil: 'Previous password, until {date}',
+		showPrevious: 'Show previous password',
+		hidePrevious: 'Hide previous password',
+		copyPrevious: 'Copy previous password',
 		copied: 'Copied.',
 		notCopied: 'That could not be put on the clipboard.',
 		/** The label's address, as a screen reader names its button: `{address}` is where it goes, shortened. */

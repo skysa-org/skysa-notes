@@ -67,11 +67,34 @@ export const fill = {
 		pageGone:
 			'The page has gone on to somewhere else, so it was not filled in. Copy the password instead.',
 	},
+	/** A password typed on the page, offered to be saved (`Remember`). */
+	remember: {
+		/** Read out for the part of the window that offers it. */
+		heading: 'Remember the password typed here',
+		/** What the page's fields held is a saved password already. */
+		saved: 'The password typed here is saved already.',
+		/** It is the new password of the one saved for this site and username: `{label}` is that one's label. */
+		updateText:
+			'The password typed here is not the one saved in {label}. Update it there, and the one it replaces is kept with it.',
+		update: 'Update {label}',
+		saveText: 'The password typed here is not saved.',
+		save: 'Save this password',
+		/** Read out for the form. */
+		saving: 'Save this password',
+		/** Which source's vault to save it in, where there is more than one. */
+		source: 'Source',
+		submit: 'Save',
+		changed:
+			'That password changed since this window opened it, so it was not updated. Use the bookmarklet again.',
+		unknown:
+			'That password keeps the ones it replaced in a way this version cannot read, so it was not updated. Update it in Passwords, in the app.',
+		failed: 'That could not be saved. Try again.',
+	},
 	/** Setting the bookmarklet up, from Passwords (`FillSetupDialog`). */
 	setup: {
 		/** The button in Passwords, and the dialog's title. */
 		title: 'Fill on sites',
-		intro: 'Fill in a site’s sign-in form with a password from here. It asks for this device’s unlock each time.',
+		intro: 'Fill in a site’s sign-in form with a password from here, which asks for this device’s unlock each time, and save a password you type there.',
 		/** The link's words, which become the bookmark's name: `{app}` is the app's name. */
 		link: 'Fill with {app}',
 		/** The same, where the app has no name of its own. */

@@ -6,15 +6,10 @@ import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
 import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';
+import { notEnrolled, notHere, type Why } from '../secrets/sealHere.js';
 import { tabLock } from '../secrets/tabLock.js';
 import { connectedSources } from '../store/connection.js';
-import {
-	db as appDb,
-	type KeyFileRecord,
-	type NoteRecord,
-	type NotesDatabase,
-	type UnlockKind,
-} from '../store/db.js';
+import { db as appDb, type NoteRecord, type NotesDatabase, type UnlockKind } from '../store/db.js';
 import { enrolment, type UnlockedKeys } from '../store/secretKeys.js';
 import { tabName, UNKNOWN_LABEL } from '../sync/account.js';
 import type { KeyFileSync } from '../sync/keyFile.js';
@@ -80,17 +75,6 @@ const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(
 
 const warning = (message: string): AttachmentProblem => ({ message, tone: 'warning' });
 
-/**
- * Why a secret cannot be made or opened here; and whether the source's Secrets
- * dialog is the way on, to set the source up or to put the device right.
- */
-interface Why {
-	readonly message: string;
-	readonly way?: 'setUp' | 'open';
-}
-
-const notEnrolled = (): Why => ({ message: t('editor.secret.notEnrolled'), way: 'open' });
-
 /** What the source is called, as its tab calls it, for its key's printed page. */
 const nameOf = async (database: NotesDatabase, connectionId: string): Promise<string> => {
 	const all = await connectedSources(database);
@@ -117,29 +101,6 @@ const failedOpening = (error: unknown): Opened =>
 	error instanceof AgeError && error.failure === 'no match'
 		? { state: 'other' }
 		: { state: 'unreadable' };
-
-/**
- * Why a new secret cannot be made in a source, for its key file as last read
- * and this device's keys; none where it can. The recipient sealed to is the
- * one the device enrolled with, so a key file that names another means the
- * key was replaced on another device.
- */
-const notHere = (
-	file: KeyFileRecord | undefined,
-	enrolled: Awaited<ReturnType<typeof enrolment>>
-): Why | undefined => {
-	if (file?.state === 'newer') return { message: t('secrets.newer') };
-	if (file?.state === 'invalid') return { message: t('secrets.invalid') };
-	if (enrolled === undefined) {
-		return file?.state === 'ok'
-			? notEnrolled()
-			: { message: t('editor.secret.notSetUp'), way: 'setUp' };
-	}
-	if (file?.state !== 'ok') return { message: t('editor.secret.lost'), way: 'open' };
-	return enrolled.recipient === file.recipient
-		? undefined
-		: { message: t('editor.secret.replaced'), way: 'open' };
-};
 
 /** Sealing to `recipient`, with the age code loaded. */
 const sealerOf = (age: Age, recipient: string): Sealer | undefined => {

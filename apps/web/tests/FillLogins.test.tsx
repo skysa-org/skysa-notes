@@ -1,6 +1,14 @@
 import '../src/jitless.js';
 
-import { pageSite, VAULT_FOLDER, vaultBody, type VaultFields, vaultPayload } from '@skysa/core';
+import {
+	pageSite,
+	readVaultPayload,
+	VAULT_FOLDER,
+	vaultArmor,
+	vaultBody,
+	type VaultFields,
+	vaultPayload,
+} from '@skysa/core';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +18,13 @@ import { PRESS_GUARD_MS } from '../src/fill/FillLogins.js';
 import { FillPage } from '../src/fill/FillPage.js';
 import type { Login } from '../src/fill/matches.js';
 import { BOOKMARKLET_REVISION, FILL_MESSAGE, FILL_VERSION } from '../src/fill/protocol.js';
-import { generateIdentity, parseRecipient, recipientOf, sealSecret } from '../src/secrets/age.js';
+import {
+	generateIdentity,
+	openSecret,
+	parseRecipient,
+	recipientOf,
+	sealSecret,
+} from '../src/secrets/age.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { createNote, rewriteNoteBody } from '../src/store/notes.js';
@@ -52,7 +66,11 @@ interface SourceSetup {
 	readonly items?: readonly Item[];
 }
 
-const helloAt = (origin: string, fields = { username: true, password: true }): ChannelState => {
+const helloAt = (
+	origin: string,
+	fields = { username: true, password: true },
+	typed = { username: '', password: '' }
+): ChannelState => {
 	const site = pageSite(origin);
 	if (site === undefined) throw new Error(origin);
 	return {
@@ -64,8 +82,7 @@ const helloAt = (origin: string, fields = { username: true, password: true }): C
 			v: FILL_VERSION,
 			b: BOOKMARKLET_REVISION,
 			step: 'hello',
-			username: '',
-			password: '',
+			...typed,
 			newPassword: '',
 			fields: { ...fields, newPassword: false },
 		},
@@ -108,6 +125,12 @@ const setup = async ({
 		});
 		if (source.shown ?? true) await setPasswordsShown(db, connectionId, true);
 		if (source.enrolled ?? true) {
+			await db.keyFiles.put({
+				connectionId,
+				state: 'ok',
+				recipient: recipientOf(identity),
+				version: 'v1',
+			});
 			await enrol(db, {
 				connectionId,
 				recipient: recipientOf(identity),
@@ -183,7 +206,26 @@ const setup = async ({
 		(await screen.findAllByRole('listitem')).map(
 			(row) => row.querySelector('.fill-login-label')?.textContent
 		);
-	return { db, lock, filled, close, copy, user, move, unlock, later, rows, identity, sealed };
+	/** What an item's body opens to. */
+	const payloadOf = (body: string) => {
+		const armor = vaultArmor(body);
+		return armor === undefined ? undefined : readVaultPayload(openSecret(armor, [identity]));
+	};
+	return {
+		db,
+		lock,
+		filled,
+		close,
+		copy,
+		user,
+		move,
+		unlock,
+		later,
+		rows,
+		identity,
+		sealed,
+		payloadOf,
+	};
 };
 
 const github = (more: Partial<Item> = {}): Item => ({
@@ -451,5 +493,78 @@ describe('the fill window’s logins', () => {
 
 		expect(await screen.findByText('No passwords for github.com.')).toBeDefined();
 		expect(screen.queryByLabelText('PIN')).toBeNull();
+	});
+});
+
+describe('a password typed on the page', () => {
+	it('is offered to be saved, with the page as its Site, and saved as the form holds it', async () => {
+		const h = await setup({
+			at: helloAt('https://github.com', undefined, { username: 'grace', password: 'typed' }),
+			sources: [{ connectionId: 'c1', items: [] }],
+		});
+
+		expect(await screen.findByText('The password typed here is not saved.')).toBeDefined();
+		// A source with nothing in it is saved to without an unlock.
+		expect(screen.queryByLabelText('PIN')).toBeNull();
+		await h.user.click(screen.getByRole('button', { name: 'Save this password' }));
+		const form = screen.getByRole('form', { name: 'Save this password' });
+		expect(within(form).getByLabelText<HTMLInputElement>('Label').value).toBe('github.com');
+		expect(within(form).getByLabelText<HTMLInputElement>('Username').value).toBe('grace');
+		expect(within(form).getByLabelText<HTMLInputElement>('Site').value).toBe(
+			'https://github.com'
+		);
+		await h.user.type(within(form).getByLabelText('Label'), ' (work)');
+		await h.user.click(within(form).getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => {
+			expect(h.close).toHaveBeenCalled();
+		});
+		const [note] = await h.db.notes.toArray();
+		expect(note?.title).toBe('github.com (work)');
+		expect(h.payloadOf(note?.body ?? '')).toMatchObject({
+			fields: { username: 'grace', password: 'typed' },
+			kept: { urls: ['https://github.com'] },
+		});
+	});
+
+	it('is offered as the new password of the one saved here for its username, which keeps the old', async () => {
+		const h = await setup({
+			at: helloAt('https://github.com', undefined, { username: 'ada', password: 'n3w' }),
+			sources: [{ connectionId: 'c1', items: [github()] }],
+		});
+		await h.unlock();
+
+		const update = await screen.findByRole('button', { name: 'Update GitHub' });
+		h.later();
+		await h.user.click(update);
+
+		await waitFor(() => {
+			expect(h.close).toHaveBeenCalled();
+		});
+		const [note] = await h.db.notes.toArray();
+		const payload = h.payloadOf(note?.body ?? '');
+		expect(payload?.fields.password).toBe('n3w');
+		expect(payload?.kept.previousPasswords).toMatchObject([{ password: 's3cret' }]);
+		expect(h.filled).not.toHaveBeenCalled();
+	});
+
+	it('is said to be saved already where a login holds it', async () => {
+		const h = await setup({
+			at: helloAt('https://github.com', undefined, { username: 'ada', password: 's3cret' }),
+			sources: [{ connectionId: 'c1', items: [github()] }],
+		});
+		await h.unlock();
+
+		expect(await screen.findByText('The password typed here is saved already.')).toBeDefined();
+		expect(screen.queryByRole('button', { name: /^Update/u })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Save this password' })).toBeNull();
+	});
+
+	it('is offered nothing for where no password was typed', async () => {
+		const h = await setup({ sources: [{ connectionId: 'c1', items: [github()] }] });
+		await h.unlock();
+		await h.rows();
+
+		expect(screen.queryByText(/^The password typed here/u)).toBeNull();
 	});
 });

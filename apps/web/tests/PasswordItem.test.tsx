@@ -12,6 +12,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { editedAt } from '../src/components/editedAt.js';
 import type { NoteDraft } from '../src/components/NoteView.js';
 import { PasswordItem } from '../src/components/PasswordItem.js';
 import type { SecretHost } from '../src/editor/secretHost.js';
@@ -155,6 +156,51 @@ describe('a password, opened', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Copy username' }));
 		expect(host.copy).toHaveBeenLastCalledWith('ada@example.com');
+	});
+
+	it('shows the passwords an Update replaced, each hidden until shown, and copies them', async () => {
+		const { host } = fakeHost();
+		const replacedAt = '2026-10-16T12:00:00.000Z';
+		const previousPasswords = [
+			{ password: 'older one', replacedAt },
+			{ password: 'oldest one', replacedAt: 'not a date' },
+		];
+		const note = await item(
+			'GitHub',
+			FIELDS,
+			vaultBody(sealed(vaultPayload(FIELDS, { previousPasswords })))
+		);
+		const user = await show(note, host);
+
+		expect(
+			await screen.findByText(`Previous password, until ${editedAt(Date.parse(replacedAt))}`)
+		).toBeDefined();
+		expect(screen.getByText('Previous password')).toBeDefined();
+		expect(screen.queryByText('older one')).toBeNull();
+
+		const [newest] = screen.getAllByRole('button', { name: 'Show previous password' });
+		if (newest === undefined) throw new Error('no previous password');
+		await user.click(newest);
+		expect(screen.getByText('older one')).toBeDefined();
+		expect(screen.queryByText('oldest one')).toBeNull();
+
+		const [copyNewest] = screen.getAllByRole('button', { name: 'Copy previous password' });
+		if (copyNewest === undefined) throw new Error('no previous password');
+		await user.click(copyNewest);
+		expect(host.copy).toHaveBeenLastCalledWith('older one');
+	});
+
+	it('shows none from before where they are kept in a shape this version does not know', async () => {
+		const { host } = fakeHost();
+		const note = await item(
+			'GitHub',
+			FIELDS,
+			vaultBody(sealed(vaultPayload(FIELDS, { previousPasswords: 'not a list' })))
+		);
+		await show(note, host);
+
+		expect(await screen.findByText('ada@example.com')).toBeDefined();
+		expect(screen.queryByText(/^Previous password/u)).toBeNull();
 	});
 
 	it('is not written by being looked at', async () => {

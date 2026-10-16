@@ -9,10 +9,10 @@ import { enrol } from '../src/store/secretKeys.js';
 import { setPasswordsShown } from '../src/store/vault.js';
 
 /**
- * Which sources the fill window looks in (docs/ARCHITECTURE.md §7, "Filling
- * in on a site"): connected, not let go of, their passwords shown in this
- * browser and their vault set up on this device, with a password in them; in
- * their tabs' order.
+ * Which sources the fill window looks in and saves to (docs/ARCHITECTURE.md
+ * §7, "Filling in on a site"): connected, not let go of, their passwords
+ * shown in this browser and their vault set up on this device; in their
+ * tabs' order.
  */
 
 const opened: NotesDatabase[] = [];
@@ -69,7 +69,7 @@ const source = async (
 	}, Promise.resolve());
 };
 
-describe('the sources the fill window looks in', () => {
+describe('the sources the fill window looks in and saves to', () => {
 	it('are those whose passwords are shown here and whose vault opens here, in their tabs’ order', async () => {
 		const db = fresh();
 		await source(db, 'late', { boundAt: 20 });
@@ -81,8 +81,14 @@ describe('the sources the fill window looks in', () => {
 
 		const found = await fillSources(db);
 
-		expect(found.sources.map((each) => each.connectionId)).toEqual(['early', 'late']);
-		expect(found.sources.map((each) => each.name)).toEqual(['Dropbox', 'Dropbox 2']);
+		expect(found.sources.map((each) => each.connectionId)).toEqual(['early', 'late', 'empty']);
+		expect(found.sources.map((each) => each.name)).toEqual([
+			'Dropbox',
+			'Dropbox 2',
+			'Dropbox 5',
+		]);
+		// One with nothing in it is listed, to save to, and is not opened.
+		expect(found.sources.map((each) => each.items)).toEqual([1, 1, 0]);
 		expect(found.sources.every((each) => each.unlock === 'pin')).toBe(true);
 		expect(found).toMatchObject({ shown: true, notSetUp: 1 });
 	});
