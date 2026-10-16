@@ -5317,7 +5317,9 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	padding-block-end: 0;
 }
 
-.modal button {
+/* The fill window's buttons are a dialog's, as it is one in a window of its own. */
+.modal button,
+.fill-page button:not(.icon, .link-button) {
 	font: inherit;
 	padding: 0.35rem 0.75rem;
 	border-radius: 0.375rem;
@@ -5478,7 +5480,8 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
    it has the focus too. A question asked in the storage panel draws it the
    same way. */
 .modal button.primary,
-.account button.primary {
+.account button.primary,
+.fill-page button.primary {
 	color: var(--on-brand);
 	background: var(--brand);
 	border-color: var(--brand);
@@ -6294,4 +6297,49 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 
 .fill-said:empty {
 	display: none;
+}
+
+.fill-page button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* Fill on sites (FillSetupDialog): the bookmarklet's link, drawn as a thing
+   to pick up and drag, and what the dialog says of it. */
+.fill-setup-dialog h3 {
+	margin: 1rem 0 0.25rem;
+	font-size: 0.9375rem;
+}
+
+.fill-setup-dialog p {
+	margin: 0.5rem 0;
+}
+
+.fill-setup-dialog ul {
+	margin: 0.25rem 0;
+	padding-inline-start: 1.25rem;
+}
+
+.fill-setup-dialog li + li {
+	margin-top: 0.25rem;
+}
+
+.fill-bookmarklet-holder {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-s) var(--space-m);
+	margin: 0.75rem 0;
+}
+
+.fill-bookmarklet {
+	display: inline-block;
+	padding: 0.4rem 0.9rem;
+	color: var(--brand);
+	font-weight: 600;
+	text-decoration: none;
+	border: 1px dashed var(--brand);
+	border-radius: 999px;
+	cursor: grab;
 }

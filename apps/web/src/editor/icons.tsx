@@ -94,6 +94,9 @@ const PATHS = {
 	eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
 	'eye-off':
 		'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.4 3.3M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
+	// Fill on sites (§7, "Filling in on a site"): a bookmark, which is what
+	// the bookmarklet is kept as.
+	bookmark: 'M6 4h12v16l-6-4.5L6 20z',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;
