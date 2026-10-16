@@ -170,5 +170,6 @@ export * from './markdown/index.js';
 export * from './password.js';
 export * from './paths.js';
 export * from './sealing.js';
+export * from './sites.js';
 export * from './secrets.js';
 export * from './vault.js';

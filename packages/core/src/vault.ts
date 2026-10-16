@@ -99,3 +99,89 @@ export const vaultArmor = (body: string): string | undefined => {
 	const alone = body.replace(/\r\n/gu, '\n').trim() === vaultBody(armor).trim();
 	return alone ? armor : undefined;
 };
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+
+/**
+ * The sites an item is for, its Site (docs/ARCHITECTURE.md §7, "Filling in on
+ * a site"): `urls`, an array of addresses, kept beside the fields and
+ * encrypted with them, so whoever can write the folder cannot point an item at
+ * another site as they could by renaming it. None where it has no `urls`;
+ * `undefined` where `urls` is a shape this version does not know, which is
+ * never filled and whose Site is not edited, so it is written back as it was.
+ */
+export const vaultUrls = (
+	kept: Readonly<Record<string, unknown>>
+): readonly string[] | undefined => {
+	const urls = kept.urls;
+	if (urls === undefined) return [];
+	return Array.isArray(urls) && urls.every(isText) ? urls : undefined;
+};
+
+/** `kept` with `urls` for its sites, where `urls` was or after the rest, and without the key where there are none. */
+export const withVaultUrls = (
+	kept: Readonly<Record<string, unknown>>,
+	urls: readonly string[]
+): Readonly<Record<string, unknown>> => {
+	if (urls.length > 0) return { ...kept, urls: [...urls] };
+	const { urls: _gone, ...rest } = kept;
+	return rest;
+};
+
+/** A password an item had before an Update put a new one in its place, and when that was. */
+export interface PreviousPassword {
+	readonly password: string;
+	/** When it was replaced, as an ISO 8601 date: text, as a later key is (above). */
+	readonly replacedAt: string;
+}
+
+/** How many passwords an item keeps from before, newest first. The owner's choice (2026-10-16). */
+export const PREVIOUS_PASSWORDS_KEPT = 5;
+
+const isPrevious = (value: unknown): value is PreviousPassword => {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const entry = value as Record<string, unknown>;
+	return typeof entry.password === 'string' && typeof entry.replacedAt === 'string';
+};
+
+/**
+ * The passwords an item had before (docs/ARCHITECTURE.md §7, "Filling in on a
+ * site"): `previousPasswords`, newest first. None where it has none;
+ * `undefined` where it is a shape this version does not know, which an Update
+ * does not write over.
+ */
+export const vaultPrevious = (
+	kept: Readonly<Record<string, unknown>>
+): readonly PreviousPassword[] | undefined => {
+	const previous = kept.previousPasswords;
+	if (previous === undefined) return [];
+	return Array.isArray(previous) && previous.every(isPrevious) ? previous : undefined;
+};
+
+/**
+ * An opened item with `password` in place of its own, which it keeps, newest
+ * first, with the date it was replaced: what Update seals, so a password typed
+ * wrong, or put there by a script on the page, never loses the one it
+ * replaced. The rest of it is kept as it was. `undefined` where its
+ * passwords from before are a shape this version does not know.
+ */
+export const withReplacedPassword = (
+	payload: VaultPayload,
+	password: string,
+	replacedAt: string
+): string | undefined => {
+	const previous = vaultPrevious(payload.kept);
+	if (previous === undefined) return undefined;
+	const old = payload.fields.password;
+	const kept =
+		old === ''
+			? payload.kept
+			: {
+					...payload.kept,
+					previousPasswords: [{ password: old, replacedAt }, ...previous].slice(
+						0,
+						PREVIOUS_PASSWORDS_KEPT
+					),
+				};
+	return vaultPayload({ ...payload.fields, password }, kept);
+};
