@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.10.1
+
+### Patch Changes
+
+- 4d250b0: Search and the command palette: the row under the pointer is lit, as in the notes list. It is the same highlight the arrow keys move, so only one row is ever lit and Enter opens it.
+- @skysa/core@1.10.1
+
 ## 1.10.0
 
 ### Minor Changes
