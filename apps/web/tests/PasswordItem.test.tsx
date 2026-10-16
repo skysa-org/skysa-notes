@@ -51,13 +51,13 @@ const item = (title: string, fields: VaultFields = FIELDS, body?: string) =>
 	});
 
 /** What an item's body opens to now, as the store has it. */
-const storedFields = async (id: string) => {
+const storedPayload = async (id: string) => {
 	const stored = await getNote(db, id, scope);
 	const armor = vaultArmor(stored?.body ?? '');
-	return armor === undefined
-		? undefined
-		: readVaultPayload(openSecret(armor, [identity]))?.fields;
+	return armor === undefined ? undefined : readVaultPayload(openSecret(armor, [identity]));
 };
+
+const storedFields = async (id: string) => (await storedPayload(id))?.fields;
 
 const Harness = ({
 	id,
@@ -590,6 +590,138 @@ describe('a label that is a web address', () => {
 	});
 });
 
+describe('a password’s site', () => {
+	const withSites = (urls: unknown) => vaultBody(sealed(JSON.stringify({ ...FIELDS, urls })));
+
+	it('is kept encrypted as it is typed, and taken out where it is emptied', async () => {
+		const { host } = fakeHost();
+		const note = await item('Work');
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		await user.type(await screen.findByLabelText('Site'), 'login.example.com');
+
+		await waitFor(async () => {
+			expect((await storedPayload(note.id))?.kept.urls).toEqual(['login.example.com']);
+		});
+		expect((await getNote(db, note.id, scope))?.body).not.toContain('example');
+		expect((await storedFields(note.id))?.username).toBe(FIELDS.username);
+
+		await user.clear(screen.getByLabelText('Site'));
+		await waitFor(async () => {
+			expect((await storedPayload(note.id))?.kept).not.toHaveProperty('urls');
+		});
+	});
+
+	it('edits the first site, and keeps the others a later version may write', async () => {
+		const { host } = fakeHost();
+		const note = await item('Work', FIELDS, withSites(['a.example', 'b.example']));
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		const site = await screen.findByLabelText('Site');
+		expect((site as HTMLInputElement).value).toBe('a.example');
+		await user.clear(site);
+		await user.type(site, 'c.example');
+
+		await waitFor(async () => {
+			expect((await storedPayload(note.id))?.kept.urls).toEqual(['c.example', 'b.example']);
+		});
+	});
+
+	it('is not edited where it is a shape this version does not know, which is kept', async () => {
+		const { host } = fakeHost();
+		const note = await item('Work', FIELDS, withSites({ main: 'a.example' }));
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		await user.type(await screen.findByLabelText('Username'), 'x');
+
+		expect(screen.queryByLabelText('Site')).toBeNull();
+		await waitFor(async () => {
+			expect((await storedFields(note.id))?.username).toBe(`${FIELDS.username}x`);
+		});
+		expect((await storedPayload(note.id))?.kept.urls).toEqual({ main: 'a.example' });
+	});
+
+	it('is offered from a label that is a web address, while it is empty', async () => {
+		const { host } = fakeHost();
+		const note = await item('github.com/login');
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		await user.click(await screen.findByRole('button', { name: 'Use github.com as the site' }));
+
+		await waitFor(async () => {
+			expect((await storedPayload(note.id))?.kept.urls).toEqual(['https://github.com']);
+		});
+		expect(screen.getByLabelText<HTMLInputElement>('Site').value).toBe('https://github.com');
+		expect(screen.queryByRole('button', { name: /^Use .* as the site$/u })).toBeNull();
+	});
+
+	it('is not offered from a label that is words', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('My bank'), host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+
+		await screen.findByLabelText('Site');
+		expect(screen.queryByRole('button', { name: /^Use .* as the site$/u })).toBeNull();
+	});
+
+	it('says where what is in it is not a web address', async () => {
+		const { host } = fakeHost();
+		const user = await show(await item('Work'), host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		const site = await screen.findByLabelText('Site');
+		expect(screen.getByText(/^The web address it fills in on/u)).toBeDefined();
+
+		await user.type(site, 'My bank');
+
+		expect(await screen.findByText('Not a web address, so it fills in nowhere.')).toBeDefined();
+		expect(site.getAttribute('aria-describedby')).toBe(
+			screen.getByText('Not a web address, so it fills in nowhere.').id
+		);
+	});
+
+	it('is put back by Cancel', async () => {
+		const { host } = fakeHost();
+		const note = await item('Work', FIELDS, withSites(['a.example']));
+		const user = await show(note, host);
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		await user.type(await screen.findByLabelText('Site'), 'x');
+		await waitFor(async () => {
+			expect((await storedPayload(note.id))?.kept.urls).toEqual(['a.examplex']);
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id, scope))?.body).toBe(note.body);
+		});
+		expect(await screen.findByRole('button', { name: 'Open a.example' })).toBeDefined();
+	});
+
+	it('opens from the item once it is opened, in place of the label’s address', async () => {
+		const { host } = fakeHost();
+		const note = await item('github.com', FIELDS, withSites(['https://login.example.com/in']));
+		await show(note, host);
+
+		const open = await screen.findByRole('button', { name: 'Open login.example.com/in' });
+		expect(open.getAttribute('title')).toBe('https://login.example.com/in');
+		expect(screen.queryByRole('button', { name: 'Open github.com' })).toBeNull();
+	});
+
+	it('is not there while the item is locked, whose label’s address is', async () => {
+		const { host } = fakeHost();
+		vi.mocked(host.open).mockResolvedValue({ state: 'locked' });
+		await show(await item('github.com', FIELDS, withSites(['login.example.com'])), host);
+
+		await screen.findByRole('button', { name: 'Unlock' });
+		expect(screen.getByRole('button', { name: 'Open github.com' })).toBeDefined();
+		expect(screen.queryByRole('button', { name: /login\.example\.com/u })).toBeNull();
+	});
+});
+
 describe('a new password', () => {
 	const begun = () =>
 		draftNote({
@@ -683,6 +815,24 @@ describe('a new password', () => {
 			expect(onClose).toHaveBeenCalled();
 		});
 		expect(await getNote(db, draft.id, scope)).toBeUndefined();
+	});
+
+	it('is kept by Done with only a site in it', async () => {
+		const { host } = fakeHost();
+		const draft = begun();
+		const onClose = vi.fn();
+		const user = userEvent.setup();
+		render(<New draft={draft} host={host} onClose={onClose} />);
+
+		await user.type(await screen.findByLabelText('Site'), 'example.com');
+		await waitFor(async () => {
+			expect((await storedPayload(draft.id))?.kept.urls).toEqual(['example.com']);
+		});
+		await user.click(screen.getByRole('button', { name: 'Done' }));
+		await settle();
+
+		expect(onClose).not.toHaveBeenCalled();
+		expect((await getNote(db, draft.id, scope))?.deletedLocally).toBe(0);
 	});
 
 	const NOT_STORED =

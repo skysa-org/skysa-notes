@@ -1,3 +1,5 @@
+import { siteOf } from '@skysa/core';
+
 import { openableLink } from '../editor/links.js';
 
 /**
@@ -45,4 +47,15 @@ export const labelLink = (label: string): URL | undefined => {
 	const topLevel = BARE_HOST.exec(text)?.[1];
 	if (topLevel === undefined || !TOP_LEVELS.has(topLevel.toLowerCase())) return undefined;
 	return openableLink(`https://${text}`);
+};
+
+/**
+ * A password's Site, as a link to open (docs/ARCHITECTURE.md §7, "Filling in
+ * on a site"): what it fills in on, where that is a site at all (`siteOf`), a
+ * bare host opening as `https://`, as a label's does.
+ */
+export const siteLink = (site: string): URL | undefined => {
+	const text = site.trim();
+	if (siteOf(text) === undefined) return undefined;
+	return openableLink(/^https?:\/\//iu.test(text) ? text : `https://${text}`);
 };
