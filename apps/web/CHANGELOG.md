@@ -1,5 +1,19 @@
 # @skysa/web
 
+## 1.9.0
+
+### Minor Changes
+
+- e1a6c8d: Passwords: search finds a password by its label while Passwords is shown, Generate makes a password in Edit (length and symbols remembered on the device), and a label that is a web address opens.
+- 9bc3e06: Ground work for passwords in the vault. A source's `.vault/` folder, where the vault's passwords will be kept one note each, now syncs as the scratchpad's folder does, while staying out of the notebooks and out of search. Each device reads its storage once more after updating, as "Re-scan" does, so that items another device made are picked up; it re-reads nothing it already holds. `@skysa/core` adds the item format (a label in plain text, and the username, password and notes as JSON in one age block) and an unbiased password generator.
+- 0def5b8: Passwords in the vault. Turn on "Passwords" in a source's Vault dialog, and a Passwords row appears under the notebooks on that device. It lists the source's passwords by label, with a filter and `+` for a new one. A password has a label, which is not encrypted, and a username, a password and notes, which are encrypted with the vault's key as they are typed. Copy puts the username or the password on the clipboard, Show reveals the password, and Edit and Delete work as they do for a note, with Undo after a delete.
+- 013389c: The Secrets feature is now called Vault. The menu item on the gear and a source's `⋯` says "Vault…", or "Set up vault…" until the source has one, the dialog it opens is called "Vault", and a note's warning opens it with "Set up vault" or "Open Vault". Setting up, unlocking, the recovery key's printed page ("Vault recovery key for …") and a new device-lock passkey ("Unlocks the vault on this device: …") say the vault too; a passkey made before keeps its old name and still works. A secret in a note is still a secret, and nothing in anyone's notes or keys changes.
+
+### Patch Changes
+
+- Updated dependencies [9bc3e06]
+  - @skysa/core@1.9.0
+
 ## 1.8.0
 
 ### Minor Changes
