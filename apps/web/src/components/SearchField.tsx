@@ -16,6 +16,7 @@ import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
 import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { editedAt } from './editedAt.js';
+import { usePointerMoved } from './usePointerMoved.js';
 
 /**
  * The app's search field, and its answers in a list that drops from it.
@@ -34,8 +35,9 @@ import { editedAt } from './editedAt.js';
  * makes it the search.
  *
  * A combobox driving a listbox, as the command palette is: the cursor stays in
- * the field, the arrows move the highlight (`aria-activedescendant`), Enter
- * opens the highlighted note, and Escape empties the field. A press on a row
+ * the field, the arrows move the highlight (`aria-activedescendant`), and so
+ * does the pointer, which is the list's hover: one row is lit, and it is the
+ * one Enter opens. Escape empties the field. A press on a row
  * is `onMouseDown`, so the field keeps the focus and the keyboard still works
  * after it.
  */
@@ -125,6 +127,7 @@ const Row = ({
 	active,
 	sourceName,
 	onChoose,
+	onPoint,
 }: {
 	id: string;
 	note: NoteRecord;
@@ -132,6 +135,8 @@ const Row = ({
 	active: boolean;
 	sourceName: SearchFieldProps['sourceName'];
 	onChoose: (note: NoteRecord) => void;
+	/** A `mousemove` over the row. */
+	onPoint: (event: { clientX: number; clientY: number }) => void;
 }) => (
 	<li
 		id={id}
@@ -142,6 +147,7 @@ const Row = ({
 			event.preventDefault();
 			onChoose(note);
 		}}
+		onMouseMove={onPoint}
 	>
 		<span className="note-title">{titleShown(note.title)}</span>
 		{/* Which source and which notebook, because the list crosses all of
@@ -231,6 +237,7 @@ export const SearchField = ({
 	const field = fieldRef ?? ownField;
 	const [open, setOpen] = useOpen(frame);
 	const [at, setAt] = useState(0);
+	const moved = usePointerMoved();
 	const id = useId();
 
 	const { searching, waiting, hits, options } = offered(query, asked, results, recent);
@@ -373,6 +380,9 @@ export const SearchField = ({
 									active={index === cursor}
 									sourceName={sourceName}
 									onChoose={choose}
+									onPoint={(event) => {
+										if (moved(event) && index !== cursor) setAt(index);
+									}}
 								/>
 							))}
 						</ul>

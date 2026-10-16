@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -248,6 +248,37 @@ describe('choosing an answer', () => {
 
 		expect(onChoose).toHaveBeenCalledWith(results[1]?.note);
 		expect(field()).toHaveProperty('value', '');
+	});
+
+	it('follows the pointer, which lights one row and the one Enter opens', async () => {
+		const onChoose = vi.fn();
+		const results = [plain('Birds', 'a heron'), plain('Rivers', 'a heron')];
+		const user = await searching({ results, onChoose });
+		const rivers = screen.getByRole('option', { name: /Rivers/ });
+
+		fireEvent.mouseMove(rivers, { clientX: 40, clientY: 80 });
+		fireEvent.mouseMove(rivers, { clientX: 42, clientY: 81 });
+
+		expect(screen.getAllByRole('option', { selected: true })).toEqual([rivers]);
+		await user.keyboard('{Enter}');
+		expect(onChoose).toHaveBeenCalledWith(results[1]?.note);
+	});
+
+	it('stays with the arrows while the pointer stands still', async () => {
+		const results = [plain('Birds', 'a heron'), plain('Rivers', 'a heron')];
+		const user = await searching({ results });
+		const rivers = screen.getByRole('option', { name: /Rivers/ });
+		fireEvent.mouseMove(rivers, { clientX: 40, clientY: 80 });
+		fireEvent.mouseMove(rivers, { clientX: 42, clientY: 81 });
+
+		await user.keyboard('{ArrowUp}');
+		// What WebKit sends as the list scrolls: a move from where the pointer
+		// already was.
+		fireEvent.mouseMove(rivers, { clientX: 42, clientY: 81 });
+
+		expect(screen.getByRole('option', { name: /Birds/ }).getAttribute('aria-selected')).toBe(
+			'true'
+		);
 	});
 
 	it('wraps the arrows round the ends', async () => {

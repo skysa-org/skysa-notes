@@ -226,8 +226,8 @@ a {
 
 /* A highlight that follows the arrow keys moves at once, as the caret does:
    one that fades along behind them looks like the list keeping up. The
-   palette's and the search's rows are not buttons, and are not lit by the
-   pointer at all. */
+   palette's and the search's rows are not buttons, so have no fade to take
+   away; they follow the pointer too (`usePointerMoved`), and move as quickly. */
 .slash-item {
 	transition: none;
 }
@@ -933,9 +933,10 @@ code {
 	color: var(--muted);
 }
 
-/* The highlight follows the keyboard, so it is on the row rather than on
-   `:hover`, as the palette's is: with both, the mouse and the arrows would
-   light two rows at once. It starts on the first, which is what Enter opens. */
+/* The highlight follows the keyboard and the pointer both
+   (`usePointerMoved`), so it is on the row rather than on `:hover`: with both,
+   the mouse and the arrows would light two rows at once. It is the list's
+   hover, and the row Enter opens; it starts on the first. */
 .search-result.active {
 	background: var(--hover-bg);
 }
@@ -4919,9 +4920,10 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	cursor: pointer;
 }
 
-/* The highlight follows the keyboard, so it is on the row rather than on
-   `:hover` — with both, moving the mouse and pressing an arrow would light two
-   rows at once and neither would be the one Enter runs. */
+/* The highlight follows the keyboard and the pointer both
+   (`usePointerMoved`), so it is on the row rather than on `:hover` — with
+   both, moving the mouse and pressing an arrow would light two rows at once
+   and neither would be the one Enter runs. */
 .palette-row.active {
 	background: var(--surface);
 }
