@@ -5,12 +5,14 @@ import { t } from '../i18n/t.js';
 import type { NoteRecord } from '../store/db.js';
 import { titleShown } from '../store/titles.js';
 import { filterByLabel, PASSWORDS_LABEL } from '../store/vault.js';
+import { FillSetupDialog } from './FillSetupDialog.js';
 
 /**
  * The source's passwords, in the notes' place (docs/ARCHITECTURE.md §7,
  * "Passwords in the vault"): their labels, A to Z, a field that narrows them
- * as it is typed in, and `+` for a new one. The labels are plain text, so the
- * list needs no unlock.
+ * as it is typed in, `+` for a new one, and Fill on sites, which sets up the
+ * bookmarklet that fills them in (`FillSetupDialog`). The labels are plain
+ * text, so the list needs no unlock.
  *
  * `note-list` as a notebook's notes are, so a compact window shows it as it
  * shows them, and the rows are a note list's rows.
@@ -34,12 +36,24 @@ export const Passwords = ({
 		[items, query]
 	);
 	const filterId = useId();
+	const [settingUp, setSettingUp] = useState(false);
 
 	return (
 		<section className="note-list passwords" aria-label={PASSWORDS_LABEL}>
 			<div className="pane-header">
 				<h2>{PASSWORDS_LABEL}</h2>
 				<div className="pane-actions">
+					<button
+						type="button"
+						className="icon"
+						title={t('fill.setup.title')}
+						aria-label={t('fill.setup.title')}
+						onClick={() => {
+							setSettingUp(true);
+						}}
+					>
+						<Icon name="bookmark" />
+					</button>
 					<button
 						type="button"
 						className="icon"
@@ -117,6 +131,13 @@ export const Passwords = ({
 						})}
 					</ul>
 				</div>
+			)}
+			{settingUp && (
+				<FillSetupDialog
+					onClose={() => {
+						setSettingUp(false);
+					}}
+				/>
 			)}
 		</section>
 	);
