@@ -500,6 +500,8 @@ export interface CompactBarProps {
 	onQuery: (query: string) => void;
 	onChoose: SearchFieldProps['onChoose'];
 	sourceName: SearchFieldProps['sourceName'];
+	/** The note on screen, as a `noteRef`, which the notes opened lately leave out. */
+	showing?: string | undefined;
 	/**
 	 * Whether the search icon has been pressed. A query still in the field
 	 * keeps the search in the bar too: a window narrowed mid-search should not
@@ -544,6 +546,7 @@ export const CompactBar = ({
 	onQuery,
 	onChoose,
 	sourceName,
+	showing,
 	searchOpen,
 	onSearchOpen,
 	fieldRef,
@@ -612,6 +615,7 @@ export const CompactBar = ({
 				onQuery={onQuery}
 				onChoose={onChoose}
 				sourceName={sourceName}
+				showing={showing}
 				fieldRef={fieldRef}
 				onDismiss={closeSearch}
 			/>
