@@ -160,10 +160,13 @@ const FieldButton = ({
 );
 
 /**
- * A label that is a web address, opened in the browser as a link's chip opens
- * one (`labelLink`). The label is plain, so it is there locked too.
+ * A label's web address, where it is one (`labelLink`), opened in the browser
+ * as a link's chip opens one; nothing where it is not. The label is plain, so
+ * it is there locked too.
  */
-const LabelLink = ({ url }: { url: URL }) => {
+const LabelLink = ({ label }: { label: string }) => {
+	const url = labelLink(label);
+	if (url === undefined) return null;
 	const address = linkAddress(url);
 	return (
 		<button
@@ -805,7 +808,6 @@ export const PasswordItem = ({
 	})();
 
 	// Not while the label is being typed, when the address would come and go.
-	const link = editing === null ? labelLink(labelOf(note)) : undefined;
 
 	// Deleted from what it shows, whatever it holds, but not while it is
 	// opening or locked, when what it is has not been seen.
@@ -838,7 +840,7 @@ export const PasswordItem = ({
 				)}
 			</div>
 			<div className="password-body">
-				{link !== undefined && <LabelLink url={link} />}
+				{editing === null && <LabelLink label={labelOf(note)} />}
 				{body}
 			</div>
 			{secrets.dialog}
