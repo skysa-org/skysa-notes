@@ -4,6 +4,7 @@ import { chordLabel } from '../commands/chord.js';
 import { useCommands, useSuspendShortcuts } from '../commands/context.js';
 import { type Command } from '../commands/registry.js';
 import { t } from '../i18n/t.js';
+import { usePointerMoved } from './usePointerMoved.js';
 
 /**
  * One list of everything the app can be asked to do, opened with a chord and
@@ -68,6 +69,7 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	// `null` until the user moves: the resting place depends on the list, which
 	// is not known until it has been filtered.
 	const [at, setAt] = useState<number | null>(null);
+	const moved = usePointerMoved();
 	// Every chord is held while this is up. Otherwise `Mod+E` pressed over an
 	// open palette flips the note underneath between editors, and the Enter that
 	// follows runs a second command on top of it.
@@ -249,6 +251,10 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 								onMouseDown={(event) => {
 									event.preventDefault();
 									choose(command);
+								}}
+								// The pointer moves the highlight, as the arrows do.
+								onMouseMove={(event) => {
+									if (moved(event) && index !== cursor) setAt(index);
 								}}
 							>
 								<span className="palette-label">{command.label}</span>

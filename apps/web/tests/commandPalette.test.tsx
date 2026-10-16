@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -245,6 +245,47 @@ describe('the palette', () => {
 		await userEvent.keyboard('{Enter}');
 
 		expect(second).toHaveBeenCalledTimes(1);
+	});
+
+	it('follows the pointer, which lights one row and the one Enter runs', async () => {
+		const second = vi.fn();
+		app(
+			<>
+				<Declares id="a" label="Alpha" run={vi.fn()} />
+				<Declares id="b" label="Bravo" chord={null} run={second} />
+				<CommandPalette onClose={() => undefined} />
+			</>
+		);
+		const bravo = screen.getByRole('option', { name: /Bravo/ });
+
+		fireEvent.mouseMove(bravo, { clientX: 40, clientY: 80 });
+		fireEvent.mouseMove(bravo, { clientX: 42, clientY: 81 });
+
+		expect(screen.getAllByRole('option', { selected: true })).toEqual([bravo]);
+		await userEvent.keyboard('{Enter}');
+		expect(second).toHaveBeenCalledTimes(1);
+	});
+
+	it('stays with the arrows while the pointer stands still', async () => {
+		app(
+			<>
+				<Declares id="a" label="Alpha" run={vi.fn()} />
+				<Declares id="b" label="Bravo" chord={null} run={vi.fn()} />
+				<CommandPalette onClose={() => undefined} />
+			</>
+		);
+		const bravo = screen.getByRole('option', { name: /Bravo/ });
+		fireEvent.mouseMove(bravo, { clientX: 40, clientY: 80 });
+		fireEvent.mouseMove(bravo, { clientX: 42, clientY: 81 });
+
+		await userEvent.keyboard('{ArrowUp}');
+		// What WebKit sends as the list scrolls: a move from where the pointer
+		// already was.
+		fireEvent.mouseMove(bravo, { clientX: 42, clientY: 81 });
+
+		expect(screen.getByRole('option', { name: /Alpha/ }).getAttribute('aria-selected')).toBe(
+			'true'
+		);
 	});
 
 	it('shows a command that cannot run rather than hiding it', async () => {
