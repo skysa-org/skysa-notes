@@ -7,10 +7,15 @@ import { rewriteSecrets, withoutArmor } from '../src/secrets.js';
 import {
 	EMPTY_VAULT_FIELDS,
 	isEmptyVaultFields,
+	PREVIOUS_PASSWORDS_KEPT,
 	readVaultPayload,
 	vaultArmor,
 	vaultBody,
 	vaultPayload,
+	vaultPrevious,
+	vaultUrls,
+	withReplacedPassword,
+	withVaultUrls,
 } from '../src/vault.js';
 import { IDENTITY, RECIPIENT } from './age/known.js';
 
@@ -122,5 +127,108 @@ describe('an item’s body', () => {
 		expect(readVaultPayload(openSecret(vaultArmor(body) ?? '', [fresh]))?.fields).toEqual(
 			fields
 		);
+	});
+});
+
+describe('an item’s sites', () => {
+	it('are its urls, none where it has none', () => {
+		expect(vaultUrls({})).toEqual([]);
+		expect(vaultUrls({ urls: ['https://example.com', 'example.org'] })).toEqual([
+			'https://example.com',
+			'example.org',
+		]);
+		expect(vaultUrls({ urls: [] })).toEqual([]);
+	});
+
+	it('are a shape this version does not know where urls is anything but addresses', () => {
+		expect(vaultUrls({ urls: 'https://example.com' })).toBeUndefined();
+		expect(vaultUrls({ urls: [{ url: 'https://example.com' }] })).toBeUndefined();
+		expect(vaultUrls({ urls: ['https://example.com', 42] })).toBeUndefined();
+		expect(vaultUrls({ urls: null })).toBeUndefined();
+	});
+
+	it('are written where urls was, else after what was kept, and taken out where there are none', () => {
+		const kept = readVaultPayload('{"urls":["a.example"],"username":"ada"}')?.kept ?? {};
+
+		expect(vaultPayload(fields, withVaultUrls(kept, ['b.example']))).toBe(
+			JSON.stringify({ urls: ['b.example'], ...fields })
+		);
+		expect(vaultPayload(fields, withVaultUrls({ totp: 'x' }, ['b.example']))).toBe(
+			JSON.stringify({ totp: 'x', urls: ['b.example'], ...fields })
+		);
+		expect(withVaultUrls(kept, [])).toEqual({ username: 'ada' });
+	});
+});
+
+describe('an item’s passwords from before', () => {
+	const at = '2026-10-16T12:00:00.000Z';
+
+	it('are none where it has none, and a shape this version does not know otherwise', () => {
+		expect(vaultPrevious({})).toEqual([]);
+		expect(vaultPrevious({ previousPasswords: [{ password: 'a', replacedAt: at }] })).toEqual([
+			{ password: 'a', replacedAt: at },
+		]);
+		expect(vaultPrevious({ previousPasswords: 'a' })).toBeUndefined();
+		expect(vaultPrevious({ previousPasswords: [{ password: 'a' }] })).toBeUndefined();
+		expect(
+			vaultPrevious({ previousPasswords: [{ password: 1, replacedAt: at }] })
+		).toBeUndefined();
+	});
+
+	it('keep the one an Update replaces, newest first, and the rest of the item as it was', () => {
+		const opened = readVaultPayload(
+			JSON.stringify({
+				urls: ['example.com'],
+				...fields,
+				previousPasswords: [{ password: 'older', replacedAt: '2026-01-01', later: 'kept' }],
+			})
+		);
+		if (opened === undefined) throw new Error('unread');
+
+		const written = readVaultPayload(withReplacedPassword(opened, 'n3w', at) ?? '');
+
+		expect(written?.fields).toEqual({ ...fields, password: 'n3w' });
+		expect(written?.kept.urls).toEqual(['example.com']);
+		expect(written?.kept.previousPasswords).toEqual([
+			{ password: fields.password, replacedAt: at },
+			{ password: 'older', replacedAt: '2026-01-01', later: 'kept' },
+		]);
+	});
+
+	it(`are kept to the ${String(PREVIOUS_PASSWORDS_KEPT)} newest`, () => {
+		const opened = readVaultPayload(vaultPayload({ ...fields, password: 'p0' }));
+		if (opened === undefined) throw new Error('unread');
+
+		const last = Array.from({ length: 7 }, (_, n) => `p${String(n + 1)}`).reduce(
+			(item, password) =>
+				readVaultPayload(withReplacedPassword(item, password, at) ?? '') ?? item,
+			opened
+		);
+
+		expect(last.fields.password).toBe('p7');
+		expect(vaultPrevious(last.kept)?.map((entry) => entry.password)).toEqual([
+			'p6',
+			'p5',
+			'p4',
+			'p3',
+			'p2',
+		]);
+	});
+
+	it('keep nothing for an item that had no password', () => {
+		const opened = readVaultPayload(vaultPayload(EMPTY_VAULT_FIELDS));
+		if (opened === undefined) throw new Error('unread');
+
+		expect(JSON.parse(withReplacedPassword(opened, 'n3w', at) ?? '')).toEqual({
+			...EMPTY_VAULT_FIELDS,
+			password: 'n3w',
+		});
+	});
+
+	it('are not written over where they are a shape this version does not know', () => {
+		const opened = readVaultPayload(JSON.stringify({ ...fields, previousPasswords: 'x' }));
+		if (opened === undefined) throw new Error('unread');
+
+		expect(withReplacedPassword(opened, 'n3w', at)).toBeUndefined();
 	});
 });

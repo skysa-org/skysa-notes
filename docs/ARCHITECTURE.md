@@ -160,7 +160,13 @@ Rules:
   { "username": "ada@example.com", "password": "…", "notes": "…" }
   ```
 
-  `age -d` gives the object back. A key the app does not know is kept where it is when an item is edited, so a later version can add fields (`totp`, `urls`) that an earlier one does not lose. It writes them as text, objects or arrays: a number goes back only as precisely as a double holds it, and of two keys of one name only the last (`readVaultPayload`). The app does not write over an item it cannot read: a field that is not text, words that are not an object, or a body that is anything but its one fence — words added beside it in another app, a label on the fence, a second block (`vaultArmor`). A version from before passwords takes the folder for hidden, as every version took `.scratchpad/` before the scratchpad: it neither pulls an item nor deletes one, and it does not encrypt one afresh when it replaces the key, which a device that has updated catches up (§7, "Catching up"). A cursor read while the folder was hidden has passed over every item made since, so schema version 12 drops every source's cursor once, as version 10 did for the scratchpad.
+  `age -d` gives the object back. A key the app does not know is kept where it is when an item is edited, so a later version can add fields (`totp`) that an earlier one does not lose. Two are known since 2026-10-16 (§7, "Filling in on a site"), and are written only where they hold something:
+
+  ```json
+  { "urls": ["https://example.com"], "previousPasswords": [{ "password": "…", "replacedAt": "2026-10-16T12:00:00.000Z" }] }
+  ```
+
+  `urls` is the item's Site, the addresses it fills on (`vaultUrls`); `previousPasswords` the passwords an Update from a site replaced, newest first, five at most (`vaultPrevious`, `withReplacedPassword`). Either in a shape this version does not know — not an array, or an entry that is not text, or not a `password` and a `replacedAt` — is kept as it is and not edited: an item whose `urls` is unknown is never filled, and one whose `previousPasswords` is unknown is not updated from a site. An entry of `previousPasswords` keeps any key a later version adds to it. It writes them as text, objects or arrays: a number goes back only as precisely as a double holds it, and of two keys of one name only the last (`readVaultPayload`). The app does not write over an item it cannot read: a field that is not text, words that are not an object, or a body that is anything but its one fence — words added beside it in another app, a label on the fence, a second block (`vaultArmor`). A version from before passwords takes the folder for hidden, as every version took `.scratchpad/` before the scratchpad: it neither pulls an item nor deletes one, and it does not encrypt one afresh when it replaces the key, which a device that has updated catches up (§7, "Catching up"). A cursor read while the folder was hidden has passed over every item made since, so schema version 12 drops every source's cursor once, as version 10 did for the scratchpad.
 
 ---
 ## 4. Provider adapter interface
@@ -1093,6 +1099,15 @@ It stops where the device locks and goes on at the next unlock. A device that ho
 - *Passwords in the device's own notes*: there is no folder to keep the key's public half in, as for secrets.
 - *A number in a later version's fields* (§3): the object is read and written as `JSON` reads it.
 - *A site's icon beside its label*: fetching it would tell a third party every label.
+
+### Filling in on a site (2026-10-16)
+
+**A bookmarklet fills a site's login from the passwords, and remembers one typed there.** The owner asked for it on 2026-10-16, and chose the answers below; it is built in steps, and this section grows with them.
+
+**Which logins a site is offered** (`sites.ts` in core; the owner's choice): only the page's own site. A login fills the site its Site names and the sites under it: one saved for `example.com` fills `login.example.com`, never the other way about. One saved over `https:` never fills a page over `http:`, which would send it in the clear; one saved over `http:` fills either. The port is the one it was saved for. An address (`192.168.1.1`, `[::1]`) or a name of one label (`localhost`) fills only itself, and a bare one is taken to be over `https:`, as any bare host is, so a router's page over `http:` needs its Site written with `http://`. A name in any script is compared as the browser's URL parser writes it, in ASCII, so a look-alike written with a Cyrillic `а` is another site, as it is to the browser; so is `example.com.evil.example`, and an address with a user in it (`https://example.com@evil.example`) names no site at all.
+- *`www.`*: a login saved for `www.example.com` also fills `example.com`, the same site with or without it, but not the other sites under `example.com`. Saving from a page keeps the page's own host, so a login saved on `www.tumblr.com` does not fill `someone.tumblr.com`.
+- *Only the encrypted Site fills* (the owner's choice, made on learning what a label allows). A label is plain text in the file's name, so anyone who can write the folder could rename `bank.com` to a look-alike's name and have the bank's password offered there; a Site is inside the item's one secret, with the password, and cannot be moved to another item's.
+- *No list of public suffixes.* The Public Suffix List is MPL-2.0, which the repository does not take (CLAUDE.md), and a partial one would be wrong in the way that matters. So a Site of `github.io` fills every site under it. Saving from a page keeps its own host, so a parent fills its children only where the user wrote it in.
 
 ### Large libraries (2026-10-08, #275)
 
