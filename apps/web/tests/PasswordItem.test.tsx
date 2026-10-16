@@ -225,7 +225,7 @@ describe('editing a password', () => {
 		const user = await show(note, host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
 
-		const username = screen.getByLabelText('Username');
+		const username = await screen.findByLabelText('Username');
 		await user.clear(username);
 		await user.type(username, 'grace');
 		await waitFor(async () => {
@@ -281,7 +281,7 @@ describe('editing a password', () => {
 		const note = await item('GitHub');
 		const user = await show(note, host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
-		await user.type(screen.getByLabelText('Password'), '!');
+		await user.type(await screen.findByLabelText('Password'), '!');
 		await user.type(screen.getByLabelText('Label'), ' old');
 		await waitFor(async () => {
 			expect((await storedFields(note.id))?.password).toBe('c0rrect horse!');
@@ -294,7 +294,8 @@ describe('editing a password', () => {
 			expect(stored?.body).toBe(note.body);
 			expect(stored?.title).toBe('GitHub');
 		});
-		expect(screen.getByRole('heading', { name: 'GitHub' })).toBeDefined();
+		// The heading is the item as the route has it, a render behind the store.
+		expect(await screen.findByRole('heading', { name: 'GitHub' })).toBeDefined();
 	});
 
 	it('is closed by the lock, with what was typed already in the item', async () => {
@@ -302,7 +303,7 @@ describe('editing a password', () => {
 		const note = await item('GitHub');
 		const user = await show(note, fake.host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
-		await user.type(screen.getByLabelText('Notes'), 'PIN 1234');
+		await user.type(await screen.findByLabelText('Notes'), 'PIN 1234');
 
 		act(() => {
 			fake.lock();
@@ -322,7 +323,7 @@ describe('editing a password', () => {
 		const note = await item('GitHub', FIELDS, vaultBody(sealed(later)));
 		const user = await show(note, host);
 		await user.click(await screen.findByRole('button', { name: 'Edit' }));
-		await user.type(screen.getByLabelText('Username'), 'x');
+		await user.type(await screen.findByLabelText('Username'), 'x');
 
 		await waitFor(async () => {
 			const stored = await getNote(db, note.id, scope);
