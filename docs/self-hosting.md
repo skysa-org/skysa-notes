@@ -435,6 +435,25 @@ deleted_classes = ["ConnectionRelay"]
 The `[[migrations]]` block with `tag = "v1"` stays: Cloudflare applies
 migrations in order and remembers which it has.
 
+## The fill bookmarklet
+
+Passwords' **Fill on sites** gives each user a bookmark that fills a site's
+sign-in form from their passwords. Two things about it are yours:
+
+- **It names your instance's address.** The bookmark holds the origin it was
+  made on, so if your instance moves to another address, its users set it up
+  again from Passwords.
+- **Send no `Cross-Origin-Opener-Policy` on `/fill`**, nor on `/*`, which
+  includes it. The fill window talks to the page that opened it through
+  `window.opener`, and any value but `unsafe-none` cuts the two apart: the
+  window then says it could not reach the page. `apps/web/public/_headers`
+  sends none, and `apps/web/tests/csp.test.ts` holds that.
+
+Once a browser has opened the app, its service worker answers `/fill` itself.
+Before that, `/fill` is asked of your instance like any page, and the request
+carries the site the user is signing in to as its `Referer`, which your
+Cloudflare logs may keep.
+
 ## Updating
 
 ```bash

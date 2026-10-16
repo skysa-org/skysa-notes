@@ -398,6 +398,30 @@ export default tseslint.config(
 		rules: { 'no-console': 'off' },
 	},
 
+	// ---- The bookmarklet ----------------------------------------------------
+
+	{
+		// Plain JavaScript a bookmark runs in another site's page
+		// (`apps/web/src/fill/bookmarklet.ts`): of the page's globals, these and
+		// nothing else, so it cannot come to need one a page may not have.
+		files: ['apps/web/src/fill/bookmarkletCode.js'],
+		languageOptions: {
+			sourceType: 'script',
+			globals: Object.fromEntries(
+				[
+					'addEventListener',
+					'alert',
+					'document',
+					'Event',
+					'getComputedStyle',
+					'Node',
+					'open',
+					'removeEventListener',
+				].map((name) => [name, 'readonly'])
+			),
+		},
+	},
+
 	// ---- Relaxations --------------------------------------------------------
 
 	{

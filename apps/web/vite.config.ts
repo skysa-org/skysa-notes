@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
@@ -48,5 +49,14 @@ export default defineConfig({
 	build: {
 		outDir: 'dist',
 		sourcemap: true,
+		rolldownOptions: {
+			// The app, and the fill window the bookmarklet opens beside it
+			// (docs/ARCHITECTURE.md §7, "Filling in on a site"), with nothing of
+			// the app's sync or router.
+			input: {
+				main: fileURLToPath(new URL('./index.html', import.meta.url)),
+				fill: fileURLToPath(new URL('./fill.html', import.meta.url)),
+			},
+		},
 	},
 });
