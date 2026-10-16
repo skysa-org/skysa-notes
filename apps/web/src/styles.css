@@ -3799,6 +3799,7 @@ button.icon.account-devices-count {
 }
 
 .password-form input,
+.password-form select,
 .password-form textarea {
 	inline-size: 100%;
 	min-width: 0;
@@ -6302,6 +6303,17 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 .fill-page button:disabled {
 	opacity: 0.5;
 	cursor: default;
+}
+
+/* What is offered for a password typed on the page, under the logins. */
+.fill-remember {
+	display: grid;
+	gap: var(--space-s);
+	justify-items: start;
+}
+
+.fill-remember .fill-save {
+	justify-self: stretch;
 }
 
 /* Fill on sites (FillSetupDialog): the bookmarklet's link, drawn as a thing
