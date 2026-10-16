@@ -60,6 +60,9 @@ export const passwords = {
 		/** Said in the form, where what was typed could not be encrypted into the item. */
 		notSealed:
 			'What you typed could not be encrypted, and is not saved yet. Keep typing to try again.',
+		/** Said in a new item's form, where the device could not keep it: it stays open until it can. */
+		notStored:
+			'This password is not saved yet. Press Done to try again, or copy what you typed somewhere safe.',
 		notDeleted: 'That password could not be deleted.',
 		/** A change to an item that could not be written on this device. */
 		notSaved:

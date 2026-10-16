@@ -139,9 +139,15 @@ export const useScratchpad = ({
 	// rests on. A card open is the column's, and nothing rests under it.
 	// Before the window is drawn, so a card going back into the wall finds it
 	// there, and one growing out of it finds nothing shut over it.
+	// Let go of in a cleanup, as the passwords' is (`usePasswords`), so neither
+	// clears the other's whichever is set first.
 	const resting = active && compact && card === undefined;
 	useLayoutEffect(() => {
-		setRest(resting ? 'notes' : null);
+		if (!resting) return undefined;
+		setRest('notes');
+		return () => {
+			setRest(null);
+		};
 	}, [resting, setRest]);
 
 	const scope = (note: NoteRecord) => ({ connectionId: note.connectionId });

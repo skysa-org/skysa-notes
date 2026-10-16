@@ -39,8 +39,8 @@ export const usePasswords = ({
 
 	// In a compact window the list is the notes' pane, and with no item open
 	// it is all there is to show, as the scratchpad's wall is: the pane the
-	// place rests on, not a dropdown open over it. Let go of in a cleanup, so
-	// the scratchpad's, set as this is let go, is not cleared after it.
+	// place rests on, not a dropdown open over it. Let go of in a cleanup, as
+	// the scratchpad's is, so neither clears the other's.
 	const resting = active && compact && noteId === undefined;
 	useLayoutEffect(() => {
 		if (!resting) return undefined;

@@ -15,7 +15,15 @@ import { linkAddress, openLink } from '../editor/links.js';
 import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
 import { t } from '../i18n/t.js';
 import { db, type NoteRecord } from '../store/db.js';
-import { deleteNote, type EditBase, isUnnamed, renameNote, saveVaultItem } from '../store/notes.js';
+import {
+	deleteNote,
+	type EditBase,
+	getNote,
+	isUnnamed,
+	renameVaultItem,
+	restoreVaultItem,
+	saveVaultItem,
+} from '../store/notes.js';
 import { titleShown } from '../store/titles.js';
 import { useNoteSecrets } from './noteSecrets.js';
 import type { NoteDraft } from './NoteView.js';
@@ -140,22 +148,13 @@ const Field = ({
 const FieldButton = ({
 	icon,
 	label,
-	pressed,
 	onClick,
 }: {
 	icon: 'copy' | 'eye' | 'eye-off';
 	label: string;
-	pressed?: boolean;
 	onClick: () => void;
 }) => (
-	<button
-		type="button"
-		className="icon"
-		title={label}
-		aria-label={label}
-		aria-pressed={pressed}
-		onClick={onClick}
-	>
+	<button type="button" className="icon" title={label} aria-label={label} onClick={onClick}>
 		<Icon name={icon} />
 	</button>
 );
@@ -209,6 +208,8 @@ export const PasswordItem = ({
 	const [editing, setEditing] = useState<Editing | null>(null);
 	const [revealed, setRevealed] = useState(false);
 	const [said, setSaid] = useState<string | undefined>();
+	/** A new item the store could not take: the form stays open on it (`write`). */
+	const [unstored, setUnstored] = useState(false);
 	const ids = {
 		label: useId(),
 		hint: useId(),
@@ -219,43 +220,58 @@ export const PasswordItem = ({
 
 	/** What the edits are written over (`EditBase`), moved on as each is written. */
 	const base = useRef<EditBase>({ origin: note.bodyOrigin ?? '', note });
-	/** The new item, not stored until its first change. */
+	/** The new item, until the store has it: from its first change, or the one after where that failed. */
 	const toStore = useRef<NoteDraft | undefined>(draft);
 	/** Writes, one after another, in the order they were typed. */
 	const queue = useRef<Promise<unknown>>(Promise.resolve());
+	/** Let go of, a new item cancelled: what is still queued for it is not written. */
+	const gone = useRef(false);
+	/** How many times the device has locked, so a form is not opened across one. */
+	const locks = useRef(0);
+	/** `shown` as last drawn, for what reads it once the writes before it are made. */
+	const showing = useRef(shown);
 	const latest = useRef({ onProblem, onClose, onOpen });
 	useEffect(() => {
 		latest.current = { onProblem, onClose, onOpen };
+		showing.current = shown;
 	});
+	const labelField = useRef<HTMLInputElement>(null);
+	const editButton = useRef<HTMLButtonElement>(null);
+
+	const notSaved = () => {
+		latest.current.onProblem({ message: t('passwords.item.notSaved'), tone: 'error' });
+	};
 
 	const write = (typed: { title: string; body: string }) => {
 		queue.current = queue.current
 			.then(async () => {
+				if (gone.current) return;
 				const storing = toStore.current;
 				if (storing !== undefined) {
-					toStore.current = undefined;
-					// The route says why it was not (`onStoreFailed`); the next
-					// change tries again.
+					// Let go of only once it is stored. Where it could not be, the
+					// route says why (`onStoreFailed`), and the form stays open on
+					// what was typed, which is nowhere else, until the next change
+					// or Done tries again (`finish`).
 					if (!(await storing.store())) {
-						toStore.current = storing;
+						setUnstored(true);
 						return;
 					}
+					toStore.current = undefined;
+					setUnstored(false);
 				}
 				const saved = await saveVaultItem(db, typed, base.current);
 				base.current = { origin: saved.bodyOrigin ?? '', note: saved };
 			})
-			.catch(() => {
-				latest.current.onProblem({ message: t('passwords.item.notSaved'), tone: 'error' });
-			});
+			.catch(notSaved);
 	};
 
 	/** Let a new item go, stored or not, without an undo: nothing in it was kept. */
 	const discard = () => {
-		const stored = toStore.current === undefined;
-		toStore.current = undefined;
+		gone.current = true;
 		queue.current = queue.current
 			.then(() =>
-				stored
+				// Stored by a change before: taken away again.
+				toStore.current === undefined
 					? deleteNote(db, base.current.note.id, {
 							connectionId: base.current.note.connectionId,
 						})
@@ -268,41 +284,79 @@ export const PasswordItem = ({
 	};
 
 	/**
-	 * Close the form, keeping what is in the item: renamed after its label,
-	 * where that changed, and let go where it is a new one with nothing in it.
+	 * Name the item's file after its label, where that changed: once, as the
+	 * form closes, rather than at every character. Only while the item is the
+	 * one the edit was made over, so a label pulled from another device since
+	 * is not written over (`renameVaultItem`).
 	 */
-	const finish = (ending: Editing, fields: VaultFields) => {
+	const rename = (ending: Editing) => {
+		const label = ending.label.trim();
+		if (label === '' || label === ending.start.label) return;
+		queue.current = queue.current
+			.then(async () => {
+				if (gone.current || toStore.current !== undefined) return;
+				const renamed = await renameVaultItem(db, label, base.current);
+				if (renamed !== undefined) {
+					base.current = { origin: renamed.bodyOrigin ?? '', note: renamed };
+				}
+			})
+			.catch(notSaved);
+	};
+
+	/** Close the form on what is in the item. */
+	const close = (ending: Editing) => {
 		setEditing(null);
 		setRevealed(false);
+		setFresh(false);
+		rename(ending);
+		queue.current = queue.current.then(() => {
+			// A copy beside the item holds the edit, the item having been
+			// replaced meanwhile: it is the one to show.
+			if (base.current.note.id !== note.id) latest.current.onOpen(base.current.note);
+		});
+	};
+
+	/**
+	 * Done: close the form, keeping what is in the item, or let a new one go
+	 * that has nothing in it. A new one the store has not taken, or not yet,
+	 * stays open until it has, since what is typed in it is in no other place;
+	 * one it could not take is tried again.
+	 */
+	const finish = (ending: Editing, fields: VaultFields) => {
 		if (fresh && ending.label.trim() === '' && isEmptyVaultFields(fields)) {
+			setEditing(null);
+			setRevealed(false);
 			discard();
 			return;
 		}
-		setFresh(false);
-		const label = ending.label.trim();
-		queue.current = queue.current
-			.then(async () => {
-				const at = base.current.note;
-				if (label !== '' && label !== ending.start.label) {
-					const renamed = await renameNote(db, at.id, label, {
-						connectionId: at.connectionId,
-					});
-					base.current = { origin: renamed.bodyOrigin ?? '', note: renamed };
-				}
-				// A copy beside the item holds the edit, the item having been
-				// replaced meanwhile: it is the one to show.
-				if (base.current.note.id !== note.id) latest.current.onOpen(base.current.note);
-			})
-			.catch(() => {
-				latest.current.onProblem({ message: t('passwords.item.notSaved'), tone: 'error' });
-			});
+		if (toStore.current === undefined) {
+			close(ending);
+			return;
+		}
+		if (unstored && ending.body !== '') write({ title: ending.label, body: ending.body });
+		queue.current = queue.current.then(() => {
+			if (toStore.current === undefined) finishing.current();
+		});
 	};
 	const finishing = useRef<() => void>(() => undefined);
+	/** Left with the form open: named as Done would have. What was typed is in the item already. */
+	const leaving = useRef<() => void>(() => undefined);
 	useEffect(() => {
 		finishing.current = () => {
 			if (editing !== null && shown.is.state === 'opened') finish(editing, shown.is.fields);
 		};
+		leaving.current = () => {
+			if (editing !== null) rename(editing);
+		};
 	});
+	// Back, another item, or the passwords hidden, with the form open.
+	useEffect(
+		() => () => {
+			// The latest, as it is left: the form as it was then.
+			leaving.current();
+		},
+		[]
+	);
 
 	// A new item: sealed to the source's key, which needs the device enrolled
 	// and not unlocked. Where it cannot be made, the host has said why.
@@ -340,7 +394,9 @@ export const PasswordItem = ({
 	// beside (`saveVaultItem`); not for what this view opened or wrote; and
 	// not while it is locked, until Unlock is pressed, so a change arriving
 	// from elsewhere does not ask for the unlock by itself.
-	const armor = vaultArmor(note.body);
+	// A new item stored and not read back yet is still the draft here, with no
+	// body: what it holds is what was written.
+	const armor = vaultArmor(note.body) ?? (draft === undefined ? undefined : shown.armor);
 	const inForm = editing !== null;
 	const known =
 		armor !== undefined &&
@@ -372,15 +428,35 @@ export const PasswordItem = ({
 
 	// Locked: the form closes, with everything typed already in the item, and
 	// what was shown is let go of.
+	// A new item is locked once the store has what was typed, and where it
+	// cannot take it, stays open on it, as it is in no other place.
 	useEffect(
 		() =>
 			host.locked(() => {
-				finishing.current();
-				setShown((before) => ({ ...before, is: { state: 'locked' } }));
-				setRevealed(false);
+				locks.current += 1;
+				const lock = () => {
+					finishing.current();
+					setShown((before) => ({ ...before, is: { state: 'locked' } }));
+					setRevealed(false);
+				};
+				if (toStore.current === undefined) {
+					lock();
+					return;
+				}
+				queue.current = queue.current.then(() => {
+					if (toStore.current === undefined) lock();
+				});
 			}),
 		[host]
 	);
+
+	// Into the form at its first field, and back to Edit as it closes.
+	const wasInForm = useRef(false);
+	useEffect(() => {
+		if (inForm === wasInForm.current) return;
+		wasInForm.current = inForm;
+		(inForm ? labelField.current : editButton.current)?.focus();
+	}, [inForm]);
 
 	// "Copied." for a moment, then nothing.
 	useEffect(() => {
@@ -399,18 +475,40 @@ export const PasswordItem = ({
 		});
 	};
 
+	/**
+	 * Open the form on the item as the store has it, once the writes before are
+	 * made: `note` can be a write or two behind them, and a form opened on it
+	 * would write the old password back with the next change to the label.
+	 */
 	const edit = () => {
 		if (view.state !== 'opened') return;
-		const label = labelOf(note);
-		base.current = { origin: note.bodyOrigin ?? '', note };
-		setShown({ armor, attempt, is: view });
-		setEditing({
-			label,
-			body: note.body,
-			start: { label, body: note.body, fields: view.fields },
-			changed: false,
-			sealFailed: false,
-		});
+		const lock = locks.current;
+		queue.current = queue.current
+			.then(async () => {
+				const stored = await getNote(db, note.id, { connectionId: note.connectionId });
+				const at = showing.current;
+				// Locked meanwhile, or changed from elsewhere and not yet opened
+				// again: what the view shows is not what the item holds.
+				if (
+					stored === undefined ||
+					stored.deletedLocally === 1 ||
+					locks.current !== lock ||
+					at.is.state !== 'opened' ||
+					vaultArmor(stored.body) !== at.armor
+				) {
+					return;
+				}
+				const label = labelOf(stored);
+				base.current = { origin: stored.bodyOrigin ?? '', note: stored };
+				setEditing({
+					label,
+					body: stored.body,
+					start: { label, body: stored.body, fields: at.is.fields },
+					changed: false,
+					sealFailed: false,
+				});
+			})
+			.catch(() => undefined);
 	};
 
 	const change = (next: { label?: string; fields?: VaultFields }) => {
@@ -452,7 +550,31 @@ export const PasswordItem = ({
 			attempt,
 			is: { ...opened, fields: start.fields },
 		});
-		if (editing.changed) write({ title: start.label, body: start.body });
+		if (editing.changed) restore(start);
+	};
+
+	/**
+	 * Put the item back as the form opened on it, where it still is that item
+	 * (`restoreVaultItem`). Where a pull replaced it while the form was open,
+	 * the edit went into a copy beside it, which held nothing else and goes.
+	 */
+	const restore = (start: Editing['start']) => {
+		queue.current = queue.current
+			.then(async () => {
+				const at = base.current.note;
+				if (at.id !== note.id) {
+					await deleteNote(db, at.id, { connectionId: at.connectionId });
+					base.current = { origin: note.bodyOrigin ?? '', note };
+					return;
+				}
+				const put = await restoreVaultItem(
+					db,
+					{ title: start.label, body: start.body },
+					base.current
+				);
+				if (put !== undefined) base.current = { origin: put.bodyOrigin ?? '', note: put };
+			})
+			.catch(notSaved);
 	};
 
 	const heading =
@@ -526,6 +648,7 @@ export const PasswordItem = ({
 				>
 					<label htmlFor={ids.label}>{t('passwords.item.label')}</label>
 					<input
+						ref={labelField}
 						id={ids.label}
 						type="text"
 						value={editing.label}
@@ -550,9 +673,12 @@ export const PasswordItem = ({
 					/>
 					<label htmlFor={ids.password}>{t('passwords.item.password')}</label>
 					<div className="password-entry">
+						{/* Text drawn as dots, not a password field: a browser offers to
+						    save what is typed into one, and this is kept here alone. */}
 						<input
 							id={ids.password}
-							type={revealed ? 'text' : 'password'}
+							type="text"
+							className={revealed ? undefined : 'password-masked'}
 							value={fields.password}
 							{...KEEP_OUT}
 							onChange={(event) => {
@@ -562,7 +688,6 @@ export const PasswordItem = ({
 						<FieldButton
 							icon={revealed ? 'eye-off' : 'eye'}
 							label={revealed ? t('passwords.item.hide') : t('passwords.item.show')}
-							pressed={revealed}
 							onClick={() => {
 								setRevealed((now) => !now);
 							}}
@@ -589,6 +714,11 @@ export const PasswordItem = ({
 					{editing.sealFailed && (
 						<p className="password-hint" role="alert">
 							{t('passwords.item.notSealed')}
+						</p>
+					)}
+					{unstored && (
+						<p className="password-hint" role="alert">
+							{t('passwords.item.notStored')}
 						</p>
 					)}
 					<div className="password-actions">
@@ -634,7 +764,6 @@ export const PasswordItem = ({
 												? t('passwords.item.hide')
 												: t('passwords.item.show')
 										}
-										pressed={revealed}
 										onClick={() => {
 											setRevealed((now) => !now);
 										}}
@@ -655,7 +784,9 @@ export const PasswordItem = ({
 						) : revealed ? (
 							<code className="password-shown">{fields.password}</code>
 						) : (
-							<span aria-label={t('passwords.item.hidden')}>{MASK}</span>
+							<span role="img" aria-label={t('passwords.item.hidden')}>
+								{MASK}
+							</span>
 						)}
 					</Field>
 					<Field label={t('passwords.item.notes')}>
@@ -690,7 +821,7 @@ export const PasswordItem = ({
 				{deletable && (
 					<div className="password-header-actions">
 						{view.state === 'opened' && (
-							<button type="button" onClick={edit}>
+							<button ref={editButton} type="button" onClick={edit}>
 								{t('passwords.item.edit')}
 							</button>
 						)}

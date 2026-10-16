@@ -714,6 +714,55 @@ export const saveVaultItem = (
 		return copyBeside(db, current, shown.note, body);
 	});
 
+/** The vault item an edit was made over, while it still is: not gone, and not replaced by a pull since. */
+const vaultItemAsBegun = async (
+	db: NotesDatabase,
+	base: EditBase
+): Promise<NoteRecord | undefined> => {
+	const current = await whereShown(db, base.note);
+	return current === undefined ||
+		current.deletedLocally === 1 ||
+		(current.bodyOrigin ?? '') !== base.origin
+		? undefined
+		: current;
+};
+
+/**
+ * Put a vault item back as its edit began (Cancel, docs/ARCHITECTURE.md §7,
+ * "Passwords in the vault"), over the item while it is still the one the edit
+ * was made over, and nowhere once it is not. Replaced by a pull since, it
+ * holds what came, which is newer than what Cancel would put back; written
+ * beside it, as an edit is, the old would be one more row with an old
+ * password. Gone, it stays gone.
+ */
+export const restoreVaultItem = (
+	db: NotesDatabase,
+	typed: Readonly<{ title: string; body: string }>,
+	base: EditBase
+): Promise<NoteRecord | undefined> =>
+	db.transaction('rw', writerTables(db), async () =>
+		(await vaultItemAsBegun(db, base)) === undefined
+			? undefined
+			: saveVaultItem(db, typed, base)
+	);
+
+/**
+ * Name a vault item's file after its label, once, as its edit is done: while
+ * it is still the one the edit was made over, so a label changed on another
+ * device and pulled since is not written over, with no copy of either.
+ */
+export const renameVaultItem = (
+	db: NotesDatabase,
+	label: string,
+	base: EditBase
+): Promise<NoteRecord | undefined> =>
+	db.transaction('rw', writerTables(db), async () => {
+		const current = await vaultItemAsBegun(db, base);
+		return current === undefined
+			? undefined
+			: renameNote(db, current.id, label, { connectionId: current.connectionId });
+	});
+
 /** Write a new dirty note and owe the remote its file. Inside the caller's transaction. */
 const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRecord> => {
 	const source = record.source ?? noteFileContents(record);
