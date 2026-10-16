@@ -28,6 +28,14 @@ export const passwords = {
 		label: 'Label',
 		/** Under the label's field: what it is for, and that it is plain text. */
 		labelHint: 'The app, site or service. Not encrypted.',
+		/** The web address the password fills in on, from the bookmarklet (docs/ARCHITECTURE.md §7, "Filling in on a site"). */
+		site: 'Site',
+		/** Under the site's field. */
+		siteHint: 'The web address it fills in on, and the sites under it. Encrypted.',
+		/** Under the site's field, in place of the hint, where what is in it is not a web address. */
+		notASite: 'Not a web address, so it fills in nowhere.',
+		/** Under an empty site's field, where the label is a web address: `{address}` is its host. */
+		useAsSite: 'Use {address} as the site',
 		username: 'Username',
 		password: 'Password',
 		notes: 'Notes',

@@ -6,6 +6,8 @@ import {
 	vaultBody,
 	type VaultFields,
 	vaultPayload,
+	vaultUrls,
+	withVaultUrls,
 } from '@skysa/core';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
@@ -28,7 +30,7 @@ import { titleShown } from '../store/titles.js';
 import { useNoteSecrets } from './noteSecrets.js';
 import type { NoteDraft } from './NoteView.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
-import { labelLink } from './passwordLink.js';
+import { labelLink, siteLink } from './passwordLink.js';
 
 /**
  * A password in the vault, in the note's column (docs/ARCHITECTURE.md §7,
@@ -59,13 +61,16 @@ type Shown =
 	| Readonly<{ state: 'other' }>
 	| Readonly<{ state: 'unreadable' }>;
 
+/** What an item holds, as opened: its fields, and the rest of its object (`VaultPayload`). */
+type Held = Readonly<{ fields: VaultFields; kept: Readonly<Record<string, unknown>> }>;
+
 /** The form, while it is open. */
 interface Editing {
 	readonly label: string;
 	/** The body as last written: as opened, until a field changes. Empty for a new item until then. */
 	readonly body: string;
 	/** What Cancel puts back. */
-	readonly start: Readonly<{ label: string; body: string; fields: VaultFields }>;
+	readonly start: Readonly<{ label: string; body: string }> & Held;
 	/** Whether anything has been written since the form opened. */
 	readonly changed: boolean;
 	/** The last change could not be encrypted, and is not in the item. */
@@ -160,12 +165,11 @@ const FieldButton = ({
 );
 
 /**
- * A label's web address, where it is one (`labelLink`), opened in the browser
- * as a link's chip opens one; nothing where it is not. The label is plain, so
- * it is there locked too.
+ * The item's web address, opened in the browser as a link's chip opens one:
+ * its Site once it is opened (`siteLink`), else its label's where that is one
+ * (`labelLink`), which is plain, so there locked too; nothing where neither is.
  */
-const LabelLink = ({ label }: { label: string }) => {
-	const url = labelLink(label);
+const AddressLink = ({ url }: { url: URL | undefined }) => {
 	if (url === undefined) return null;
 	const address = linkAddress(url);
 	return (
@@ -181,6 +185,70 @@ const LabelLink = ({ label }: { label: string }) => {
 			<Icon name="open" />
 			<span className="link-chip-address">{address}</span>
 		</button>
+	);
+};
+
+/** The address an item shows with Open: its Site, once it is opened, else its label's. */
+const addressOf = (view: Shown, label: string): URL | undefined =>
+	(view.state === 'opened' ? siteLink(vaultUrls(view.kept)?.[0] ?? '') : undefined) ??
+	labelLink(label);
+
+/**
+ * The item's Site, in its form (docs/ARCHITECTURE.md §7, "Filling in on a
+ * site"): the first of its sites, the rest, which a later version may write,
+ * kept as they are; and, while it is empty, "Use … as the site" from a label
+ * that is a web address.
+ */
+const SiteField = ({
+	ids,
+	sites,
+	label,
+	onChange,
+}: {
+	ids: Readonly<{ site: string; siteHint: string }>;
+	sites: readonly string[];
+	label: string;
+	onChange: (urls: readonly string[]) => void;
+}) => {
+	const site = sites[0] ?? '';
+	// Emptied, it stays the first while others follow it, so the field goes
+	// on editing it rather than taking up the next.
+	const set = (value: string) => {
+		const rest = sites.slice(1);
+		onChange(value.trim() === '' && rest.length === 0 ? [] : [value, ...rest]);
+	};
+	const suggested = site.trim() === '' ? labelLink(label) : undefined;
+	return (
+		<>
+			<label htmlFor={ids.site}>{t('passwords.item.site')}</label>
+			<input
+				id={ids.site}
+				type="text"
+				inputMode="url"
+				value={site}
+				aria-describedby={ids.siteHint}
+				{...KEEP_OUT}
+				onChange={(event) => {
+					set(event.target.value);
+				}}
+			/>
+			<p id={ids.siteHint} className="password-hint">
+				{site.trim() !== '' && siteLink(site) === undefined
+					? t('passwords.item.notASite')
+					: t('passwords.item.siteHint')}
+			</p>
+			{suggested !== undefined && (
+				<button
+					type="button"
+					className="link-button password-use-site"
+					onClick={() => {
+						set(suggested.origin);
+					}}
+				>
+					{t('passwords.item.useAsSite', { address: suggested.host })}
+				</button>
+			)}
+		</>
 	);
 };
 
@@ -216,6 +284,8 @@ export const PasswordItem = ({
 	const ids = {
 		label: useId(),
 		hint: useId(),
+		site: useId(),
+		siteHint: useId(),
 		username: useId(),
 		password: useId(),
 		notes: useId(),
@@ -325,8 +395,9 @@ export const PasswordItem = ({
 	 * stays open until it has, since what is typed in it is in no other place;
 	 * one it could not take is tried again.
 	 */
-	const finish = (ending: Editing, fields: VaultFields) => {
-		if (fresh && ending.label.trim() === '' && isEmptyVaultFields(fields)) {
+	const finish = (ending: Editing, held: Held) => {
+		const empty = isEmptyVaultFields(held.fields) && vaultUrls(held.kept)?.length === 0;
+		if (fresh && ending.label.trim() === '' && empty) {
 			setEditing(null);
 			setRevealed(false);
 			discard();
@@ -346,7 +417,7 @@ export const PasswordItem = ({
 	const leaving = useRef<() => void>(() => undefined);
 	useEffect(() => {
 		finishing.current = () => {
-			if (editing !== null && shown.is.state === 'opened') finish(editing, shown.is.fields);
+			if (editing !== null && shown.is.state === 'opened') finish(editing, shown.is);
 		};
 		leaving.current = () => {
 			if (editing !== null) rename(editing);
@@ -380,7 +451,7 @@ export const PasswordItem = ({
 			setEditing({
 				label: '',
 				body: '',
-				start: { label: '', body: '', fields: EMPTY_VAULT_FIELDS },
+				start: { label: '', body: '', fields: EMPTY_VAULT_FIELDS, kept: {} },
 				changed: false,
 				sealFailed: false,
 			});
@@ -506,7 +577,7 @@ export const PasswordItem = ({
 				setEditing({
 					label,
 					body: stored.body,
-					start: { label, body: stored.body, fields: at.is.fields },
+					start: { label, body: stored.body, fields: at.is.fields, kept: at.is.kept },
 					changed: false,
 					sealFailed: false,
 				});
@@ -514,24 +585,25 @@ export const PasswordItem = ({
 			.catch(() => undefined);
 	};
 
-	const change = (next: { label?: string; fields?: VaultFields }) => {
+	const change = (next: { label?: string; fields?: VaultFields; kept?: Held['kept'] }) => {
 		const opened = shown.is;
 		if (editing === null || opened.state !== 'opened') return;
 		const label = next.label ?? editing.label;
 		const fields = next.fields ?? opened.fields;
-		// The item keeps its armor byte for byte until a field changes; a new
-		// one is sealed at its first change, whatever it is.
+		const kept = next.kept ?? opened.kept;
+		// The item keeps its armor byte for byte until what is sealed changes;
+		// a new one is sealed at its first change, whatever it is.
 		const body =
-			next.fields !== undefined || editing.body === ''
-				? sealedBody(opened.seal, fields, opened.kept)
+			next.fields !== undefined || next.kept !== undefined || editing.body === ''
+				? sealedBody(opened.seal, fields, kept)
 				: editing.body;
 		if (body === undefined) {
-			setShown({ ...shown, is: { ...opened, fields } });
+			setShown({ ...shown, is: { ...opened, fields, kept } });
 			setEditing({ ...editing, label, sealFailed: true });
 			return;
 		}
 		const written = vaultArmor(body);
-		setShown({ armor: written, attempt, is: { ...opened, fields } });
+		setShown({ armor: written, attempt, is: { ...opened, fields, kept } });
 		if (written !== undefined) setOwn((before) => new Set([...before, written]));
 		setEditing({ ...editing, label, body, changed: true, sealFailed: false });
 		write({ title: label, body });
@@ -551,7 +623,7 @@ export const PasswordItem = ({
 		setShown({
 			armor: vaultArmor(start.body),
 			attempt,
-			is: { ...opened, fields: start.fields },
+			is: { ...opened, fields: start.fields, kept: start.kept },
 		});
 		if (editing.changed) restore(start);
 	};
@@ -640,13 +712,16 @@ export const PasswordItem = ({
 			const field = (key: keyof VaultFields) => (value: string) => {
 				change({ fields: { ...fields, [key]: value } });
 			};
+			// None where `urls` is a shape this version does not know, which is
+			// not edited.
+			const sites = vaultUrls(view.kept);
 			return (
 				<form
 					className="password-form"
 					aria-label={t('passwords.item.editing', { label: heading })}
 					onSubmit={(event) => {
 						event.preventDefault();
-						finish(editing, fields);
+						finish(editing, view);
 					}}
 				>
 					<label htmlFor={ids.label}>{t('passwords.item.label')}</label>
@@ -664,6 +739,16 @@ export const PasswordItem = ({
 					<p id={ids.hint} className="password-hint">
 						{t('passwords.item.labelHint')}
 					</p>
+					{sites !== undefined && (
+						<SiteField
+							ids={ids}
+							sites={sites}
+							label={editing.label}
+							onChange={(urls) => {
+								change({ kept: withVaultUrls(view.kept, urls) });
+							}}
+						/>
+					)}
 					<label htmlFor={ids.username}>{t('passwords.item.username')}</label>
 					<input
 						id={ids.username}
@@ -840,7 +925,7 @@ export const PasswordItem = ({
 				)}
 			</div>
 			<div className="password-body">
-				{editing === null && <LabelLink label={labelOf(note)} />}
+				{editing === null && <AddressLink url={addressOf(view, labelOf(note))} />}
 				{body}
 			</div>
 			{secrets.dialog}

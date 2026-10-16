@@ -3871,6 +3871,12 @@ button.icon.account-devices-count {
 	font-size: 0.75rem;
 }
 
+/* "Use github.com as the site", under an empty Site whose label is an address. */
+.password-form .password-use-site {
+	justify-self: start;
+	font-size: 0.8125rem;
+}
+
 .password-actions {
 	display: flex;
 	justify-content: end;
