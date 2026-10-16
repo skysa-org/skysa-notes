@@ -41,10 +41,12 @@ export interface FillSource {
 	/** As its tab is called (`tabName`). */
 	readonly name: string;
 	readonly unlock: UnlockKind;
+	/** How many passwords are in it: none, and it is not unlocked, only saved to. */
+	readonly items: number;
 }
 
 export interface FillSources {
-	/** In the order their tabs are, each with a password in it. */
+	/** In the order their tabs are. */
 	readonly sources: readonly FillSource[];
 	/** Whether any source shows its passwords in this browser. */
 	readonly shown: boolean;
@@ -53,9 +55,9 @@ export interface FillSources {
 }
 
 /**
- * The sources to look in: connected, and not let go of (`detached`), whose
- * passwords are shown on this device; not the device's own notes, which have
- * no passwords. One with no passwords in it is not asked to unlock.
+ * The sources to look in, and to save to: connected, and not let go of
+ * (`detached`), whose passwords are shown on this device; not the device's own
+ * notes, which have no passwords.
  */
 export const fillSources = async (db: NotesDatabase): Promise<FillSources> => {
 	const all = await connectedSources(db);
@@ -70,8 +72,8 @@ export const fillSources = async (db: NotesDatabase): Promise<FillSources> => {
 			if (!(await getPasswordsShown(db, connectionId))) return 'hidden' as const;
 			const enrolled = await enrolment(db, connectionId);
 			if (enrolled === undefined) return 'notSetUp' as const;
-			if ((await listVaultNotes(db, connectionId)).length === 0) return 'empty' as const;
-			return { connectionId, name: tabName(source, all), unlock: enrolled.unlock };
+			const items = (await listVaultNotes(db, connectionId)).length;
+			return { connectionId, name: tabName(source, all), unlock: enrolled.unlock, items };
 		})
 	);
 	return {
@@ -95,6 +97,10 @@ export interface Match {
 	readonly username: string;
 	/** The site of its Site that fills in on the page: the page's own, or one above it. */
 	readonly savedFor: Site;
+	/** Whether its password is the one the page's fields held. */
+	readonly holdsTyped: boolean;
+	/** Its body as it was read, which an Update writes over only while it still is. */
+	readonly body: string;
 }
 
 /** What one source's passwords came to on the page. */
@@ -116,8 +122,8 @@ type Read =
 const UNOPENED: Read = { state: 'unopened' };
 const ELSEWHERE: Read = { state: 'elsewhere' };
 
-/** What the item's one secret holds, or `undefined` where none of `identities` opens it. */
-const openedWords = (age: Age, armor: string, identities: readonly Uint8Array[]) => {
+/** What an item's one secret holds, or `undefined` where none of `identities` opens it. */
+export const openedWords = (age: Age, armor: string, identities: readonly Uint8Array[]) => {
 	try {
 		return age.openSecret(armor, identities);
 	} catch (error) {
@@ -148,14 +154,17 @@ const readItem = (
 /**
  * A source's passwords that fill in on `page`, by label, opened with
  * `identities`: copies the caller wipes after, as the lock wipes its own in
- * place the moment the page hides. The page is let draw between items.
+ * place the moment the page hides. The page is let draw between items. Each
+ * says whether it holds `typed`, the password the page's fields held, which
+ * is not kept.
  */
 export const findMatches = async (
 	db: NotesDatabase,
 	age: Age,
 	connectionId: string,
 	identities: readonly Uint8Array[],
-	page: Site
+	page: Site,
+	typed = ''
 ): Promise<Found> =>
 	age.eachNote<Found>(
 		await listVaultNotes(db, connectionId),
@@ -170,6 +179,8 @@ export const findMatches = async (
 				label: titleShown(note.title),
 				username: read.login.username,
 				savedFor: read.savedFor,
+				holdsTyped: typed !== '' && read.login.password === typed,
+				body: note.body,
 			};
 			return { ...found, matches: [...found.matches, match] };
 		}

@@ -1,5 +1,5 @@
 import { type Site, siteName } from '@skysa/core';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { UnlockDialog } from '../components/UnlockDialog.js';
 import { openLink } from '../editor/links.js';
@@ -21,13 +21,23 @@ import {
 	type Match,
 } from './matches.js';
 import type { Hello } from './protocol.js';
+import { Remember } from './Remember.js';
+import {
+	offerFor,
+	saveLogin,
+	type Saving,
+	typedLogin,
+	updateLogin,
+	type Wrote,
+} from './remembering.js';
 
 /**
  * The fill window's logins, once the page has said who it is
  * (docs/ARCHITECTURE.md §7, "Filling in on a site"): each source with
  * passwords in it unlocked in turn, as the app's own unlock asks, and the
  * passwords whose Site fills in on the page listed, to fill in with, or to
- * copy where the page had no fields to fill.
+ * copy where the page had no fields to fill; and a password typed on the
+ * page offered to be saved, or put in place of the one saved (`Remember`).
  *
  * Asked for only now, after a page's `hello`: a page that opens the window
  * without the bookmarklet's answer never sets off the device's lock. The
@@ -264,27 +274,36 @@ const NoLogins = ({ page }: { page: Site }) => (
 	</>
 );
 
+/** How far the window has got with the sources, all told. */
+const summarize = (sources: readonly FillSource[], opening: ReadonlyMap<string, Opening>) => {
+	const found = sources.flatMap((source) => {
+		const at = opening.get(source.connectionId);
+		return at?.state === 'opened' ? [{ source, found: at.found }] : [];
+	});
+	const states = sources.map((source) => opening.get(source.connectionId));
+	return {
+		matches: found.flatMap(({ source, found: { matches: each } }) =>
+			each.map((match) => ({ source, match }))
+		),
+		unopened: found.reduce((sum, each) => sum + each.found.unopened, 0),
+		busy: states.some(isBusy),
+		allOpened: states.every((at) => at?.state === 'opened'),
+	};
+};
+
 interface ShownProps extends Omit<RowProps, 'match' | 'source'> {
 	sources: FillSources;
 	opening: ReadonlyMap<string, Opening>;
 	said: Said;
 	onUnlock: (source: FillSource) => void;
+	/** What is offered for a password typed on the page, under the logins. */
+	children?: ReactNode;
 }
 
 /** The logins, and what the window says of the sources it looked in. */
-const LoginsShown = ({ sources, opening, said, onUnlock, ...row }: ShownProps) => {
+const LoginsShown = ({ sources, opening, said, onUnlock, children, ...row }: ShownProps) => {
 	const many = sources.sources.length > 1;
-	const found = sources.sources.flatMap((source) => {
-		const at = opening.get(source.connectionId);
-		return at?.state === 'opened' ? [{ source, found: at.found }] : [];
-	});
-	const matches = found.flatMap(({ source, found: { matches: each } }) =>
-		each.map((match) => ({ source, match }))
-	);
-	const unopened = found.reduce((sum, each) => sum + each.found.unopened, 0);
-	const states = sources.sources.map((source) => opening.get(source.connectionId));
-	const busy = states.some(isBusy);
-	const allOpened = states.every((at) => at?.state === 'opened');
+	const { matches, unopened, busy, allOpened } = summarize(sources.sources, opening);
 	const looked = sources.sources.length > 0 || sources.notSetUp === 0;
 	return (
 		<>
@@ -313,6 +332,7 @@ const LoginsShown = ({ sources, opening, said, onUnlock, ...row }: ShownProps) =
 				/>
 			))}
 			{allOpened && looked && matches.length === 0 && <NoLogins page={row.page} />}
+			{children}
 			{unopened > 0 && <p className="muted">{t('fill.unopened', { count: unopened })}</p>}
 			{sources.notSetUp > 0 && (
 				<p className="muted">{t('fill.notSetUp', { count: sources.notSetUp })}</p>
@@ -339,6 +359,7 @@ export const FillLogins = ({
 	/** The sources this window has unlocked: one locking closes it. */
 	const unlocked = useRef(new Set<string>());
 	const press = usePressGuard(now, opening, asking);
+	const typed = typedLogin(hello);
 
 	const set = useCallback((connectionId: string, to: Opening) => {
 		setOpening((before) => new Map(before).set(connectionId, to));
@@ -358,6 +379,11 @@ export const FillLogins = ({
 	/** A source's passwords that fill in on the page, unlocked first where it is locked. */
 	const open = async (source: FillSource) => {
 		const { connectionId } = source;
+		// Nothing in it to look at: only to save to, which needs no unlock.
+		if (source.items === 0) {
+			set(connectionId, { state: 'opened', found: { matches: [], unopened: 0 } });
+			return;
+		}
 		if (!lock.isUnlocked(connectionId)) {
 			set(connectionId, { state: 'unlocking' });
 			const answer = await ask(source);
@@ -374,7 +400,14 @@ export const FillLogins = ({
 		}
 		set(connectionId, { state: 'opening' });
 		try {
-			const found = await findMatches(db, await age(), connectionId, identities, site);
+			const found = await findMatches(
+				db,
+				await age(),
+				connectionId,
+				identities,
+				site,
+				typed?.password
+			);
 			set(connectionId, { state: 'opened', found });
 		} catch {
 			set(connectionId, { state: 'failed' });
@@ -449,6 +482,32 @@ export const FillLogins = ({
 		setSaid(done ? 'copied' : 'notCopied');
 	};
 
+	/** Save a password typed on the page; once saved, the window has done its part. */
+	const save = async (saving: Saving): Promise<Wrote | 'failed'> => {
+		try {
+			const wrote = await saveLogin(db, await age(), saving);
+			if (wrote.state === 'written') close();
+			return wrote;
+		} catch {
+			return 'failed';
+		}
+	};
+
+	/** Put the password typed on the page in place of `match`'s own, which it keeps. */
+	const update = async (match: Match): Promise<Wrote | 'failed'> => {
+		const identities = copied(lock.keys(match.connectionId));
+		if (identities === undefined || typed === undefined) return 'failed';
+		try {
+			const wrote = await updateLogin(db, await age(), match, typed.password, identities);
+			if (wrote.state === 'written') close();
+			return wrote;
+		} catch {
+			return 'failed';
+		} finally {
+			wipe(identities);
+		}
+	};
+
 	if (sources === undefined) {
 		return (
 			<p className="muted" role="status">
@@ -460,6 +519,7 @@ export const FillLogins = ({
 	if (!sources.shown) return <NoSources />;
 
 	const { fields } = hello;
+	const { matches, busy } = summarize(sources.sources, opening);
 	return (
 		<>
 			<LoginsShown
@@ -478,7 +538,24 @@ export const FillLogins = ({
 				onUnlock={(source) => {
 					void open(source);
 				}}
-			/>
+			>
+				{typed !== undefined && !busy && (
+					<Remember
+						page={site}
+						typed={typed}
+						offer={offerFor(
+							typed,
+							matches.map(({ match }) => match),
+							site
+						)}
+						sources={sources.sources}
+						press={press}
+						onSave={save}
+						onUpdate={update}
+						onOpenPasswords={openPasswords}
+					/>
+				)}
+			</LoginsShown>
 			{asking !== null && (
 				<UnlockDialog
 					key={asking.source.connectionId}
