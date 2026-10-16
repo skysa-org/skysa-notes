@@ -1,21 +1,16 @@
 import { siteName } from '@skysa/core';
 import { type ReactNode, useEffect, useSyncExternalStore } from 'react';
 
-import { openLink } from '../editor/links.js';
 import { t } from '../i18n/t.js';
 import type { ChannelState, FillChannel } from './channel.js';
+import { FillLogins, type FillLoginsOptions, openPasswords } from './FillLogins.js';
 
 /**
  * The fill window (docs/ARCHITECTURE.md §7, "Filling in on a site"), opened
  * over a site's sign-in page by the bookmarklet: what it knows of the page,
  * as its channel says (`channel.ts`), and, once the page has said who it is,
- * that page's logins.
+ * that page's logins (`FillLogins`).
  */
-
-/** Passwords in the app, from the window: in a tab of its own, with no hold on this one (`openLink`). */
-const openPasswords = () => {
-	openLink(new URL('/#passwords', window.location.origin));
-};
 
 /** What the window says while it does not know the page, or cannot read it. */
 const notYet = (at: Exclude<ChannelState, { state: 'hello' }>): ReactNode => {
@@ -39,7 +34,10 @@ const notYet = (at: Exclude<ChannelState, { state: 'hello' }>): ReactNode => {
 	return <p>{at.state === 'newer' ? t('fill.newer') : t('fill.older')}</p>;
 };
 
-export const FillPage = ({ channel }: { channel: FillChannel }) => {
+export const FillPage = ({
+	channel,
+	...options
+}: Readonly<{ channel: FillChannel }> & FillLoginsOptions) => {
 	const at = useSyncExternalStore(channel.subscribe, channel.current);
 	const heading =
 		at.state === 'hello' ? t('fill.on', { site: siteName(at.site) }) : t('fill.title');
@@ -56,9 +54,14 @@ export const FillPage = ({ channel }: { channel: FillChannel }) => {
 					<span className="fill-insecure">{t('fill.notSecure')}</span>
 				)}
 			</header>
-			{at.state === 'hello'
-				? at.outdated && <p className="muted">{t('fill.outdated')}</p>
-				: notYet(at)}
+			{at.state === 'hello' ? (
+				<>
+					{at.outdated && <p className="muted">{t('fill.outdated')}</p>}
+					<FillLogins site={at.site} hello={at.hello} channel={channel} {...options} />
+				</>
+			) : (
+				notYet(at)
+			)}
 		</main>
 	);
 };

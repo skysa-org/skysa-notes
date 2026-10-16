@@ -50,7 +50,7 @@ const armoredNotes = (db: NotesDatabase, connectionId: string): Promise<NoteReco
  * Each of `notes` in turn, the page let draw between them every so often:
  * each header tried is a curve operation, and none of them waits.
  */
-const eachNote = <T>(
+export const eachNote = <T>(
 	notes: readonly NoteRecord[],
 	start: T,
 	step: (sofar: T, note: NoteRecord) => T | Promise<T>

@@ -391,19 +391,26 @@ const EnteredUnlockForm = ({
 };
 
 export interface UnlockDialogProps extends Omit<UnlockFormProps, 'onUnlocked' | 'onRecovery'> {
+	/** In place of "Unlock vault": where which source's vault it is needs saying. */
+	title?: string;
 	onUnlocked: () => void;
 	onRecovery: () => void;
 	onCancel: () => void;
 	returnFocus?: RefObject<HTMLElement | null>;
 }
 
-export const UnlockDialog = ({ onCancel, returnFocus, ...form }: UnlockDialogProps) => {
+export const UnlockDialog = ({
+	title = t('secrets.unlock.title'),
+	onCancel,
+	returnFocus,
+	...form
+}: UnlockDialogProps) => {
 	// The device's own lock is asked with nothing drawn: the dialog is drawn
 	// once it says anything but yes, and never where it unlocks.
 	const [asked, setAsked] = useState(form.kind !== 'device');
 	return (
 		<Dialog
-			title={t('secrets.unlock.title')}
+			title={title}
 			className="secrets-dialog"
 			onClose={onCancel}
 			returnFocus={returnFocus}

@@ -6255,3 +6255,43 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	font-size: 0.8125rem;
 	font-weight: 600;
 }
+
+/* The fill window's logins: a row each, its label and username, and Fill in
+   or Copy beside them, under them where the window is too narrow. */
+.fill-logins {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--border);
+}
+
+.fill-login {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-xs) var(--space-s);
+	padding: var(--space-s) 0;
+	border-bottom: 1px solid var(--border);
+}
+
+.fill-login-text {
+	display: grid;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.fill-login-label {
+	font-weight: 600;
+}
+
+.fill-login-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-xs);
+}
+
+.fill-said:empty {
+	display: none;
+}
