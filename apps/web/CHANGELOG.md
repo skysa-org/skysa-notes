@@ -1,5 +1,13 @@
 # @skysa/web
 
+## 1.11.1
+
+### Patch Changes
+
+- b5b802d: Text copied from the rich editor no longer has `&#x20;` at the end of its lines. A space at the end of a line, such as the one a phone's keyboard leaves after the last word before Enter, is left out of what is copied; the note keeps it.
+- b6e951b: The fill window times its guard against a stray press from the moment its logins are drawn, rather than after the browser has painted them, so a press that lands on logins just drawn is not taken as one meant for them.
+- @skysa/core@1.11.1
+
 ## 1.11.0
 
 ### Minor Changes
