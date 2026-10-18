@@ -1,5 +1,13 @@
 import { type Site, siteName } from '@skysa/core';
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from 'react';
 
 import { UnlockDialog } from '../components/UnlockDialog.js';
 import { openLink } from '../editor/links.js';
@@ -117,10 +125,15 @@ const isBusy = (at: Opening | undefined): boolean =>
 /**
  * `run`, unless the window was shown or focused, or what it lists or asks
  * changed, less than `PRESS_GUARD_MS` ago.
+ *
+ * Timed from as what it lists is drawn, in a layout effect, before the browser
+ * paints it. A passive effect runs after the paint, so on a slow device a
+ * press on rows just drawn could come before it, and be timed from before
+ * they were.
  */
 const usePressGuard = (now: () => number, listed: unknown, asked: unknown) => {
 	const shownAt = useRef(0);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		shownAt.current = now();
 	}, [now, listed, asked]);
 	useEffect(() => {
