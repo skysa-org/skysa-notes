@@ -51,6 +51,7 @@ import { codeBlocksKeepAtoms, codeSpansHoldText } from './codeAtoms.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
 import { codeDisplay, type CodeDisplayStore } from './codeDisplay.js';
 import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
+import { copiedText } from './copiedText.js';
 import { deleteSelectedNode } from './deleteSelected.js';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
@@ -488,6 +489,9 @@ export const createRichEditor = ({
 				// Files, ahead of the clipboard plugin's paste and of ProseMirror's drop.
 				handlePaste: (view, event) =>
 					attachOnPaste(ctx.get(attachHostCtx.key), view, event),
+				// Ahead of the clipboard plugin's, which would copy a space at
+				// the end of a line as `&#x20;` (`copiedText.ts`).
+				clipboardTextSerializer: (slice) => copiedText(ctx, slice),
 				handleDOMEvents: {
 					drop: (view, event) => attachOnDrop(ctx.get(attachHostCtx.key), view, event),
 					// Ahead of ProseMirror's own, which on Android waits for a
