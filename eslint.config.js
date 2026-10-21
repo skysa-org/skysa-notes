@@ -300,11 +300,11 @@ export default tseslint.config(
 	},
 	{
 		// No Node built-ins anywhere in the Worker, `worker.ts` included: the
-		// entry module is the likeliest place for one to appear, and nothing else
-		// in the gate would notice. `pnpm typecheck` passes (apps/api's src and
-		// tests are one TypeScript program and the tests legitimately pull
-		// @types/node in) and so does `wrangler deploy --dry-run` — the import
-		// goes straight into the bundle, and only the deployed Worker finds out.
+		// entry module is the likeliest place for one to appear. `wrangler deploy
+		// --dry-run` bundles one without a word, and only the deployed Worker
+		// would find out. `pnpm typecheck` refuses it too, through
+		// `tsconfig.src.json` (src with no Node types; `tsconfig.json` holds the
+		// tests, which pull @types/node in), but this says why, and says it first.
 		files: ['apps/api/src/**/*.ts'],
 		languageOptions: { globals: globals.node },
 		rules: {
