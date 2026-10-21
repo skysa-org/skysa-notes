@@ -858,9 +858,16 @@ export const NoteView = ({
 					}
 					const { body, origin } = unstored.value;
 					onDeleted({ ...deleted, body, bodyOrigin: origin });
+				})
+				// Turned down by the store: the note is where it was, nothing
+				// held for it was let go, and there is no delete to undo. Said,
+				// as the scratchpad and the vault say it, rather than a note
+				// that stays put after Delete with nothing said.
+				.catch(() => {
+					onProblem?.({ message: t('notes.view.notDeleted'), tone: 'error' });
 				});
 		},
-		[flush, forget, onDeleted, settle]
+		[flush, forget, onDeleted, onProblem, settle]
 	);
 
 	useImperativeHandle(handle, () => ({ deleteNote: deleteOne }), [deleteOne]);
