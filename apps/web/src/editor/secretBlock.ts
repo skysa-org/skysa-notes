@@ -22,6 +22,8 @@ import {
 	createSecretPanels,
 	DRAFT,
 	insertSecret,
+	keepAll,
+	keepSecretsWith,
 	leftBehind,
 	lockAll,
 	NOT_REVEALED,
@@ -338,6 +340,9 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 			const stopReceiving = host.receive(() => {
 				void insertSecret(doc, host, panels);
 			});
+			const stopKeeping = keepSecretsWith(view, () => {
+				keepAll(doc, panels);
+			});
 			return {
 				update: (updated, before) => {
 					if (updated.state.doc === before.doc || panels.all().length === 0) return;
@@ -347,9 +352,12 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 					panels.refresh();
 				},
 				destroy: () => {
+					stopKeeping();
 					stopLock();
 					stopReceiving();
-					// The editor is going: the words with it.
+					// The editor is going: the words with it. What they held is in
+					// the note already, a character still being composed included,
+					// where its owner asked first (`keepSecrets`).
 					panels.takeAll();
 				},
 			};
