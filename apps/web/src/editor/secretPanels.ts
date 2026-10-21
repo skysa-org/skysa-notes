@@ -367,6 +367,31 @@ export const keepAll = (doc: SecretDocument, panels: SecretPanels): void => {
 	});
 };
 
+/** What is in each editor's panels kept, by the editor's view, while it is there. */
+const keepers = new WeakMap<object, () => void>();
+
+/**
+ * Register what keeps `view`'s panels (`keepAll`), for `keepSecrets` to call;
+ * the answer lets go of it, as the editor goes.
+ */
+export const keepSecretsWith = (view: object, keep: () => void): (() => void) => {
+	keepers.set(view, keep);
+	return () => {
+		keepers.delete(view);
+	};
+};
+
+/**
+ * What is typed in `view`'s panels kept, a character an input method is
+ * still composing with it, before the editor goes: once it has, the words
+ * would go with it. Either editor's owner calls it while the editor is there
+ * to take the edit and whatever saves the note is there to save it. Nothing,
+ * for a view that has gone or holds no panels.
+ */
+export const keepSecrets = (view: object): void => {
+	keepers.get(view)?.();
+};
+
 /**
  * Every panel closed as the tab locks, at once: what the lock is for is that
  * the words are not on screen. What is typed in them is kept first.

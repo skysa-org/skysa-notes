@@ -3,6 +3,7 @@ import '@milkdown/kit/prose/tables/style/tables.css';
 
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
+import type { EditorView } from '@milkdown/kit/prose/view';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
 import type { StructuralDifference } from '@skysa/core';
@@ -10,6 +11,7 @@ import {
 	type ReactNode,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -31,6 +33,7 @@ import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
 import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
 import type { SecretHost } from './secretHost.js';
+import { keepSecrets } from './secretPanels.js';
 import { SlashMenu } from './SlashMenu.js';
 
 /**
@@ -204,6 +207,27 @@ const EditorBody = ({
 		// `get` is intentionally absent; see below.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [loading, noteId, offer]);
+
+	// What is typed in a secret's panel kept before the editor goes: a word an
+	// input method is still composing is not in the note until then. A layout
+	// effect's cleanup, so it runs before any passive one: the note's autosave
+	// flushes in its own as the note is left, and must find the edit there. The
+	// view is held from when the editor is made, since by then it is the one
+	// the panels were registered under.
+	const proseView = useRef<EditorView | null>(null);
+	useEffect(() => {
+		if (loading) return;
+		proseView.current = get()?.action((ctx) => ctx.get(editorViewCtx)) ?? null;
+		// `get` is intentionally absent; see below.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [loading, noteId]);
+	useLayoutEffect(
+		() => () => {
+			if (proseView.current !== null) keepSecrets(proseView.current);
+			proseView.current = null;
+		},
+		[noteId]
+	);
 
 	// Can this note be shown at all? Checked once the editor exists, because only
 	// then do its parser and serializer exist. This runs before the user has any

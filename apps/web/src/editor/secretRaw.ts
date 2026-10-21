@@ -27,6 +27,7 @@ import {
 	DRAFT,
 	insertSecret,
 	keepAll,
+	keepSecretsWith,
 	leftBehind,
 	lockAll,
 	NOT_REVEALED,
@@ -604,19 +605,6 @@ const revealWidget = (
 		return bar;
 	});
 
-/** What is in each editor's panels kept, by the editor: what it does as it goes. */
-const keepers = new WeakMap<EditorView, () => void>();
-
-/**
- * What is typed in `view`'s panels kept, a character an input method is
- * still composing with it, before the editor goes: once it has, the words
- * would go with it. Its owner calls it while the editor is there to take
- * the edit and whatever saves the note is there to save it.
- */
-export const keepSecrets = (view: EditorView): void => {
-	keepers.get(view)?.();
-};
-
 /**
  * Secrets in raw mode, through the host the editor is given as it is made:
  * Reveal on each one on screen, its panel under it, a new secret begun from
@@ -682,7 +670,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 			const stopReceiving = host.receive(() => {
 				void insertSecret(doc, host, panels);
 			});
-			keepers.set(view, () => {
+			const stopKeeping = keepSecretsWith(view, () => {
 				keepAll(doc, panels);
 			});
 			return {
@@ -707,7 +695,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 				},
 				destroy: () => {
 					gone.current = true;
-					keepers.delete(view);
+					stopKeeping();
 					stopShowing();
 					stopLock();
 					stopReceiving();

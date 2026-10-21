@@ -18,7 +18,8 @@ import { rawLinks } from './linkRaw.js';
 import { rawWithoutNul } from './noNul.js';
 import { rawAttachments } from './rawAttach.js';
 import { NO_SECRETS, type SecretHost } from './secretHost.js';
-import { keepSecrets, rawSecrets } from './secretRaw.js';
+import { keepSecrets } from './secretPanels.js';
+import { rawSecrets } from './secretRaw.js';
 
 /**
  * Raw markdown mode: CodeMirror 6 over the note body. The body string is the
