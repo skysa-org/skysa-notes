@@ -16,6 +16,7 @@ import {
 	holdAcceptedCode,
 	holdConnectCode,
 } from '../src/store/connectCode.js';
+import type * as Connection from '../src/store/connection.js';
 import {
 	bindConnection,
 	connectedSources,
@@ -27,6 +28,20 @@ import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/
 import { createNote } from '../src/store/notes.js';
 import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
+
+/** A store that turns the next rename down, as a write IndexedDB refuses does. */
+const store = vi.hoisted(() => ({ refusingRename: false }));
+
+vi.mock('../src/store/connection.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Connection>();
+	return {
+		...actual,
+		renameSource: (...args: Parameters<typeof Connection.renameSource>) =>
+			store.refusingRename
+				? Promise.reject(new Error('QuotaExceededError'))
+				: actual.renameSource(...args),
+	};
+});
 
 /**
  * The bar across the top of the app: which set of notes is showing, what the
@@ -46,6 +61,7 @@ const opened: NotesDatabase[] = [];
 
 afterEach(async () => {
 	cleanup();
+	store.refusingRename = false;
 	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
@@ -255,6 +271,44 @@ describe('the source tabs', () => {
 		});
 		expect((await db.syncState.get('c1'))?.label).toBeUndefined();
 		expect(screen.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+	});
+
+	// The name it was shown under, given back unchanged, is no name of the
+	// user's: stored, it would pin the tab to the derived name ("Dropbox") and
+	// stop it following the account, as the storage panel's field already knew.
+	it('stores no name when the one it had is given back unchanged', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await showConnection(db, 'c1');
+		show(db);
+
+		await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
+		screen.getByRole('textbox', { name: 'Rename Dropbox' });
+		await user.keyboard('{Enter}');
+
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox')).toBeNull();
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect((await db.syncState.get('c1'))?.label).toBeUndefined();
+	});
+
+	it('keeps the name it had where the store turns the rename down', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await showConnection(db, 'c1');
+		show(db);
+		store.refusingRename = true;
+
+		await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
+		await user.keyboard('Work');
+		await user.keyboard('{Enter}');
+
+		expect(await screen.findByRole('button', { name: 'Dropbox' })).toBeTruthy();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect((await db.syncState.get('c1'))?.label).toBeUndefined();
 	});
 
 	it('does not offer to rename the device’s own pile, which is not a connection', async () => {
