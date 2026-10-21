@@ -56,6 +56,8 @@ export const notes = {
 		hideOutline: 'Hide the outline',
 		unsaved:
 			'Changes are not being saved on this device. Copy your text somewhere safe, then reload.',
+		/** Delete, from the note's row or the open note, turned down by the store. */
+		notDeleted: 'That note could not be deleted.',
 		yamlError:
 			'There is a YAML error in this note’s frontmatter, so its title and tags cannot be saved back to the file — the text is left exactly as it is rather than guessed at. Everything else about the note works as usual.',
 		/** The editor tabs' tooltips, by the editor each tab is: rich text, or markdown. */

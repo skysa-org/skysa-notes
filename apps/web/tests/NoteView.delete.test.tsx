@@ -4,9 +4,25 @@ import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteView, type NoteViewHandle } from '../src/components/NoteView.js';
+import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
+import type * as Notes from '../src/store/notes.js';
 import { createNote, deleteNote, getNote } from '../src/store/notes.js';
+
+/** A store that turns the next delete down, as a write IndexedDB refuses does. */
+const store = vi.hoisted(() => ({ refusing: false }));
+
+vi.mock('../src/store/notes.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Notes>();
+	return {
+		...actual,
+		deleteNote: (...args: Parameters<typeof Notes.deleteNote>) =>
+			store.refusing
+				? Promise.reject(new Error('QuotaExceededError'))
+				: actual.deleteNote(...args),
+	};
+});
 
 /**
  * Typing and then deleting, inside the autosave window.
@@ -46,14 +62,57 @@ const deleteOpen = (note: NoteRecord) => {
 	});
 };
 
+const deletions: NoteRecord[] = [];
+const problems: AttachmentProblem[] = [];
+
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
-	return <NoteView ref={pane} note={note} onDeleted={() => undefined} />;
+	return (
+		<NoteView
+			ref={pane}
+			note={note}
+			onDeleted={(deleted) => {
+				deletions.push(deleted);
+			}}
+			onProblem={(problem) => {
+				problems.push(problem);
+			}}
+		/>
+	);
 };
 
 afterEach(async () => {
 	cleanup();
+	store.refusing = false;
+	deletions.length = 0;
+	problems.length = 0;
 	await db.notes.clear();
+});
+
+describe('deleting a note the store will not delete', () => {
+	/**
+	 * The list's `⋯` deletes through the pane. A delete the store turns down
+	 * leaves the note where it was, and the user is told so — not left looking
+	 * at a note they asked to delete with nothing said, and no undo offered for
+	 * a delete that never happened.
+	 */
+	it('says so, and leaves the note as it was', async () => {
+		const note = await createNote(db, { title: 'Kept', body: 'still here\n' });
+		render(<Harness id={note.id} />);
+		await screen.findByTestId('rich-editor');
+		store.refusing = true;
+
+		deleteOpen(note);
+
+		await waitFor(() => {
+			expect(problems).toEqual([
+				{ message: 'That note could not be deleted.', tone: 'error' },
+			]);
+		});
+		expect(deletions).toEqual([]);
+		expect((await getNote(db, note.id))?.deletedLocally).toBe(0);
+		expect(screen.getByTestId('rich-editor')).toBeTruthy();
+	});
 });
 
 describe('deleting a note with an edit still pending', () => {
