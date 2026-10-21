@@ -1,5 +1,15 @@
 # @skysa/web
 
+## 1.11.2
+
+### Patch Changes
+
+- a7b6cb5: Changing or removing a link in the rich editor now acts on the whole link, wherever in it the cursor is. A link whose words were partly bold or italic used to come apart: only the words around the cursor got the new address, or lost the link, and the rest kept the old one.
+- 712a1de: A note that could not be deleted now says so. Delete from a note's row or from the open note used to do nothing visible when the device's storage turned the delete down: the note stayed where it was and no message appeared.
+- ec5165b: A character a phone's keyboard was still composing in a secret's panel is kept when the note is closed or the editor switched in rich text mode, as it already was in markdown mode.
+- 5c400b7: Renaming a source from its tab in a wide window now behaves as it does from the storage panel. Leaving the name as it was no longer stores it as a name of your own, so the tab goes on following the account's name. A rename the device could not save leaves the old name in place instead of failing unseen.
+- @skysa/core@1.11.2
+
 ## 1.11.1
 
 ### Patch Changes
