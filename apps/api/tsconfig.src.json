@@ -1,0 +1,8 @@
+{
+	// The Worker's own code alone, with no ambient Node types: it runs without
+	// `nodejs_compat`, so `Buffer`, `process` or `setImmediate` there would pass
+	// `tsconfig.json` (whose tests pull @types/node in through vitest) and only
+	// fail once deployed. `pnpm typecheck` runs both.
+	"extends": "./tsconfig.json",
+	"include": ["src/**/*.ts", "worker-configuration.d.ts"]
+}
