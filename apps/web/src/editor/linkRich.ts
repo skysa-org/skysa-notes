@@ -4,6 +4,7 @@ import type { EditorView } from '@milkdown/kit/prose/view';
 
 import { LINK_MARK } from './commands.js';
 import { linkChip, openableLink, openLink, opensOnClick } from './links.js';
+import { markRunAt } from './markRun.js';
 
 /**
  * A link in rich text, opened in the browser (`links.ts`; docs/ARCHITECTURE.md
@@ -41,22 +42,8 @@ export const linkAt = (state: EditorState): LinkAt | undefined => {
 	const href = mark === undefined ? undefined : hrefOf(mark);
 	if (mark === undefined || href === undefined) return undefined;
 
-	const start = $head.start();
-	const run: { current: { from: number; to: number } | undefined } = { current: undefined };
-	const found: { current: LinkAt | undefined } = { current: undefined };
-	$head.parent.forEach((child, offset) => {
-		const from = start + offset;
-		const to = from + child.nodeSize;
-		if (!mark.isInSet(child.marks)) {
-			run.current = undefined;
-			return;
-		}
-		run.current = { from: run.current?.from ?? from, to };
-		if (run.current.from <= $head.pos && $head.pos <= run.current.to) {
-			found.current = { ...run.current, href };
-		}
-	});
-	return found.current;
+	const run = markRunAt(state.doc, $head.pos, mark);
+	return run === undefined ? undefined : { ...run, href };
 };
 
 /** Open the link the cursor is in, where it is one this app opens: Alt+Enter, as in Google Docs. */
