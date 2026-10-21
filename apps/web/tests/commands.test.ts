@@ -183,6 +183,46 @@ describe('links', () => {
 		expect(withCtx(currentMarkdown)).toBe('plain\n');
 	});
 
+	// A link's words can be several text nodes: `[the **bay** map](…)` is three.
+	// The edit has to reach the whole link from wherever in it the cursor is,
+	// not just the node the cursor happens to be in, or the link comes apart.
+	it.each(['the', 'bay', 'map'])(
+		'points the whole of a link somewhere else from its %s, across formatting',
+		async (word) => {
+			const withCtx = await mount('[the **bay** map](https://example.test/a)\n');
+			withCtx(cursorIn(word));
+
+			withCtx(setLink('https://example.test/b'));
+
+			expect(withCtx(currentMarkdown)).toBe('[the **bay** map](https://example.test/b)\n');
+		}
+	);
+
+	it.each(['the', 'bay', 'map'])(
+		'takes the link off the whole of its words from its %s, across formatting',
+		async (word) => {
+			const withCtx = await mount('[the **bay** map](https://example.test/a)\n');
+			withCtx(cursorIn(word));
+
+			withCtx(clearLink);
+
+			expect(withCtx(currentMarkdown)).toBe('the **bay** map\n');
+		}
+	);
+
+	it('stops at the end of the link, leaving the next one alone', async () => {
+		const withCtx = await mount(
+			'[one **two**](https://example.test/a)[three](https://example.test/c)\n'
+		);
+		withCtx(cursorIn('one'));
+
+		withCtx(setLink('https://example.test/b'));
+
+		expect(withCtx(currentMarkdown)).toBe(
+			'[one **two**](https://example.test/b)[three](https://example.test/c)\n'
+		);
+	});
+
 	it('puts no file beside the note in a link, which would be two broken ones', async () => {
 		const withCtx = await mount('See [a.zip](a.zip) now\n');
 		withCtx((ctx) => {

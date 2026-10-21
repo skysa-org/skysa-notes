@@ -13,7 +13,7 @@ import {
 	wrapInHeadingCommand,
 } from '@milkdown/kit/preset/commonmark';
 import { insertTableCommand, toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
-import type { MarkType } from '@milkdown/kit/prose/model';
+import type { Mark, MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 
@@ -22,6 +22,7 @@ import { attachPicked } from './attachDrop.js';
 import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
 import { applyList } from './lists.js';
+import { markRunAt } from './markRun.js';
 import { insertSecretCommand } from './secretBlock.js';
 
 /**
@@ -93,21 +94,24 @@ const clearFormatting = (ctx: Ctx): void => {
  *
  * Found by the mark rather than by the selection, because a link is a mark over
  * a run of text and not a node: the user's cursor is somewhere in the middle of
- * it and the edit has to reach both ends. Milkdown's own `updateLinkCommand`
- * looks for it the same way.
+ * it and the edit has to reach both ends. The first text in the selection that
+ * carries a link says which link; `markRunAt` then runs it out to both ends,
+ * across any formatting inside it.
  */
 const linkAround = (state: EditorState, type: MarkType): { from: number; to: number } | null => {
 	const { from, to } = state.selection;
-	const found: { current: { from: number; to: number } | null } = { current: null };
+	const found: { current: { pos: number; mark: Mark } | null } = { current: null };
 
 	state.doc.nodesBetween(from, from === to ? to + 1 : to, (node, pos) => {
 		if (found.current !== null) return false;
-		if (!type.isInSet(node.marks)) return true;
-		found.current = { from: pos, to: pos + node.nodeSize };
+		const mark = type.isInSet(node.marks);
+		if (mark === undefined) return true;
+		found.current = { pos, mark };
 		return false;
 	});
 
-	return found.current;
+	if (found.current === null) return null;
+	return markRunAt(state.doc, found.current.pos, found.current.mark) ?? null;
 };
 
 /** Whether everything inline in `from`–`to` is a file's chip. */
