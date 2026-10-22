@@ -1,29 +1,17 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
 
 /**
  * A press on the search field, before anything is typed in it, lists the
  * notes opened lately on this device — every way a note comes to be open
  * counts — less the one on screen; and choosing one opens it.
  */
-
-const openApp = async (at = '/') => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: [at] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const showing = async (title: string) => {
 	await waitFor(() => {

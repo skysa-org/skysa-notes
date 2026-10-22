@@ -27,6 +27,7 @@ import {
 import { queueMove, queueWrite } from '../src/store/queue.js';
 import { type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { noteById, updateNote } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -44,14 +45,6 @@ const ADA = { connectionId: 'c-ada', provider: 'dropbox', accountId: 'dbid:ada' 
 const BOB = { connectionId: 'c-bob', provider: 'onedrive', accountId: 'ms:bob' } as const;
 const ada = { connectionId: ADA.connectionId };
 const bob = { connectionId: BOB.connectionId };
-
-const holdCredential = (db: NotesDatabase, connectionId: string) =>
-	db.credentials.put({
-		id: connectionId,
-		credential: `sk1_${connectionId}`,
-		provider: 'dropbox',
-		createdAt: 0,
-	});
 
 /** Bob's source live, Ada's still connected: the caller decides when it goes. */
 const twoSources = async () => {

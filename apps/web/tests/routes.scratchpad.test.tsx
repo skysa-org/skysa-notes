@@ -1,17 +1,15 @@
 import { readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, getNote, listScratchNotes, setScratchMarks } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { setScratchpadShown } from '../src/store/scratchpad.js';
 import { hashIn } from './entry.js';
 import { fence, sealed } from './secretHostFake.js';
+import { openApp } from './support/app.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -28,17 +26,6 @@ afterEach(() => {
 	fake?.restore();
 	fake = undefined;
 });
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
-};
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };
 const scratch = (input: { title?: string; body?: string } = {}) =>

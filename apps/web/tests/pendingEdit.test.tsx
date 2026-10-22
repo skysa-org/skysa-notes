@@ -10,6 +10,7 @@ import { deleteNote, getNote, saveNoteBody } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 import { updateNote } from './noteRows.js';
+import { flushAutosave } from './support/app.js';
 
 /**
  * An edit still in the autosave window when a sync lands on its note.
@@ -93,13 +94,6 @@ const open = async () => {
 			});
 		},
 	};
-};
-
-/** What `pagehide` does: the pending save goes now, rather than in two seconds. */
-const flushAutosave = () => {
-	act(() => {
-		window.dispatchEvent(new Event('pagehide'));
-	});
 };
 
 const notes = () => db.notes.where('connectionId').equals(CONNECTION).toArray();

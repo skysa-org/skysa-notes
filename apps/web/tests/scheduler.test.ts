@@ -25,7 +25,6 @@ import { type RelayFactory } from '../src/sync/relay.js';
 import {
 	createSyncScheduler,
 	type ProviderFactory,
-	type SchedulerEnvironment,
 	type SchedulerEvent,
 	type SchedulerStatus,
 	SYNC_WAIT_MS,
@@ -34,7 +33,9 @@ import {
 	type SyncSchedulerOptions,
 } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
+import { fakeEnvironment } from './support/fakes/environment.js';
 
 const HOUR = 60 * 60 * 1000;
 const ACCOUNT = { connectionId: 'c1', provider: 'dropbox', accountId: 'acct' } as const;
@@ -51,72 +52,6 @@ afterEach(async () => {
 		})
 	);
 });
-
-/** Time, the network and the tab, as the test says they are. */
-const fakeEnvironment = () => {
-	const state = { now: 1_000_000, online: true, visible: true, nextId: 0 };
-	const handlers = new Map<SchedulerEvent, Set<() => void>>();
-	const timers = new Map<number, { at: number; callback: () => void }>();
-	/** Each lock's tail: the next holder waits for it. */
-	const locks = new Map<string, Promise<void>>();
-
-	const environment: SchedulerEnvironment = {
-		now: () => state.now,
-		isOnline: () => state.online,
-		isVisible: () => state.visible,
-		listen: (event, handler) => {
-			const set = handlers.get(event) ?? new Set();
-			set.add(handler);
-			handlers.set(event, set);
-			return () => {
-				set.delete(handler);
-			};
-		},
-		setTimer: (callback, ms) => {
-			state.nextId += 1;
-			const id = state.nextId;
-			timers.set(id, { at: state.now + ms, callback });
-			return () => {
-				timers.delete(id);
-			};
-		},
-		withLock: <T>(name: string, work: () => Promise<T>): Promise<T> => {
-			const held = (locks.get(name) ?? Promise.resolve()).then(work);
-			locks.set(
-				name,
-				held.then(
-					() => undefined,
-					() => undefined
-				)
-			);
-			return held;
-		},
-	};
-
-	return {
-		environment,
-		state,
-		fire: (event: SchedulerEvent) => {
-			handlers.get(event)?.forEach((handler) => {
-				handler();
-			});
-		},
-		/** Move the clock on, running every timer that comes due on the way. */
-		advance: (ms: number) => {
-			state.now += ms;
-			[...timers.entries()]
-				.filter(([, timer]) => timer.at <= state.now)
-				.sort(([, a], [, b]) => a.at - b.at)
-				.forEach(([id, timer]) => {
-					timers.delete(id);
-					timer.callback();
-				});
-		},
-		/** How far away each pending timer is. */
-		pending: () =>
-			[...timers.values()].map((timer) => timer.at - state.now).sort((a, b) => a - b),
-	};
-};
 
 type FakeEnvironment = ReturnType<typeof fakeEnvironment>;
 
@@ -244,15 +179,6 @@ const remote = (): Remote => {
 		factory,
 	};
 };
-
-/** The credential a bound device holds. Without one nothing can mint. */
-const holdCredential = (db: NotesDatabase, connectionId: string) =>
-	db.credentials.put({
-		id: connectionId,
-		credential: `sk1_${connectionId}`,
-		provider: ACCOUNT.provider,
-		createdAt: 0,
-	});
 
 const bound = async (connectionId = 'c1') => {
 	const db = freshDatabase();

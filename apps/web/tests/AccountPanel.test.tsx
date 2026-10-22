@@ -42,6 +42,7 @@ import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
 
 const STORAGE_FIRST: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
@@ -114,12 +115,7 @@ const backFromConsent = (db: NotesDatabase) => beginConnect(db, 'dropbox');
 
 /** A device holding a credential for `connectionId`, as connecting leaves it. */
 const holding = (db: NotesDatabase, connectionId: string, credential = 'sk1_held') =>
-	db.credentials.put({
-		id: connectionId,
-		credential,
-		provider: 'dropbox',
-		createdAt: Date.now(),
-	});
+	holdCredential(db, connectionId, { credential, createdAt: Date.now() });
 
 /** A button once the user can press it. */
 const enabled = async (name: string): Promise<HTMLElement> => {

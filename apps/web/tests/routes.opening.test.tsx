@@ -1,17 +1,15 @@
 import { SCRATCHPAD_FOLDER } from '@skysa/core';
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { OPENING_NOTICE_MS } from '../src/components/opening.js';
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { setScratchpadShown } from '../src/store/scratchpad.js';
 import { holdTheNotes as heldNotes } from './heldNotes.js';
+import { openApp } from './support/app.js';
 
 /**
  * A note pressed while its read is held up (2026-10-10). Reported on a phone:
@@ -34,17 +32,6 @@ const holdTheNotes = async (): Promise<() => void> => {
 	const release = await heldNotes(db.name);
 	holds.push(release);
 	return release;
-};
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
 };
 
 const titleField = (within_: HTMLElement = document.body) =>
