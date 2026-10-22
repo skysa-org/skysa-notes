@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { APP_FOLDER_NAME, MARKER_FILE, NOTE_EXTENSION } from '../config.js';
+import { asObject, parseJson } from '../json.js';
 import { foldName } from '../markdown/slug.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
@@ -428,14 +429,7 @@ const feedLimit = (nodes: number): number =>
 	2 * Math.max(1, Math.ceil(nodes / Number(PAGE_SIZE))) + 2;
 
 const parseCursor = (cursor: string): DriveCursor => {
-	const parsed = ((): unknown => {
-		try {
-			return JSON.parse(cursor);
-		} catch {
-			return undefined;
-		}
-	})();
-	const result = cursorSchema.safeParse(parsed);
+	const result = cursorSchema.safeParse(parseJson(cursor));
 	if (!result.success) throw new CursorResetError('gdrive cursor is not one this adapter wrote');
 	return result.data;
 };
@@ -486,16 +480,8 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	const failureOf = async (response: Response): Promise<DriveFailure> => {
 		const text = await response.text().catch(() => '');
-		const parsed = ((): {
-			error?: { message?: unknown; errors?: unknown; status?: unknown };
-		} => {
-			try {
-				const value: unknown = JSON.parse(text);
-				return typeof value === 'object' && value !== null ? value : {};
-			} catch {
-				return {};
-			}
-		})();
+		const parsed: { error?: { message?: unknown; errors?: unknown; status?: unknown } } =
+			asObject(parseJson(text));
 		const errors = Array.isArray(parsed.error?.errors)
 			? (parsed.error.errors as unknown[])
 			: [];
