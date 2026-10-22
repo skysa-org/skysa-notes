@@ -13,6 +13,7 @@ import {
 	NotFoundError,
 	type RemoteEntry,
 } from '../../src/providers/types.js';
+import { json } from './harness.js';
 import { bodyBytes, bodyText, createFrom } from './wireBody.js';
 
 /**
@@ -89,12 +90,6 @@ const changeMetadata = (entry: ChangeEntry): Record<string, unknown> => {
 		path_display: toDropboxPath(entry.path),
 	};
 };
-
-const json = (body: unknown, status = 200): Response =>
-	new Response(JSON.stringify(body), {
-		status,
-		headers: { 'content-type': 'application/json' },
-	});
 
 /** The envelope every endpoint-specific Dropbox error arrives in. */
 const failure = (summary: string, error: unknown, status = 409): Response =>

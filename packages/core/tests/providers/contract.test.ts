@@ -1,4 +1,4 @@
-import { createDropboxProvider } from '../../src/providers/dropbox.js';
+import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
 	type FakeProvider,
@@ -6,7 +6,8 @@ import {
 } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
-import { describeProviderContract } from './contract.js';
+import type { StorageProvider } from '../../src/providers/types.js';
+import { describeProviderContract, type ProviderContractOptions } from './contract.js';
 import { createDropboxStub } from './dropboxStub.js';
 import { createGDriveStub } from './gdriveStub.js';
 import { createOneDriveStub } from './onedriveStub.js';
@@ -54,117 +55,124 @@ describeProviderContract('in-memory fake, provider reports whole subtrees', () =
  */
 const DROPBOX_STALE_REV = 'ffffffffffffffff';
 
-// One entry per page, so the adapter's `has_more` loops — in `list` and in
-// `changes` — are walked rather than assumed.
-describeProviderContract(
-	'dropbox over a stubbed transport, one entry per page',
-	() => {
-		const stub = createDropboxStub({ pageSize: 1 });
-		return {
-			provider: createDropboxProvider({
-				fetch: stub.fetch,
-				getAccessToken: () => Promise.resolve('stub-token'),
-				appVersion: '0.1.0',
-				clientId: 'stub-client',
-			}),
-			...beneath(stub.backing),
-		};
+/** What every adapter is made from: one shape, so one table registers them all. */
+type CreateAdapter = (options: {
+	fetch: FetchLike;
+	getAccessToken: () => Promise<string>;
+	appVersion: string;
+	clientId: string;
+}) => StorageProvider;
+
+interface Adapter {
+	name: string;
+	create: CreateAdapter;
+	stub: (options: { pageSize?: number }) => { fetch: FetchLike; backing: FakeProvider };
+	options?: ProviderContractOptions;
+	/** The variable a live run reads its access token from. */
+	liveToken: string;
+	live: ProviderContractOptions;
+	/** Waits, after a live scenario empties the app folder, until it reads as empty. */
+	settle?: (provider: StorageProvider) => Promise<void>;
+}
+
+const adapters: readonly Adapter[] = [
+	{
+		// One entry per page, so the adapter's `has_more` loops — in `list` and
+		// in `changes` — are walked rather than assumed.
+		name: 'dropbox',
+		create: createDropboxProvider,
+		stub: createDropboxStub,
+		options: { staleVersion: DROPBOX_STALE_REV },
+		// Needs an app registration and a throwaway account. See
+		// docs/ARCHITECTURE.md §5.3.
+		liveToken: 'DROPBOX_TEST_TOKEN',
+		live: { staleVersion: DROPBOX_STALE_REV, timeout: 30_000 },
 	},
-	{ staleVersion: DROPBOX_STALE_REV }
-);
-
-describeProviderContract(
-	'dropbox over a stubbed transport',
-	() => {
-		const stub = createDropboxStub();
-		return {
-			provider: createDropboxProvider({
-				fetch: stub.fetch,
-				getAccessToken: () => Promise.resolve('stub-token'),
-				appVersion: '0.1.0',
-				clientId: 'stub-client',
-			}),
-			...beneath(stub.backing),
-		};
+	{
+		// Graph's feed carries no paths and does not report a renamed folder's
+		// contents, so the adapter keeps the tree in its cursor. One entry per
+		// page splits that tree across pages, which is where it is easiest to
+		// get wrong.
+		name: 'onedrive',
+		create: createOneDriveProvider,
+		stub: createOneDriveStub,
+		// A Graph access token carrying `Files.ReadWrite.AppFolder`. See
+		// docs/ARCHITECTURE.md §5.2.
+		liveToken: 'ONEDRIVE_TEST_TOKEN',
+		live: { timeout: 30_000 },
 	},
-	{ staleVersion: DROPBOX_STALE_REV }
-);
+	{
+		// Drive's feed names no paths and lists no parents, and nothing on Drive
+		// is conditional, so the adapter walks names, checks before and after it
+		// writes, and lists what arrives. One entry per page splits the scan and
+		// the feed.
+		name: 'gdrive',
+		create: createGDriveProvider,
+		stub: createGDriveStub,
+		// An access token carrying `drive.file`. See docs/ARCHITECTURE.md §5.1.
+		liveToken: 'GDRIVE_TEST_TOKEN',
+		// Drive's change feed lags a write by a couple of seconds (measured
+		// 1.4–2.8s, docs/ARCHITECTURE.md §5.1), so every read of it in the suite
+		// waits first. Dropbox's and Graph's are immediate and take the default
+		// of 0.
+		live: { changesLagMs: 5_000, timeout: 60_000 },
+		// Drive's search index keeps listing a deleted file for a moment, and the
+		// next scenario's cold-start scan then finds files whose parent the
+		// cleanup has already removed — unplaceable, so reported as deletions by
+		// id, in a scan that is supposed to report current state and nothing
+		// else. That is this harness emptying a shared folder between scenarios,
+		// not something a user can do to themselves, but it fails the scenario
+		// all the same.
+		settle: async (provider) => {
+			for (let round = 0; round < 20; round += 1) {
+				if ((await provider.list('')).length === 0) return;
+				await new Promise((resolve) => setTimeout(resolve, 500));
+			}
+		},
+	},
+];
 
-// Graph's feed carries no paths and does not report a renamed folder's
-// contents, so the adapter keeps the tree in its cursor. One entry per page
-// splits that tree across pages, which is where it is easiest to get wrong.
-describeProviderContract('onedrive over a stubbed transport, one entry per page', () => {
-	const stub = createOneDriveStub({ pageSize: 1 });
-	return {
-		provider: createOneDriveProvider({
-			fetch: stub.fetch,
-			getAccessToken: () => Promise.resolve('stub-token'),
-			appVersion: '0.1.0',
-			clientId: 'stub-client',
-		}),
-		...beneath(stub.backing),
-	};
-});
-
-describeProviderContract('onedrive over a stubbed transport', () => {
-	const stub = createOneDriveStub();
-	return {
-		provider: createOneDriveProvider({
-			fetch: stub.fetch,
-			getAccessToken: () => Promise.resolve('stub-token'),
-			appVersion: '0.1.0',
-			clientId: 'stub-client',
-		}),
-		...beneath(stub.backing),
-	};
-});
-
-// Drive's feed names no paths and lists no parents, and nothing on Drive is
-// conditional, so the adapter walks names, checks before and after it writes,
-// and lists what arrives. One entry per page splits the scan and the feed.
-describeProviderContract('gdrive over a stubbed transport, one entry per page', () => {
-	const stub = createGDriveStub({ pageSize: 1 });
-	return {
-		provider: createGDriveProvider({
-			fetch: stub.fetch,
-			getAccessToken: () => Promise.resolve('stub-token'),
-			appVersion: '0.1.0',
-			clientId: 'stub-client',
-		}),
-		...beneath(stub.backing),
-	};
-});
-
-describeProviderContract('gdrive over a stubbed transport', () => {
-	const stub = createGDriveStub();
-	return {
-		provider: createGDriveProvider({
-			fetch: stub.fetch,
-			getAccessToken: () => Promise.resolve('stub-token'),
-			appVersion: '0.1.0',
-			clientId: 'stub-client',
-		}),
-		...beneath(stub.backing),
-	};
-});
+for (const adapter of adapters) {
+	for (const [suffix, stubOptions] of [
+		[', one entry per page', { pageSize: 1 }],
+		['', {}],
+	] as const) {
+		describeProviderContract(
+			`${adapter.name} over a stubbed transport${suffix}`,
+			() => {
+				const stub = adapter.stub(stubOptions);
+				return {
+					provider: adapter.create({
+						fetch: stub.fetch,
+						getAccessToken: () => Promise.resolve('stub-token'),
+						appVersion: '0.1.0',
+						clientId: 'stub-client',
+					}),
+					...beneath(stub.backing),
+				};
+			},
+			adapter.options
+		);
+	}
+}
 
 /**
- * The same scenarios against a real Dropbox account. Skipped unless asked for,
- * because it needs an app registration and a throwaway account — it empties the
- * app folder between scenarios. See docs/ARCHITECTURE.md §5.3.
+ * The same scenarios against a real account, for each adapter whose token is
+ * given. Skipped unless asked for, because each empties the app folder between
+ * scenarios: use a throwaway account.
  *
  *   PROVIDER_LIVE_TESTS=1 DROPBOX_TEST_TOKEN=... pnpm test
  */
-const liveToken =
-	process.env.PROVIDER_LIVE_TESTS === '1' ? (process.env.DROPBOX_TEST_TOKEN ?? '') : '';
-
-if (liveToken !== '') {
+for (const adapter of adapters) {
+	const token =
+		process.env.PROVIDER_LIVE_TESTS === '1' ? (process.env[adapter.liveToken] ?? '') : '';
+	if (token === '') continue;
 	describeProviderContract(
-		'dropbox (live account)',
+		`${adapter.name} (live account)`,
 		() => {
-			const provider = createDropboxProvider({
+			const provider = adapter.create({
 				fetch: globalThis.fetch.bind(globalThis),
-				getAccessToken: () => Promise.resolve(liveToken),
+				getAccessToken: () => Promise.resolve(token),
 				appVersion: '0.1.0',
 				clientId: 'live-test',
 			});
@@ -173,89 +181,10 @@ if (liveToken !== '') {
 				cleanup: async () => {
 					const entries = await provider.list('');
 					await Promise.all(entries.map((entry) => provider.delete(entry)));
+					await adapter.settle?.(provider);
 				},
 			};
 		},
-		{ staleVersion: DROPBOX_STALE_REV, timeout: 30_000 }
-	);
-}
-
-/**
- * The same scenarios against a real OneDrive account, with a Graph access token
- * carrying `Files.ReadWrite.AppFolder`. Empties the app folder between
- * scenarios, so use a throwaway account. See docs/ARCHITECTURE.md §5.2.
- *
- *   PROVIDER_LIVE_TESTS=1 ONEDRIVE_TEST_TOKEN=... pnpm test
- */
-const liveGraphToken =
-	process.env.PROVIDER_LIVE_TESTS === '1' ? (process.env.ONEDRIVE_TEST_TOKEN ?? '') : '';
-
-if (liveGraphToken !== '') {
-	describeProviderContract(
-		'onedrive (live account)',
-		() => {
-			const provider = createOneDriveProvider({
-				fetch: globalThis.fetch.bind(globalThis),
-				getAccessToken: () => Promise.resolve(liveGraphToken),
-				appVersion: '0.1.0',
-				clientId: 'live-test',
-			});
-			return {
-				provider,
-				cleanup: async () => {
-					const entries = await provider.list('');
-					await Promise.all(entries.map((entry) => provider.delete(entry)));
-				},
-			};
-		},
-		{ timeout: 30_000 }
-	);
-}
-
-/**
- * The same scenarios against a real Google Drive account, with an access token
- * carrying `drive.file`. Empties the app folder between scenarios, so use a
- * throwaway account. See docs/ARCHITECTURE.md §5.1.
- *
- *   PROVIDER_LIVE_TESTS=1 GDRIVE_TEST_TOKEN=... pnpm test
- */
-const liveGoogleToken =
-	process.env.PROVIDER_LIVE_TESTS === '1' ? (process.env.GDRIVE_TEST_TOKEN ?? '') : '';
-
-if (liveGoogleToken !== '') {
-	describeProviderContract(
-		'gdrive (live account)',
-		() => {
-			const provider = createGDriveProvider({
-				fetch: globalThis.fetch.bind(globalThis),
-				getAccessToken: () => Promise.resolve(liveGoogleToken),
-				appVersion: '0.1.0',
-				clientId: 'live-test',
-			});
-			return {
-				provider,
-				cleanup: async () => {
-					const entries = await provider.list('');
-					await Promise.all(entries.map((entry) => provider.delete(entry)));
-					// And wait for Drive to agree that they are gone. Its search
-					// index keeps listing a deleted file for a moment, and the
-					// next scenario's cold-start scan then finds files whose
-					// parent this cleanup has already removed — unplaceable, so
-					// reported as deletions by id, in a scan that is supposed to
-					// report current state and nothing else. That is this
-					// harness emptying a shared folder between scenarios, not
-					// something a user can do to themselves, but it fails the
-					// scenario all the same.
-					for (let round = 0; round < 20; round += 1) {
-						if ((await provider.list('')).length === 0) return;
-						await new Promise((resolve) => setTimeout(resolve, 500));
-					}
-				},
-			};
-		},
-		// Drive's change feed lags a write by a couple of seconds (measured
-		// 1.4–2.8s, docs/ARCHITECTURE.md §5.1), so every read of it in the suite waits
-		// first. Dropbox's and Graph's are immediate and take the default of 0.
-		{ changesLagMs: 5_000, timeout: 60_000 }
+		adapter.live
 	);
 }
