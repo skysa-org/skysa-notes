@@ -101,7 +101,9 @@ jobs:
             # Three files are generated from sources in this repository and
             # committed: the route tree (written by the router's Vite plugin
             # during the build above), the Worker's `Env` and runtime types
-            # (`wrangler types`, from wrangler.toml and the installed workerd),
+            # (`cf-typegen`: `wrangler types` from wrangler.toml, the installed
+            # workerd, and `.dev.vars.example` for the secrets' names — not a
+            # developer's own `.dev.vars`, so the file is the same everywhere),
             # and drizzle's migration snapshots (from src/db/schema.ts). Each
             # is regenerated or checked here, so a source change that forgot to
             # regenerate fails now rather than drifting. A wrangler bump fails
@@ -110,7 +112,7 @@ jobs:
             - name: Generated files match their sources
               run: |
                   set -eu
-                  pnpm --filter @skysa/api exec wrangler types --check
+                  pnpm --filter @skysa/api run cf-typegen --check
                   pnpm --filter @skysa/api exec drizzle-kit check
                   pnpm --filter @skysa/api exec drizzle-kit generate
                   # Untracked files too: a schema change makes `generate`
