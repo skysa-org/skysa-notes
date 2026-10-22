@@ -40,6 +40,7 @@ import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.j
 import { dropPictures, restampPicture } from '../store/pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
 import { queueMove, queueWrite } from '../store/queue.js';
+import { rowsOf } from '../store/rows.js';
 import { eachInSlices } from '../store/slices.js';
 
 /**
@@ -320,7 +321,7 @@ export const createDexieSyncStore = (
 		);
 
 	const notesOf = (scope: Scope): Promise<NoteRecord[]> =>
-		scope.notes.where('connectionId').equals(connectionId).toArray();
+		rowsOf(scope.notes, connectionId).toArray();
 
 	/**
 	 * The connection's notes at or beneath `folderPath`, tombstones included,
@@ -349,13 +350,13 @@ export const createDexieSyncStore = (
 	};
 
 	const foldersOf = (scope: Scope): Promise<FolderRecord[]> =>
-		scope.folders.where('connectionId').equals(connectionId).toArray();
+		rowsOf(scope.folders, connectionId).toArray();
 
 	const opsOf = (scope: Scope): Promise<OpQueueRecord[]> =>
-		scope.opQueue.where('connectionId').equals(connectionId).toArray();
+		rowsOf(scope.opQueue, connectionId).toArray();
 
 	const filesOf = (scope: Scope): Promise<FileRecord[]> =>
-		scope.files.where('connectionId').equals(connectionId).toArray();
+		rowsOf(scope.files, connectionId).toArray();
 
 	const fileKey = (id: string): [string, string] => [connectionId, id];
 
@@ -899,7 +900,7 @@ export const createDexieSyncStore = (
 	 * be done, and the notebook would come back on every device.
 	 */
 	const rmdirsBehind = async (scope: Scope, path: string): Promise<void> => {
-		const ops = await scope.opQueue.where('connectionId').equals(connectionId).sortBy('seq');
+		const ops = await rowsOf(scope.opQueue, connectionId).sortBy('seq');
 		const over = ops.filter(
 			(op) => op.op === 'rmdir' && isWithin(foldPath(path), foldPath(op.path))
 		);

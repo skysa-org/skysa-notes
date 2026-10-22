@@ -25,6 +25,7 @@ import {
 } from './db.js';
 import { foldPath } from './naming.js';
 import { queueMoveFile, queueUpload, requeueWriteBehind } from './queue.js';
+import { rowsOf } from './rows.js';
 
 /**
  * Files beside notes (#187): the writers that add one, and the rules a note's
@@ -105,9 +106,7 @@ const fileAtName = async (
 	path: string
 ): Promise<FileRecord | undefined> => {
 	const wanted = foldPath(path);
-	return db.files
-		.where('connectionId')
-		.equals(connectionId)
+	return rowsOf(db.files, connectionId)
 		.filter((file) => foldPath(file.path) === wanted)
 		.first();
 };
@@ -261,7 +260,7 @@ export const listFilePaths = async (
 	scope: FileScope = {}
 ): Promise<string[]> => {
 	const connectionId = scope.connectionId ?? (await activeConnectionId(db));
-	const files = await db.files.where('connectionId').equals(connectionId).toArray();
+	const files = await rowsOf(db.files, connectionId).toArray();
 	return files.map((file) => file.path);
 };
 
@@ -281,9 +280,7 @@ export const handOverToCopies = async (
 	if (file.remoteId === undefined) return;
 	const held = await db.fileBytes.get(fileKey(file));
 	if (held === undefined || !heldBytesAreCurrent(file, held)) return;
-	const copies = await db.opQueue
-		.where('connectionId')
-		.equals(file.connectionId)
+	const copies = await rowsOf(db.opQueue, file.connectionId)
 		.filter((op) => op.op === 'upload' && op.copyOf === file.remoteId)
 		.toArray();
 	await db.fileBytes.bulkPut(
@@ -386,10 +383,8 @@ export const carryLinkedFiles = async (
 	];
 	if (own.length === 0) return;
 
-	const files = await db.files.where('connectionId').equals(note.connectionId).toArray();
-	const neighbours = await db.notes
-		.where('connectionId')
-		.equals(note.connectionId)
+	const files = await rowsOf(db.files, note.connectionId).toArray();
+	const neighbours = await rowsOf(db.notes, note.connectionId)
 		.filter((each) => each.id !== note.id && foldPath(parentPath(each.path)) === from)
 		.toArray();
 	const shared = new Set(

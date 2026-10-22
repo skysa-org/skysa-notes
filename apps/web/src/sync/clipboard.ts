@@ -12,6 +12,7 @@ import {
 
 import { PREVIEW_CHARS, showsClipboard } from '../store/clipboard.js';
 import { type ClipRecord, type NotesDatabase } from '../store/db.js';
+import { rowsOf } from '../store/rows.js';
 import { type FileRead, ownBuffer, type ReadingSession } from './fileReads.js';
 
 /**
@@ -192,7 +193,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 	const reconcile = (connectionId: string, items: readonly RemoteEntry[]): Promise<void> =>
 		db.transaction('rw', [db.syncState, db.clips, db.clipBytes, db.clipThumbs], async () => {
 			if (!showsClipboard(await db.syncState.get(connectionId))) return;
-			const rows = await db.clips.where('connectionId').equals(connectionId).toArray();
+			const rows = await rowsOf(db.clips, connectionId).toArray();
 			const listed = new Set(items.map((entry) => basename(entry.path)));
 			// Let go of by another device, or removed here and now gone.
 			const gone = rows.filter((row) => row.state !== 'pending' && !listed.has(row.name));
@@ -225,11 +226,9 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 				(entry) => entry.kind === 'file' && readClipName(basename(entry.path)) !== undefined
 			)
 		);
-		const rows = await db.clips.where('connectionId').equals(connectionId).toArray();
+		const rows = await rowsOf(db.clips, connectionId).toArray();
 		const held = new Set(
-			(await db.clipBytes.where('connectionId').equals(connectionId).primaryKeys()).map(
-				([, name]) => name
-			)
+			(await rowsOf(db.clipBytes, connectionId).primaryKeys()).map(([, name]) => name)
 		);
 		await inTurns(
 			rows.filter(
@@ -325,7 +324,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		if (state === undefined || state.detached !== undefined || state.rootId === undefined) {
 			return;
 		}
-		const owed = (await db.clips.where('connectionId').equals(connectionId).toArray())
+		const owed = (await rowsOf(db.clips, connectionId).toArray())
 			.filter((row) => row.state !== 'sent')
 			// Oldest first, so the items arrive on the other devices in the
 			// order they were pasted.
@@ -346,7 +345,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		const tried = new Set(
 			owed.filter((row) => row.state === 'removing').map((row) => row.name)
 		);
-		const late = await db.clips.where('connectionId').equals(connectionId).toArray();
+		const late = await rowsOf(db.clips, connectionId).toArray();
 		if (late.some((row) => row.state === 'removing' && !tried.has(row.name))) {
 			void flush(connectionId);
 		}
