@@ -1,11 +1,9 @@
-import { fromBase64Url } from '../crypto.js';
+import { clientForm, postTokenForm, readIdClaims, revokeByForm } from './common.js';
 import {
 	type FetchLike,
 	type OAuthCredentials,
-	OAuthError,
 	ScopeNotGrantedError,
 	type StorageOAuth,
-	type TokenSet,
 } from './types.js';
 
 /**
@@ -37,77 +35,6 @@ export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 /** `openid` and `email` yield the ID token that says whose account this is. */
 export const GOOGLE_SCOPES = ['openid', 'email', DRIVE_SCOPE].join(' ');
 
-interface TokenResponse {
-	access_token?: string;
-	refresh_token?: string;
-	expires_in?: number;
-	id_token?: string;
-	scope?: string;
-	error?: string;
-}
-
-interface IdClaims {
-	aud?: unknown;
-	sub?: unknown;
-	email?: unknown;
-}
-
-/**
- * The ID token's claims, read without checking its signature: OpenID Connect
- * Core §3.1.3.7 lets a client that received it directly from the token
- * endpoint, over TLS, rely on that channel instead — Google's own guide says
- * the same. The audience is still checked, so a token minted for another client
- * names nobody.
- */
-const claimsOf = (idToken: string | undefined, clientId: string): IdClaims => {
-	const [, payload] = (idToken ?? '').split('.');
-	if (payload === undefined) return {};
-	try {
-		const parsed: unknown = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
-		if (typeof parsed !== 'object' || parsed === null) return {};
-		const claims: IdClaims = parsed;
-		return claims.aud === clientId ? claims : {};
-	} catch {
-		return {};
-	}
-};
-
-const nonEmpty = (value: unknown): string | undefined =>
-	typeof value === 'string' && value !== '' ? value : undefined;
-
-const postForm = async (
-	doFetch: FetchLike,
-	credentials: OAuthCredentials,
-	form: Record<string, string>,
-	now: number
-): Promise<{ tokens: TokenSet; idToken?: string; scope?: string }> => {
-	const response = await doFetch(TOKEN, {
-		method: 'POST',
-		headers: { 'content-type': 'application/x-www-form-urlencoded' },
-		body: new URLSearchParams({
-			client_id: credentials.clientId,
-			client_secret: credentials.clientSecret,
-			...form,
-		}).toString(),
-	});
-
-	const body = (await response.json().catch(() => ({}))) as TokenResponse;
-	if (!response.ok || body.access_token === undefined) {
-		// `error_description` goes nowhere, as for the other providers.
-		throw new OAuthError('google', body.error ?? String(response.status));
-	}
-
-	return {
-		tokens: {
-			accessToken: body.access_token,
-			...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
-			expiresAt: now + (body.expires_in ?? 3600) * 1000,
-		},
-		...(body.id_token === undefined ? {} : { idToken: body.id_token }),
-		...(body.scope === undefined ? {} : { scope: body.scope }),
-	};
-};
-
 /**
  * Withdraws the grant — and not only this connection's: "Revocation removes all
  * OAuth 2.0 scopes previously granted to a project, invalidating any issued
@@ -115,13 +42,23 @@ const postForm = async (
  * That is why a deployment wants a Cloud project of its own
  * (docs/google-oauth.md). Best effort, like Dropbox's.
  */
-const revokeToken = async (doFetch: FetchLike, accessToken: string): Promise<boolean> => {
-	const response = await doFetch(REVOKE, {
-		method: 'POST',
-		headers: { 'content-type': 'application/x-www-form-urlencoded' },
-		body: new URLSearchParams({ token: accessToken }).toString(),
-	}).catch(() => undefined);
-	return response?.ok ?? false;
+const revokeToken = (doFetch: FetchLike, accessToken: string): Promise<boolean> =>
+	revokeByForm(doFetch, REVOKE, accessToken);
+
+const postForm = async (
+	doFetch: FetchLike,
+	credentials: OAuthCredentials,
+	form: Record<string, string>,
+	now: number
+) => {
+	const { tokens, body } = await postTokenForm(
+		doFetch,
+		TOKEN,
+		'google',
+		{ ...clientForm(credentials), ...form },
+		now
+	);
+	return { tokens, idToken: body.id_token, scope: body.scope };
 };
 
 export const gdriveOAuth: StorageOAuth = {
@@ -170,12 +107,10 @@ export const gdriveOAuth: StorageOAuth = {
 			throw new ScopeNotGrantedError('google', DRIVE_SCOPE);
 		}
 
-		const claims = claimsOf(idToken, credentials.clientId);
 		// `sub`, not `email`: Google says it is unique and never reused, and that
 		// an email address can change and be given to someone else. Unlike
 		// Microsoft's, it is the same for every app the account signs in to.
-		const accountId = nonEmpty(claims.sub);
-		const displayName = nonEmpty(claims.email);
+		const { sub: accountId, email: displayName } = readIdClaims(idToken, credentials.clientId);
 		return {
 			...tokens,
 			...(accountId === undefined ? {} : { accountId }),
