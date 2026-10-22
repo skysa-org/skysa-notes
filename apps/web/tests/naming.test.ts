@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { freeName, freePath } from '../src/store/naming.js';
+import { freeName, freePath, namesIn, pathDepth, respell } from '../src/store/naming.js';
 
 /**
  * The comparison, on its own.
@@ -83,5 +83,37 @@ describe('freePath', () => {
 	it('is not fooled by a path that was never normalized', () => {
 		// Rows hold whatever path they were imported with, not one this app composed.
 		expect(freePath('archive/report.md', ['archive//report.md'])).toBe('archive/report-2.md');
+	});
+});
+
+describe('respell', () => {
+	it("takes a source's spelling of each notebook along a path, and the first one seen where it has none", () => {
+		const spellings = new Map([['work', 'Work']]);
+
+		expect(respell(spellings, 'work/Plans')).toBe('Work/Plans');
+		// The first spelling through a notebook the source did not have is kept.
+		expect(respell(spellings, 'WORK/plans/2026')).toBe('Work/Plans/2026');
+		expect(respell(spellings, '')).toBe('');
+	});
+});
+
+describe('namesIn', () => {
+	it('lists what a folder holds directly, the folder compared folded', () => {
+		expect(namesIn(['Work/a.md', 'work/b.md', 'Work/sub/c.md', 'd.md'], 'WORK')).toEqual([
+			'a.md',
+			'b.md',
+		]);
+		expect(namesIn(['Work/a.md', 'd.md'], '')).toEqual(['d.md']);
+	});
+});
+
+describe('pathDepth', () => {
+	it.each([
+		['', 0],
+		['a.md', 1],
+		['Work/a.md', 2],
+		['Work/sub/c.md', 3],
+	])('%j is %i deep', (path, depth) => {
+		expect(pathDepth(path)).toBe(depth);
 	});
 });
