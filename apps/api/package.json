@@ -15,7 +15,7 @@
 		"deploy:migrate": "wrangler d1 migrations apply skysa-notes --remote && wrangler deploy",
 		"typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.src.json --noEmit",
 		"test": "vitest run",
-		"cf-typegen": "wrangler types",
+		"cf-typegen": "wrangler types --env-file ../../.dev.vars.example",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "wrangler d1 migrations apply skysa-notes --local",
 		"db:migrate:remote": "wrangler d1 migrations apply skysa-notes --remote"
