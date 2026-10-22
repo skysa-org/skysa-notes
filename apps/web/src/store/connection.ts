@@ -36,6 +36,7 @@ import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
 import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
 import { queueByNotebook } from './queue.js';
+import { sourceTables } from './scopes.js';
 import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from './unsynced.js';
 
 /**
@@ -606,27 +607,7 @@ const queueOwed = (db: NotesDatabase, connectionId: string, moved: Moved) =>
 // because what is unsent is asked inside (`unsyncedIn`), and a file added here
 // and not uploaded is.
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
-	db.transaction(
-		'rw',
-		[
-			db.notes,
-			db.folders,
-			db.opQueue,
-			db.syncState,
-			db.prefs,
-			db.credentials,
-			db.files,
-			db.fileBytes,
-			db.clips,
-			db.clipBytes,
-			db.clipThumbs,
-			db.pictures,
-			db.pictureBytes,
-			db.keyFiles,
-			db.secretKeys,
-		],
-		work
-	);
+	db.transaction('rw', sourceTables(db), work);
 
 /** Prefs key: how many binds and unbinds this device has seen. */
 export const BINDINGS_KEY = 'sync.bindings';
