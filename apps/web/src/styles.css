@@ -539,9 +539,30 @@ code {
 	height: 1rem;
 }
 
+/* A source that needs connecting again (`ProviderIcon`'s `alert`): a red dot
+   on the mark's top corner, in the colour a toast says something went wrong
+   in, ringed in the bar's colour so it stands off the mark under it. */
+.provider-icon-alert {
+	position: relative;
+	display: block;
+	flex: none;
+}
+
+.provider-icon-badge {
+	position: absolute;
+	inset-block-start: -0.1875rem;
+	inset-inline-end: -0.1875rem;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 50%;
+	background: var(--bad);
+	box-shadow: 0 0 0 1.5px var(--surface);
+}
+
 /* Centred on the name rather than sat on its baseline, which an image's
    bottom edge is. */
-.source-tab > .provider-icon {
+.source-tab > .provider-icon,
+.source-tab > .provider-icon-alert {
 	align-self: center;
 	margin-inline-end: var(--space-xs);
 }
@@ -5545,6 +5566,12 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 }
 
 .modal .secrets-error {
+	color: var(--bad);
+}
+
+/* Sync has stopped until the source is connected again (`SyncState`): an
+   error, said in the colour of one, as the dot on the source's mark is. */
+.account .account-problem {
 	color: var(--bad);
 }
 

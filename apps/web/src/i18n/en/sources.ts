@@ -29,6 +29,12 @@ export const sources = {
 		 */
 		shown: '<name>{source}</name><state> — disconnected</state>',
 	},
+	/**
+	 * The showing source, as its tab or the compact bar's dropdown is read out
+	 * and as its tooltip says, while it needs connecting again — which a red
+	 * dot on its mark shows. {source} is its name.
+	 */
+	reconnect: '{source} — needs to be connected again',
 	/** What another source's `⋯` offers. */
 	options: {
 		rename: 'Rename',

@@ -9,7 +9,12 @@ import gdrive16 from '../src/assets/providers/gdrive-16.png';
 import gdrive32 from '../src/assets/providers/gdrive-32.png';
 import gdrive48 from '../src/assets/providers/gdrive-48.png';
 import onedriveMark from '../src/assets/providers/onedrive.svg';
-import { type AccountSlot, SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
+import {
+	type AccountSlot,
+	SourcePanel,
+	SourceTabs,
+	useShowingSource,
+} from '../src/components/SourceTabs.js';
 import {
 	dropConnectCode,
 	heldConnectCode,
@@ -28,6 +33,7 @@ import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/
 import { createNote } from '../src/store/notes.js';
 import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
+import { type SchedulerStatus } from '../src/sync/scheduler.js';
 
 /** A store that turns the next rename down, as a write IndexedDB refuses does. */
 const store = vi.hoisted(() => ({ refusingRename: false }));
@@ -106,8 +112,42 @@ const tabs = (): (string | null)[] =>
 		.getAllByRole('button')
 		.map((button) => button.textContent);
 
-const show = (db: NotesDatabase, client: Client = clientWith()) =>
-	render(<SourceTabs db={db} client={client} returnTo="/" navigate={() => undefined} />);
+/** A scheduler that says what it is given, and says it again when told to. */
+const syncSaying = (status: SchedulerStatus) => {
+	const listeners = new Set<(status: SchedulerStatus) => void>();
+	let now = status;
+	return {
+		status: () => now,
+		subscribe: (listener: (status: SchedulerStatus) => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+		say: (next: SchedulerStatus) => {
+			now = next;
+			listeners.forEach((listener) => {
+				listener(next);
+			});
+		},
+	};
+};
+
+const IDLE: SchedulerStatus = { phase: 'idle', conflicts: [] };
+const REAUTHORIZE: SchedulerStatus = {
+	phase: 'attention',
+	refusal: 'reauthorize_required',
+	conflicts: [],
+};
+
+const show = (
+	db: NotesDatabase,
+	client: Client = clientWith(),
+	sync: ReturnType<typeof syncSaying> = syncSaying(IDLE)
+) =>
+	render(
+		<SourceTabs db={db} client={client} returnTo="/" navigate={() => undefined} sync={sync} />
+	);
 
 describe('the source tabs', () => {
 	it('says nothing at all until something is connected', async () => {
@@ -492,6 +532,35 @@ describe('the source tabs', () => {
 		expect((await db.syncState.get('c1'))?.label).toBeUndefined();
 		const sources = await connectedSources(db);
 		expect(tabName(sources[0] ?? { connectionId: 'c1' }, sources)).toBe('Dropbox');
+	});
+
+	it('marks the showing source that needs connecting again, in red and in words', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const sync = syncSaying(REAUTHORIZE);
+		show(db, clientWith(), sync);
+
+		const tab = await screen.findByRole('button', {
+			name: 'Dropbox — needs to be connected again',
+		});
+		expect(tab.getAttribute('title')).toBe('Dropbox — needs to be connected again');
+		expect(tab.querySelector('.provider-icon-badge')).not.toBeNull();
+		// The name on screen is the name; the dot says the rest.
+		expect(tabs()).toEqual(['Dropbox', 'OneDrive']);
+		// The scheduler syncs the showing source only, so only it is marked.
+		const other = screen.getByRole('button', { name: 'OneDrive' });
+		expect(other.querySelector('.provider-icon-badge')).toBeNull();
+
+		act(() => {
+			sync.say(IDLE);
+		});
+		const back = screen.getByRole('button', { name: 'Dropbox' });
+		expect(back.querySelector('.provider-icon-badge')).toBeNull();
+		expect(back.hasAttribute('title')).toBe(false);
 	});
 
 	it('refuses to name the pile, which has no row to name', async () => {
@@ -1425,5 +1494,38 @@ describe("the gate's code, on an instance that asks for one", () => {
 		await waitFor(() => {
 			expect(document.activeElement).toBe(connect.getByRole('button', { name: 'Dropbox' }));
 		});
+	});
+});
+
+describe('the compact bar\u2019s source dropdown', () => {
+	const Trigger = ({ db, sync }: { db: NotesDatabase; sync: ReturnType<typeof syncSaying> }) => {
+		const source = useShowingSource(undefined, db, clientWith(), sync);
+		return (
+			<p>
+				{source.name}
+				{source.reconnect && ' needs connecting again'}
+			</p>
+		);
+	};
+
+	it('says when the source showing needs connecting again', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await showConnection(db, 'c1');
+		const sync = syncSaying(REAUTHORIZE);
+		render(<Trigger db={db} sync={sync} />);
+
+		expect(await screen.findByText('Dropbox needs connecting again')).toBeDefined();
+		act(() => {
+			sync.say(IDLE);
+		});
+		expect(screen.getByText('Dropbox')).toBeDefined();
+	});
+
+	it('says nothing of it before a source is showing', async () => {
+		const db = freshDatabase();
+		render(<Trigger db={db} sync={syncSaying(REAUTHORIZE)} />);
+
+		expect(await screen.findByText('Storage')).toBeDefined();
 	});
 });
