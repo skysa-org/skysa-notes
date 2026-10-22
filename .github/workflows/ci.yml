@@ -124,6 +124,11 @@ jobs:
                     exit 1
                   fi
 
+            # The web build's size budget, in gzipped bytes: the largest chunk,
+            # all scripts, what each page loads before it runs, and all CSS.
+            # The lines and how to raise one are in the script.
+            - run: pnpm size
+
             # Advisory. Both current advisories are dev-only and transitive, so
             # gating on them would red-light every run without telling us anything
             # about what ships.

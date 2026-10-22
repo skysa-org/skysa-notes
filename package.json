@@ -12,6 +12,7 @@
 		"dev": "pnpm -r --parallel run dev",
 		"build": "pnpm --filter @skysa/core run build && pnpm --filter @skysa/web run build && pnpm --filter @skysa/api run build",
 		"test": "pnpm -r run test",
+		"size": "pnpm --filter @skysa/web run size",
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
