@@ -1,8 +1,8 @@
 import type Dexie from 'dexie';
 import { liveQuery } from 'dexie';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
 
@@ -26,6 +26,7 @@ afterEach(async () => {
 
 const thisTab = async (): Promise<NotesDatabase> => {
 	const db = createDatabase(`frozen-${crypto.randomUUID()}`);
+	onTestFinished(watchTab(db));
 	opened.push(db);
 	await db.prefs.put({ key: 'before', value: 'kept' });
 	return db;
@@ -36,6 +37,24 @@ const freeze = () => {
 };
 
 describe('a tab the browser freezes', () => {
+	it('is watched for only on the database the tab is watched through', () => {
+		// A database made for a test, or beside the app's own for a moment, must
+		// not leave a listener on `document` behind it (#445).
+		const added = vi.spyOn(document, 'addEventListener');
+		const removed = vi.spyOn(document, 'removeEventListener');
+		const freezes = (spy: typeof added) =>
+			spy.mock.calls.filter(([type]) => type === 'freeze').map(([, listener]) => listener);
+
+		const db = createDatabase(`frozen-${crypto.randomUUID()}`);
+		opened.push(db);
+		expect(freezes(added)).toEqual([]);
+
+		const stop = watchTab(db);
+		expect(freezes(added)).toHaveLength(1);
+		stop();
+		expect(freezes(removed)).toEqual(freezes(added));
+	});
+
 	it('lets go of the database as it is frozen', async () => {
 		const db = await thisTab();
 		expect(db.isOpen()).toBe(true);
@@ -63,6 +82,7 @@ describe('a tab the browser freezes', () => {
 		// phone. Closed then, the open would finish with no connection, and
 		// nothing would ask for one again.
 		const db = createDatabase(`frozen-${crypto.randomUUID()}`);
+		onTestFinished(watchTab(db));
 		opened.push(db);
 		db.on('populate', () => {
 			freeze();

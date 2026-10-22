@@ -1,7 +1,7 @@
 import type Dexie from 'dexie';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { holdsTextFor } from '../src/store/detached.js';
 import {
 	beforeClosing,
@@ -193,6 +193,7 @@ describe('settling what the editors hold', () => {
 
 	it('is still what a tab closing for a newer build writes first', async () => {
 		const db: NotesDatabase = createDatabase(`held-${crypto.randomUUID()}`);
+		onTestFinished(watchTab(db));
 		opened.push(db);
 		await db.prefs.put({ key: 'before', value: 'kept' });
 		register(() => db.prefs.put({ key: 'typed', value: 'just now' }));
