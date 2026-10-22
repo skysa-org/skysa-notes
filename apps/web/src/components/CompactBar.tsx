@@ -461,6 +461,14 @@ const barName = (note: NoteRecord | undefined, edit: LiveEdit | undefined) => {
 };
 
 /**
+ * What the source dropdown says of the source showing, in its tooltip and to a
+ * screen reader: its name, and that it needs connecting again where the red
+ * dot on its mark says so in colour.
+ */
+const sourceWords = (source: { name: string; reconnect: boolean }): string =>
+	source.reconnect ? t('sources.reconnect', { source: source.name }) : source.name;
+
+/**
  * A scratch card's name, open over the whole window: said, as a note's would
  * be, but not a dropdown, since a card is not one of a list to choose from.
  * Back, or its Close, is the way out of it. It is in the notes' place, and
@@ -557,6 +565,7 @@ export const CompactBar = ({
 	const searching = searchOpen || query !== '';
 	const renaming = useRenaming(renamings);
 	const source = useShowingSource(renaming);
+	const sourceValue = sourceWords(source);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
 	const name = barName(note, edit);
 	const title = name?.text ?? t('shell.compact.noNote');
@@ -648,9 +657,9 @@ export const CompactBar = ({
 				    button's name, and the panel it opens. */}
 				<PaneTrigger
 					pane="sources"
-					label={t('shell.compact.source', { value: source.name })}
-					value={source.name}
-					icon={<ProviderIcon kind={source.kind} />}
+					label={t('shell.compact.source', { value: sourceValue })}
+					value={sourceValue}
+					icon={<ProviderIcon kind={source.kind} alert={source.reconnect} />}
 					panel={panel}
 					onPanel={onPanel}
 				/>

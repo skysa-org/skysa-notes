@@ -57,7 +57,23 @@ const MARKS: Partial<Record<ProviderKind, { src: string; srcSet?: string }>> = {
 	gdrive: { src: gdrive32, srcSet: `${gdrive16} 1x, ${gdrive32} 2x, ${gdrive48} 3x` },
 };
 
-export const ProviderIcon = ({ kind }: { kind: SourceKind }) => {
+/**
+ * `alert`: the source needs connecting again (`needsReconnect`), which a red
+ * dot on the mark's corner says, as a phone's app icon says it has news. The
+ * dot is decorative too: what holds the mark says it in words.
+ */
+export const ProviderIcon = ({ kind, alert = false }: { kind: SourceKind; alert?: boolean }) => {
+	const shown = <Mark kind={kind} />;
+	if (!alert) return shown;
+	return (
+		<span className="provider-icon-alert">
+			{shown}
+			<span className="provider-icon-badge" />
+		</span>
+	);
+};
+
+const Mark = ({ kind }: { kind: SourceKind }) => {
 	const mark = kind === undefined || kind === 'local' ? undefined : MARKS[kind];
 	if (mark === undefined)
 		return <Icon name={kind === 'local' ? 'device' : 'storage'} className="provider-icon" />;

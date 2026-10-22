@@ -72,7 +72,7 @@ import {
 	type UnsentAnswer,
 } from '../sync/account.js';
 import { isLongRun } from '../sync/progress.js';
-import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
+import { needsReconnect, syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
 import { ClipboardPanel } from './ClipboardPanel.js';
 import { ConnectButton } from './ConnectButton.js';
@@ -508,14 +508,6 @@ const stuckMessage = (stuck: StuckOp, label: string): string =>
 		path: stuck.targetPath ?? stuck.path,
 		error: errorOf(stuck),
 	});
-
-/** A problem that connecting the account again is the answer to. */
-const needsReconnect = (status: SchedulerStatus): boolean =>
-	status.phase === 'attention' &&
-	(status.refusal === 'credential_required' ||
-		status.refusal === 'credential_revoked' ||
-		status.refusal === 'reauthorize_required' ||
-		(status.refusal === undefined && status.error === 'authorization required'));
 
 const conflictMessage = (count: number): string => t('account.conflicts', { count });
 
@@ -1168,9 +1160,12 @@ const SyncState = ({
 
 	return (
 		<>
-			{/* Said even where there is no link to offer: sync has stopped. */}
+			{/*
+			 * Said even where there is no link to offer: sync has stopped. In
+			 * the colour of an error, as the mark on the source's tab is.
+			 */}
 			{reconnect && (
-				<p className="muted">
+				<p className="account-problem">
 					{status.refusal === 'credential_revoked' ||
 					status.refusal === 'credential_required'
 						? t('account.reconnect.cannotReach', { provider: label })

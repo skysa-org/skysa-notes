@@ -39,6 +39,8 @@ import {
 	PROVIDER_LABELS,
 	tabName,
 } from '../sync/account.js';
+import { syncScheduler, useNeedsReconnect } from '../sync/runtime.js';
+import { type SyncScheduler } from '../sync/scheduler.js';
 import { ConnectButton } from './ConnectButton.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 import { ProviderIcon, type SourceKind, sourceKind } from './ProviderIcon.js';
@@ -63,6 +65,8 @@ export interface SourceTabsProps {
 	search?: ReactNode;
 	/** How many times the app's URL has asked for the code field (`useEnterCode`). */
 	enterCode?: number;
+	/** How the showing source's sync is going, which marks its tab when it needs connecting again. */
+	sync?: Pick<SyncScheduler, 'status' | 'subscribe'>;
 }
 
 /**
@@ -139,11 +143,15 @@ export const SourceTabs = ({
 	navigate,
 	search,
 	enterCode,
+	sync = syncScheduler,
 }: SourceTabsProps) => {
 	const { ordered, offerable, gate, live, connectLabel, nothingToShow } = useSourceChoices(
 		db,
 		client
 	);
+	// The scheduler syncs the showing source only, so it is the only one
+	// known to need connecting again.
+	const reconnect = useNeedsReconnect(sync);
 	const first = connectLabel === CONNECT_FIRST_LABEL;
 	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
 	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offerable.length > 0);
@@ -176,6 +184,7 @@ export const SourceTabs = ({
 								<SourceTab
 									source={source}
 									name={tabName(source, ordered)}
+									reconnect={source.active && reconnect}
 									onShow={(width) => {
 										// A press on the tab already showing is the
 										// way into renaming it, which is what makes
@@ -250,10 +259,13 @@ export const SourceTabs = ({
 const SourceTab = ({
 	source,
 	name,
+	reconnect,
 	onShow,
 }: {
 	source: ConnectedSource;
 	name: string;
+	/** It needs connecting again: a red dot on its mark, and said in its name and tooltip. */
+	reconnect: boolean;
 	/** With the width the tab is taking, so replacing it moves nothing. */
 	onShow: (width: number) => void;
 }) => {
@@ -275,10 +287,13 @@ const SourceTab = ({
 			// what it plainly says could not find it. Exactly the visible words, so
 			// it still satisfies WCAG 2.5.3.
 			aria-label={
-				source.detached === undefined
-					? name
-					: t('sources.disconnected.label', { source: name })
+				source.detached !== undefined
+					? t('sources.disconnected.label', { source: name })
+					: reconnect
+						? t('sources.reconnect', { source: name })
+						: name
 			}
+			{...(reconnect ? { title: t('sources.reconnect', { source: name }) } : {})}
 			// The tab the user is on, said once. `aria-current` is what a screen
 			// reader announces; "showing" in the text as well would be read twice.
 			{...(source.active ? { 'aria-current': 'true' as const } : {})}
@@ -286,7 +301,7 @@ const SourceTab = ({
 				onShow(event.currentTarget.offsetWidth);
 			}}
 		>
-			<ProviderIcon kind={sourceKind(source)} />
+			<ProviderIcon kind={sourceKind(source)} alert={reconnect} />
 			{source.detached === undefined
 				? shownName(name)
 				: // Not an icon alone: a source that syncs nowhere is the one thing
@@ -1256,20 +1271,24 @@ export const SourcePanel = ({
  * What the compact bar's source dropdown is about: the source showing, or
  * plain "Storage" before there is one — the dropdown is there regardless,
  * because the storage panel is in it. Its name, for the trigger's tooltip and
- * for a screen reader, and which storage it is, for the mark the trigger shows
- * in place of the name.
+ * for a screen reader, which storage it is, for the mark the trigger shows
+ * in place of the name, and whether it needs connecting again, for the red
+ * dot on the mark.
  */
 export const useShowingSource = (
 	renaming?: Renaming,
 	db: NotesDatabase = defaultDb,
-	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'> = api
-): { name: string; kind: SourceKind } => {
+	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'> = api,
+	sync: Pick<SyncScheduler, 'status' | 'subscribe'> = syncScheduler
+): { name: string; kind: SourceKind; reconnect: boolean } => {
 	const { ordered } = useSourceChoices(db, client);
+	const reconnect = useNeedsReconnect(sync);
 	const showing = ordered.find((source) => source.active);
 	return showing === undefined
-		? { name: t('sources.storage'), kind: undefined }
+		? { name: t('sources.storage'), kind: undefined, reconnect: false }
 		: {
 				name: shownSourceName(showing.connectionId, tabName(showing, ordered), renaming),
 				kind: sourceKind(showing),
+				reconnect,
 			};
 };
