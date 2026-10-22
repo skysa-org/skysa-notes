@@ -1,10 +1,13 @@
 import {
 	basename,
 	foldName,
+	joinPath,
 	normalizePath,
 	NOTE_EXTENSION,
 	parentPath,
+	pathSegments,
 	replaceBasename,
+	ROOT,
 	uniqueFilename,
 } from '@skysa/core';
 
@@ -87,3 +90,28 @@ export const freePath = (wanted: string, taken: Iterable<string>): string => {
 
 	return replaceBasename(wanted, freeName(basename(wanted), siblings));
 };
+
+/**
+ * The spelling a path takes in a source: each notebook along it as the source
+ * spells it, and as the first path through it spelled it where the source has
+ * no such notebook. Rows from two places can disagree about a notebook's
+ * spelling — `Work` and `work` — which is one directory on every provider.
+ * `spellings`, folded path to spelling, is written to as it goes.
+ */
+export const respell = (spellings: Map<string, string>, path: string): string => {
+	if (path === ROOT) return path;
+	const known = spellings.get(foldPath(path));
+	if (known !== undefined) return known;
+	const spelled = joinPath(respell(spellings, parentPath(path)), basename(path));
+	spellings.set(foldPath(path), spelled);
+	return spelled;
+};
+
+/** The names of what `paths` holds directly in `folder`, the folder compared folded. */
+export const namesIn = (paths: Iterable<string>, folder: string): string[] => {
+	const wanted = foldPath(folder);
+	return [...paths].filter((path) => foldPath(parentPath(path)) === wanted).map(basename);
+};
+
+/** How many notebooks deep a path is: `a/b.md` is 2, the root 0. */
+export const pathDepth = (path: string): number => pathSegments(path).length;
