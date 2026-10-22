@@ -123,7 +123,7 @@ type Queued = PromiseExtended<void>;
  * own, which a write here must not be taken to be covered by, nor a delete here
  * withdraw.
  */
-const opsFor = (
+export const opsFor = (
 	db: QueueDb,
 	note: Pick<NoteRecord, 'connectionId' | 'id'>
 ): PromiseExtended<OpQueueRecord[]> =>
@@ -327,7 +327,7 @@ export const queueRmdir = (
 			);
 
 /** The ops queued for one file, within its connection, as `opsFor` for a note. */
-const opsForFile = (
+export const opsForFile = (
 	db: QueueDb,
 	file: Pick<FileRecord, 'connectionId' | 'id'>
 ): PromiseExtended<OpQueueRecord[]> =>

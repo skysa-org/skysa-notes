@@ -11,6 +11,8 @@ import {
 import { t } from '../i18n/t.js';
 import {
 	activeConnectionId,
+	type ConnectionScope,
+	type FileKey,
 	type FileRecord,
 	type FolderRecord,
 	type NoteRecord,
@@ -37,10 +39,6 @@ import {
  * user sees the same structure from any other tool. The root itself is never
  * stored as a row — it is the empty path.
  */
-
-export interface FolderScope {
-	connectionId?: string;
-}
 
 /** Every ancestor of a path, outermost first, excluding the root. */
 const ancestorsOf = (path: string): string[] =>
@@ -96,7 +94,7 @@ const spellingOf = (path: string, existing: readonly string[]): string => {
 export const ensureFolder = async (
 	db: NotesDatabase,
 	path: string,
-	options: FolderScope = {}
+	options: ConnectionScope = {}
 ): Promise<FolderRecord[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const now = Date.now();
@@ -133,7 +131,7 @@ export class FolderExistsError extends Error {
 	}
 }
 
-export interface CreateFolderInput extends FolderScope {
+export interface CreateFolderInput extends ConnectionScope {
 	/** Folder to create it in. Defaults to the root. */
 	parentPath?: string;
 	name: string;
@@ -209,7 +207,7 @@ export const createFolder = async (
 
 export const listFolders = async (
 	db: NotesDatabase,
-	options: FolderScope & { parentPath?: string } = {}
+	options: ConnectionScope & { parentPath?: string } = {}
 ): Promise<FolderRecord[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const all = await db.folders.where('connectionId').equals(connectionId).toArray();
@@ -231,7 +229,7 @@ export const moveFolder = async (
 	db: NotesDatabase,
 	from: string,
 	to: string,
-	options: FolderScope = {}
+	options: ConnectionScope = {}
 ): Promise<void> => {
 	const source = normalizePath(from);
 	const target = normalizePath(to);
@@ -459,7 +457,7 @@ export const renameFolder = async (
 	db: NotesDatabase,
 	path: string,
 	name: string,
-	options: FolderScope = {}
+	options: ConnectionScope = {}
 ): Promise<string> => {
 	// Handed back, because the caller cannot work it out: the name is sanitised
 	// on the way in, and the open notebook is named by path in the URL — which
@@ -478,7 +476,7 @@ export const renameFolder = async (
 export const deleteFolder = async (
 	db: NotesDatabase,
 	path: string,
-	options: FolderScope = {}
+	options: ConnectionScope = {}
 ): Promise<void> => {
 	const target = normalizePath(path);
 	if (target === '') throw new Error('The root folder cannot be deleted');
@@ -537,7 +535,7 @@ export const deleteFolder = async (
 				await handOverToCopies(db, file);
 				await queueDeleteFile(db, file);
 			}, Promise.resolve());
-			const keys = files.map((file): [string, string] => [file.connectionId, file.id]);
+			const keys = files.map((file): FileKey => [file.connectionId, file.id]);
 			await db.files.bulkDelete(keys);
 			await db.fileBytes.bulkDelete(keys);
 			await dropPictures(db, keys);
@@ -563,7 +561,7 @@ export const deleteFolder = async (
 /** Every folder path, sorted, which is enough to render the sidebar tree. */
 export const folderTree = async (
 	db: NotesDatabase,
-	options: FolderScope = {}
+	options: ConnectionScope = {}
 ): Promise<string[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();

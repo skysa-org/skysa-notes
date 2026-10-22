@@ -26,7 +26,7 @@ import { pickFiles } from '../editor/pickFiles.js';
 import { t } from '../i18n/t.js';
 import { type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
 import { addClips, type ClipInput, listClips, removeClip } from '../store/clipboard.js';
-import { type ClipRecord, type NotesDatabase } from '../store/db.js';
+import { type ClipKey, type ClipRecord, type NotesDatabase } from '../store/db.js';
 import { type FileRead } from '../sync/fileReads.js';
 import { type SyncScheduler } from '../sync/scheduler.js';
 import { sizeOf } from './AttachedFiles.js';
@@ -294,7 +294,7 @@ const ClipPicture = ({
 	shrinker: PictureShrinker;
 }) => {
 	const here = useLiveQuery(async () => {
-		const key: [string, string] = [connectionId, name];
+		const key: ClipKey = [connectionId, name];
 		const [bytes, thumbs] = await Promise.all([
 			database.clipBytes.where('[connectionId+name]').equals(key).count(),
 			database.clipThumbs.where('[connectionId+name]').equals(key).count(),
