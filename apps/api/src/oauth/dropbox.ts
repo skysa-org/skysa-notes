@@ -1,4 +1,5 @@
-import { type FetchLike, OAuthError, type StorageOAuth, type TokenSet } from './types.js';
+import { clientForm, nonEmpty, postTokenForm, revokeByBearer } from './common.js';
+import { type FetchLike, type StorageOAuth, type TokenSet } from './types.js';
 
 /**
  * The storage half of Dropbox OAuth: Authorization Code + PKCE, exchanged on
@@ -33,130 +34,18 @@ export const DROPBOX_SCOPES = [
 	'account_info.read',
 ].join(' ');
 
-export interface DropboxOAuthConfig {
-	clientId: string;
-	clientSecret: string;
-	redirectUri: string;
-}
-
-/** Building the consent URL needs no client secret — only the exchange does. */
-export interface AuthorizeInput extends Omit<DropboxOAuthConfig, 'clientSecret'> {
-	state: string;
-	challenge: string;
-}
-
-export const authorizeUrl = (input: AuthorizeInput): string =>
-	`${AUTHORIZE}?${new URLSearchParams({
-		client_id: input.clientId,
-		response_type: 'code',
-		redirect_uri: input.redirectUri,
-		state: input.state,
-		code_challenge: input.challenge,
-		code_challenge_method: 'S256',
-		scope: DROPBOX_SCOPES,
-		// Without this Dropbox issues a short-lived access token and no refresh
-		// token, and the connection would die a few hours later with no way back.
-		token_access_type: 'offline',
-	}).toString()}`;
-
-interface TokenResponse {
-	access_token?: string;
-	refresh_token?: string;
-	expires_in?: number;
-	account_id?: string;
-	error_description?: string;
-	error?: string;
-}
-
-const postForm = async (
+/**
+ * The tokens a form posted to Dropbox's token endpoint brings back, with the
+ * account they are for: Dropbox names it in the token body, not an ID token.
+ */
+const tokensFrom = async (
 	doFetch: FetchLike,
-	url: string,
 	form: Record<string, string>,
 	now: number
 ): Promise<TokenSet> => {
-	const response = await doFetch(url, {
-		method: 'POST',
-		headers: { 'content-type': 'application/x-www-form-urlencoded' },
-		body: new URLSearchParams(form).toString(),
-	});
-
-	const body = (await response.json().catch(() => ({}))) as TokenResponse;
-	if (!response.ok || body.access_token === undefined) {
-		// The description can quote back what was sent, so only the code goes on.
-		throw new OAuthError('dropbox', body.error ?? String(response.status));
-	}
-
-	return {
-		accessToken: body.access_token,
-		...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
-		// Dropbox access tokens last about four hours. Treating the expiry as
-		// absolute means the client can decide to refresh early without knowing
-		// when the exchange happened.
-		//
-		// A response with no `expires_in` would otherwise expire on arrival and
-		// put the client straight into a refresh loop; an hour is short enough to
-		// be safe if the real lifetime is shorter than Dropbox documents.
-		expiresAt: now + (body.expires_in ?? 3600) * 1000,
-		// A present-but-empty or null id is worse than none: `''` matches every
-		// other `''` and would adopt two different accounts into one user.
-		...(typeof body.account_id === 'string' && body.account_id !== ''
-			? { accountId: body.account_id }
-			: {}),
-	};
-};
-
-export interface ExchangeInput extends DropboxOAuthConfig {
-	code: string;
-	verifier: string;
-	now?: number;
-}
-
-export const exchangeCode = (doFetch: FetchLike, input: ExchangeInput): Promise<TokenSet> =>
-	postForm(
-		doFetch,
-		TOKEN,
-		{
-			code: input.code,
-			grant_type: 'authorization_code',
-			client_id: input.clientId,
-			client_secret: input.clientSecret,
-			redirect_uri: input.redirectUri,
-			code_verifier: input.verifier,
-		},
-		input.now ?? Date.now()
-	);
-
-export interface RefreshInput {
-	clientId: string;
-	clientSecret: string;
-	refreshToken: string;
-	now?: number;
-}
-
-export const refreshAccessToken = (doFetch: FetchLike, input: RefreshInput): Promise<TokenSet> =>
-	postForm(
-		doFetch,
-		TOKEN,
-		{
-			grant_type: 'refresh_token',
-			refresh_token: input.refreshToken,
-			client_id: input.clientId,
-			client_secret: input.clientSecret,
-		},
-		input.now ?? Date.now()
-	);
-
-/**
- * Disconnecting revokes at Dropbox as well as deleting the row, so the grant
- * does not linger on the user's account (docs/ARCHITECTURE.md §9). Best effort: a
- * failure here must not stop the disconnect.
- */
-export const revokeToken = async (doFetch: FetchLike, accessToken: string): Promise<boolean> => {
-	const response = await doFetch(REVOKE, {
-		method: 'POST',
-		headers: { authorization: `Bearer ${accessToken}` },
-	}).catch(() => undefined);
-	return response?.ok ?? false;
+	const { tokens, body } = await postTokenForm(doFetch, TOKEN, 'dropbox', form, now);
+	const accountId = nonEmpty(body.account_id);
+	return { ...tokens, ...(accountId === undefined ? {} : { accountId }) };
 };
 
 interface AccountResponse {
@@ -164,34 +53,61 @@ interface AccountResponse {
 	email?: string;
 }
 
-/** What the connection is called in the UI. Falls back rather than failing. */
-export const accountName = async (doFetch: FetchLike, accessToken: string): Promise<string> => {
-	const response = await doFetch('https://api.dropboxapi.com/2/users/get_current_account', {
-		method: 'POST',
-		headers: { authorization: `Bearer ${accessToken}` },
-	}).catch(() => undefined);
-
-	if (response === undefined || !response.ok) return 'Dropbox';
-	const body = (await response.json().catch(() => ({}))) as AccountResponse;
-	return body.email ?? body.name?.display_name ?? 'Dropbox';
-};
-
-/** The shape the routes use, over the functions above. */
 export const dropboxOAuth: StorageOAuth = {
 	authorizeUrl: (credentials, input) =>
-		authorizeUrl({ clientId: credentials.clientId, ...input }),
+		`${AUTHORIZE}?${new URLSearchParams({
+			client_id: credentials.clientId,
+			response_type: 'code',
+			redirect_uri: input.redirectUri,
+			state: input.state,
+			code_challenge: input.challenge,
+			code_challenge_method: 'S256',
+			scope: DROPBOX_SCOPES,
+			// Without this Dropbox issues a short-lived access token and no refresh
+			// token, and the connection would die a few hours later with no way back.
+			token_access_type: 'offline',
+		}).toString()}`,
+
 	exchangeCode: (doFetch, credentials, input) =>
-		exchangeCode(doFetch, {
-			clientId: credentials.clientId,
-			clientSecret: credentials.clientSecret,
-			...input,
-		}),
+		tokensFrom(
+			doFetch,
+			{
+				code: input.code,
+				grant_type: 'authorization_code',
+				...clientForm(credentials),
+				redirect_uri: input.redirectUri,
+				code_verifier: input.verifier,
+			},
+			input.now ?? Date.now()
+		),
+
 	refreshAccessToken: (doFetch, credentials, input) =>
-		refreshAccessToken(doFetch, {
-			clientId: credentials.clientId,
-			clientSecret: credentials.clientSecret,
-			...input,
-		}),
-	revokeToken,
-	accountName: (doFetch, tokens) => accountName(doFetch, tokens.accessToken),
+		tokensFrom(
+			doFetch,
+			{
+				grant_type: 'refresh_token',
+				refresh_token: input.refreshToken,
+				...clientForm(credentials),
+			},
+			input.now ?? Date.now()
+		),
+
+	/**
+	 * Disconnecting revokes at Dropbox as well as deleting the row, so the grant
+	 * does not linger on the user's account (docs/ARCHITECTURE.md §9). Best
+	 * effort: a failure here must not stop the disconnect.
+	 */
+	revokeToken: (doFetch, accessToken) => revokeByBearer(doFetch, REVOKE, accessToken),
+
+	/** What the connection is called in the UI. Falls back rather than failing. */
+	accountName: async (doFetch, tokens) => {
+		const response = await doFetch('https://api.dropboxapi.com/2/users/get_current_account', {
+			method: 'POST',
+			headers: { authorization: `Bearer ${tokens.accessToken}` },
+		}).catch(() => undefined);
+
+		if (response === undefined || !response.ok) return 'Dropbox';
+		const body = (await response.json().catch(() => ({}))) as AccountResponse;
+		return body.email ?? body.name?.display_name ?? 'Dropbox';
+	},
 };
