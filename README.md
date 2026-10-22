@@ -47,6 +47,7 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 |---|---|
 | `pnpm dev` | Web + API dev servers |
 | `pnpm build` | Build core, SPA, then a Worker dry-run bundle |
+| `pnpm size` | Check the built SPA against its size budget (after `pnpm build`) |
 | `pnpm test` | Vitest across all packages |
 | `pnpm lint` / `pnpm lint:fix` | ESLint across all packages, with or without auto-fix |
 | `pnpm typecheck` | `tsc --noEmit` across all packages, and core's source again with no Node types |
