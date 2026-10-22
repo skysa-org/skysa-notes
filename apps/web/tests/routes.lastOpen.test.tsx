@@ -47,7 +47,6 @@ vi.mock('../src/store/lastOpen.js', async (importOriginal) => {
 afterEach(() => {
 	store.lateBy = 0;
 	store.told = 0;
-	cleanup();
 });
 
 const openApp = async (at = '/') => {

@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
@@ -15,8 +15,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * notebook's together under its name, and counts them all on its row whether
  * it is open or shut. A note chosen from inside opens the notebook it is in.
  */
-
-afterEach(cleanup);
 
 const openApp = async () => {
 	await setDefaultEditorMode(db, 'raw');

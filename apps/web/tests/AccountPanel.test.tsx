@@ -8,7 +8,7 @@ import {
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, StrictMode, useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
@@ -43,8 +43,6 @@ import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 import { freshDatabase } from './support/db.js';
-
-afterEach(cleanup);
 
 const STORAGE_FIRST: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
 

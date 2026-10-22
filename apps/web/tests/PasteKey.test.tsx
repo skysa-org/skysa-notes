@@ -1,7 +1,7 @@
 import { encodeIdentity, recoveryKeyGroups } from '@skysa/core';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { PasteKey, typedIn } from '../src/components/PasteKey.js';
 import type { Scanner } from '../src/components/ScanKey.js';
@@ -12,8 +12,6 @@ import { generateIdentity } from '../src/secrets/age.js';
  * each group goes on to the next as it fills, and a key pasted whole fills
  * them all.
  */
-
-afterEach(cleanup);
 
 const EMPTY: readonly string[] = Array.from({ length: 12 }, () => '');
 

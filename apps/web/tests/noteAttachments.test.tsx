@@ -1,5 +1,5 @@
 import { imageInfo, MAX_ATTACHMENT_BYTES } from '@skysa/core';
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -18,8 +18,6 @@ import { heldCopy, heldPicture, keepPicture } from '../src/store/pictures.js';
 import type { FileRead } from '../src/sync/fileReads.js';
 import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
 import { freshDatabase } from './support/db.js';
-
-afterEach(cleanup);
 
 const bufferOf = (value: string): ArrayBuffer => new TextEncoder().encode(value).buffer;
 

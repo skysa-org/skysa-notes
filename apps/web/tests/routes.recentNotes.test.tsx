@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
@@ -14,8 +14,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * notes opened lately on this device — every way a note comes to be open
  * counts — less the one on screen; and choosing one opens it.
  */
-
-afterEach(cleanup);
 
 const openApp = async (at = '/') => {
 	await setDefaultEditorMode(db, 'raw');
