@@ -18,6 +18,22 @@ concurrency:
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+    # Beside `verify` rather than inside it, so it costs no wall time: the same
+    # tests, once more as one run with coverage on, against the thresholds in
+    # vitest.config.ts.
+    coverage:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - run: corepack enable
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .nvmrc
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm coverage
+
     verify:
         runs-on: ubuntu-latest
         # The whole gate runs in well under two minutes; this is only so a hung
