@@ -1,7 +1,7 @@
 import Dexie, { liveQuery } from 'dexie';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { type HeldUp, heldUpOf } from '../src/store/heldUp.js';
 
 /**
@@ -22,10 +22,11 @@ afterEach(async () => {
 
 const thisTab = async (): Promise<{ db: NotesDatabase; held: HeldUp }> => {
 	const db = createDatabase(`held-up-${crypto.randomUUID()}`);
+	onTestFinished(watchTab(db));
 	cleanups.push(() => db.delete());
 	await db.open();
 	const held = heldUpOf(db);
-	if (held === undefined) throw new Error('createDatabase did not watch for waits');
+	if (held === undefined) throw new Error('watchTab did not watch for waits');
 	return { db, held };
 };
 

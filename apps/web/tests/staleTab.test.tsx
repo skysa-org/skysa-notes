@@ -1,10 +1,10 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type Dexie from 'dexie';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { StaleTabGate } from '../src/components/StaleTabGate.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';
 
@@ -26,6 +26,7 @@ afterEach(async () => {
 
 const thisTab = async (): Promise<NotesDatabase> => {
 	const db = createDatabase(`stale-${crypto.randomUUID()}`);
+	onTestFinished(watchTab(db));
 	opened.push(db);
 	await db.prefs.put({ key: 'before', value: 'kept' });
 	return db;
@@ -138,6 +139,7 @@ describe('a tab whose database a newer build has asked for', () => {
 		newer.close();
 
 		const old = createDatabase(name);
+		onTestFinished(watchTab(old));
 		opened.push(old);
 		// What an editor holds is not written: the newer schema is already
 		// live, and this is old code that would be writing into it.

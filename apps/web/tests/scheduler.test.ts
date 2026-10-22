@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type ApiClient } from '../src/api/client.js';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { heldUpOf } from '../src/store/heldUp.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -246,7 +246,8 @@ const remote = (): Remote => {
 
 const freshDatabase = (): NotesDatabase => {
 	const db = createDatabase(`scheduler-${crypto.randomUUID()}`);
-	cleanups.push(() => db.delete());
+	// Watched as the app's own is, for whether another tab holds it up.
+	cleanups.push(watchTab(db), () => db.delete());
 	return db;
 };
 
