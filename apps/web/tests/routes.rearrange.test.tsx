@@ -1,13 +1,11 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder, listFolders } from '../src/store/folders.js';
 import { createNote, getNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
 
 /**
  * Re-arranging, end to end. The rules live in `store/rearrange.ts` and the rows
@@ -23,17 +21,6 @@ afterEach(() => {
 
 /** jsdom has no `DataTransfer`, and the rows write to the one they are given. */
 const transfer = () => ({ effectAllowed: 'none', setData: vi.fn() });
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
-};
 
 /** Pick up by dragging, and drop on the row that says it would take it. */
 const dragOnto = async (source: HTMLElement, destination: string) => {

@@ -12,13 +12,14 @@ import {
 	RELAY_PONG_MS,
 	RELAY_RETRY_MS,
 	RELAY_TELL_MS,
-	type RelayEnvironment,
 	type RelayLinkOptions,
 	type RelaySocketEvents,
 	relayUrl,
 	type TicketAnswer,
 } from '../src/sync/relay.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
+import { fakeEnvironment } from './support/fakes/environment.js';
 
 /**
  * The change relay's socket, from the app's side (docs/ARCHITECTURE.md §6,
@@ -35,71 +36,6 @@ afterEach(async () => {
 		})
 	);
 });
-
-type RelayEvent = Parameters<RelayEnvironment['listen']>[0];
-
-const fakeEnvironment = () => {
-	const state = { now: 1_000_000, online: true, visible: true, nextId: 0 };
-	const handlers = new Map<RelayEvent, Set<() => void>>();
-	const timers = new Map<number, { at: number; callback: () => void }>();
-
-	const environment: RelayEnvironment = {
-		now: () => state.now,
-		isOnline: () => state.online,
-		isVisible: () => state.visible,
-		listen: (event, handler) => {
-			const set = handlers.get(event) ?? new Set();
-			set.add(handler);
-			handlers.set(event, set);
-			return () => {
-				set.delete(handler);
-			};
-		},
-		setTimer: (callback, ms) => {
-			state.nextId += 1;
-			const id = state.nextId;
-			timers.set(id, { at: state.now + ms, callback });
-			return () => {
-				timers.delete(id);
-			};
-		},
-	};
-
-	return {
-		environment,
-		state,
-		listening: () => [...handlers.values()].reduce((sum, set) => sum + set.size, 0),
-		/** Hidden or shown, offline or online, and the event that says so. */
-		set: (change: { visible?: boolean; online?: boolean }) => {
-			if (change.visible !== undefined) {
-				state.visible = change.visible;
-				handlers.get('visibilitychange')?.forEach((handler) => {
-					handler();
-				});
-			}
-			if (change.online !== undefined) {
-				state.online = change.online;
-				handlers.get(change.online ? 'online' : 'offline')?.forEach((handler) => {
-					handler();
-				});
-			}
-		},
-		/** Move the clock on, running every timer that comes due on the way. */
-		advance: (ms: number) => {
-			state.now += ms;
-			[...timers.entries()]
-				.filter(([, timer]) => timer.at <= state.now)
-				.sort(([, a], [, b]) => a.at - b.at)
-				.forEach(([id, timer]) => {
-					timers.delete(id);
-					timer.callback();
-				});
-		},
-		/** How far away each pending timer is. */
-		pending: () =>
-			[...timers.values()].map((timer) => timer.at - state.now).sort((a, b) => a - b),
-	};
-};
 
 interface FakeSocket {
 	readonly url: string;
@@ -546,12 +482,7 @@ describe('the relay URL', () => {
 describe('relay links over the API', () => {
 	const holding = async (connectionId: string) => {
 		const db = freshDatabase();
-		await db.credentials.put({
-			id: connectionId,
-			credential: `sk1_${connectionId}`,
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, connectionId);
 		return db;
 	};
 
