@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { APP_FOLDER_NAME, MARKER_FILE, NOTE_EXTENSION } from '../config.js';
-import { foldName } from '../markdown/slug.js';
+import { APP_FOLDER_NAME, MARKER_FILE } from '../config.js';
+import { isNoteName } from '../markdown/slug.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import {
@@ -265,9 +265,6 @@ const byAge = (files: readonly DriveFile[]): DriveFile[] =>
 	);
 
 const earliest = (files: readonly DriveFile[]): DriveFile | undefined => byAge(files)[0];
-
-/** A note by its name, folded as the engine asks it (`decide`), so `Report.MD` is one. */
-const isNoteName = (name: string): boolean => foldName(name).endsWith(NOTE_EXTENSION);
 
 /**
  * Two files at one name with the same bytes: one is a copy of the other, and
