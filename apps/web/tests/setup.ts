@@ -1,14 +1,18 @@
 // Dexie needs a real IndexedDB; Node has none.
 import 'fake-indexeddb/auto';
 
+import { cleanup } from '@testing-library/react';
 import { afterAll, afterEach, vi } from 'vitest';
 
 import { deleteFreshDatabases, resetSharedDb } from './support/db.js';
 
-// Every test starts from an empty database (tests/support/db.ts). After each
-// test rather than before the next: a setup file's `afterEach` runs after the
-// file's own, so whatever the test rendered has been unmounted first.
+// After every test, in this order: what it rendered is unmounted, then every
+// test starts from an empty database (tests/support/db.ts). Testing Library
+// only cleans up by itself where `afterEach` is a global, and here it is
+// imported. A setup file's `afterEach` runs after the test file's own, so a
+// file's hook still sees what its test rendered.
 afterEach(async () => {
+	cleanup();
 	await deleteFreshDatabases();
 	await resetSharedDb();
 });

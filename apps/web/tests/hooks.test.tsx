@@ -1,6 +1,6 @@
 import { SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createCodeDisplayStore } from '../src/editor/codeDisplay.js';
 import { bindConnection, finishImport } from '../src/store/connection.js';
@@ -29,8 +29,6 @@ import { sealed } from './secretHostFake.js';
  * exists at all, so counting the wrong thing is visible: count every note and
  * the row appears — claiming a number of loose notes — for an app that has none.
  */
-
-afterEach(cleanup);
 
 const count = async (): Promise<number | undefined> => {
 	const { result } = renderHook(() => useLooseNoteCount(useActiveConnectionId()));

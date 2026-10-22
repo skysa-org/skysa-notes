@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
@@ -17,8 +17,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  */
 
 const DROPBOX = 'c-dropbox';
-
-afterEach(cleanup);
 
 const openApp = async () => {
 	await setDefaultEditorMode(db, 'raw');

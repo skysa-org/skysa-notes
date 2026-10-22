@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Toast } from '../src/components/Toast.js';
 
@@ -8,8 +8,6 @@ import { Toast } from '../src/components/Toast.js';
  * refusal (issue #131). The link is the operator's, so how it opens matters as
  * much as that it is there.
  */
-
-afterEach(cleanup);
 
 describe('Toast', () => {
 	it('is the message and a way to dismiss it, and no link, when there is nowhere to go', () => {

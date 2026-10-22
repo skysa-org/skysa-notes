@@ -1,6 +1,6 @@
 import { encodeIdentity } from '@skysa/core';
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
 import { RecoveryQr } from '../src/components/RecoveryQr.js';
 import { generateIdentity } from '../src/secrets/age.js';
@@ -10,8 +10,6 @@ import { readQr } from './qrRead.js';
  * The recovery key as a QR code: what a camera reads from it is the key as
  * age writes it, and nothing else.
  */
-
-afterEach(cleanup);
 
 describe('the recovery key’s QR code', () => {
 	it('reads as the key, exactly as age writes it', () => {

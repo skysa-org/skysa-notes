@@ -1,7 +1,7 @@
 import { VAULT_FOLDER } from '@skysa/core';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Passwords } from '../src/components/Passwords.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
@@ -13,8 +13,6 @@ import { byLabel } from '../src/store/vault.js';
  * labels A to Z as the user's language sorts them, a field that narrows them,
  * and `+` for a new one.
  */
-
-afterEach(cleanup);
 
 const item = (title: string, at = title.toLowerCase()): NoteRecord => ({
 	...draftNote({

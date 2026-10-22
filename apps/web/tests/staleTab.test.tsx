@@ -1,7 +1,7 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type Dexie from 'dexie';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { StaleTabGate } from '../src/components/StaleTabGate.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
@@ -17,8 +17,6 @@ import { deleteAfterTest, freshDatabase } from './support/db.js';
 
 /** Later than any version this build declares. */
 const NEWER = 99;
-
-afterEach(cleanup);
 
 const thisTab = async (): Promise<NotesDatabase> => {
 	const db = freshDatabase();
