@@ -9,9 +9,7 @@ import { Toast } from '../src/components/Toast.js';
  * much as that it is there.
  */
 
-afterEach(() => {
-	cleanup();
-});
+afterEach(cleanup);
 
 describe('Toast', () => {
 	it('is the message and a way to dismiss it, and no link, when there is nowhere to go', () => {

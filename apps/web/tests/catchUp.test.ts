@@ -11,16 +11,12 @@ import {
 import { catchUpSecrets } from '../src/secrets/catchUp.js';
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import {
-	ACTIVE_CONNECTION_KEY,
-	createDatabase,
-	type NoteRecord,
-	type NotesDatabase,
-} from '../src/store/db.js';
+import { ACTIVE_CONNECTION_KEY, type NoteRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
 import { type SchedulerStatus, type SyncPhase } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Catching up (docs/ARCHITECTURE.md §7, "Replacing the key"): what a key a
@@ -28,14 +24,12 @@ import { noteById } from './noteRows.js';
  * source is unlocked and synced up, once a tab.
  */
 
-const opened: NotesDatabase[] = [];
 const stops: (() => void)[] = [];
 
-afterEach(async () => {
+afterEach(() => {
 	stops.splice(0).forEach((stop) => {
 		stop();
 	});
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const PIN: Unlock = { kind: 'pin', digits: '2468' };
@@ -87,8 +81,7 @@ const setup = async ({
 	shown?: string;
 	age?: () => Promise<Age>;
 } = {}) => {
-	const db = createDatabase(`catch-up-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 	await db.syncState.put({ connectionId: 'c2', clientId: 'install', rootId: 'root2' });
 	await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: shown });

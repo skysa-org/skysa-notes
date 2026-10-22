@@ -2,7 +2,7 @@ import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PING, RELAY_PONG, RELAY_PUSHED } from
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import {
 	createRelayFactory,
 	createRelayLink,
@@ -18,6 +18,7 @@ import {
 	relayUrl,
 	type TicketAnswer,
 } from '../src/sync/relay.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The change relay's socket, from the app's side (docs/ARCHITECTURE.md §6,
@@ -543,12 +544,6 @@ describe('the relay URL', () => {
 });
 
 describe('relay links over the API', () => {
-	const freshDatabase = (): NotesDatabase => {
-		const db = createDatabase(`relay-${crypto.randomUUID()}`);
-		cleanups.push(() => db.delete());
-		return db;
-	};
-
 	const holding = async (connectionId: string) => {
 		const db = freshDatabase();
 		await db.credentials.put({

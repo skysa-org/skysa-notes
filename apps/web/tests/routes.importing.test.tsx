@@ -20,15 +20,9 @@ beforeEach(() => {
 	vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')));
 });
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
 });
 
 const openApp = async (url = '/') => {

@@ -7,13 +7,7 @@ import { createFakeProvider, createSyncEngine, isHidden } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection } from '../src/store/connection.js';
-import {
-	createDatabase,
-	LOCAL_CONNECTION_ID,
-	type NoteRecord,
-	noteRef,
-	type NotesDatabase,
-} from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NoteRecord, noteRef } from '../src/store/db.js';
 import {
 	ArchiveLimitError,
 	crc32,
@@ -47,6 +41,7 @@ import {
 } from '../src/store/notes.js';
 import { unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The archive is written by hand, so it is read back by hand: a reader here
@@ -705,24 +700,16 @@ describe('what the user is told when there is no download', () => {
 });
 
 describe('exporting notes', () => {
-	const opened: NotesDatabase[] = [];
 	const listening: (() => void)[] = [];
 	const scope = { connectionId: 'dropbox-1' };
 
-	afterEach(async () => {
+	afterEach(() => {
 		listening.splice(0).forEach((stop) => {
 			stop();
 		});
 		vi.unstubAllGlobals();
 		vi.useRealTimers();
-		await Promise.all(opened.splice(0).map((db) => db.delete()));
 	});
-
-	const freshDatabase = (): NotesDatabase => {
-		const db = createDatabase(`export-${crypto.randomUUID()}`);
-		opened.push(db);
-		return db;
-	};
 
 	it('writes each note as the file a push would send, at the path the provider has', async () => {
 		const db = freshDatabase();
@@ -949,21 +936,13 @@ describe('exporting notes', () => {
 });
 
 describe('a whole source', () => {
-	const opened: NotesDatabase[] = [];
 	const withdrawn: (() => void)[] = [];
 
-	afterEach(async () => {
+	afterEach(() => {
 		withdrawn.splice(0).forEach((withdraw) => {
 			withdraw();
 		});
-		await Promise.all(opened.splice(0).map((db) => db.delete()));
 	});
-
-	const freshDatabase = (): NotesDatabase => {
-		const db = createDatabase(`library-${crypto.randomUUID()}`);
-		opened.push(db);
-		return db;
-	};
 
 	it("is its live notes and every notebook, and nothing of another source's", async () => {
 		const db = freshDatabase();
@@ -1133,23 +1112,15 @@ describe('a whole source', () => {
 });
 
 describe('the files beside the notes (#187)', () => {
-	const opened: NotesDatabase[] = [];
 	const listening: (() => void)[] = [];
 	const scope = { connectionId: 'dropbox-1' };
 
-	afterEach(async () => {
+	afterEach(() => {
 		listening.splice(0).forEach((stop) => {
 			stop();
 		});
 		vi.unstubAllGlobals();
-		await Promise.all(opened.splice(0).map((db) => db.delete()));
 	});
-
-	const freshDatabase = (): NotesDatabase => {
-		const db = createDatabase(`export-files-${crypto.randomUUID()}`);
-		opened.push(db);
-		return db;
-	};
 
 	const bufferOf = (value: string): ArrayBuffer => new TextEncoder().encode(value).buffer;
 

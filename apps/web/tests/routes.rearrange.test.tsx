@@ -16,16 +16,9 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * it — the open notebook is named by path in the URL, and a move changes it.
  */
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.files.clear();
-	await db.fileBytes.clear();
 });
 
 /** jsdom has no `DataTransfer`, and the rows write to the one they are given. */

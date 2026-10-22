@@ -37,12 +37,9 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
  * most recent note opens in its place.
  */
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	hold.gate = Promise.resolve();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.prefs.clear();
 });
 
 const openApp = async (at = '/') => {

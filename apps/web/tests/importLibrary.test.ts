@@ -1,8 +1,8 @@
 import { createFakeProvider, createSyncEngine, isHidden, MAX_ATTACHMENT_BYTES } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { zipOf } from '../src/store/exportNotes.js';
 import { createFolder } from '../src/store/folders.js';
 import {
@@ -20,21 +20,10 @@ import {
 } from '../src/store/importLibrary.js';
 import { createNote, importNoteFile } from '../src/store/notes.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
+import { freshDatabase } from './support/db.js';
 
 const CONNECTION = 'dropbox-1';
 const scope = { connectionId: CONNECTION };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`import-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 /** A bound source whose first import is through, so it takes an import of files. */
 const bound = async (): Promise<NotesDatabase> => {

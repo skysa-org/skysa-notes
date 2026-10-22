@@ -15,15 +15,7 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * counts — less the one on screen; and choosing one opens it.
  */
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-});
+afterEach(cleanup);
 
 const openApp = async (at = '/') => {
 	await setDefaultEditorMode(db, 'raw');
