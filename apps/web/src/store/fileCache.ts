@@ -1,4 +1,4 @@
-import { type FileRecord, type NotesDatabase } from './db.js';
+import { type FileKey, type FileRecord, type NotesDatabase } from './db.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
 
 /**
@@ -42,7 +42,7 @@ export interface HeldFile {
  * since is put back over. Not for pinned bytes, which the cache never lets go
  * of and so has no order to keep for.
  */
-const touch = (db: NotesDatabase, key: [string, string], now: number): Promise<void> =>
+const touch = (db: NotesDatabase, key: FileKey, now: number): Promise<void> =>
 	db.transaction('rw', db.fileBytes, async () => {
 		const held = await db.fileBytes.get(key);
 		if (held === undefined || held.pinned === 1 || now - held.lastUsedAt < TOUCH_AFTER_MS)

@@ -24,6 +24,7 @@ import Dexie from 'dexie';
 
 import {
 	type FileBytesRecord,
+	type FileKey,
 	type FileRecord,
 	type FolderRecord,
 	noteKey,
@@ -39,7 +40,7 @@ import { noteFile, noteRecordFromFile } from '../store/notes.js';
 import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.js';
 import { dropPictures, restampPicture } from '../store/pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
-import { queueMove, queueWrite } from '../store/queue.js';
+import { opsFor, opsForFile, queueMove, queueWrite } from '../store/queue.js';
 import { eachInSlices } from '../store/slices.js';
 
 /**
@@ -357,7 +358,7 @@ export const createDexieSyncStore = (
 	const filesOf = (scope: Scope): Promise<FileRecord[]> =>
 		scope.files.where('connectionId').equals(connectionId).toArray();
 
-	const fileKey = (id: string): [string, string] => [connectionId, id];
+	const fileKey = (id: string): FileKey => [connectionId, id];
 
 	const ownFile = (scope: Scope, id: string): Promise<FileRecord | undefined> =>
 		scope.files.get(fileKey(id));
@@ -369,10 +370,8 @@ export const createDexieSyncStore = (
 		await dropPictures(scope, [fileKey(id)]);
 	};
 
-	const fileOpsOf = async (scope: Scope, fileId: string): Promise<OpQueueRecord[]> =>
-		(await scope.opQueue.where('fileId').equals(fileId).toArray()).filter(
-			(op) => op.connectionId === connectionId
-		);
+	const fileOpsOf = (scope: Scope, fileId: string): Promise<OpQueueRecord[]> =>
+		opsForFile(scope, { connectionId, id: fileId });
 
 	const withdraw = (scope: Scope, ops: readonly OpQueueRecord[]) =>
 		scope.opQueue.bulkDelete(ops.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
@@ -481,25 +480,21 @@ export const createDexieSyncStore = (
 	 * this is not about that.
 	 */
 	const originIsNow = async (scope: Scope, noteId: string, at: string): Promise<void> => {
-		const ops = await scope.opQueue.where('noteId').equals(noteId).toArray();
+		const ops = await opsFor(scope, { connectionId, id: noteId });
 		await scope.opQueue.bulkPut(
-			ops
-				.filter((op) => op.connectionId === connectionId && op.op === 'move')
-				.map((op) => ({ ...op, path: at }))
+			ops.filter((op) => op.op === 'move').map((op) => ({ ...op, path: at }))
 		);
 	};
 
 	/** Point one note's queued ops at where it has just been moved to. */
 	const rebaseOwnOps = async (scope: Scope, noteId: string, from: string, to: string) => {
-		const ops = await scope.opQueue.where('noteId').equals(noteId).toArray();
+		const ops = await opsFor(scope, { connectionId, id: noteId });
 		await scope.opQueue.bulkPut(
-			ops
-				.filter((op) => op.connectionId === connectionId)
-				.map((op) => ({
-					...op,
-					path: op.path === from ? to : op.path,
-					...(op.targetPath === from ? { targetPath: to } : {}),
-				}))
+			ops.map((op) => ({
+				...op,
+				path: op.path === from ? to : op.path,
+				...(op.targetPath === from ? { targetPath: to } : {}),
+			}))
 		);
 	};
 
@@ -531,10 +526,10 @@ export const createDexieSyncStore = (
 		// bytes. A queued write would put the old content straight back on the
 		// remote under a new version. A queued move is the user's rename, and
 		// stays.
-		const ops = await scope.opQueue.where('noteId').equals(resolution.noteId).toArray();
+		const ops = await opsFor(scope, { connectionId, id: resolution.noteId });
 		await scope.opQueue.bulkDelete(
 			ops
-				.filter((op) => op.connectionId === connectionId && op.op === 'write')
+				.filter((op) => op.op === 'write')
 				.flatMap((op) => (op.seq === undefined ? [] : [op.seq]))
 		);
 		// And its origin is where the remote says the file is, whatever it was
