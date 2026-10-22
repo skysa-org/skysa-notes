@@ -1,11 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-	createDatabase,
-	LOCAL_CONNECTION_ID,
-	noteRef,
-	type NotesDatabase,
-} from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, noteRef, type NotesDatabase } from '../src/store/db.js';
 import { createNote, deleteNote } from '../src/store/notes.js';
 import {
 	getRecentKeys,
@@ -15,6 +10,7 @@ import {
 	rememberRecent,
 } from '../src/store/recentNotes.js';
 import { updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The notes opened lately on this device, which the search field lists before
@@ -22,15 +18,8 @@ import { updateNote } from './noteRows.js';
  */
 
 let db: NotesDatabase;
-let counter = 0;
-
 beforeEach(() => {
-	counter += 1;
-	db = createDatabase(`test-recent-notes-${counter}`);
-});
-
-afterEach(async () => {
-	await db.delete();
+	db = freshDatabase();
 });
 
 const DROPBOX = 'c-dropbox';

@@ -2,7 +2,7 @@ import { parseNoteFile, splitFrontmatter } from '@skysa/core';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, noteKey, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import { noteKey, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
 import { listFolders } from '../src/store/folders.js';
 import {
 	createNote,
@@ -26,17 +26,11 @@ import {
 	titleAfterEdit,
 } from '../src/store/notes.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 let db: NotesDatabase;
-let counter = 0;
-
 beforeEach(() => {
-	counter += 1;
-	db = createDatabase(`test-notes-${counter}`);
-});
-
-afterEach(async () => {
-	await db.delete();
+	db = freshDatabase();
 });
 
 describe('createNote', () => {

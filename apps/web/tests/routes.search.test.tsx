@@ -8,7 +8,6 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
-import { db } from '../src/store/db.js';
 
 /**
  * What the component is handed, not what `parseSearch` returns — the two were
@@ -23,11 +22,7 @@ import { db } from '../src/store/db.js';
  * took the whole app down.
  */
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
+afterEach(cleanup);
 
 const openAt = async (url: string) => {
 	const router = createRouter({

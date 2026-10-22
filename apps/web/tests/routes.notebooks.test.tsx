@@ -15,14 +15,9 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * that the only way to change one was to edit the folder on the provider.
  */
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
 });
 
 const openApp = async () => {

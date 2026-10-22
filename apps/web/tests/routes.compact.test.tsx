@@ -30,18 +30,13 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
 let fake: FakeWindow | undefined;
 let widths: FakeWidths | undefined;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
 	fake?.restore();
 	fake = undefined;
 	widths?.restore();
 	widths = undefined;
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
 });
 
 const openApp = async (width = 800) => {

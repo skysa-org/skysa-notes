@@ -31,13 +31,7 @@ import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.j
  * lock, and a new one stored at its first change.
  */
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-});
+afterEach(cleanup);
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };
 

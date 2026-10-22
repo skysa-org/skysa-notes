@@ -35,15 +35,10 @@ vi.mock('../src/components/CompactBar.js', async (importOriginal) => {
 
 let fake: FakeWindow | undefined;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
 });
 
 const openApp = async (width: number) => {

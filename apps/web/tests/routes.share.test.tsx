@@ -19,12 +19,8 @@ import { fakeCaches } from './fakeCaches.js';
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
-beforeEach(async () => {
+beforeEach(() => {
 	vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')));
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.syncState.clear();
-	await db.prefs.clear();
 });
 
 afterEach(() => {

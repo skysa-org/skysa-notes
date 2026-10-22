@@ -44,11 +44,7 @@ const showing = async (title: string): Promise<void> => {
 	});
 };
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
+afterEach(cleanup);
 
 describe('moving between two notes in rich mode', () => {
 	it('does not call the second note unrepresentable', async () => {

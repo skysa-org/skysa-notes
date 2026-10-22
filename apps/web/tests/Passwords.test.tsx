@@ -14,9 +14,7 @@ import { byLabel } from '../src/store/vault.js';
  * and `+` for a new one.
  */
 
-afterEach(() => {
-	cleanup();
-});
+afterEach(cleanup);
 
 const item = (title: string, at = title.toLowerCase()): NoteRecord => ({
 	...draftNote({

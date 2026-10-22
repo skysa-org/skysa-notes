@@ -53,6 +53,7 @@ import {
 	type SyncScheduler,
 } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Two browsers, one account — Phase 6's soak, as the checklist names it: "two
@@ -1196,8 +1197,7 @@ describe('one browser over two sources', () => {
 	const twoSources = async () => {
 		const first = createFakeProvider({ startAt: START });
 		const second = createFakeProvider({ startAt: START });
-		const db = createDatabase(`soak-two-${crypto.randomUUID()}`);
-		cleanups.push(() => db.delete());
+		const db = freshDatabase();
 		for (const [connectionId, provider] of [
 			['c-second', 'onedrive'],
 			['c-first', 'dropbox'],
