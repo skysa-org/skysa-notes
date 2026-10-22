@@ -31,6 +31,7 @@ import {
 	queueRmdir,
 	withdrawMkdirs,
 } from './queue.js';
+import { rowsOf } from './rows.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -61,8 +62,8 @@ const ancestorsOf = (path: string): string[] =>
  */
 const folderPaths = async (db: NotesDatabase, connectionId: string): Promise<string[]> => {
 	const [folders, notes] = await Promise.all([
-		db.folders.where('connectionId').equals(connectionId).toArray(),
-		db.notes.where('connectionId').equals(connectionId).toArray(),
+		rowsOf(db.folders, connectionId).toArray(),
+		rowsOf(db.notes, connectionId).toArray(),
 	]);
 	const implied = notes
 		// A note the user has deleted draws no notebook, because `listNotes`
@@ -103,9 +104,7 @@ export const ensureFolder = async (
 
 	const wanted = ancestorsOf(path);
 	const existing = new Set(
-		(await db.folders.where('connectionId').equals(connectionId).toArray()).map(
-			(folder) => folder.path
-		)
+		(await rowsOf(db.folders, connectionId).toArray()).map((folder) => folder.path)
 	);
 
 	const created = wanted
@@ -212,7 +211,7 @@ export const listFolders = async (
 	options: FolderScope & { parentPath?: string } = {}
 ): Promise<FolderRecord[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
-	const all = await db.folders.where('connectionId').equals(connectionId).toArray();
+	const all = await rowsOf(db.folders, connectionId).toArray();
 
 	return all
 		.filter(
@@ -248,7 +247,7 @@ export const moveFolder = async (
 		[db.folders, db.notes, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
 		async () => {
 			const connectionId = options.connectionId ?? (await activeConnectionId(db));
-			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+			const folders = await rowsOf(db.folders, connectionId).toArray();
 
 			// A notebook already at the destination is the everyday mistake — renaming
 			// "Drafts" to a name another notebook has — and merging the two is not what
@@ -274,9 +273,9 @@ export const moveFolder = async (
 			// and then not actually moved — which is the merge again, arrived at from
 			// the other side.
 			const moving = folders.filter((folder) => isWithin(folder.path, source));
-			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+			const notes = await rowsOf(db.notes, connectionId).toArray();
 			const inside = notes.filter((note) => isWithin(note.path, source));
-			const files = await db.files.where('connectionId').equals(connectionId).toArray();
+			const files = await rowsOf(db.files, connectionId).toArray();
 			const carried = files.filter((file) => isWithin(file.path, source));
 
 			// Nothing is there — before the refusal below, not after it: a move that
@@ -498,7 +497,7 @@ export const deleteFolder = async (
 		],
 		async () => {
 			const connectionId = options.connectionId ?? (await activeConnectionId(db));
-			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+			const folders = await rowsOf(db.folders, connectionId).toArray();
 			// Outermost first, and every one of them: see `moveFolder` for why
 			// a subdirectory needs an op of its own even though removing the
 			// notebook above it takes the directory with it.
@@ -509,7 +508,7 @@ export const deleteFolder = async (
 				leaving.map((folder) => [folder.connectionId, folder.path])
 			);
 
-			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+			const notes = await rowsOf(db.notes, connectionId).toArray();
 			const tombstoned = notes
 				.filter((note) => isWithin(note.path, target) && note.deletedLocally === 0)
 				.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
@@ -527,9 +526,7 @@ export const deleteFolder = async (
 			// row and its bytes go now and the op is what is left of it. A copy
 			// elsewhere that was to read one of them from the remote is handed
 			// the bytes first, where this device has them.
-			const files = await db.files
-				.where('connectionId')
-				.equals(connectionId)
+			const files = await rowsOf(db.files, connectionId)
 				.filter((file) => isWithin(file.path, target))
 				.toArray();
 			await files.reduce<Promise<void>>(async (pending, file) => {
@@ -566,6 +563,6 @@ export const folderTree = async (
 	options: FolderScope = {}
 ): Promise<string[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
-	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+	const folders = await rowsOf(db.folders, connectionId).toArray();
 	return folders.map((folder) => folder.path).sort((a, b) => a.localeCompare(b));
 };
