@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { EMPTY_QUERY, type FindQuery, type FindTarget, type Located } from '../editor/find.js';
 import { useFindTarget } from '../editor/findTarget.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 
 /**
@@ -76,10 +77,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 	// `query` is read, not depended on: the effect below wants whatever is typed
 	// at the moment the editor appears. Declared first, so it is already in step
 	// on a render that changes both.
-	const typed = useRef(query);
-	useEffect(() => {
-		typed.current = query;
-	}, [query]);
+	const typed = useLatest(query);
 
 	useEffect(() => {
 		if (target === null) return;
@@ -89,7 +87,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 		return () => {
 			target.clear();
 		};
-	}, [target]);
+	}, [target, typed]);
 
 	useEffect(() => {
 		field.current?.focus();
