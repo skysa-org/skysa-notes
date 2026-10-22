@@ -49,7 +49,7 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 | `pnpm build` | Build core, SPA, then a Worker dry-run bundle |
 | `pnpm test` | Vitest across all packages |
 | `pnpm lint` / `pnpm lint:fix` | ESLint across all packages, with or without auto-fix |
-| `pnpm typecheck` | `tsc --noEmit` across all packages |
+| `pnpm typecheck` | `tsc --noEmit` across all packages, and core's source again with no Node types |
 | `pnpm format` / `pnpm format:check` | Prettier write / check |
 | `pnpm verify` | format:check + lint + typecheck + test — run before every commit |
 | `pnpm db:generate` | Generate a Drizzle migration from the schema |

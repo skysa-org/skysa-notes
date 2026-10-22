@@ -24,7 +24,7 @@ jobs:
         # vitest or wrangler cannot sit there for the default six hours.
         timeout-minutes: 15
         steps:
-            - uses: actions/checkout@v7
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   # The changeset check below compares against the base branch,
                   # which a shallow clone does not have.
@@ -34,9 +34,9 @@ jobs:
             # its cache. The version comes from `packageManager` in package.json.
             - run: corepack enable
 
-            - uses: actions/setup-node@v7
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
               with:
-                  node-version: 22
+                  node-version-file: .nvmrc
                   cache: pnpm
 
             - run: pnpm install --frozen-lockfile
@@ -92,14 +92,56 @@ jobs:
                   pnpm exec changeset status --since="origin/$BASE"
 
             # Separate, and not merged into `verify`, because it is the only thing
-            # that checks two claims nothing else does: `packages/core` compiles
-            # under `tsconfig.build.json` with `types: []` — which is what enforces
-            # "no Node-only dependencies" — and the Worker still bundles, via
-            # `wrangler deploy --dry-run`.
+            # that checks the SPA and the Worker still bundle (`vite build` and
+            # `wrangler deploy --dry-run`). Core's portability check — src
+            # compiling under `tsconfig.build.json` with `types: []` — is part of
+            # `pnpm typecheck`, so `verify` catches it locally too.
             - run: pnpm build
+
+            # Three files are generated from sources in this repository and
+            # committed: the route tree (written by the router's Vite plugin
+            # during the build above), the Worker's `Env` and runtime types
+            # (`wrangler types`, from wrangler.toml and the installed workerd),
+            # and drizzle's migration snapshots (from src/db/schema.ts). Each
+            # is regenerated or checked here, so a source change that forgot to
+            # regenerate fails now rather than drifting. A wrangler bump fails
+            # this too, because the runtime types come with it: run
+            # `pnpm --filter @skysa/api run cf-typegen` and commit the result.
+            - name: Generated files match their sources
+              run: |
+                  set -eu
+                  pnpm --filter @skysa/api exec wrangler types --check
+                  pnpm --filter @skysa/api exec drizzle-kit check
+                  pnpm --filter @skysa/api exec drizzle-kit generate
+                  # Untracked files too: a schema change makes `generate`
+                  # write a new migration rather than change an old one.
+                  if [ -n "$(git status --porcelain)" ]; then
+                    git status --porcelain
+                    git diff
+                    echo "::error::A generated file is out of date. Regenerate it and commit the result."
+                    exit 1
+                  fi
 
             # Advisory. Both current advisories are dev-only and transitive, so
             # gating on them would red-light every run without telling us anything
             # about what ships.
             - run: pnpm audit --prod
               continue-on-error: true
+
+    # `engines` in package.json promises Node 22.13, and `verify` runs on
+    # whatever 22 `.nvmrc` resolves to today. This is the other end of that
+    # range: the tests on the oldest Node the project says it supports, so the
+    # promise is checked rather than assumed. Tests only — formatting, lint
+    # and types do not depend on the Node version.
+    minimum-node:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - run: corepack enable
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '22.13'
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm test
