@@ -31,6 +31,7 @@ import {
 	queueRmdir,
 	withdrawMkdirs,
 } from './queue.js';
+import { isLive, isTombstone } from './rowStates.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -73,7 +74,7 @@ const folderPaths = async (db: NotesDatabase, connectionId: string): Promise<str
 		// with "already exists" while the sidebar showed nothing there. Offline,
 		// that lasts as long as the device is away. Found by the two-device
 		// soak, seed 443 of 600.
-		.filter((note) => note.deletedLocally === 0)
+		.filter(isLive)
 		.flatMap((note) => ancestorsOf(parentPath(note.path)));
 	return [...new Set([...folders.map((folder) => folder.path), ...implied])];
 };
@@ -367,26 +368,24 @@ export const moveFolder = async (
 			// moving together can hold one path already, and without this which of
 			// them kept it after the move would be a coin toss.
 			const buried = inside
-				.filter((note) => note.deletedLocally === 1)
+				.filter(isTombstone)
 				.map((note) => ({ ...note, path: rebasePath(note.path, source, target) }));
 
 			const taken = new Set([...outside, ...buried].map((note) => note.path));
 
-			const relocated = inside
-				.filter((note) => note.deletedLocally === 0)
-				.reduce<NoteRecord[]>((done, note) => {
-					const path = freePath(rebasePath(note.path, source, target), taken);
-					// Every note that lands takes its path out of circulation, so two
-					// notes moving together cannot be given the same one either.
-					taken.add(path);
-					// Deliberately not touching `dirty`: a folder move is metadata only.
-					//
-					// A note that gave way is a different case — that rename is ours
-					// rather than the folder move's — but it needs nothing more than
-					// any other note here: each one is queued as a move to wherever it
-					// landed, below.
-					return [...done, { ...note, path }];
-				}, buried);
+			const relocated = inside.filter(isLive).reduce<NoteRecord[]>((done, note) => {
+				const path = freePath(rebasePath(note.path, source, target), taken);
+				// Every note that lands takes its path out of circulation, so two
+				// notes moving together cannot be given the same one either.
+				taken.add(path);
+				// Deliberately not touching `dirty`: a folder move is metadata only.
+				//
+				// A note that gave way is a different case — that rename is ours
+				// rather than the folder move's — but it needs nothing more than
+				// any other note here: each one is queued as a move to wherever it
+				// landed, below.
+				return [...done, { ...note, path }];
+			}, buried);
 
 			// The files beside the notes go with them, under the names they have,
 			// which the notes' links say. Moved one by one, as the notes are:
@@ -511,7 +510,7 @@ export const deleteFolder = async (
 
 			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
 			const tombstoned = notes
-				.filter((note) => isWithin(note.path, target) && note.deletedLocally === 0)
+				.filter((note) => isWithin(note.path, target) && isLive(note))
 				.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
 			if (tombstoned.length > 0) await db.notes.bulkPut(tombstoned);
 			await tombstoned.reduce<Promise<void>>(async (pending, note) => {

@@ -40,6 +40,7 @@ import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.j
 import { dropPictures, restampPicture } from '../store/pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
 import { queueMove, queueWrite } from '../store/queue.js';
+import { isLive, isLiveSource, isTombstone } from '../store/rowStates.js';
 import { eachInSlices } from '../store/slices.js';
 
 /**
@@ -111,7 +112,7 @@ type Scope = Pick<
  * the sidebar and on the remote. Reported clean, the pull writes the row back
  * and the delete behind it purges it — §7's "the delete wins".
  */
-const isDirty = (note: NoteRecord): boolean => note.dirty === 1 && note.deletedLocally === 0;
+const isDirty = (note: NoteRecord): boolean => note.dirty === 1 && isLive(note);
 
 const toSyncNote = (note: NoteRecord): SyncNote => ({
 	id: note.id,
@@ -309,7 +310,7 @@ export const createDexieSyncStore = (
 				// Gone, or detached. A run that was at the network when the source
 				// was let go would otherwise pull back in every note the detach had
 				// just removed, and put a cursor on a row that must not have one.
-				if (state === undefined || state.detached !== undefined) {
+				if (state === undefined || !isLiveSource(state)) {
 					throw new UnboundConnectionError(connectionId);
 				}
 				// A scan before `verifyResume` has checked the remote could delete
@@ -545,7 +546,7 @@ export const createDexieSyncStore = (
 		// the delete, meeting a remote change on the way out. The delete wins
 		// (§7): the row is written back and the queued delete purges it. A copy
 		// would be a new live note holding the text the user just deleted.
-		if (note.deletedLocally === 1) return;
+		if (isTombstone(note)) return;
 
 		// The copy is made from the note as it stands, not as the engine read it:
 		// the user may have typed while the engine was at the network, and a copy
@@ -1056,7 +1057,7 @@ export const createDexieSyncStore = (
 		// take the `remoteId` that queued delete is addressed by, leaving it to
 		// purge the row with nothing removed and the file to come back on the
 		// next pull as a note the user deleted.
-		if (note.deletedLocally === 1) return;
+		if (isTombstone(note)) return;
 		await scope.notes.put({ ...withoutRemote(note), dirty: 1 });
 		await queue(scope, { op: 'write', noteId: note.id, path: note.path });
 	};
@@ -1221,7 +1222,7 @@ export const createDexieSyncStore = (
 		if (outcome.kind === 'purged') {
 			const note = await ownNote(scope, outcome.noteId);
 			if (note === undefined) return;
-			if (note.deletedLocally === 1) {
+			if (isTombstone(note)) {
 				await scope.notes.delete(noteKey(note));
 				return;
 			}
@@ -1305,7 +1306,7 @@ export const createDexieSyncStore = (
 			// live one is the answer. Handing back the tombstone would have a file
 			// arriving at that path written into a row its queued delete is about
 			// to purge — taking the file on the remote with it.
-			const note = notes.find((each) => each.deletedLocally === 0) ?? notes[0];
+			const note = notes.find(isLive) ?? notes[0];
 			return note === undefined ? undefined : toSyncNote(note);
 		},
 

@@ -13,6 +13,7 @@ import {
 
 import { noteKey, type NoteRecord, type NotesDatabase } from '../store/db.js';
 import { rewriteNoteBody } from '../store/notes.js';
+import { isLive } from '../store/rowStates.js';
 
 /**
  * What secrets need of the curve and the cipher (docs/ARCHITECTURE.md §7,
@@ -43,7 +44,7 @@ const armoredNotes = (db: NotesDatabase, connectionId: string): Promise<NoteReco
 	db.notes
 		.where('connectionId')
 		.equals(connectionId)
-		.filter((note) => note.deletedLocally === 0 && note.body.includes(ARMOR_LINE))
+		.filter((note) => isLive(note) && note.body.includes(ARMOR_LINE))
 		.toArray();
 
 /**

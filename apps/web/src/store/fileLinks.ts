@@ -5,6 +5,7 @@ import { fileKey, handOverToCopies } from './files.js';
 import { foldPath } from './naming.js';
 import { dropPictures } from './pictures.js';
 import { queueDeleteFile } from './queue.js';
+import { isLiveSource, isTombstone } from './rowStates.js';
 
 /**
  * Which notes may link a file, and the one way to delete a file that none does
@@ -182,7 +183,7 @@ const linking = (
 				.map(({ note }) => ({
 					id: note.id,
 					title: note.title,
-					deleted: note.deletedLocally === 1,
+					deleted: isTombstone(note),
 				}));
 			return [file.id, linkedBy];
 		})
@@ -205,7 +206,7 @@ export const holdsEveryNote = (state: SyncStateRecord | undefined): boolean =>
 	(state.cursor !== undefined &&
 		state.importing === undefined &&
 		state.resumeUnverified === undefined &&
-		state.detached === undefined &&
+		isLiveSource(state) &&
 		(state.unreadable ?? []).length === 0);
 
 /** `holdsEveryNote` of a source, read from the store. */

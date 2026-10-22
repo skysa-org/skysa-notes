@@ -12,6 +12,7 @@ import {
 
 import { PREVIEW_CHARS, showsClipboard } from '../store/clipboard.js';
 import { type ClipRecord, type NotesDatabase } from '../store/db.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { type FileRead, ownBuffer, type ReadingSession } from './fileReads.js';
 
 /**
@@ -300,7 +301,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		const entry = await upload(session, row.name, held.bytes);
 		await db.transaction('rw', [db.syncState, db.clips, db.clipBytes], async () => {
 			const state = await db.syncState.get(row.connectionId);
-			if (state === undefined || state.detached !== undefined) return;
+			if (state === undefined || !isLiveSource(state)) return;
 			await sent(row, entry);
 		});
 		return true;
@@ -322,7 +323,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		const session = sessionFor(connectionId);
 		if (session === undefined || !isOnline()) return;
 		const state = await db.syncState.get(connectionId);
-		if (state === undefined || state.detached !== undefined || state.rootId === undefined) {
+		if (state === undefined || !isLiveSource(state) || state.rootId === undefined) {
 			return;
 		}
 		const owed = (await db.clips.where('connectionId').equals(connectionId).toArray())
