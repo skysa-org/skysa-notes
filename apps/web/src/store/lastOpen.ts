@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
 import { getNote, listNotes } from './notes.js';
+import { readJson, sourceKey } from './prefs.js';
 import { type FolderNode, listedUnder } from './tree.js';
 
 /**
@@ -39,7 +40,7 @@ const stored = z.object({
 	notes: z.record(z.string(), z.string()),
 });
 
-const keyFor = (connectionId: string): string => `lastOpen:${connectionId}`;
+const keyFor = (connectionId: string): string => sourceKey('lastOpen', connectionId);
 
 /**
  * A row is read whatever is in it. One written by a later version, or
@@ -47,15 +48,10 @@ const keyFor = (connectionId: string): string => `lastOpen:${connectionId}`;
  * none, rather than an error on the way into the app.
  */
 const read = (value: string | undefined): LastOpen => {
-	if (value === undefined) return NOTHING;
-	try {
-		const parsed = stored.safeParse(JSON.parse(value));
-		if (!parsed.success) return NOTHING;
-		const { folder, notes } = parsed.data;
-		return folder === undefined ? { notes } : { folder, notes };
-	} catch {
-		return NOTHING;
-	}
+	const parsed = readJson(value, stored);
+	if (parsed === undefined) return NOTHING;
+	const { folder, notes } = parsed;
+	return folder === undefined ? { notes } : { folder, notes };
 };
 
 export const getLastOpen = async (db: NotesDatabase, connectionId: string): Promise<LastOpen> =>

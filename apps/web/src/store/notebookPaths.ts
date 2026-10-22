@@ -2,6 +2,7 @@ import { isWithin, rebasePath } from '@skysa/core';
 import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
+import { readJson, sourceKey } from './prefs.js';
 
 /**
  * Some of a source's notebooks, by path, as this device keeps them in `prefs`:
@@ -52,18 +53,10 @@ export interface NotebookPaths {
 const stored = z.array(z.string());
 
 /** Whatever is in the row: one the app cannot read is none, as `lastOpen` has it. */
-const read = (value: string | undefined): string[] => {
-	if (value === undefined) return [];
-	try {
-		const parsed = stored.safeParse(JSON.parse(value));
-		return parsed.success ? parsed.data : [];
-	} catch {
-		return [];
-	}
-};
+const read = (value: string | undefined): string[] => readJson(value, stored) ?? [];
 
 export const notebookPaths = (name: string, limit: number): NotebookPaths => {
-	const keyFor = (connectionId: string): string => `${name}:${connectionId}`;
+	const keyFor = (connectionId: string): string => sourceKey(name, connectionId);
 
 	const get = async (db: Pick<NotesDatabase, 'prefs'>, connectionId: string) =>
 		read((await db.prefs.get(keyFor(connectionId)))?.value);
