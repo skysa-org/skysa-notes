@@ -2,6 +2,7 @@ import { isScratchPath, isVaultPath } from '@skysa/core';
 import { z } from 'zod';
 
 import { type NoteKey, type NoteRecord, noteRef, type NotesDatabase } from './db.js';
+import { isLive } from './rowStates.js';
 
 /**
  * The notes opened lately on this device, newest first: what the search field
@@ -89,7 +90,7 @@ export const listRecentNotes = async (db: NotesDatabase, skip?: string): Promise
 		.filter(
 			(note): note is NoteRecord =>
 				note !== undefined &&
-				note.deletedLocally === 0 &&
+				isLive(note) &&
 				!isScratchPath(note.path) &&
 				!isVaultPath(note.path) &&
 				noteRef(note) !== skip

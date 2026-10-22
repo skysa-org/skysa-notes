@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
 import { getNote, listNotes } from './notes.js';
+import { isLive } from './rowStates.js';
 import { type FolderNode, listedUnder } from './tree.js';
 
 /**
@@ -176,7 +177,7 @@ export const pickNote = async (
 	const live = async (id: string | undefined) => {
 		if (id === undefined) return undefined;
 		const note = await getNote(db, id, { connectionId });
-		return note?.deletedLocally === 0 ? note : undefined;
+		return isLive(note) ? note : undefined;
 	};
 
 	const named = await live(open);

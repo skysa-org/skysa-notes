@@ -15,6 +15,7 @@ import {
 	type SyncStateRecord,
 } from './db.js';
 import { updateLive } from './detached.js';
+import { isLiveSource } from './rowStates.js';
 
 /**
  * A source's clipboard on this device (docs/ARCHITECTURE.md §7, "The
@@ -51,7 +52,7 @@ const encoder = new TextEncoder();
 
 /** Whether a source shows its clipboard on this device. */
 export const showsClipboard = (state: SyncStateRecord | undefined): boolean =>
-	state !== undefined && state.detached === undefined && state.clipboard === true;
+	state !== undefined && isLiveSource(state) && state.clipboard === true;
 
 /** A source's own row, if it is one the clipboard can belong to: live, not detached. */
 const liveState = async (

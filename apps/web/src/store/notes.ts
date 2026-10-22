@@ -43,6 +43,7 @@ import { frontmatterOf } from './frontmatter.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
+import { isLive, isTombstone } from './rowStates.js';
 
 /**
  * The scope every writer here opens, whether or not it touches every table in
@@ -153,7 +154,7 @@ const takenNamesIn = async (
 	return siblings
 		.filter(
 			(note) =>
-				note.deletedLocally === 0 &&
+				isLive(note) &&
 				note.id !== exceptId &&
 				// Folded, or the fold in `freeName` below is for nothing: a folder
 				// spelled `Archive` where this one says `archive` is one directory
@@ -322,7 +323,7 @@ export const listNotes = async (
 	const all = await db.notes.where('connectionId').equals(connectionId).toArray();
 
 	return all
-		.filter((note) => options.includeDeleted === true || note.deletedLocally === 0)
+		.filter((note) => options.includeDeleted === true || isLive(note))
 		.filter(
 			(note) =>
 				options.folderPath === undefined || parentPath(note.path) === options.folderPath
@@ -349,7 +350,7 @@ export const listScratchNotes = async (
 			)
 			.toArray()
 	)
-		.filter((note) => note.deletedLocally === 0 && isScratchPath(note.path))
+		.filter((note) => isLive(note) && isScratchPath(note.path))
 		.sort(newestFirst);
 
 /** How many notes `listNotesEverywhere` reads at a time. */
@@ -366,7 +367,7 @@ const everywhereAfter = async (
 			? db.notes.limit(EVERYWHERE_PAGE)
 			: db.notes.where(':id').above(after).limit(EVERYWHERE_PAGE)
 	).toArray();
-	const notes = [...read, ...page.filter((note) => note.deletedLocally === 0)];
+	const notes = [...read, ...page.filter(isLive)];
 	const last = page.at(-1);
 	if (last === undefined || page.length < EVERYWHERE_PAGE) return notes;
 	return everywhereAfter(db, noteKey(last), notes);
@@ -532,7 +533,7 @@ export const saveNoteBody = async (
 		// restored, under the id it names. It is no longer the note deleted from
 		// this tab, and an edit to it that finds it gone later is kept. Under
 		// both names: the row may have moved source since the editor took it.
-		if (current.deletedLocally === 0) {
+		if (isLive(current)) {
 			deletedHere.delete(current);
 			deletedHere.delete(base.note);
 		}
@@ -541,7 +542,7 @@ export const saveNoteBody = async (
 		// delete wins (§7), and restoring it brings the edit back with it.
 		// A displaced one is not: the tombstone holds the later text, which is
 		// what restoring it should bring back.
-		if (current.deletedLocally === 1) {
+		if (isTombstone(current)) {
 			return base.displaced === true ? current : applyBody(db, current.id, body, there);
 		}
 		if (base.displaced !== true && (current.bodyOrigin ?? '') === base.origin) {
@@ -664,7 +665,7 @@ export const rewriteNoteBody = (
 ): Promise<NoteRecord | undefined> =>
 	db.transaction('rw', writerTables(db), async () => {
 		const note = await db.notes.get(key);
-		if (note === undefined || note.deletedLocally === 1) return undefined;
+		if (note === undefined || isTombstone(note)) return undefined;
 		const body = change(note.body);
 		if (body === note.body) return undefined;
 		const [connectionId, id] = key;
@@ -702,12 +703,12 @@ export const saveVaultItem = (
 		if (current === undefined) {
 			return (await deletedHere.has(db, base.note)) ? base.note : bringBack(db, shown, body);
 		}
-		if (current.deletedLocally === 0) {
+		if (isLive(current)) {
 			deletedHere.delete(current);
 			deletedHere.delete(base.note);
 		}
 		const there = { connectionId: current.connectionId };
-		if (current.deletedLocally === 1 || (current.bodyOrigin ?? '') === base.origin) {
+		if (isTombstone(current) || (current.bodyOrigin ?? '') === base.origin) {
 			return applyEdit(db, current.id, (note) => ({ body, ...labelled(note) }), there);
 		}
 		if (current.body === body && current.title === labelled(current).title) return current;
@@ -721,7 +722,7 @@ const vaultItemAsBegun = async (
 ): Promise<NoteRecord | undefined> => {
 	const current = await whereShown(db, base.note);
 	return current === undefined ||
-		current.deletedLocally === 1 ||
+		isTombstone(current) ||
 		(current.bodyOrigin ?? '') !== base.origin
 		? undefined
 		: current;
@@ -1076,15 +1077,12 @@ export const restoreNote = (db: NotesDatabase, id: string, scope?: NoteScope): P
  * are one name to every provider the app syncs to.
  */
 const makeRoomFor = async (db: NotesDatabase, restored: NoteRecord | undefined): Promise<void> => {
-	if (restored === undefined || restored.deletedLocally === 1) return;
+	if (restored === undefined || isTombstone(restored)) return;
 	const at = foldPath(restored.path);
 	const inTheWay = await db.notes
 		.where('connectionId')
 		.equals(restored.connectionId)
-		.filter(
-			(note) =>
-				note.id !== restored.id && note.deletedLocally === 0 && foldPath(note.path) === at
-		)
+		.filter((note) => note.id !== restored.id && isLive(note) && foldPath(note.path) === at)
 		.toArray();
 	await inTheWay.reduce(
 		(done, note) =>
@@ -1180,7 +1178,7 @@ const noteAtPath = async (
 	path: string
 ): Promise<NoteRecord | undefined> => {
 	const rows = await db.notes.where('[connectionId+path]').equals([connectionId, path]).toArray();
-	return rows.find((note) => note.deletedLocally === 0) ?? rows[0];
+	return rows.find(isLive) ?? rows[0];
 };
 
 /**
