@@ -25,6 +25,11 @@ import {
  * (`forgetUnread`). Moved out of `engine.ts` as they were (#446).
  */
 
+/** The notes and folders a batch's decisions so far write back: `reestablished` in `engine.ts`, handed in. */
+export type Reestablished = (
+	changes: readonly PullChange[]
+) => Readonly<{ notes: ReadonlySet<string>; folders: ReadonlySet<string> }>;
+
 export const createPullDeletions = (
 	{ provider, store }: EngineContext,
 	{
@@ -42,9 +47,7 @@ export const createPullDeletions = (
 	}: {
 		forgetNote: (local: SyncNote) => PullChange;
 		stillThere: (placed: Pick<Placement, 'at' | 'remoteId'>) => Promise<boolean>;
-		reestablished: (
-			changes: readonly PullChange[]
-		) => Readonly<{ notes: ReadonlySet<string>; folders: ReadonlySet<string> }>;
+		reestablished: Reestablished;
 	} & Pick<
 		PullFolders,
 		'deleteFolderAfterRescue' | 'doomedFolder' | 'folderIdAt' | 'movedFolderOver'
@@ -398,3 +401,6 @@ export const createPullDeletions = (
 
 	return { decideDeleted, forgetUnread };
 };
+
+/** What the pull's other parts are handed of it. */
+export type PullDeletions = ReturnType<typeof createPullDeletions>;

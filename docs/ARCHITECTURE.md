@@ -1697,6 +1697,7 @@ packages/
                               #   cascade.ts (what a folder's deletion takes with it, and the folders above a kept note it must not)
                               #   folders.ts (the folders, as a pull decides them: made, moved, moved over, deleted once rescued)
                               #   deletions.ts (a deletion believed or not by the rest of the batch, and what it takes with it)
+                              #   notes.ts (the notes, as a pull decides them: matched, read, reconciled, moved aside, let go of)
         push/                 # the push's parts, out of engine.ts (#446): folders.ts (folders made before a write, and removed or left once empty)
                               #   files.ts (files that are not notes: uploaded, moved, deleted, beside what they meet)
                               #   notes.ts (notes: written after a rename, renamed or moved aside, deleted)
