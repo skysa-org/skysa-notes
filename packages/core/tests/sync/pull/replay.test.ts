@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemoteEntry } from '../../../src/providers/types.js';
 import {
+	folderBefore,
 	folderNow,
 	placement,
 	placements,
+	rebaseThrough,
+	survives,
 	unreadNow,
 	whereNow,
 } from '../../../src/sync/pull/replay.js';
@@ -123,6 +126,123 @@ describe('folderNow', () => {
 		expect(folderNow('Play/Inner', [...moved, { kind: 'delete-folder', path: 'Play' }])).toBe(
 			undefined
 		);
+	});
+});
+
+describe('folderBefore', () => {
+	it('walks back through a move into the folder’s own old path', () => {
+		const moved: PullChange[] = [{ kind: 'move-folder', from: 'B', to: 'B/B' }];
+		expect(folderBefore('B/B', moved)).toBe('B');
+		// Left behind: what was at `B` went with the move.
+		expect(folderBefore('B', moved)).toBeUndefined();
+	});
+});
+
+/**
+ * Every round of up to three folder changes that could happen to these
+ * folders — a move only of a folder that is there to a path that is free, a
+ * deletion only of a folder that is there, a new folder only where one is
+ * not — with where each folder ends up, kept by the folder rather than by its
+ * path, as the store keeps it.
+ */
+const FOLDER_PATHS = ['A', 'A/x', 'B', 'B/B', 'C'];
+const FOLDER_CHANGES: readonly PullChange[] = [
+	...FOLDER_PATHS.flatMap((from) =>
+		FOLDER_PATHS.filter((to) => to !== from).map((to): PullChange => ({
+			kind: 'move-folder',
+			from,
+			to,
+		}))
+	),
+	...FOLDER_PATHS.map((path): PullChange => ({ kind: 'delete-folder', path })),
+	...FOLDER_PATHS.map((path): PullChange => ({ kind: 'ensure-folder', path })),
+];
+
+/** Each folder's starting path, or `new`, by where it is now. */
+type Folders = ReadonlyMap<string, string>;
+
+const STARTING: Folders = new Map(['A', 'A/x', 'B'].map((path) => [path, path]));
+
+const parentThere = (folders: Folders, path: string): boolean =>
+	!path.includes('/') || folders.has(path.slice(0, path.lastIndexOf('/')));
+
+/** Taken by a folder at it, or under it: a folder at `B/B` is in a folder `B`. */
+const taken = (folders: Folders, path: string): boolean =>
+	[...folders.keys()].some((each) => each === path || each.startsWith(`${path}/`));
+
+/** The folders after one change, or `undefined` where it could not happen. */
+const applied = (folders: Folders, change: PullChange): Folders | undefined => {
+	if (change.kind === 'move-folder') {
+		if (!folders.has(change.from) || taken(folders, change.to)) return undefined;
+		if (!parentThere(folders, change.to) && !change.to.startsWith(`${change.from}/`)) {
+			return undefined;
+		}
+		return new Map([...folders].map(([path, was]) => [rebaseThrough(path, change), was]));
+	}
+	if (change.kind === 'delete-folder') {
+		if (!folders.has(change.path)) return undefined;
+		return new Map([...folders].filter(([path]) => survives(path, change)));
+	}
+	if (change.kind === 'ensure-folder') {
+		if (taken(folders, change.path) || !parentThere(folders, change.path)) return undefined;
+		return new Map([...folders, [change.path, 'new']]);
+	}
+	return folders;
+};
+
+const rounds = (length: number): { decided: PullChange[]; folders: Folders }[] =>
+	length === 0
+		? [{ decided: [], folders: STARTING }]
+		: rounds(length - 1).flatMap(({ decided, folders }) =>
+				FOLDER_CHANGES.flatMap((change) => {
+					const next = applied(folders, change);
+					return next === undefined
+						? []
+						: [{ decided: [...decided, change], folders: next }];
+				})
+			);
+
+describe('folderNow and folderBefore', () => {
+	const all = [0, 1, 2, 3].flatMap(rounds);
+
+	it('are enough rounds to mean something', () => {
+		expect(all.length).toBeGreaterThan(500);
+	});
+
+	it('walk a folder forward to where it is, and back to where it started', () => {
+		all.forEach(({ decided, folders }) => {
+			const where = new Map([...folders].map(([path, was]) => [was, path]));
+			STARTING.forEach((_, start) => {
+				const now = folderNow(start, decided);
+				expect(now).toBe(where.get(start));
+				if (now !== undefined) expect(folderBefore(now, decided)).toBe(start);
+			});
+		});
+	});
+
+	it('walk back from every folder there now to where it started, or to nothing it was', () => {
+		all.forEach(({ decided, folders }) => {
+			folders.forEach((was, path) => {
+				const before = folderBefore(path, decided);
+				if (was === 'new') {
+					// Whatever it answers, it is no folder that was there before.
+					if (before !== undefined) expect(STARTING.has(before)).toBe(false);
+				} else {
+					expect(before).toBe(was);
+				}
+			});
+		});
+	});
+});
+
+describe('rebaseThrough and survives', () => {
+	it('carry a path inside the folder, and leave its neighbours alone', () => {
+		expect(rebaseThrough('Work/a.md', { from: 'Work', to: 'Play' })).toBe('Play/a.md');
+		expect(rebaseThrough('Work', { from: 'Work', to: 'Play' })).toBe('Play');
+		expect(rebaseThrough('Workshop/a.md', { from: 'Work', to: 'Play' })).toBe('Workshop/a.md');
+		expect(survives('Work/a.md', { path: 'Work' })).toBe(false);
+		expect(survives('Work', { path: 'Work' })).toBe(false);
+		expect(survives('Workshop', { path: 'Work' })).toBe(true);
 	});
 });
 

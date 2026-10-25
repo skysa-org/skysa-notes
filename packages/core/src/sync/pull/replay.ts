@@ -7,8 +7,23 @@ import { type PullChange, type SyncNote, type UnreadableFile } from '../store.js
  * once), a folder (`folderNow`), the unreadable files the store will list
  * (`unreadNow`). Each replays the decisions in order, as the store will apply
  * them, because every decision is reached against the store as it was before
- * the batch.
+ * the batch. `folderBefore` walks them the other way.
+ *
+ * What a folder's move or deletion does to a path is the same in every one of
+ * them, and the files' replay (`placedFiles`): `rebaseThrough` and `survives`.
  */
+
+type FolderMove = Pick<Extract<PullChange, { kind: 'move-folder' }>, 'from' | 'to'>;
+
+/** Where a path is once a folder's move has carried it, if it was in the folder. */
+export const rebaseThrough = (at: string, move: FolderMove): string =>
+	isWithin(at, move.from) ? rebasePath(at, move.from, move.to) : at;
+
+/** Whether a path is still there once a folder has been deleted. */
+export const survives = (
+	at: string,
+	deletion: Pick<Extract<PullChange, { kind: 'delete-folder' }>, 'path'>
+): boolean => !isWithin(at, deletion.path);
 
 /**
  * Where a note is, and whether it still holds unpushed edits, once the
@@ -47,7 +62,7 @@ const placedBy =
 		// while the dirty ones are kept and merely detached. Nothing a
 		// folder does reaches a note that is not anywhere.
 		if (change.kind === 'delete-folder') {
-			if (state.at === undefined || !isWithin(state.at, change.path)) return state;
+			if (state.at === undefined || survives(state.at, change)) return state;
 			// A note the cascade is told to leave alone is untouched by it,
 			// remote and all: the folder's deletion is not about its file,
 			// which is elsewhere waiting on a rename queued here.
@@ -55,9 +70,9 @@ const placedBy =
 			return state.dirty ? { ...state, remoteId: undefined } : { ...state, at: undefined };
 		}
 		if (change.kind === 'move-folder') {
-			return state.at !== undefined && isWithin(state.at, change.from)
-				? { ...state, at: rebasePath(state.at, change.from, change.to) }
-				: state;
+			return state.at === undefined
+				? state
+				: { ...state, at: rebaseThrough(state.at, change) };
 		}
 		if (change.kind === 'conflict') {
 			return change.resolution.noteId === note.id
@@ -151,10 +166,28 @@ export const remoteNow = (note: SyncNote, decided: readonly PullChange[]): strin
 export const folderNow = (path: string, decided: readonly PullChange[]): string | undefined =>
 	decided.reduce<string | undefined>((at, change) => {
 		if (at === undefined) return undefined;
+		if (change.kind === 'move-folder') return rebaseThrough(at, change);
+		if (change.kind === 'delete-folder') return survives(at, change) ? at : undefined;
+		return at;
+	}, path);
+
+/**
+ * Where whatever is at `path` once the decisions so far have run was before
+ * them, or `undefined` if nothing that was there before is there now. Walked
+ * backwards, because the store can only be asked about the paths it already
+ * holds; `folderNow` walks forwards, and takes the answer back to `path`.
+ */
+export const folderBefore = (path: string, decided: readonly PullChange[]): string | undefined =>
+	decided.reduceRight<string | undefined>((at, change) => {
+		if (at === undefined) return undefined;
 		if (change.kind === 'move-folder') {
-			return isWithin(at, change.from) ? rebasePath(at, change.from, change.to) : at;
+			if (isWithin(at, change.to)) return rebasePath(at, change.to, change.from);
+			// Left behind by the move: whatever was here went with it. Asked
+			// second, because a folder moved into its own old path — `B` to
+			// `B/B` — leaves `B/B` full and `B` empty.
+			return isWithin(at, change.from) ? undefined : at;
 		}
-		if (change.kind === 'delete-folder') return isWithin(at, change.path) ? undefined : at;
+		if (change.kind === 'delete-folder') return survives(at, change) ? at : undefined;
 		return at;
 	}, path);
 
@@ -185,14 +218,12 @@ export const unreadNow = (
 			return new Map(
 				[...files].map(([remoteId, file]) => [
 					remoteId,
-					isWithin(file.path, change.from)
-						? { ...file, path: rebasePath(file.path, change.from, change.to) }
-						: file,
+					{ ...file, path: rebaseThrough(file.path, change) },
 				])
 			);
 		}
 		if (change.kind === 'delete-folder') {
-			return new Map([...files].filter(([, file]) => !isWithin(file.path, change.path)));
+			return new Map([...files].filter(([, file]) => survives(file.path, change)));
 		}
 		return files;
 	}, unread);
