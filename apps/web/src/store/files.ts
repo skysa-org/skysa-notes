@@ -26,6 +26,7 @@ import {
 import { foldPath } from './naming.js';
 import { queueMoveFile, queueUpload, requeueWriteBehind } from './queue.js';
 import { rowsOf } from './rows.js';
+import { isTombstone } from './rowStates.js';
 
 /**
  * Files beside notes (#187): the writers that add one, and the rules a note's
@@ -183,7 +184,7 @@ export const addAttachment = async (
 		async (): Promise<FileRecord> => {
 			const connectionId = input.connectionId ?? (await activeConnectionId(db));
 			const note = await db.notes.get([connectionId, input.noteId]);
-			if (note === undefined || note.deletedLocally === 1) {
+			if (note === undefined || isTombstone(note)) {
 				throw new Error(`No note with id ${input.noteId}`);
 			}
 			const place = await placeFor(

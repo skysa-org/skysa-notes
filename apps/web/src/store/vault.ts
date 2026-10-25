@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { t } from '../i18n/t.js';
 import { type NoteRecord, type NotesDatabase } from './db.js';
 import { getPreference, readJson, setPreference, sourceKey } from './prefs.js';
+import { isLive } from './rowStates.js';
 import { titleShown } from './titles.js';
 
 /**
@@ -63,7 +64,7 @@ export const listVaultNotes = async (
 			.between([connectionId, `${VAULT_FOLDER}/`], [connectionId, `${VAULT_FOLDER}/\uffff`])
 			.toArray()
 	)
-		.filter((note) => note.deletedLocally === 0 && isVaultPath(note.path))
+		.filter((note) => isLive(note) && isVaultPath(note.path))
 		.sort(byLabel);
 
 /** Text folded as the filter compares it: case and accents let go of. */

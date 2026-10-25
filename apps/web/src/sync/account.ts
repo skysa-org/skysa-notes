@@ -30,6 +30,7 @@ import {
 	type SyncStateRecord,
 } from '../store/db.js';
 import { settleEditors } from '../store/heldEdits.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { type Seen } from '../store/unsynced.js';
 import { type SyncScheduler } from './scheduler.js';
 import { PROVIDER_LABELS } from './sourceNames.js';
@@ -372,7 +373,7 @@ const supersede = async (db: NotesDatabase, connection: Connection): Promise<voi
 	if (key === undefined) return;
 	const stale = (await db.syncState.toArray()).filter(
 		(state) =>
-			state.detached === undefined &&
+			isLiveSource(state) &&
 			state.connectionId !== connection.id &&
 			state.provider !== undefined &&
 			accountKey(state.provider, state.accountId) === key

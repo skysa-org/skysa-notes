@@ -37,6 +37,7 @@ import { noteRecordFromFile } from './notes.js';
 import { queueByNotebook } from './queue.js';
 import { readZip } from './readZip.js';
 import { rowsOf } from './rows.js';
+import { isLive, isLiveSource } from './rowStates.js';
 import { writerTables } from './scopes.js';
 import { eachInSlices } from './slices.js';
 
@@ -657,9 +658,7 @@ const notebooksOf = (
 	new Map(
 		[
 			...folders.map((folder) => folder.path),
-			...[...notes.filter((note) => note.deletedLocally === 0), ...files].flatMap((row) =>
-				ancestorPaths(row.path)
-			),
+			...[...notes.filter(isLive), ...files].flatMap((row) => ancestorPaths(row.path)),
 		].map((path) => [foldPath(path), path])
 	);
 
@@ -690,7 +689,7 @@ const mayImport = async (db: NotesDatabase, connectionId: string): Promise<boole
 		return !(await db.syncState.toArray()).some(holdsPile);
 	}
 	const state = await db.syncState.get(connectionId);
-	return state !== undefined && state.detached === undefined && state.importing === undefined;
+	return state !== undefined && isLiveSource(state) && state.importing === undefined;
 };
 
 /**
@@ -912,11 +911,9 @@ const placeNotes = (
 		// eslint-disable-next-line functional/immutable-data
 		siblings.push(path);
 	};
-	existing
-		.filter((note) => note.deletedLocally === 0)
-		.forEach((note) => {
-			take(note.path);
-		});
+	existing.filter(isLive).forEach((note) => {
+		take(note.path);
+	});
 	const ids = new Set(existing.map((note) => note.id));
 	const numbered = { current: 0 };
 	const rows = plan.notes.map((note, index) => {

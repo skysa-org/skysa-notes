@@ -5,6 +5,7 @@ import { type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
 import { readJson, sourceKey } from './prefs.js';
 import { rowsOf } from './rows.js';
+import { isLive } from './rowStates.js';
 
 /**
  * Notebooks and notes pinned to the top of their list, per source, on this
@@ -63,7 +64,7 @@ export const setNotebookPin = (
 		]);
 		const inside = [
 			...folders.map((folder) => folder.path),
-			...notes.filter((note) => note.deletedLocally === 0).map((note) => note.path),
+			...notes.filter(isLive).map((note) => note.path),
 		];
 		const there = (each: string) => inside.some((held) => isWithin(held, each));
 		// This one, wherever it was pinned, and every one no longer there.

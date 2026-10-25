@@ -37,6 +37,7 @@ import { noteFile } from './notes.js';
 import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
 import { queueByNotebook } from './queue.js';
 import { rowsOf } from './rows.js';
+import { isLive, isLiveSource, isTombstone } from './rowStates.js';
 import { sourceTables } from './scopes.js';
 import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from './unsynced.js';
 
@@ -383,7 +384,7 @@ const moveRowsTo = async (
 	// A tombstone's path is free, as it is to every other writer (`takenNamesIn`).
 	const taken = new Set(
 		notes
-			.filter((note) => note.connectionId === target && note.deletedLocally === 0)
+			.filter((note) => note.connectionId === target && isLive(note))
 			.map((note) => foldPath(note.path))
 	);
 	const held = new Set(
@@ -404,7 +405,7 @@ const moveRowsTo = async (
 	const taking = (note: NoteRecord): boolean => only === undefined || only.notes.has(note.id);
 	// Dropped for the target's row of the same file: nothing of its own to keep.
 	const yielding = (note: NoteRecord): boolean =>
-		twinOf(note) !== undefined && (note.deletedLocally === 1 || note.dirty === 0);
+		twinOf(note) !== undefined && (isTombstone(note) || note.dirty === 0);
 	// Where each row ends up: its own id, a fresh one where the target holds the
 	// id or the file, or the target's own row where this one yields to it.
 	const landing = new Map(
@@ -426,7 +427,7 @@ const moveRowsTo = async (
 			source: noteFile(note),
 			connectionId: target,
 		};
-		if (note.deletedLocally === 1) {
+		if (isTombstone(note)) {
 			// A delete owed to the account it came from, which the new one
 			// only is when resuming.
 			return mode === 'resume' ? [{ row: pinned, owed: false }] : [];
@@ -458,7 +459,7 @@ const moveRowsTo = async (
 	// for an undo of a delete whose tombstone this drops rather than carries,
 	// which has nothing else left to say where the note belongs now.
 	leaving
-		.filter((note) => taking(note) || note.deletedLocally === 1)
+		.filter((note) => taking(note) || isTombstone(note))
 		.forEach((note) => {
 			movedRows.record(note, { connectionId: target, id: idNow(note.id) });
 		});
@@ -544,10 +545,7 @@ const moveRowsTo = async (
 const cutLoose = async (db: Scope, connectionId: string): Promise<Moved> => {
 	const notes = await rowsOf(db.notes, connectionId).toArray();
 	const folders = await rowsOf(db.folders, connectionId).toArray();
-	const [gone, staying] = [
-		notes.filter((note) => note.deletedLocally === 1),
-		notes.filter((note) => note.deletedLocally === 0),
-	];
+	const [gone, staying] = [notes.filter(isTombstone), notes.filter(isLive)];
 	await db.notes.bulkDelete(gone.map(noteKey));
 	const cut = staying.map((note): NoteRecord => ({
 		...withoutRemote(note),
@@ -666,7 +664,7 @@ export const bindingMode = async (
 	const from = (await db.syncState.toArray())
 		.filter(
 			(state) =>
-				state.detached !== undefined &&
+				!isLiveSource(state) &&
 				state.connectionId !== input.connectionId &&
 				state.provider !== undefined &&
 				to !== undefined &&
@@ -706,7 +704,7 @@ const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
 		)
 	);
 	return {
-		notes: notes.filter((note) => note.deletedLocally === 0 && note.remoteId === undefined),
+		notes: notes.filter((note) => isLive(note) && note.remoteId === undefined),
 		folders: folders.filter((folder) => folder.remoteId === undefined),
 		files: files.filter((file) => file.remoteId === undefined && !uploading.has(file.id)),
 		linked: [...notes, ...folders, ...files].some((row) => row.remoteId !== undefined),
@@ -725,7 +723,7 @@ const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
  * it, and kept here as well until the import is done or cancelled.
  */
 export const holdsPile = (state: SyncStateRecord): boolean =>
-	state.importing !== undefined && state.detached === undefined;
+	state.importing !== undefined && isLiveSource(state);
 
 /** A source with no row of its own and nothing detached to resume: new here. */
 const firstBinding = (
@@ -1020,7 +1018,7 @@ const keepOnly = async (
 	const removed = rows.filter((note) => !stayingIds.has(note.id));
 	await db.notes.bulkDelete(removed.map(noteKey));
 
-	const live = staying.filter((note) => note.deletedLocally === 0);
+	const live = staying.filter(isLive);
 	const links = new Set(live.flatMap((note) => linkedFiles(note.body, note.path).map(foldPath)));
 	const listed = new Set(unsynced.files.filter(keepFile).map((file) => file.id));
 	const ops = await rowsOf(db.opQueue, connectionId).toArray();
@@ -1096,10 +1094,10 @@ const forgetSource = async (db: NotesDatabase, connectionId: string): Promise<vo
 export const finishImport = (db: NotesDatabase, connectionId: string): Promise<void> =>
 	inTransaction(db, async () => {
 		const state = await db.syncState.get(connectionId);
-		if (state?.importing === undefined || state.detached !== undefined) return;
+		if (state?.importing === undefined || !isLiveSource(state)) return;
 		const since = state.boundAt ?? 0;
 		const lateNotes = (await rowsOf(db.notes, LOCAL_CONNECTION_ID).toArray()).filter(
-			(note) => note.deletedLocally === 0 && note.updatedAt > since
+			(note) => isLive(note) && note.updatedAt > since
 		);
 		const late = lateNotes.map((note) => note.id);
 		if (late.length > 0) {
@@ -1251,7 +1249,7 @@ export const importStanding = async (
 	connectionId: string
 ): Promise<'importing' | 'imported' | 'written'> => {
 	const state = await db.syncState.get(connectionId);
-	if (state?.importing === undefined || state.detached !== undefined) return 'imported';
+	if (state?.importing === undefined || !isLiveSource(state)) return 'imported';
 	if (!state.importing.lock && (await writtenSince(db, connectionId))) return 'written';
 	return 'importing';
 };
@@ -1273,7 +1271,7 @@ const writtenSince = async (db: Scope, connectionId: string): Promise<boolean> =
 	);
 	const notes = await rowsOf(db.notes, connectionId).toArray();
 	const changed = notes.some((note) => {
-		if (note.deletedLocally === 1) return true;
+		if (isTombstone(note)) return true;
 		const was = pile.get(note.id);
 		if (was === undefined) return note.dirty === 1;
 		return was.body !== note.body || was.path !== note.path;
@@ -1455,7 +1453,7 @@ export const releaseConnection = (
 		const { connectionId, seen } = input;
 		const state = await db.syncState.get(connectionId);
 		if (state === undefined) return { outcome: 'released' };
-		if (state.detached === undefined) return { outcome: 'reconnected' };
+		if (isLiveSource(state)) return { outcome: 'reconnected' };
 		await countBinding(db);
 		const unsynced = await unsyncedIn(db, connectionId);
 		const held = await heldRowsIn(db, connectionId, input.holding ?? new Set());
@@ -1552,11 +1550,11 @@ export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<Mov
 		const { connectionId, target, seen } = input;
 		const state = await db.syncState.get(connectionId);
 		if (state === undefined) return { outcome: 'released' };
-		if (state.detached === undefined) return { outcome: 'reconnected' };
+		if (isLiveSource(state)) return { outcome: 'reconnected' };
 		const to = await db.syncState.get(target);
 		// Never the device's own pile, which nothing shows while a source is
 		// connected, and never a source that cannot send what it is handed.
-		if (target === connectionId || to === undefined || to.detached !== undefined) {
+		if (target === connectionId || to === undefined || !isLiveSource(to)) {
 			return { outcome: 'no-target' };
 		}
 		const unsynced = await unsyncedIn(db, connectionId);
@@ -1746,9 +1744,7 @@ export const pileContents = async (
 		? { notebooks: 0, notes: 0 }
 		: {
 				notebooks: await rowsOf(db.folders, LOCAL_CONNECTION_ID).count(),
-				notes: await rowsOf(db.notes, LOCAL_CONNECTION_ID)
-					.filter((note) => note.deletedLocally === 0)
-					.count(),
+				notes: await rowsOf(db.notes, LOCAL_CONNECTION_ID).filter(isLive).count(),
 			};
 
 /**
@@ -1781,7 +1777,7 @@ export const connectedSources = async (
 		...(state.label === undefined ? {} : { label: state.label }),
 		...(state.boundAt === undefined ? {} : { boundAt: state.boundAt }),
 		active: state.connectionId === active,
-		...(state.detached === undefined ? {} : { detached: true }),
+		...(isLiveSource(state) ? {} : { detached: true }),
 	}));
 	return [...connected, ...pile];
 };

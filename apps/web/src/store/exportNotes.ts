@@ -20,6 +20,7 @@ import { settleEditors } from './heldEdits.js';
 import { foldPath } from './naming.js';
 import { noteFile } from './notes.js';
 import { rowsOf } from './rows.js';
+import { isLive } from './rowStates.js';
 import { type Unsynced } from './unsynced.js';
 
 /**
@@ -561,9 +562,7 @@ const refuseOversize = (rows: readonly FileRecord[], held: ReadonlySet<string>):
 export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Library> =>
 	db.transaction('r', [db.notes, db.folders, db.files, db.fileBytes], async () => {
 		const [notes, folders, rows, held] = await Promise.all([
-			rowsOf(db.notes, connectionId)
-				.filter((note) => note.deletedLocally === 0)
-				.toArray(),
+			rowsOf(db.notes, connectionId).filter(isLive).toArray(),
 			rowsOf(db.folders, connectionId).sortBy('path'),
 			rowsOf(db.files, connectionId).toArray(),
 			// Keys alone, which is all `refuseOversize` needs.
@@ -619,9 +618,7 @@ export const unsentLibrary = (db: NotesDatabase, listed: Unsynced): Promise<Libr
  */
 export const holdsAnything = async (db: NotesDatabase, connectionId: string): Promise<boolean> =>
 	(await rowsOf(db.folders, connectionId).count()) > 0 ||
-	(await rowsOf(db.notes, connectionId)
-		.filter((note) => note.deletedLocally === 0)
-		.first()) !== undefined ||
+	(await rowsOf(db.notes, connectionId).filter(isLive).first()) !== undefined ||
 	(await holdsFile(db, connectionId));
 
 /** Whether some file of one source has its current bytes here (`holdsAnything`). */

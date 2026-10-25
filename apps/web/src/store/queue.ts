@@ -3,6 +3,7 @@ import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
 import { rowsOf } from './rows.js';
+import { isTombstone } from './rowStates.js';
 
 /**
  * The push queue: what the sync engine owes the remote, in the order it has to
@@ -166,7 +167,7 @@ const add = (
  */
 export const queueWrite = (db: QueueDb, note: NoteRecord, except?: number): Queued =>
 	// A tombstone owes the remote its delete and nothing else.
-	note.deletedLocally === 1
+	isTombstone(note)
 		? nothing()
 		: opsFor(db, note).then((queued) =>
 				queued.some((op) => op.op === 'write' && op.seq !== except)

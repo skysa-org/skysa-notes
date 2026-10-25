@@ -9,6 +9,7 @@ import {
 } from './db.js';
 import { goneSources } from './goneSources.js';
 import { type SettledEditors } from './heldEdits.js';
+import { isLiveSource } from './rowStates.js';
 
 /**
  * A source the device no longer reaches, kept for what it never sent
@@ -67,7 +68,7 @@ export const updateLive = (
 ): Promise<void> =>
 	db.transaction('rw', db.syncState, async () => {
 		const state = await db.syncState.get(connectionId);
-		if (state === undefined || state.detached !== undefined) return;
+		if (state === undefined || !isLiveSource(state)) return;
 		await db.syncState.put(change(state));
 	});
 

@@ -25,6 +25,7 @@ import { updateLive } from '../store/detached.js';
 import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
 import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
@@ -1311,7 +1312,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					const state = await db.syncState.get(session.connectionId);
 					// Let go of meanwhile: there is nothing to re-scan, and a `put`
 					// would bring the row back. Detached is let go as well.
-					if (state === undefined || state.detached !== undefined) return;
+					if (state === undefined || !isLiveSource(state)) return;
 					// `rootId` is kept: it is the same folder, and finding it again
 					// costs a search whose answer we already have.
 					const { cursor: _cursor, ...kept } = state;

@@ -1,5 +1,6 @@
 import { type FileRecord, type NotesDatabase } from './db.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
+import { isLiveSource } from './rowStates.js';
 
 /**
  * The bytes of files beside notes that this device has read (#187): a cache,
@@ -147,7 +148,7 @@ export const evictCache = (
 	db.transaction('rw', db.files, db.fileBytes, db.syncState, async () => {
 		const spared = new Set(
 			(await db.syncState.toArray())
-				.filter((state) => state.detached !== undefined || state.resumeUnverified === true)
+				.filter((state) => !isLiveSource(state) || state.resumeUnverified === true)
 				.map((state) => state.connectionId)
 		);
 		const keys = await db.fileBytes

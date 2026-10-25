@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n/t.js';
 import { type ConnectedSource } from '../store/connection.js';
 import { LOCAL_CONNECTION_ID } from '../store/db.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { countedFolders, movable, type Unsynced } from '../store/unsynced.js';
 import { connectedName, sourceName } from '../sync/account.js';
 import { DialogActions, InlineDialog } from './Dialog.js';
@@ -56,7 +57,7 @@ export const otherLiveSources = (
 		(source) =>
 			source.connectionId !== connectionId &&
 			source.connectionId !== LOCAL_CONNECTION_ID &&
-			source.detached === undefined
+			isLiveSource(source)
 	);
 
 /**
