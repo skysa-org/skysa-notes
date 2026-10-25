@@ -29,6 +29,8 @@ import {
 	listNotes,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { getPinnedNotes, setNotePinned } from '../src/store/pins.js';
+import { DEFAULT_EDITOR_MODE_KEY, PREF_KEYS, sourceKey } from '../src/store/prefs.js';
 import { queueWrite } from '../src/store/queue.js';
 import { countOf, isEmpty, type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.js';
@@ -1042,5 +1044,102 @@ describe('a source’s keys for secrets (§7)', () => {
 
 		expect(await db.secretKeys.get(BOB.connectionId)).toBeDefined();
 		expect(await db.keyFiles.get(BOB.connectionId)).toBeDefined();
+	});
+});
+
+describe('what this device remembers of a source (#452)', () => {
+	/** Every pref kept for a source, set to `value`. */
+	const remembering = (db: NotesDatabase, connectionId: string, value = 'kept') =>
+		db.prefs.bulkPut(PREF_KEYS.map((name) => ({ key: sourceKey(name, connectionId), value })));
+
+	const remembered = async (db: NotesDatabase, connectionId: string) =>
+		(await db.prefs.bulkGet(PREF_KEYS.map((name) => sourceKey(name, connectionId)))).map(
+			(row) => row?.value
+		);
+
+	const NONE = PREF_KEYS.map(() => undefined);
+
+	/** Ada's source, remembered, and let go of with a note it was never sent. */
+	const detachedRemembering = async () => {
+		const db = await connected();
+		await createNote(db, { ...ada, title: 'Unsent' });
+		await remembering(db, ADA.connectionId);
+		await detachConnection(db, ada);
+		return db;
+	};
+
+	it('goes with the source when its notes leave the device, and nothing else does', async () => {
+		const db = await connected();
+		await bindConnection(db, BOB);
+		await pushed(db, 'plan.md');
+		await remembering(db, ADA.connectionId);
+		await remembering(db, BOB.connectionId);
+		await db.prefs.put({ key: DEFAULT_EDITOR_MODE_KEY, value: 'raw' });
+
+		await detachConnection(db, ada);
+
+		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
+		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
+		expect(await remembered(db, BOB.connectionId)).toEqual(PREF_KEYS.map(() => 'kept'));
+		expect((await db.prefs.get(DEFAULT_EDITOR_MODE_KEY))?.value).toBe('raw');
+	});
+
+	it('stays while notes it was never sent do', async () => {
+		const db = await detachedRemembering();
+
+		expect(await remembered(db, ADA.connectionId)).toEqual(PREF_KEYS.map(() => 'kept'));
+	});
+
+	it('goes when those notes are discarded', async () => {
+		const db = await detachedRemembering();
+
+		expect(
+			await releaseConnection(db, {
+				connectionId: ADA.connectionId,
+				unsynced: 'discard',
+				seen: await shownNow(db),
+			})
+		).toBe('released');
+
+		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
+	});
+
+	it('goes home with the notes, under a new id for the same account', async () => {
+		const db = await detachedRemembering();
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
+		expect(await remembered(db, 'c-ada-2')).toEqual(PREF_KEYS.map(() => 'kept'));
+	});
+
+	it('keeps a pinned note pinned when it goes home under a new id', async () => {
+		const db = await connected();
+		const note = await createNote(db, { ...ada, title: 'Unsent' });
+		await setNotePinned(db, ADA.connectionId, note.id, true);
+		await detachConnection(db, ada);
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect(await getPinnedNotes(db, 'c-ada-2')).toEqual([note.id]);
+	});
+
+	it('gives way to what the connection it goes home to already remembers', async () => {
+		const db = await detachedRemembering();
+		await db.prefs.put({ key: sourceKey('lastOpen', 'c-ada-2'), value: 'its own' });
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect((await db.prefs.get(sourceKey('lastOpen', 'c-ada-2')))?.value).toBe('its own');
+		expect((await db.prefs.get(sourceKey('scratchpad', 'c-ada-2')))?.value).toBe('kept');
+		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
+	});
+
+	it('stays where it is under the same id, live again', async () => {
+		const db = await detachedRemembering();
+
+		await bindConnection(db, ADA);
+
+		expect(await remembered(db, ADA.connectionId)).toEqual(PREF_KEYS.map(() => 'kept'));
 	});
 });

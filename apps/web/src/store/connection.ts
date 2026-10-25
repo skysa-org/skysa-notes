@@ -35,6 +35,7 @@ import { movedRows } from './movedRows.js';
 import { foldPath, freePath, pathDepth, respell } from './naming.js';
 import { noteFile } from './notes.js';
 import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
+import { carrySourcePrefs, forgetSourcePrefs } from './prefs.js';
 import { queueByNotebook } from './queue.js';
 import { rowsOf } from './rows.js';
 import { isLive, isLiveSource, isTombstone } from './rowStates.js';
@@ -745,6 +746,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		await db.syncState.bulkDelete(from);
 		await forgetBinding(db, from);
 		await carryKeys(db, from, input.connectionId);
+		await carrySourcePrefs(db, from, input.connectionId);
 		// The same connection, back: the rows it kept never left it.
 		const waiting =
 			current?.detached === undefined
@@ -1065,6 +1067,7 @@ const keepOnly = async (
 const forgetSource = async (db: NotesDatabase, connectionId: string): Promise<void> => {
 	await db.syncState.delete(connectionId);
 	await db.credentials.delete(connectionId);
+	await forgetSourcePrefs(db, connectionId);
 	const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
 	if (chosen === connectionId) await db.prefs.delete(ACTIVE_CONNECTION_KEY);
 };

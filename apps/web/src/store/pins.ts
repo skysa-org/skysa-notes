@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { type NoteKey, type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
-import { readJson, sourceKey } from './prefs.js';
+import { readJson, sourceKey, type SourcePref } from './prefs.js';
 import { rowsOf } from './rows.js';
 import { isLive } from './rowStates.js';
 
@@ -102,7 +102,7 @@ export const forgetPinnedNotebooks = async (
  * changes, rather than in every place a note can go from: one deleted here and
  * taken back keeps its pin.
  */
-const NOTES = 'pinnedNotes';
+const NOTES: SourcePref = 'pinnedNotes';
 
 const notesKey = (connectionId: string): string => sourceKey(NOTES, connectionId);
 
