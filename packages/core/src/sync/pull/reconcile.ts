@@ -267,3 +267,6 @@ export const createPullReconcile = (
 
 	return { reconcile };
 };
+
+/** What the pull's other parts are handed of it. */
+export type PullReconcile = ReturnType<typeof createPullReconcile>;
