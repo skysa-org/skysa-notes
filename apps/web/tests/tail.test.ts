@@ -1,9 +1,10 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * The way out of a note that ends in a code block.
@@ -15,13 +16,8 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
  * declined it.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string, onUserEdit: (markdown: string) => void = () => undefined) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body, onUserEdit });
 
 	const withCtx = <T>(action: (ctx: Ctx) => T): T => editor.action(action);
 
@@ -55,7 +51,7 @@ const mount = async (body: string, onUserEdit: (markdown: string) => void = () =
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

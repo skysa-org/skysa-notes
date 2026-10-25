@@ -1,10 +1,9 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BLOCK_COMMANDS } from '../src/editor/commands.js';
-import { createRichEditor } from '../src/editor/rich.js';
 import {
 	matchCommands,
 	moveHighlight,
@@ -13,6 +12,7 @@ import {
 	slashQuery,
 	textBeforeCursor,
 } from '../src/editor/slash.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 const labels = (query: string) => matchCommands(query, BLOCK_COMMANDS).map((item) => item.label);
 
@@ -140,17 +140,8 @@ describe('slashKeyAction', () => {
 });
 
 describe('textBeforeCursor', () => {
-	const editors: Editor[] = [];
-
 	const mount = async (body: string) => {
-		const root = document.createElement('div');
-		document.body.append(root);
-		const editor = await createRichEditor({
-			root,
-			body,
-			onUserEdit: () => undefined,
-		}).create();
-		editors.push(editor);
+		const { editor } = await mountRich({ body });
 
 		const withCtx = <T>(action: (ctx: Ctx) => T): T => editor.action(action);
 		withCtx((ctx) => {
@@ -165,7 +156,7 @@ describe('textBeforeCursor', () => {
 	};
 
 	afterEach(async () => {
-		await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+		await destroyRichEditors();
 		document.body.replaceChildren();
 	});
 

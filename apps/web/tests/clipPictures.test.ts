@@ -1,23 +1,18 @@
 import { CLIPBOARD_ITEMS } from '@skysa/core';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { clipPicture } from '../src/components/clipPictures.js';
 import { copyTurns } from '../src/pictures/copies.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import { addClips, keepClipThumb, removeClip } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The pictures on a source's clipboard as its panel draws them (#276): from a
  * thumb made once from the item's bytes and kept with it, or as they are.
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
 
 const be32 = (value: number): number[] => [
 	(value >>> 24) & 255,
@@ -66,8 +61,7 @@ const shrinkerOf = (answer: (want: { width: number }) => Promise<Shrunk> | Shrun
 };
 
 const setup = async () => {
-	const db = createDatabase(`clip-pictures-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({
 		connectionId: 'c1',
 		clientId: 'install',
@@ -411,8 +405,7 @@ describe('a picture’s thumb on the clipboard', () => {
 	});
 
 	it('goes with a source the user lets go of, as it is detached', async () => {
-		const db = createDatabase(`clip-pictures-${crypto.randomUUID()}`);
-		opened.push(db);
+		const db = freshDatabase();
 		await bindConnection(db, {
 			connectionId: 'c1',
 			provider: 'dropbox',

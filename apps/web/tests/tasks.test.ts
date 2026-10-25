@@ -1,12 +1,13 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { sinkListItemCommand, splitListItemCommand } from '@milkdown/kit/preset/commonmark';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
 import { toggleTaskCommand } from '../src/editor/tasks.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Task list items: ticking one, and what happens to the next one.
@@ -16,13 +17,8 @@ import { toggleTaskCommand } from '../src/editor/tasks.js';
  * one either the old one's tick or no checkbox at all.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body });
 	return {
 		root,
 		withCtx: <T>(action: (ctx: Ctx) => T): T => editor.action(action),
@@ -62,7 +58,7 @@ const selectWord = (word: string) => (ctx: Ctx) => {
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

@@ -8,7 +8,7 @@ import {
 	vaultBody,
 	vaultPayload,
 } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
 	generateIdentity,
@@ -21,9 +21,10 @@ import {
 	scanReplacing,
 	sealSecret,
 } from '../src/secrets/age.js';
-import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import { type NoteRecord, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Encrypting a source's secrets to its new key (docs/ARCHITECTURE.md §7,
@@ -31,15 +32,8 @@ import { noteById, updateNote } from './noteRows.js';
  * nothing else.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
 const setup = async () => {
-	const db = createDatabase(`reseal-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 	return db;
 };

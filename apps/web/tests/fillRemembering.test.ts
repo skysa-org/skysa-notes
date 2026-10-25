@@ -9,7 +9,7 @@ import {
 	vaultBody,
 	vaultPayload,
 } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { Match } from '../src/fill/matches.js';
 import {
@@ -27,21 +27,15 @@ import {
 	sealSecret,
 } from '../src/secrets/age.js';
 import { loadAge } from '../src/secrets/loadAge.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol } from '../src/store/secretKeys.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Remembering a password typed on a site, from the fill window
  * (docs/ARCHITECTURE.md §7, "Filling in on a site"): what is offered for it,
  * and Save and Update, which seal as Passwords does and lose nothing.
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
 
 const site = (origin: string): Site => {
 	const found = pageSite(origin);
@@ -124,8 +118,7 @@ describe('what is offered for a password typed', () => {
 });
 
 const setup = async ({ keyFile = 'ours' }: { keyFile?: 'ours' | 'theirs' } = {}) => {
-	const db = createDatabase(`fill-remembering-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 	const identity = generateIdentity();
 	await db.keyFiles.put({

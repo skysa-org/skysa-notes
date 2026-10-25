@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { createDatabase, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
+import { type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import {
 	attachedFiles,
 	deleteUnlinkedFiles,
@@ -9,6 +9,7 @@ import {
 } from '../src/store/fileLinks.js';
 import { addAttachment } from '../src/store/files.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Which notes link a file beside them, and deleting one that none does
@@ -16,18 +17,6 @@ import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
  */
 
 const CONNECTION = 'dropbox-1';
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`file-links-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 /** A file the remote has, in the store as a pull leaves it: a row, bound. */
 const bound = async (db: NotesDatabase, id: string, path: string, size = 10) => {

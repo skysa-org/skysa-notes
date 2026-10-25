@@ -1,26 +1,16 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Result } from '../src/api/client.js';
 import { CommandsProvider } from '../src/commands/context.js';
 import { ImportDialog, importMessage } from '../src/components/ImportProgress.js';
 import { bindConnection } from '../src/store/connection.js';
-import {
-	createDatabase,
-	LOCAL_CONNECTION_ID,
-	type NotesDatabase,
-	type SyncStateRecord,
-} from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
+import { holdCredential } from './support/connection.js';
+import { freshDatabase } from './support/db.js';
 
 const syncing = (progress?: SchedulerStatus['progress']): SchedulerStatus => ({
 	phase: 'syncing',
@@ -97,11 +87,10 @@ const server = (answer: () => Promise<Result<{ disconnected: boolean }>>) => {
 
 /** A device used before connecting, part-way through its first import. */
 const importing = async (): Promise<{ db: NotesDatabase; source: SyncStateRecord }> => {
-	const db = createDatabase(`import-ui-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await createNote(db, { title: 'Mine', body: 'mine\n' });
 	await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
-	await db.credentials.put({ id: 'c1', credential: 'sk1_c1', provider: 'dropbox', createdAt: 0 });
+	await holdCredential(db, 'c1');
 	const source = await db.syncState.get('c1');
 	if (source === undefined) throw new Error('not bound');
 	return { db, source };

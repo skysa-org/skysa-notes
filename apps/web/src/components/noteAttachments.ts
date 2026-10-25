@@ -33,6 +33,7 @@ import {
 	type NotesDatabase,
 	type PictureRecord,
 } from '../store/db.js';
+import { createEmitter } from '../store/emitter.js';
 import { heldFile, holdsBytes } from '../store/fileCache.js';
 import {
 	addAttachment,
@@ -212,7 +213,7 @@ export const createNoteAttachments = ({
 	shrinker = pictureShrinker(),
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	const turns = copyTurns<Made>(shrinker);
 	// What this host has handed out and not been given back, let go of with it.
 	const handedOut = new Set<HeldUrl>();
@@ -575,18 +576,9 @@ export const createNoteAttachments = ({
 			});
 		},
 
-		changed: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		changed: changes.subscribe,
 
-		notify: () => {
-			listeners.forEach((listener) => {
-				listener();
-			});
-		},
+		notify: changes.emit,
 
 		dispose: () => {
 			handedOut.forEach((held) => {

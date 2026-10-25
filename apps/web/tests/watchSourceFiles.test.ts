@@ -1,9 +1,10 @@
 import type * as DexieModule from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type FileRecord, type NotesDatabase } from '../src/store/db.js';
+import { type FileRecord } from '../src/store/db.js';
 import type * as Files from '../src/store/files.js';
 import { watchSourceFiles } from '../src/store/sourceFiles.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Every open note and every scratch card with a picture listens for the files
@@ -40,18 +41,9 @@ vi.mock('../src/store/files.js', async (importOriginal) => {
 	};
 });
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	Object.assign(counted, { queries: 0, reads: 0, failNext: false });
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`source-files-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const row = (path: string, connectionId = 'c1'): FileRecord => ({
 	connectionId,

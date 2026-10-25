@@ -1,14 +1,13 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type * as Bar from '../src/components/CompactBar.js';
-import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { renderApp } from './support/app.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -35,15 +34,10 @@ vi.mock('../src/components/CompactBar.js', async (importOriginal) => {
 
 let fake: FakeWindow | undefined;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
 });
 
 const openApp = async (width: number) => {
@@ -51,12 +45,7 @@ const openApp = async (width: number) => {
 	await setDefaultEditorMode(db, 'raw');
 	await createFolder(db, { parentPath: undefined, name: 'Work' });
 	await createNote(db, { folderPath: 'Work', title: 'Minutes', body: 'Minutes\n\nthe heron\n' });
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
+	await renderApp();
 };
 
 /**

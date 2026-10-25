@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { bindConnection, finishImport } from '../src/store/connection.js';
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createFolder, deleteFolder, moveFolder, renameFolder } from '../src/store/folders.js';
 import { pickNote } from '../src/store/lastOpen.js';
 import { createNote, deleteNote, renameNote } from '../src/store/notes.js';
@@ -18,17 +18,11 @@ import {
 	setNotePinned,
 } from '../src/store/pins.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
+import { freshDatabase } from './support/db.js';
 
 let db: NotesDatabase;
-let counter = 0;
-
 beforeEach(() => {
-	counter += 1;
-	db = createDatabase(`test-pins-${String(counter)}`);
-});
-
-afterEach(async () => {
-	await db.delete();
+	db = freshDatabase();
 });
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };

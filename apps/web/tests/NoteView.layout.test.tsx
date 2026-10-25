@@ -19,14 +19,12 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
 let fake: FakeWindow | undefined;
 let widths: FakeWidths | undefined;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
 	widths?.restore();
 	widths = undefined;
-	await db.notes.clear();
-	await db.prefs.clear();
 });
 
 const Harness = ({ id }: { id: string }) => {
