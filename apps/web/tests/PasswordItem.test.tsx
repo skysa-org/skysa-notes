@@ -973,10 +973,13 @@ describe('deleting a password', () => {
 		const onDelete = vi.fn();
 		const user = await show(note, host, { onDelete });
 
+		// Found once the item has opened: until then the region holds only
+		// "Opening…".
 		await user.click(
-			within(await screen.findByRole('region', { name: 'GitHub' })).getByRole('button', {
-				name: 'Delete',
-			})
+			await within(await screen.findByRole('region', { name: 'GitHub' })).findByRole(
+				'button',
+				{ name: 'Delete' }
+			)
 		);
 
 		expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: note.id }));

@@ -9,9 +9,10 @@ import {
 	parentPath,
 	rebasePath,
 } from '../../src/paths.js';
-import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
+import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
-import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import { CursorResetError, type StorageProvider } from '../../src/providers/types.js';
 import { conflictFilePath } from '../../src/sync/conflicts.js';
@@ -21,6 +22,8 @@ import { createDropboxStub } from '../providers/dropboxStub.js';
 import { createGDriveStub } from '../providers/gdriveStub.js';
 import { createOneDriveStub } from '../providers/onedriveStub.js';
 import { mulberry32 } from '../support/random.js';
+import { AT } from './kit/engine.js';
+import { entryAt } from './kit/remote.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
 /**
@@ -138,7 +141,6 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 	],
 ];
 
-const AT = new Date('2026-09-15T14:32:10Z');
 const COPY = /^(.*) \(conflict [^)]+\)\.md$/;
 
 interface Device {
@@ -801,12 +803,6 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 	describe('a file listed as not UTF-8 text', () => {
 		const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
 
-		const entryAt = (remote: Remote, path: string) => {
-			const found = remote.backing.snapshot().find((entry) => entry.path === path);
-			if (found === undefined) throw new Error(`nothing on the remote at ${path}`);
-			return found;
-		};
-
 		it('is listed while it cannot be read, and not once it is fixed or gone', async () => {
 			// `converged` asks both devices for exactly the unreadable files the
 			// remote holds, each time.
@@ -819,7 +815,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 
 			// Saved again as UTF-8, in place: read, imported, and off the list.
 			await remote.backing.write('plan.md', 'fixed\n', {
-				expectedVersion: entryAt(remote, 'plan.md').version,
+				expectedVersion: entryAt(remote.backing, 'plan.md').version,
 			});
 
 			expect(await converged(remote, a, b)).toEqual({ 'plan.md': 'fixed\n' });
@@ -830,7 +826,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			expect(await converged(remote, a, b)).toEqual({});
 			expect(await listedUnreadable(b)).toEqual(['plan.md']);
 
-			await remote.backing.delete(entryAt(remote, 'plan.md'));
+			await remote.backing.delete(entryAt(remote.backing, 'plan.md'));
 
 			expect(await converged(remote, a, b)).toEqual({});
 			expect(await listedUnreadable(a)).toEqual([]);
@@ -846,15 +842,15 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			await converged(remote, a, b);
 			expect(await listedUnreadable(a)).toEqual(['Work/old.md']);
 
-			await remote.backing.move(entryAt(remote, 'Work/old.md'), 'Work/older.md');
+			await remote.backing.move(entryAt(remote.backing, 'Work/old.md'), 'Work/older.md');
 			await converged(remote, a, b);
 			expect(await listedUnreadable(a)).toEqual(['Work/older.md']);
 
-			await remote.backing.move(entryAt(remote, 'Work'), 'Archive');
+			await remote.backing.move(entryAt(remote.backing, 'Work'), 'Archive');
 			await converged(remote, a, b);
 			expect(await listedUnreadable(a)).toEqual(['Archive/older.md']);
 
-			await remote.backing.delete(entryAt(remote, 'Archive'));
+			await remote.backing.delete(entryAt(remote.backing, 'Archive'));
 			await converged(remote, a, b);
 			expect(await listedUnreadable(a)).toEqual([]);
 		});
@@ -1007,9 +1003,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			});
 			// Gone from the remote with the notes in it, as the website's trash
 			// takes a folder.
-			const work = remote.backing.snapshot().find((entry) => entry.path === 'Work');
-			expect(work).toBeDefined();
-			await remote.backing.delete({ remoteId: work?.remoteId ?? '', path: 'Work' });
+			await remote.backing.delete(entryAt(remote.backing, 'Work'));
 
 			expect((await synced(a)).status).toBe('ok');
 			const files = await converged(remote, a, b);

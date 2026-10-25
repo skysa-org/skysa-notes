@@ -89,7 +89,11 @@ describe('the passwords’ row', () => {
 		).toEqual(['Bank', 'GitHub']);
 		expect(screen.queryByRole('heading', { name: 'Inbox' })).toBeNull();
 		expect(hashIn(router)).toBe('passwords');
-		expect(document.title).toContain('Passwords');
+		// Set by an effect once the route has its data, so not by the time the
+		// list is shown.
+		await waitFor(() => {
+			expect(document.title).toContain('Passwords');
+		});
 		expect(screen.getByText('Choose a password, or add one with +.')).toBeDefined();
 		// Nowhere a notebook, and its row the one thing in the sidebar that names it.
 		const sidebar = screen.getByRole('navigation', { name: 'Notebooks' });
@@ -107,7 +111,9 @@ describe('a password', () => {
 
 		const open = await screen.findByRole('region', { name: 'GitHub' });
 		expect(hashIn(router)).toBe('passwords/github');
-		expect(document.title).toContain('Passwords > GitHub');
+		await waitFor(() => {
+			expect(document.title).toContain('Passwords > GitHub');
+		});
 		// This device holds no key for the source: what it holds is not shown.
 		expect(await within(open).findByRole('button', { name: 'Unlock' })).toBeDefined();
 		expect(screen.queryByText('ada')).toBeNull();

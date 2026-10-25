@@ -395,6 +395,83 @@ export const describeProviderContract = (
 			});
 		});
 
+		describe('the root', () => {
+			// No file can be written at the root, whichever way it is spelled,
+			// and nothing can be moved onto it: each is a `NotFoundError`, which
+			// the engine already answers, rather than whatever the provider says
+			// to a path it does not take. The root is a folder that is there.
+			it('refuses a note written at the root', config, async () => {
+				const provider = await open();
+				for (const root of ['', '/']) {
+					await expect(provider.write(root, 'x\n', {})).rejects.toThrow(NotFoundError);
+				}
+			});
+
+			it('refuses a file created at the root', config, async () => {
+				const provider = await open();
+				await expect(provider.createFile('', new Uint8Array([1, 2, 3]))).rejects.toThrow(
+					NotFoundError
+				);
+			});
+
+			it('answers the root as a folder that is already there', config, async () => {
+				const provider = await open();
+				const root = await provider.createFolder('');
+				expect(root.path).toBe('');
+				expect(root.kind).toBe('folder');
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
+			it('refuses a move onto the root, leaving the file where it was', config, async () => {
+				const provider = await open();
+				const seeded = await seedFile(provider, 'a.md', 'kept\n');
+				await expect(provider.move(seeded, '')).rejects.toThrow(NotFoundError);
+				expect((await provider.read(seeded)).content).toBe('kept\n');
+			});
+
+			// Google Drive would answer the root's id and trash the app folder,
+			// and everything with it.
+			it('refuses to delete the root, leaving what is in it', config, async () => {
+				const provider = await open();
+				const seeded = await seedFile(provider, 'a.md', 'kept\n');
+				const root = await provider.createFolder('');
+				await expect(provider.delete(root)).rejects.toThrow(NotFoundError);
+				expect((await provider.read(seeded)).content).toBe('kept\n');
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
+			// An adapter that goes by id would act on the root whatever path the
+			// ref gave.
+			it('refuses the root by its id, under any path', config, async () => {
+				const provider = await open();
+				const { rootId } = await provider.ensureRoot();
+				const named = { remoteId: rootId, path: 'Elsewhere' };
+				await expect(provider.delete(named)).rejects.toThrow(NotFoundError);
+				await expect(provider.move(named, 'Archive')).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
+			it('refuses to move the root', config, async () => {
+				const provider = await open();
+				const root = await provider.createFolder('');
+				await expect(provider.move(root, 'Archive')).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
+			// A left app folder would be hidden from the app that owns it.
+			it('refuses to leave the root', config, async ({ skip }) => {
+				const provider = await open();
+				const { leaveFolder } = provider;
+				if (leaveFolder === undefined) {
+					skip();
+					return;
+				}
+				const root = await provider.createFolder('');
+				await expect(leaveFolder(root)).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+		});
+
 		describe('move', () => {
 			it('renames a file, keeping its content', config, async () => {
 				const provider = await open();
