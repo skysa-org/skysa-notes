@@ -1,8 +1,17 @@
 import { MARKER_FILE } from '../config.js';
-import { asObject, isJsonObject, parseJson } from '../json.js';
+import { isJsonObject, parseJson } from '../json.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
-import { type FetchLike, parseRetryAfter } from './http.js';
+import {
+	type Attempt,
+	createTransport,
+	type FetchLike,
+	jsonBody,
+	parseRetryAfter,
+	readErrorBody,
+	type RequestParts,
+	retryNote,
+} from './http.js';
 import { decodeText, responseBytes } from './text.js';
 import {
 	AuthError,
@@ -200,10 +209,8 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
 
 	const failureOf = async (response: Response): Promise<DropboxFailure> => {
-		const text = await response.text().catch(() => '');
-		const parsed: { error_summary?: string; error?: { retry_after?: number } } = asObject(
-			parseJson(text)
-		);
+		const { text, body: errorBody } = await readErrorBody(response);
+		const parsed: { error_summary?: string; error?: { retry_after?: number } } = errorBody;
 		// The header is what the error-handling guide documents ("indicating how
 		// long your app should wait (in seconds) before retrying"); the RPC
 		// routes put the same number in the body's `retry_after`, which is read
@@ -221,12 +228,6 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
-
-	/** What to put in the message, when Dropbox said how long to wait. */
-	const waitedFor = (failure: DropboxFailure): string =>
-		failure.retryAfterMs === undefined
-			? ''
-			: `, retry after ${String(failure.retryAfterMs / 1000)}s`;
 
 	/**
 	 * Endpoint-specific errors arrive as 409 with a `/`-separated summary. Any
@@ -250,49 +251,29 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
 		if (failure.status === 429) {
 			throw new RateLimitError(
-				`dropbox rate limit${waitedFor(failure)}`,
+				`dropbox rate limit${retryNote(failure.retryAfterMs)}`,
 				failure.retryAfterMs
 			);
 		}
 		throw new Error(`dropbox ${String(failure.status)}: ${failure.summary}`);
 	};
 
-	const authorization = async (): Promise<string> => `Bearer ${await getAccessToken()}`;
+	const { send, attempt, call } = createTransport({
+		fetch: doFetch,
+		getAccessToken,
+		failureOf,
+		raise,
+	});
 
-	const post = async (
-		url: string,
-		headers: HeadersInit,
-		body?: string | Uint8Array<ArrayBuffer>
-	): Promise<Response> =>
-		doFetch(url, {
-			method: 'POST',
-			headers: { authorization: await authorization(), ...headers },
-			...(body === undefined ? {} : { body }),
-		});
+	const post = (url: string, headers: Record<string, string>, body?: RequestParts['body']) =>
+		send('POST', url, { headers, ...(body === undefined ? {} : { body }) });
 
-	const rpc = async <T>(route: string, body: unknown): Promise<T> => {
-		const response = await post(
-			`${RPC}/${route}`,
-			{ 'content-type': 'application/json' },
-			JSON.stringify(body)
-		);
-		if (!response.ok) return raise(await failureOf(response));
-		return (await response.json()) as T;
-	};
+	const rpc = <T>(route: string, body: unknown): Promise<T> =>
+		call<T>('POST', `${RPC}/${route}`, jsonBody(body));
 
 	/** Like `rpc`, but hands the failure back instead of throwing it. */
-	const tryRpc = async <T>(
-		route: string,
-		body: unknown
-	): Promise<{ ok: true; value: T } | { ok: false; failure: DropboxFailure }> => {
-		const response = await post(
-			`${RPC}/${route}`,
-			{ 'content-type': 'application/json' },
-			JSON.stringify(body)
-		);
-		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		return { ok: true, value: (await response.json()) as T };
-	};
+	const tryRpc = <T>(route: string, body: unknown): Promise<Attempt<T, DropboxFailure>> =>
+		attempt<T>('POST', `${RPC}/${route}`, jsonBody(body));
 
 	/**
 	 * The entry at a path, or `undefined` when there is nothing there.

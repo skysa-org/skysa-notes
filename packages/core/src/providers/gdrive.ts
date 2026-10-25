@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { APP_FOLDER_NAME, MARKER_FILE } from '../config.js';
-import { asObject, parseJson } from '../json.js';
+import { parseJson } from '../json.js';
 import { isNoteName } from '../markdown/slug.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
@@ -10,7 +10,14 @@ import {
 	conflictFolderName,
 	conflictNameKeepingExtension,
 } from '../sync/conflicts.js';
-import { type FetchLike, parseRetryAfter } from './http.js';
+import {
+	createTransport,
+	type FetchLike,
+	jsonBody,
+	parseRetryAfter,
+	readErrorBody,
+	type RequestParts,
+} from './http.js';
 import {
 	applyItem,
 	arrivals,
@@ -231,13 +238,6 @@ const NO_ACCESS = new Set(['appNotAuthorizedToFile', 'insufficientFilePermission
 const outOfReach = (failure: DriveFailure): boolean =>
 	failure.status === 404 ||
 	(failure.status === 403 && failure.reasons.some((reason) => NO_ACCESS.has(reason)));
-
-type Attempt<T> = { ok: true; value: T } | { ok: false; failure: DriveFailure };
-
-interface RequestParts {
-	headers?: Record<string, string>;
-	body?: string | Uint8Array<ArrayBuffer>;
-}
 
 const encoder = new TextEncoder();
 
@@ -475,9 +475,8 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	const rootBox = new Map<'id' | 'known', string>();
 
 	const failureOf = async (response: Response): Promise<DriveFailure> => {
-		const text = await response.text().catch(() => '');
-		const parsed: { error?: { message?: unknown; errors?: unknown; status?: unknown } } =
-			asObject(parseJson(text));
+		const { text, body } = await readErrorBody(response);
+		const parsed: { error?: { message?: unknown; errors?: unknown; status?: unknown } } = body;
 		const errors = Array.isArray(parsed.error?.errors)
 			? (parsed.error.errors as unknown[])
 			: [];
@@ -515,39 +514,11 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		throw new Error(`gdrive ${String(failure.status)}: ${detail}`);
 	};
 
-	const send = async (method: string, url: string, parts: RequestParts = {}): Promise<Response> =>
-		doFetch(url, {
-			method,
-			headers: { authorization: `Bearer ${await getAccessToken()}`, ...parts.headers },
-			...(parts.body === undefined ? {} : { body: parts.body }),
-		});
-
-	const attempt = async <T>(
-		method: string,
-		url: string,
-		parts: RequestParts = {}
-	): Promise<Attempt<T>> => {
-		const response = await send(method, url, parts);
-		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		// A delete answers 204 with nothing to parse.
-		const text = await response.text();
-		return { ok: true, value: (text === '' ? {} : JSON.parse(text)) as T };
-	};
-
-	const call = async <T>(
-		method: string,
-		url: string,
-		parts: RequestParts = {},
-		path?: string
-	): Promise<T> => {
-		const result = await attempt<T>(method, url, parts);
-		if (!result.ok) return raise(result.failure, path);
-		return result.value;
-	};
-
-	const json = (body: unknown): RequestParts => ({
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
+	const { send, attempt, call } = createTransport({
+		fetch: doFetch,
+		getAccessToken,
+		failureOf,
+		raise,
 	});
 
 	const fileUrl = (id: string, params: Record<string, string> = {}): string =>
@@ -590,7 +561,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * into it, and the trash is somewhere the user can get that back from.
 	 */
 	const trash = async (id: string): Promise<void> => {
-		const result = await attempt<unknown>('PATCH', fileUrl(id), json({ trashed: true }));
+		const result = await attempt<unknown>('PATCH', fileUrl(id), jsonBody({ trashed: true }));
 		if (result.ok || result.failure.status === 404) return;
 		raise(result.failure);
 	};
@@ -682,7 +653,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 						await call<DriveFile>(
 							'POST',
 							`${FILES}?fields=${FIELDS}`,
-							json({
+							jsonBody({
 								name: APP_FOLDER_NAME,
 								mimeType: FOLDER,
 								parents: ['root'],
@@ -730,7 +701,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			await call<DriveFile>(
 				'PATCH',
 				fileUrl(child.id ?? '', { addParents: rootIdNow, removeParents: otherId }),
-				json({})
+				jsonBody({})
 			);
 		}, Promise.resolve());
 	};
@@ -1041,7 +1012,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const made = await call<DriveFile>(
 			'POST',
 			`${FILES}?fields=${FIELDS}`,
-			json({ name, mimeType: FOLDER, parents: [parentId] })
+			jsonBody({ name, mimeType: FOLDER, parents: [parentId] })
 		);
 		// Another device's, made in the same moment, may be one the app had left.
 		const winner = await settleCreate(parentId, made);
@@ -1059,7 +1030,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			? call<DriveFile>(
 					'PATCH',
 					fileUrl(folder.id),
-					json({ appProperties: { [LEFT_KEY]: null } })
+					jsonBody({ appProperties: { [LEFT_KEY]: null } })
 				)
 			: folder;
 
@@ -1075,7 +1046,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const result = await attempt<unknown>(
 			'PATCH',
 			fileUrl(id),
-			json({ appProperties: { [LEFT_KEY]: LEFT_VALUE } })
+			jsonBody({ appProperties: { [LEFT_KEY]: LEFT_VALUE } })
 		);
 		if (result.ok || result.failure.status === 404) return;
 		raise(result.failure);
@@ -1106,7 +1077,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const result = await attempt<DriveFile>(
 			'PATCH',
 			fileUrl(id, reparent),
-			json({ name: basename(target) })
+			jsonBody({ name: basename(target) })
 		);
 		if (result.ok) return toEntry(result.value, target);
 		if (result.failure.status === 404) throw new NotFoundError(entry.path);
@@ -1315,7 +1286,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			const result = await call<DriveFile>(
 				'PATCH',
 				fileUrl(other.id ?? ''),
-				json({ name: renamed })
+				jsonBody({ name: renamed })
 			);
 			applyItem(page, treeItemOf(result));
 			return [...names, renamed];
