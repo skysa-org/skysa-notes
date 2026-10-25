@@ -10,8 +10,9 @@ import { createFolder, deleteFolder } from '../src/store/folders.js';
 import type * as LastOpenModule from '../src/store/lastOpen.js';
 import { getLastOpen, rememberOpen } from '../src/store/lastOpen.js';
 import { createNote, deleteNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { noteUrl, placeIn } from './entry.js';
+import { openApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * Whichever way a notebook comes to be showing — clicked, restored at start, a
@@ -48,17 +49,6 @@ afterEach(() => {
 	store.lateBy = 0;
 	store.told = 0;
 });
-
-const openApp = async (at = '/') => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: [at] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
-};
 
 /** Close the app and open it again at its start URL, as a PWA is reopened. */
 const reopen = async () => {
@@ -240,12 +230,7 @@ describe('where the user was, on this device', () => {
 	});
 
 	it('is kept per source, and showing a source goes back to where it was in it', async () => {
-		await db.credentials.put({
-			id: DROPBOX,
-			credential: `sk1_${DROPBOX}`,
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX);
 		await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 		await finishImport(db, DROPBOX);
 		await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Inbox' });

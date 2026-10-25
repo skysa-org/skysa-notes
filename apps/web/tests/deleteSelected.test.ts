@@ -1,29 +1,25 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * A delete a phone's keyboard asks for with an input event rather than a key,
  * while a picture or a chip is selected whole (`editor/deleteSelected.ts`).
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 
 const BODY = 'A ![cat](cat.png) and [a.zip](a.zip) b.\n';
 
 const mount = async () => {
-	const root = document.createElement('div');
-	document.body.append(root);
 	const onUserEdit = vi.fn();
-	const editor = await createRichEditor({ root, body: BODY, onUserEdit }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body: BODY, onUserEdit });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	const at = (type: string) => {
 		const found = { current: -1 };

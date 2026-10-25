@@ -1,20 +1,15 @@
-import {
-	createMemoryHistory,
-	createRouter,
-	type RouterHistory,
-	RouterProvider,
-} from '@tanstack/react-router';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { type RouterHistory } from '@tanstack/react-router';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import { activeConnectionId, db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, renameNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { hashIn, noteUrl, placeIn } from './entry.js';
+import { openApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * Where the user is, through the browser's own history (`routes/place.ts`):
@@ -24,17 +19,6 @@ import { hashIn, noteUrl, placeIn } from './entry.js';
  */
 
 const DROPBOX = 'c-dropbox';
-
-const openApp = async (at = '/') => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: [at] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
-};
 
 const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title');
 
@@ -291,12 +275,7 @@ describe('going back and forward', () => {
 	});
 
 	it('goes back to the source a step was taken in, and forward again', async () => {
-		await db.credentials.put({
-			id: DROPBOX,
-			credential: `sk1_${DROPBOX}`,
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX);
 		await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 		await finishImport(db, DROPBOX);
 		await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Plans' });
@@ -346,12 +325,7 @@ describe('going back and forward', () => {
 		await showing('Scribble');
 		await settle();
 
-		await db.credentials.put({
-			id: DROPBOX,
-			credential: `sk1_${DROPBOX}`,
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX);
 		await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 		await finishImport(db, DROPBOX);
 		await waitFor(async () => {

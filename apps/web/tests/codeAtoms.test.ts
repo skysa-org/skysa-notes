@@ -1,30 +1,26 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { DOMParser as ProseParser } from '@milkdown/kit/prose/model';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ALL_COMMANDS } from '../src/editor/commands.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Code is text (#187): a chip, a picture or a line break is never lost to a
  * code span or a code block (`editor/codeAtoms.ts`).
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
 	const onUserEdit = vi.fn();
-	const editor = await createRichEditor({ root, body, onUserEdit }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body, onUserEdit });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	return {
 		view,

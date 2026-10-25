@@ -1,15 +1,13 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { noteUrl } from './entry.js';
+import { openApp } from './support/app.js';
 
 /**
  * The store answers a list of notes at once under test, and one test needs it
@@ -41,16 +39,6 @@ afterEach(() => {
 	cleanup();
 	hold.gate = Promise.resolve();
 });
-
-const openApp = async (at = '/') => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: [at] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title');
 

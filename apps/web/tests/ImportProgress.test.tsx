@@ -9,6 +9,7 @@ import { bindConnection } from '../src/store/connection.js';
 import { LOCAL_CONNECTION_ID, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
 
 const syncing = (progress?: SchedulerStatus['progress']): SchedulerStatus => ({
@@ -89,7 +90,7 @@ const importing = async (): Promise<{ db: NotesDatabase; source: SyncStateRecord
 	const db = freshDatabase();
 	await createNote(db, { title: 'Mine', body: 'mine\n' });
 	await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
-	await db.credentials.put({ id: 'c1', credential: 'sk1_c1', provider: 'dropbox', createdAt: 0 });
+	await holdCredential(db, 'c1');
 	const source = await db.syncState.get('c1');
 	if (source === undefined) throw new Error('not bound');
 	return { db, source };

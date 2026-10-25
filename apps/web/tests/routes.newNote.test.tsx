@@ -1,17 +1,16 @@
 import { EditorView } from '@codemirror/view';
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MODE_LABELS } from '../src/editor/mode.js';
-import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { flushAutosave, openApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * A note begun — by `+`, by `n`, or by opening a notebook with nothing in it —
@@ -43,16 +42,6 @@ afterEach(() => {
 	refusing.asked = 0;
 });
 
-const openApp = async (at = '/') => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: [at] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
-
 const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title');
 const list = () => screen.getByRole('region', { name: 'Notes' });
 const rowTitles = () =>
@@ -76,12 +65,6 @@ const typeInText = (text: string) => {
 			changes: { from: editor.state.doc.length, insert: text },
 			userEvent: 'input.type',
 		});
-	});
-};
-
-const flushAutosave = () => {
-	act(() => {
-		window.dispatchEvent(new Event('pagehide'));
 	});
 };
 
@@ -338,12 +321,7 @@ describe('a note begun beside others', () => {
 
 describe('while a first import is filling a source', () => {
 	const importing = async () => {
-		await db.credentials.put({
-			id: DROPBOX,
-			credential: `sk1_${DROPBOX}`,
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX);
 		await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 		await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Work' });
 	};

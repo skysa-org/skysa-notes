@@ -1,13 +1,11 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
 import { createFolder, listFolders } from '../src/store/folders.js';
 import { createNote, getNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
 
 /**
  * Managing notebooks, end to end. `renameFolder` and `deleteFolder` had been in
@@ -19,16 +17,6 @@ afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
 });
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const menu = async (user: ReturnType<typeof userEvent.setup>, name: string, item: string) => {
 	await user.click(await screen.findByRole('button', { name: `Options for “${name}”` }));

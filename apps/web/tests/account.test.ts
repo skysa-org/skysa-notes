@@ -21,6 +21,7 @@ import {
 	stopSyncingHere,
 } from '../src/sync/account.js';
 import { updateNote } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -67,12 +68,7 @@ const answering = (result: Result<Connection>) => {
 
 /** A device holding a credential for `connectionId`, as connecting leaves it. */
 const holding = async (db: NotesDatabase, connectionId: string, credential = 'sk1_held') => {
-	await db.credentials.put({
-		id: connectionId,
-		credential,
-		provider: 'dropbox',
-		createdAt: Date.now(),
-	});
+	await holdCredential(db, connectionId, { credential, createdAt: Date.now() });
 	return credential;
 };
 
