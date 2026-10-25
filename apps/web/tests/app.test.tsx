@@ -30,14 +30,10 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-beforeEach(async () => {
+beforeEach(() => {
 	// The storage panel asks the server on open. There is no server here, and
 	// an app that cannot reach it has to work anyway.
 	vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')));
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.syncState.clear();
 });
 
 /** The note list's heading: the second on the page, after "Notebooks". */

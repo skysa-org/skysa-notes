@@ -590,10 +590,11 @@ const defined = <T extends object>(value: T): T =>
  */
 export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => {
 	const recovered = recover(frontmatter);
-	if (recovered === undefined) return {};
-	const { record, doc } = recovered;
+	return recovered === undefined ? {} : fieldsOf(recovered);
+};
 
-	return defined({
+const fieldsOf = ({ record, doc }: Recovered): NoteFrontmatter =>
+	defined({
 		id: asId(record.id, doc),
 		title: asString(record.title),
 		created: asString(record.created),
@@ -605,7 +606,6 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 				? record.color
 				: undefined,
 	});
-};
 
 /**
  * Where a note's times are, in the order they are looked for: the app's own
@@ -645,10 +645,26 @@ export interface NoteTimes {
  */
 export const readNoteTimes = (frontmatter: string | null): NoteTimes => {
 	const recovered = recover(frontmatter);
-	if (recovered === undefined) return {};
-	const created = firstTime(recovered.record, CREATED_KEYS);
-	const updated = firstTime(recovered.record, UPDATED_KEYS) ?? created;
+	return recovered === undefined ? {} : timesOf(recovered);
+};
+
+const timesOf = ({ record }: Recovered): NoteTimes => {
+	const created = firstTime(record, CREATED_KEYS);
+	const updated = firstTime(record, UPDATED_KEYS) ?? created;
 	return defined({ created, updated });
+};
+
+/**
+ * `readFrontmatter` and `readNoteTimes` together, from one parse of the block:
+ * what reading a note file asks of it, on every note a pull brings in.
+ */
+export const readNoteMetadata = (
+	frontmatter: string | null
+): Readonly<{ fields: NoteFrontmatter; times: NoteTimes }> => {
+	const recovered = recover(frontmatter);
+	return recovered === undefined
+		? { fields: {}, times: {} }
+		: { fields: fieldsOf(recovered), times: timesOf(recovered) };
 };
 
 /**

@@ -49,8 +49,10 @@ locally and talks to nobody until a provider is connected.
 pnpm verify   # format:check + lint + typecheck + test
 ```
 
-CI runs the same thing plus `pnpm build`, and `pnpm audit --prod` for
-information only. A pull request that has not run `pnpm verify` will fail, and
+CI runs the same thing plus `pnpm build` and `pnpm size` (the SPA's size
+budget), a check that the generated files (the route tree, the Worker's types,
+the migration snapshots) match their sources, the tests again on Node 22.13,
+and `pnpm audit --prod` for information only. A pull request that has not run `pnpm verify` will fail, and
 there is nothing in it that a maintainer can fix for you.
 
 What is expected of a change:

@@ -2,6 +2,7 @@ import { isScratchPath, isVaultPath } from '@skysa/core';
 import { z } from 'zod';
 
 import { type NoteKey, type NoteRecord, noteRef, type NotesDatabase } from './db.js';
+import { readJson } from './prefs.js';
 
 /**
  * The notes opened lately on this device, newest first: what the search field
@@ -38,15 +39,7 @@ const stored = z.array(z.tuple([z.string(), z.string()]));
  * hand-edited in devtools, is a list the app cannot use, and so the same as
  * none, rather than an error in the search field.
  */
-const read = (value: string | undefined): NoteKey[] => {
-	if (value === undefined) return [];
-	try {
-		const parsed = stored.safeParse(JSON.parse(value));
-		return parsed.success ? parsed.data : [];
-	} catch {
-		return [];
-	}
-};
+const read = (value: string | undefined): NoteKey[] => readJson(value, stored) ?? [];
 
 /** The notes opened lately, as keys, newest first. */
 export const getRecentKeys = async (db: NotesDatabase): Promise<NoteKey[]> =>

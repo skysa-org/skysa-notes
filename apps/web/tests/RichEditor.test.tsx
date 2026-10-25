@@ -1,7 +1,7 @@
-import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { adoptBody, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
+import { adoptBody, type Adoption, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
 import { RichEditor } from '../src/editor/RichEditor.js';
 
 /**
@@ -31,7 +31,7 @@ vi.mock('../src/editor/rich.js', () => ({
 			destroy: () => Promise.resolve(),
 		};
 	},
-	adoptBody: vi.fn(() => true),
+	adoptBody: vi.fn((): Adoption => 'replaced'),
 	whatIsLost: vi.fn(() => undefined),
 }));
 
@@ -54,8 +54,6 @@ beforeEach(() => {
 	vi.mocked(adoptBody).mockClear();
 	vi.mocked(whatIsLost).mockClear();
 });
-
-afterEach(cleanup);
 
 describe('RichEditor', () => {
 	it('opens the editor on the body it is given, and calls that no edit', async () => {
@@ -143,7 +141,7 @@ describe('RichEditor', () => {
 			/>
 		);
 		await mounted();
-		vi.mocked(adoptBody).mockReturnValueOnce(false);
+		vi.mocked(adoptBody).mockReturnValueOnce('refused');
 
 		rerender(
 			<RichEditor
@@ -163,6 +161,42 @@ describe('RichEditor', () => {
 
 		// Still the text from o1 on screen, so the edit is one against o1.
 		expect(onUserEdit).toHaveBeenLastCalledWith('Hello!', 'o1');
+	});
+
+	it('takes in a body that says what it already shows without calling that a replacement', async () => {
+		// As the raw editor does: what the user typed is not overtaken by a body
+		// the document already means (#444).
+		const onUserEdit = vi.fn();
+		const onAdopted = vi.fn();
+		const props = { noteId: 'a', onUserEdit, onAdopted, onUnsupported: vi.fn() };
+		const { rerender } = render(<RichEditor {...props} body="- one" origin="o1" />);
+		await mounted();
+		vi.mocked(adoptBody).mockReturnValueOnce('same');
+
+		rerender(<RichEditor {...props} body="* one" origin="o2" />);
+		await waitFor(() => {
+			expect(adoptBody).toHaveBeenCalledWith(expect.anything(), '* one');
+		});
+		act(() => {
+			setup?.onUserEdit('- one!');
+		});
+
+		expect(onAdopted).not.toHaveBeenCalled();
+		// Taken in all the same: the next edit is one against o2.
+		expect(onUserEdit).toHaveBeenLastCalledWith('- one!', 'o2');
+	});
+
+	it('calls a body that changed the text a replacement', async () => {
+		const onAdopted = vi.fn();
+		const props = { noteId: 'a', onUserEdit: vi.fn(), onAdopted, onUnsupported: vi.fn() };
+		const { rerender } = render(<RichEditor {...props} body="Hello" />);
+		await mounted();
+
+		rerender(<RichEditor {...props} body="Pulled" />);
+
+		await waitFor(() => {
+			expect(onAdopted).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	it('does not reload the note when it re-renders for some other reason', async () => {

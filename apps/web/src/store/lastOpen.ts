@@ -2,7 +2,9 @@ import { isVaultPath, isWithin, parentPath, ROOT } from '@skysa/core';
 import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
+import { createEmitter } from './emitter.js';
 import { getNote, listNotes } from './notes.js';
+import { readJson, sourceKey } from './prefs.js';
 import { type FolderNode, listedUnder } from './tree.js';
 
 /**
@@ -39,7 +41,7 @@ const stored = z.object({
 	notes: z.record(z.string(), z.string()),
 });
 
-const keyFor = (connectionId: string): string => `lastOpen:${connectionId}`;
+const keyFor = (connectionId: string): string => sourceKey('lastOpen', connectionId);
 
 /**
  * A row is read whatever is in it. One written by a later version, or
@@ -47,15 +49,10 @@ const keyFor = (connectionId: string): string => `lastOpen:${connectionId}`;
  * none, rather than an error on the way into the app.
  */
 const read = (value: string | undefined): LastOpen => {
-	if (value === undefined) return NOTHING;
-	try {
-		const parsed = stored.safeParse(JSON.parse(value));
-		if (!parsed.success) return NOTHING;
-		const { folder, notes } = parsed.data;
-		return folder === undefined ? { notes } : { folder, notes };
-	} catch {
-		return NOTHING;
-	}
+	const parsed = readJson(value, stored);
+	if (parsed === undefined) return NOTHING;
+	const { folder, notes } = parsed;
+	return folder === undefined ? { notes } : { folder, notes };
 };
 
 export const getLastOpen = async (db: NotesDatabase, connectionId: string): Promise<LastOpen> =>
@@ -72,19 +69,14 @@ export const getLastOpen = async (db: NotesDatabase, connectionId: string): Prom
  * since it landed. A new object each write, so one can be told from the next.
  */
 const written = new WeakMap<NotesDatabase, ReadonlyMap<string, LastOpen>>();
-const listeners = new Set<() => void>();
+const writes = createEmitter();
 
 /** What this tab wrote last for a source, once it has landed. */
 export const lastWritten = (db: NotesDatabase, connectionId: string): LastOpen | undefined =>
 	written.get(db)?.get(connectionId);
 
 /** Be told each time one of this tab's writes lands. */
-export const onWritten = (listener: () => void): (() => void) => {
-	listeners.add(listener);
-	return () => {
-		listeners.delete(listener);
-	};
-};
+export const onWritten = writes.subscribe;
 
 /**
  * Remember `folder` as the notebook open in this source, and `noteId`, when
@@ -119,9 +111,7 @@ export const rememberOpen = async (
 	});
 	if (lastOpen === undefined) return;
 	written.set(db, new Map(written.get(db)).set(connectionId, lastOpen));
-	listeners.forEach((listener) => {
-		listener();
-	});
+	writes.emit();
 };
 
 /**

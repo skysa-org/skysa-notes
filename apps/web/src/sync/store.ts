@@ -41,6 +41,7 @@ import { dropPictures, restampPicture } from '../store/pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
+import { libraryTables } from '../store/scopes.js';
 import { eachInSlices } from '../store/slices.js';
 
 /**
@@ -292,33 +293,19 @@ export const createDexieSyncStore = (
 	 * interleave.
 	 */
 	const inTransaction = <T>(work: () => Promise<T>): Promise<T> =>
-		db.transaction(
-			'rw',
-			[
-				db.notes,
-				db.folders,
-				db.opQueue,
-				db.syncState,
-				db.prefs,
-				db.files,
-				db.fileBytes,
-				db.pictures,
-				db.pictureBytes,
-			],
-			async () => {
-				const state = await db.syncState.get(connectionId);
-				// Gone, or detached. A run that was at the network when the source
-				// was let go would otherwise pull back in every note the detach had
-				// just removed, and put a cursor on a row that must not have one.
-				if (state === undefined || state.detached !== undefined) {
-					throw new UnboundConnectionError(connectionId);
-				}
-				// A scan before `verifyResume` has checked the remote could delete
-				// every note an emptied app folder no longer holds.
-				if (state.resumeUnverified === true) throw new UnverifiedResumeError(connectionId);
-				return work();
+		db.transaction('rw', libraryTables(db), async () => {
+			const state = await db.syncState.get(connectionId);
+			// Gone, or detached. A run that was at the network when the source
+			// was let go would otherwise pull back in every note the detach had
+			// just removed, and put a cursor on a row that must not have one.
+			if (state === undefined || state.detached !== undefined) {
+				throw new UnboundConnectionError(connectionId);
 			}
-		);
+			// A scan before `verifyResume` has checked the remote could delete
+			// every note an emptied app folder no longer holds.
+			if (state.resumeUnverified === true) throw new UnverifiedResumeError(connectionId);
+			return work();
+		});
 
 	const notesOf = (scope: Scope): Promise<NoteRecord[]> =>
 		rowsOf(scope.notes, connectionId).toArray();

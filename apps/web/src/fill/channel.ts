@@ -1,5 +1,6 @@
 import { pageSite, type Site } from '@skysa/core';
 
+import { createEmitter } from '../store/emitter.js';
 import {
 	BOOKMARKLET_REVISION,
 	FILL_MESSAGE,
@@ -77,16 +78,14 @@ export interface ChannelOptions {
 
 export const openChannel = (win: ChannelWindow, options: ChannelOptions = {}): FillChannel => {
 	const { slowMs = SLOW_MS, setTimer = setTimeout } = options;
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	const at: { current: ChannelState } = {
 		current: win.opener === null ? { state: 'alone' } : { state: 'waiting', slow: false },
 	};
 
 	const set = (next: ChannelState) => {
 		at.current = next;
-		listeners.forEach((listener) => {
-			listener();
-		});
+		changes.emit();
 	};
 
 	const hear = (event: MessageEvent) => {
@@ -128,12 +127,7 @@ export const openChannel = (win: ChannelWindow, options: ChannelOptions = {}): F
 
 	return {
 		current: () => at.current,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		subscribe: changes.subscribe,
 		fill: (login) => {
 			const now = at.current;
 			const opener = win.opener;

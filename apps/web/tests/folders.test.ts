@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -20,17 +20,11 @@ import {
 	saveNoteBody,
 } from '../src/store/notes.js';
 import { updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 let db: NotesDatabase;
-let counter = 0;
-
 beforeEach(() => {
-	counter += 1;
-	db = createDatabase(`test-folders-${counter}`);
-});
-
-afterEach(async () => {
-	await db.delete();
+	db = freshDatabase();
 });
 
 describe('ensureFolder', () => {

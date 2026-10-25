@@ -50,6 +50,7 @@ export {
 	attachmentName,
 	clusters,
 	foldName,
+	isNoteName,
 	noteFilename,
 	normalizeTag,
 	sanitizeFolderName,

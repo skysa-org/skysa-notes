@@ -44,23 +44,7 @@ import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
 import { rowsOf } from './rows.js';
-
-/**
- * The scope every writer here opens, whether or not it touches every table in
- * it: one caller wraps several writers in a transaction of its own, and a
- * writer that asked for more than that caller opened would fail there with a
- * `SubTransactionError`. The files are in it because a note's move carries the
- * files it links (`carryLinkedFiles`).
- */
-const writerTables = (db: NotesDatabase) => [
-	db.notes,
-	db.folders,
-	db.opQueue,
-	db.syncState,
-	db.prefs,
-	db.files,
-	db.fileBytes,
-];
+import { writerTables } from './scopes.js';
 
 /**
  * Notes CRUD over IndexedDB.
