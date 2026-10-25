@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
+import { asObject, parseJson } from '../json.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import type { FetchLike } from './dropbox.js';
@@ -237,14 +238,7 @@ const cursorSchema = z.object({
 type DeltaCursor = z.infer<typeof cursorSchema>;
 
 const parseCursor = (cursor: string): DeltaCursor => {
-	const parsed = ((): unknown => {
-		try {
-			return JSON.parse(cursor);
-		} catch {
-			return undefined;
-		}
-	})();
-	const result = cursorSchema.safeParse(parsed);
+	const result = cursorSchema.safeParse(parseJson(cursor));
 	if (!result.success || !result.data.link.startsWith(`${GRAPH_ORIGIN}/`)) {
 		throw new CursorResetError('onedrive cursor is not one this adapter wrote');
 	}
@@ -299,14 +293,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 
 	const failureOf = async (response: Response): Promise<GraphFailure> => {
 		const text = await response.text().catch(() => '');
-		const parsed = ((): { error?: { message?: unknown } } => {
-			try {
-				const value: unknown = JSON.parse(text);
-				return typeof value === 'object' && value !== null ? value : {};
-			} catch {
-				return {};
-			}
-		})();
+		const parsed: { error?: { message?: unknown } } = asObject(parseJson(text));
 		// Graph documents seconds, and `parseRetryAfter` also reads the HTTP date
 		// the header is allowed to carry, which some fronts send instead.
 		// https://learn.microsoft.com/en-us/graph/throttling

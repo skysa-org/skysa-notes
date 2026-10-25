@@ -246,6 +246,13 @@ export const noteFilename = (title: string): string => `${slugify(title)}${NOTE_
 export const foldName = (name: string): string => name.normalize('NFC').toLowerCase();
 
 /**
+ * Whether a name or path is a note's: its extension folded as `foldName` folds,
+ * so `Report.MD` from a Windows tool is one. The engine, the providers and the
+ * app all ask this, and must answer it the same way.
+ */
+export const isNoteName = (name: string): boolean => foldName(name).endsWith(NOTE_EXTENSION);
+
+/**
  * Disambiguate against names already in the folder by appending `-2`, `-3`, and
  * so on — the convention every file manager uses.
  */

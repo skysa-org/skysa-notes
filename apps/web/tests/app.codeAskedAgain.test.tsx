@@ -56,9 +56,6 @@ beforeEach(async () => {
 		}
 		return Promise.reject(new TypeError('offline'));
 	});
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.syncState.clear();
 	await createFolder(db, { name: 'Work' });
 });
 

@@ -1,9 +1,8 @@
 import { contentTypeOf } from '../attachments.js';
 import { isClipPath } from '../clipboard.js';
-import { NOTE_EXTENSION } from '../config.js';
 import { contentHash } from '../hash.js';
 import { parseNoteFile } from '../markdown/note.js';
-import { foldName } from '../markdown/slug.js';
+import { foldName, isNoteName } from '../markdown/slug.js';
 import {
 	ancestorPaths,
 	basename,
@@ -245,7 +244,7 @@ const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
 	entry.deleted !== true &&
 	entry.kind === 'file' &&
 	!isHidden(entry.path) &&
-	foldName(entry.path).endsWith(NOTE_EXTENSION);
+	isNoteName(entry.path);
 
 /** The message of an unknown throw, without letting a non-Error crash the log. */
 const messageOf = (error: unknown): string =>
@@ -2857,7 +2856,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		//
 		// It is a row of its own (docs/ARCHITECTURE.md §7, "Files beside
 		// notes"): mirrored, never read.
-		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) {
+		if (!isNoteName(entry.path)) {
 			return [
 				...unlisted(),
 				...(await noteNoLonger(entry, decided)),

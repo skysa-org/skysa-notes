@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
 	abandonImport,
@@ -8,14 +8,11 @@ import {
 	importStanding,
 	pileContents,
 } from '../src/store/connection.js';
-import {
-	activeConnectionId,
-	createDatabase,
-	LOCAL_CONNECTION_ID,
-	type NotesDatabase,
-} from '../src/store/db.js';
+import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { holdCredential } from './support/connection.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A source's first import (`SyncStateRecord.importing`): the device's pile is
@@ -25,18 +22,6 @@ import { createNote, saveNoteBody } from '../src/store/notes.js';
 
 const DROPBOX = { connectionId: 'c-drop', provider: 'dropbox', accountId: 'dbid:1' } as const;
 const DRIVE = { connectionId: 'c-drive', provider: 'gdrive', accountId: 'g:1' } as const;
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`importing-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 /** A device used for a while with nothing connected. */
 const usedLocally = async () => {
@@ -162,12 +147,7 @@ describe('abandoning an import', () => {
 	it('puts the device back exactly as it was before the connect', async () => {
 		const { db } = await usedLocally();
 		const before = await rowsOf(db, LOCAL_CONNECTION_ID);
-		await db.credentials.put({
-			id: DROPBOX.connectionId,
-			credential: 'sk1_x',
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX.connectionId, { credential: 'sk1_x' });
 		await bindConnection(db, DROPBOX);
 		// Some of the remote has arrived meanwhile.
 		await createNote(db, { connectionId: DROPBOX.connectionId, title: 'Theirs' });
