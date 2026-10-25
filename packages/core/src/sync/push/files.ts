@@ -10,6 +10,7 @@ import { conflictFilePath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
 import { type SyncFile, type SyncOp } from '../store.js';
+import { type FolderPush } from './folders.js';
 
 /**
  * The files that are not notes, as a push sends them: uploaded where their
@@ -27,7 +28,7 @@ const FILE_BESIDE_ATTEMPTS = 8;
 
 export const createFilePush = (
 	{ provider, store, now }: EngineContext,
-	{ ensureRemoteFolder }: { ensureRemoteFolder: (path: string) => Promise<void> }
+	{ ensureRemoteFolder }: Pick<FolderPush, 'ensureRemoteFolder'>
 ) => {
 	/**
 	 * The file in the way is this one, as far as can be told without reading
