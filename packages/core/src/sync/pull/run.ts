@@ -22,6 +22,26 @@ import { type PullReconcile } from './reconcile.js';
  * (#446).
  */
 
+/**
+ * Where a copy of the user's writing was made. Not a note moved aside for a
+ * file that cannot be read: nothing was edited twice there and no copy was
+ * made, and reported here the user is told the one thing that did not
+ * happen. The record says it instead, and keeps saying it
+ * (`UnreadableFile.movedAside`).
+ */
+const conflictPathsIn = (changes: readonly PullChange[]): string[] =>
+	changes.flatMap((change) => (change.kind === 'conflict' ? [change.resolution.copyPath] : []));
+
+interface PullProgress {
+	pulled: number;
+	conflicts: readonly string[];
+	seen: ReadonlySet<string>;
+	/** Whether a page so far met the clipboard's folder. */
+	clipboard?: true;
+	/** Whether a page so far met the key file. */
+	encryption?: true;
+}
+
 export const createPullRun = (
 	{ provider, store, meter }: EngineContext,
 	{
@@ -40,28 +60,6 @@ export const createPullRun = (
 		Pick<PullReconcile, 'reconcile'> &
 		Pick<Cascade, 'renamesQueued'>
 ) => {
-	/**
-	 * Where a copy of the user's writing was made. Not a note moved aside for a
-	 * file that cannot be read: nothing was edited twice there and no copy was
-	 * made, and reported here the user is told the one thing that did not
-	 * happen. The record says it instead, and keeps saying it
-	 * (`UnreadableFile.movedAside`).
-	 */
-	const conflictPathsIn = (changes: readonly PullChange[]): string[] =>
-		changes.flatMap((change) =>
-			change.kind === 'conflict' ? [change.resolution.copyPath] : []
-		);
-
-	interface PullProgress {
-		pulled: number;
-		conflicts: readonly string[];
-		seen: ReadonlySet<string>;
-		/** Whether a page so far met the clipboard's folder. */
-		clipboard?: true;
-		/** Whether a page so far met the key file. */
-		encryption?: true;
-	}
-
 	/**
 	 * Every page of a round from a stored cursor, read before anything is
 	 * decided. A round is one batch however the provider pages it: Graph asks
