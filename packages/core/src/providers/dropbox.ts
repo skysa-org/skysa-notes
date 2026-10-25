@@ -1,8 +1,25 @@
 import { MARKER_FILE } from '../config.js';
-import { asObject, isJsonObject, parseJson } from '../json.js';
-import { buildMarker, serializeMarker } from '../marker.js';
+import { isJsonObject, parseJson } from '../json.js';
 import { normalizePath, ROOT } from '../paths.js';
-import { decodeText, responseBytes } from './text.js';
+import {
+	type HttpProviderOptions,
+	isSelf,
+	outsideRoot,
+	readAsText,
+	refuseRoot,
+	rootFolderEntry,
+	writeMarkerOnce,
+} from './adapter.js';
+import {
+	type Attempt,
+	createTransport,
+	jsonBody,
+	parseRetryAfter,
+	rateLimited,
+	readErrorBody,
+	type RequestParts,
+} from './http.js';
+import { responseBytes } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -11,8 +28,7 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	parseRetryAfter,
-	RateLimitError,
+	ProviderResponseError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -36,17 +52,15 @@ import {
 
 const RPC = 'https://api.dropboxapi.com/2';
 const CONTENT = 'https://content.dropboxapi.com/2';
+/**
+ * With App folder access the root exists by construction and has no id of its
+ * own, so its id is a constant — which docs/ARCHITECTURE.md §4 allows.
+ */
+const ROOT_ID = 'app-folder';
 
-export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+const rootId = (): Promise<string> => Promise.resolve(ROOT_ID);
 
-export interface DropboxProviderOptions {
-	fetch: FetchLike;
-	/** Called per request, so a refreshed token is picked up without rebuilding. */
-	getAccessToken: () => Promise<string>;
-	appVersion: string;
-	clientId: string;
-	userAgent?: string;
-}
+export type DropboxProviderOptions = HttpProviderOptions;
 
 /** Only the fields this adapter reads. Dropbox sends a good deal more. */
 interface Metadata {
@@ -91,7 +105,8 @@ const toDropboxPath = (path: string): string => {
  */
 const fromDropboxPath = (path: string | undefined): string => {
 	const normalized = normalizePath(path ?? '');
-	if (normalized === ROOT) throw new Error('dropbox returned an entry with no usable path');
+	if (normalized === ROOT)
+		throw new ProviderResponseError('dropbox returned an entry with no usable path');
 	return normalized;
 };
 
@@ -146,25 +161,6 @@ const toFolderEntry = (metadata: Metadata): RemoteEntry => ({
 });
 
 /**
- * Is what is at a path the very entry we were asked to act on?
- *
- * By id wherever both sides have one: that is what the request addressed the
- * entry by, and an `EntryRef`'s path is only as fresh as the caller's last
- * look. A note that has never been pushed carries no id, and then the path is
- * all there is to go on.
- */
-const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
-	entry.remoteId === '' || current.remoteId === ''
-		? // Folded, because Dropbox is case-insensitive and `path_display`
-			// carries the case the *user* typed — so the path that comes back is
-			// routinely spelled differently from the one the caller is holding
-			// for the very same file. Compared exactly, a move that had already
-			// happened would be reported as a conflict, and the conflict rule
-			// would write the user's note aside as a copy of itself.
-			normalizePath(entry.path).toLowerCase() === current.path.toLowerCase()
-		: entry.remoteId === current.remoteId;
-
-/**
  * The metadata for a download, which rides in a header because the body is the
  * file itself.
  *
@@ -177,10 +173,13 @@ const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
  * backoff already knows what to do with one.
  */
 const downloadResult = (header: string | null): Metadata => {
-	if (header === null) throw new Error('dropbox sent a download with no metadata header');
+	if (header === null)
+		throw new ProviderResponseError('dropbox sent a download with no metadata header');
 	const parsed = parseJson(header);
 	if (parsed === undefined) {
-		throw new Error('dropbox sent a download whose metadata header is not JSON');
+		throw new ProviderResponseError(
+			'dropbox sent a download whose metadata header is not JSON'
+		);
 	}
 	// `null`, a number and a bare string are all valid JSON and none of them has
 	// the shape below — and `null` in particular would get past a bare cast and
@@ -188,7 +187,9 @@ const downloadResult = (header: string | null): Metadata => {
 	// stack that says nothing about Dropbox. Which is the thing this function
 	// exists to stop. `failureOf` guards the same way for the same reason.
 	if (!isJsonObject(parsed)) {
-		throw new Error('dropbox sent a download whose metadata header is not an object');
+		throw new ProviderResponseError(
+			'dropbox sent a download whose metadata header is not an object'
+		);
 	}
 	return parsed;
 };
@@ -199,13 +200,11 @@ const toChangeEntry = (metadata: Metadata): ChangeEntry =>
 		: toEntry(metadata);
 
 export const createDropboxProvider = (options: DropboxProviderOptions): StorageProvider => {
-	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
+	const { fetch: doFetch, getAccessToken } = options;
 
 	const failureOf = async (response: Response): Promise<DropboxFailure> => {
-		const text = await response.text().catch(() => '');
-		const parsed: { error_summary?: string; error?: { retry_after?: number } } = asObject(
-			parseJson(text)
-		);
+		const { text, body: errorBody } = await readErrorBody(response);
+		const parsed: { error_summary?: string; error?: { retry_after?: number } } = errorBody;
 		// The header is what the error-handling guide documents ("indicating how
 		// long your app should wait (in seconds) before retrying"); the RPC
 		// routes put the same number in the body's `retry_after`, which is read
@@ -223,12 +222,6 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
-
-	/** What to put in the message, when Dropbox said how long to wait. */
-	const waitedFor = (failure: DropboxFailure): string =>
-		failure.retryAfterMs === undefined
-			? ''
-			: `, retry after ${String(failure.retryAfterMs / 1000)}s`;
 
 	/**
 	 * Endpoint-specific errors arrive as 409 with a `/`-separated summary. Any
@@ -251,50 +244,28 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (tagged(failure, 'reset')) throw new CursorResetError(failure.summary);
 		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
 		if (failure.status === 429) {
-			throw new RateLimitError(
-				`dropbox rate limit${waitedFor(failure)}`,
-				failure.retryAfterMs
-			);
+			throw rateLimited('dropbox', 429, failure.retryAfterMs, failure.summary);
 		}
 		throw new Error(`dropbox ${String(failure.status)}: ${failure.summary}`);
 	};
 
-	const authorization = async (): Promise<string> => `Bearer ${await getAccessToken()}`;
+	const { send, attempt, call } = createTransport({
+		kind: 'dropbox',
+		fetch: doFetch,
+		getAccessToken,
+		failureOf,
+		raise,
+	});
 
-	const post = async (
-		url: string,
-		headers: HeadersInit,
-		body?: string | Uint8Array<ArrayBuffer>
-	): Promise<Response> =>
-		doFetch(url, {
-			method: 'POST',
-			headers: { authorization: await authorization(), ...headers },
-			...(body === undefined ? {} : { body }),
-		});
+	const post = (url: string, headers: Record<string, string>, body?: RequestParts['body']) =>
+		send('POST', url, { headers, ...(body === undefined ? {} : { body }) });
 
-	const rpc = async <T>(route: string, body: unknown): Promise<T> => {
-		const response = await post(
-			`${RPC}/${route}`,
-			{ 'content-type': 'application/json' },
-			JSON.stringify(body)
-		);
-		if (!response.ok) return raise(await failureOf(response));
-		return (await response.json()) as T;
-	};
+	const rpc = <T>(route: string, body: unknown): Promise<T> =>
+		call<T>('POST', `${RPC}/${route}`, jsonBody(body));
 
 	/** Like `rpc`, but hands the failure back instead of throwing it. */
-	const tryRpc = async <T>(
-		route: string,
-		body: unknown
-	): Promise<{ ok: true; value: T } | { ok: false; failure: DropboxFailure }> => {
-		const response = await post(
-			`${RPC}/${route}`,
-			{ 'content-type': 'application/json' },
-			JSON.stringify(body)
-		);
-		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		return { ok: true, value: (await response.json()) as T };
-	};
+	const tryRpc = <T>(route: string, body: unknown): Promise<Attempt<T, DropboxFailure>> =>
+		attempt<T>('POST', `${RPC}/${route}`, jsonBody(body));
 
 	/**
 	 * The entry at a path, or `undefined` when there is nothing there.
@@ -366,31 +337,19 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
-		upload(path, content, opts.expectedVersion);
+		outsideRoot(path, (target) => upload(target, content, opts.expectedVersion));
 
 	/** `mode: add` with nothing expected: a file or folder in the way is a conflict. */
 	const createFile = (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<RemoteEntry> =>
-		upload(path, bytes, undefined);
+		outsideRoot(path, (target) => upload(target, bytes, undefined));
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
-		// With App folder access the root exists by construction and has no id of
-		// its own, so this is a constant — which docs/ARCHITECTURE.md §4 allows.
-		const rootId = 'app-folder';
-		if ((await metadataAt(MARKER_FILE)) !== undefined) return { rootId };
-
-		const marker = buildMarker({
-			appVersion,
-			provider: 'dropbox',
-			clientId,
-			...(userAgent === undefined ? {} : { userAgent }),
-		});
-		// `add`, so if another device wrote the marker between the check above and
-		// here, theirs stands and this is a no-op rather than an overwrite.
-		await write(MARKER_FILE, serializeMarker(marker), {}).catch((error: unknown) => {
-			if (error instanceof ConflictError) return;
-			throw error;
-		});
-		return { rootId };
+		await writeMarkerOnce(
+			{ ...options, provider: 'dropbox' },
+			async () => (await metadataAt(MARKER_FILE)) !== undefined,
+			(path, content) => write(path, content, {})
+		);
+		return { rootId: ROOT_ID };
 	};
 
 	const list = async (folderPath: string): Promise<RemoteEntry[]> => {
@@ -422,17 +381,20 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// The body is the file itself, so the metadata rides in a header.
 		const metadata = downloadResult(response.headers.get('dropbox-api-result'));
 		if (metadata.rev === undefined || metadata.rev === '') {
-			throw new Error('dropbox sent a download with no rev');
+			throw new ProviderResponseError('dropbox sent a download with no rev');
 		}
 		return { bytes: await responseBytes(response), version: metadata.rev };
 	};
 
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
-		const { bytes, version } = await readBytes(entry);
-		return { content: decodeText(bytes, entry.path), version };
-	};
+	const read = readAsText(readBytes);
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
+		// There already. Asked, Dropbox would refuse the path rather than answer
+		// the app folder: `create_folder_v2` takes a `WritePath`, whose pattern
+		// needs a leading slash, and the root is `''` (as `upload` and `move_v2`
+		// take a `WritePathOrId`, which is why those are refused here too).
+		// https://github.com/dropbox/dropbox-api-spec (`files.stone`, `alias WritePath`)
+		if (normalizePath(path) === ROOT) return rootFolderEntry(ROOT_ID);
 		const result = await tryRpc<{ metadata?: Metadata }>('files/create_folder_v2', {
 			path: toDropboxPath(path),
 			autorename: false,
@@ -450,6 +412,8 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		await refuseRoot(entry, rootId);
+		if (normalizePath(newPath) === ROOT) throw new NotFoundError(ROOT);
 		const result = await tryRpc<{ metadata?: Metadata }>('files/move_v2', {
 			from_path: target(entry),
 			to_path: toDropboxPath(newPath),
@@ -504,7 +468,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// such a rename is a move to where the entry already is, and reporting
 		// where it actually is leaves the store agreeing with the provider
 		// rather than holding a name no file has.
-		if (isSelf(entry, current)) return current;
+		if (isSelf(entry, current, 'folded')) return current;
 
 		// "Into itself" that turns out not to be itself is a folder being moved
 		// under its own descendant, which is not a conflict with the entry at
@@ -515,6 +479,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const remove = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
 		const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
 		// Idempotent: something already gone is the outcome the caller wanted.
 		if (result.ok || tagged(result.failure, 'not_found')) return;
