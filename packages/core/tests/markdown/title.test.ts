@@ -210,7 +210,10 @@ describe('the first heading, over bodies put together at random', () => {
 			.map(({ seed, body }) => ({ seed, body, read: titleOf(body), whole: wholeBody(body) }));
 
 		expect(disagreements).toEqual([]);
-	}, 20_000);
+		// About four seconds on a laptop, and five times that on a shared CI
+		// runner with coverage on: the line is the time a stuck parse would
+		// blow through, not the time a slow machine needs.
+	}, 60_000);
 
 	it('answers many of them from what it read as far as a heading', () => {
 		const parse = vi.spyOn(pipeline, 'parse');
@@ -225,5 +228,5 @@ describe('the first heading, over bodies put together at random', () => {
 		parse.mockRestore();
 
 		expect(answered.length).toBeGreaterThan(1000);
-	}, 20_000);
+	}, 60_000);
 });

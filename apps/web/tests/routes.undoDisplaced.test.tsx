@@ -11,6 +11,7 @@ import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { noteUrl } from './entry.js';
 import { updateNote } from './noteRows.js';
+import { flushAutosave } from './support/app.js';
 
 /**
  * Undo, for a note deleted while the editor still held an edit older than the
@@ -31,12 +32,9 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 	};
 });
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	store.refusingText = undefined;
-	await db.notes.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
 });
 
 const editorText = () => EditorView.findFromDOM(document.body)?.state.doc.toString();
@@ -48,12 +46,6 @@ const type = (text: string) => {
 			changes: { from: editor.state.doc.length, insert: text },
 			userEvent: 'input.type',
 		});
-	});
-};
-
-const flushAutosave = () => {
-	act(() => {
-		window.dispatchEvent(new Event('pagehide'));
 	});
 };
 

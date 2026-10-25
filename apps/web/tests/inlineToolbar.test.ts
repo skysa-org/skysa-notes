@@ -1,10 +1,10 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { shouldShowInlineToolbar } from '../src/editor/InlineToolbar.js';
-import { createRichEditor } from '../src/editor/rich.js';
 import { fence, sealed } from './secretHostFake.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -16,13 +16,8 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
  * wrong about all three and still pass.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body });
 
 	// The toolbar's own element, which the predicate asks about when focus has
 	// gone into it.
@@ -49,7 +44,7 @@ let fake: FakeWindow | undefined;
 afterEach(async () => {
 	fake?.restore();
 	fake = undefined;
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

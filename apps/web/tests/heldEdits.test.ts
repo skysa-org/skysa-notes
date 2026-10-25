@@ -1,7 +1,7 @@
 import type Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase } from '../src/store/db.js';
 import { holdsTextFor } from '../src/store/detached.js';
 import {
 	beforeClosing,
@@ -11,6 +11,7 @@ import {
 	UNDERWAY_WAIT_MS,
 } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
+import { deleteAfterTest, watchedDatabase } from './support/db.js';
 
 /**
  * The editors' held edits, written on request. The stale-tab case comes last:
@@ -18,13 +19,10 @@ import { tabState } from '../src/store/staleTab.js';
  */
 
 const registered: (() => void)[] = [];
-const opened: Dexie[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	registered.splice(0).forEach((release) => {
 		release();
 	});
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const register = (finish: () => Promise<unknown>) => {
@@ -192,14 +190,13 @@ describe('settling what the editors hold', () => {
 	});
 
 	it('is still what a tab closing for a newer build writes first', async () => {
-		const db: NotesDatabase = createDatabase(`held-${crypto.randomUUID()}`);
-		opened.push(db);
+		const db = watchedDatabase();
 		await db.prefs.put({ key: 'before', value: 'kept' });
 		register(() => db.prefs.put({ key: 'typed', value: 'just now' }));
 
 		const newer = createDatabase(db.name) as Dexie;
 		newer.version(99).stores({ somethingNew: 'id' });
-		opened.push(newer);
+		deleteAfterTest(newer);
 		await newer.open();
 
 		expect(tabState()).toBe('stale');
