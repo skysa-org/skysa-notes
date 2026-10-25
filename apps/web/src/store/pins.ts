@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
 import { readJson, sourceKey } from './prefs.js';
+import { rowsOf } from './rows.js';
 
 /**
  * Notebooks and notes pinned to the top of their list, per source, on this
@@ -55,8 +56,8 @@ export const setNotebookPin = (
 ): Promise<void> =>
 	db.transaction('rw', [db.prefs, db.folders, db.notes], async () => {
 		const [folders, notes, top, bottom] = await Promise.all([
-			db.folders.where('connectionId').equals(connectionId).toArray(),
-			db.notes.where('connectionId').equals(connectionId).toArray(),
+			rowsOf(db.folders, connectionId).toArray(),
+			rowsOf(db.notes, connectionId).toArray(),
 			notebooks.top.get(db, connectionId),
 			notebooks.bottom.get(db, connectionId),
 		]);

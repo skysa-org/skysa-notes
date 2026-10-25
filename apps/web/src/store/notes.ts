@@ -43,6 +43,7 @@ import { frontmatterOf } from './frontmatter.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
+import { rowsOf } from './rows.js';
 import { writerTables } from './scopes.js';
 
 /**
@@ -132,7 +133,7 @@ const takenNamesIn = async (
 	folderPath: string,
 	exceptId?: string
 ): Promise<string[]> => {
-	const siblings = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const siblings = await rowsOf(db.notes, connectionId).toArray();
 	const folder = foldPath(folderPath);
 	return siblings
 		.filter(
@@ -303,7 +304,7 @@ export const listNotes = async (
 	options: ListNotesOptions = {}
 ): Promise<NoteRecord[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
-	const all = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const all = await rowsOf(db.notes, connectionId).toArray();
 
 	return all
 		.filter((note) => options.includeDeleted === true || note.deletedLocally === 0)
@@ -1062,9 +1063,7 @@ export const restoreNote = (db: NotesDatabase, id: string, scope?: NoteScope): P
 const makeRoomFor = async (db: NotesDatabase, restored: NoteRecord | undefined): Promise<void> => {
 	if (restored === undefined || restored.deletedLocally === 1) return;
 	const at = foldPath(restored.path);
-	const inTheWay = await db.notes
-		.where('connectionId')
-		.equals(restored.connectionId)
+	const inTheWay = await rowsOf(db.notes, restored.connectionId)
 		.filter(
 			(note) =>
 				note.id !== restored.id && note.deletedLocally === 0 && foldPath(note.path) === at

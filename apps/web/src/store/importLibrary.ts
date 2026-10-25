@@ -36,6 +36,7 @@ import { foldPath, freePath } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
 import { queueByNotebook } from './queue.js';
 import { readZip } from './readZip.js';
+import { rowsOf } from './rows.js';
 import { writerTables } from './scopes.js';
 import { eachInSlices } from './slices.js';
 
@@ -756,9 +757,9 @@ export const importLibrary = async (
 			throw new ImportRefusedError('This source cannot take an import now');
 		}
 		const [folderRows, noteRows, fileRows] = await Promise.all([
-			db.folders.where('connectionId').equals(connectionId).toArray(),
-			db.notes.where('connectionId').equals(connectionId).toArray(),
-			db.files.where('connectionId').equals(connectionId).toArray(),
+			rowsOf(db.folders, connectionId).toArray(),
+			rowsOf(db.notes, connectionId).toArray(),
+			rowsOf(db.files, connectionId).toArray(),
 		]);
 		const spellings = notebooksOf(folderRows, noteRows, fileRows);
 		const stamp = new Date(now);

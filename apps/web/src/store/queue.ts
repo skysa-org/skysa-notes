@@ -2,6 +2,7 @@ import { ancestorPaths, foldName, isWithin, parentPath, pathSegments } from '@sk
 import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
+import { rowsOf } from './rows.js';
 
 /**
  * The push queue: what the sync engine owes the remote, in the order it has to
@@ -292,9 +293,7 @@ export const queueMkdir = (db: QueueDb, connectionId: string, path: string): Que
  * deleted, and a write that finds no parent makes it (`runOp`).
  */
 export const withdrawMkdirs = (db: QueueDb, connectionId: string, path: string): Queued =>
-	db.opQueue
-		.where('connectionId')
-		.equals(connectionId)
+	rowsOf(db.opQueue, connectionId)
 		.filter((op) => op.op === 'mkdir' && isWithin(op.path, path))
 		.toArray()
 		.then((inside) => db.opQueue.bulkDelete(seqsOf(inside)))

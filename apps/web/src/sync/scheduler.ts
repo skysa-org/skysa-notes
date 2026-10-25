@@ -24,6 +24,7 @@ import {
 import { updateLive } from '../store/detached.js';
 import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
+import { rowsOf } from '../store/rows.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
 import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
@@ -554,9 +555,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	/** Every op of the connection gets its attempts back. Inside a transaction. */
 	const resetAttempts = async (connectionId: string): Promise<void> => {
-		const tried = await db.opQueue
-			.where('connectionId')
-			.equals(connectionId)
+		const tried = await rowsOf(db.opQueue, connectionId)
 			.filter((op) => op.attempts > 0)
 			.toArray();
 		await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
@@ -581,9 +580,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * Only an upload, and the run was blocked for that upload alone.
 	 */
 	const stuckOp = async (connectionId: string): Promise<StuckOp | undefined> => {
-		const failing = await db.opQueue
-			.where('connectionId')
-			.equals(connectionId)
+		const failing = await rowsOf(db.opQueue, connectionId)
 			.filter((op) => outOfAttempts(op, maxAttempts))
 			.toArray();
 		const upload = (op: OpQueueRecord): number => (op.op === 'upload' ? 1 : 0);
@@ -1069,7 +1066,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	/** A local edit queues an op, so a new highest seq is an edit to push. */
 	const watchEdits = (session: Session) => {
 		const subscription = liveQuery(() =>
-			db.opQueue.where('connectionId').equals(session.connectionId).primaryKeys()
+			rowsOf(db.opQueue, session.connectionId).primaryKeys()
 		).subscribe({
 			next: (seqs) => {
 				const highest = Math.max(0, ...seqs);
