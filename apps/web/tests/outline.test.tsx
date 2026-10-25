@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,8 +17,6 @@ import { RawEditor } from '../src/editor/RawEditor.js';
  * cannot be typed into at all; both are checked in a browser instead
  * (docs/ARCHITECTURE.md §7).
  */
-
-afterEach(cleanup);
 
 const BODY = ['# Top', '', 'words', '', '## Middle', '', 'more', '', '### Deep', ''].join('\n');
 

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import { Sidebar } from '../src/components/Sidebar.js';
@@ -12,8 +12,6 @@ import { buildFolderTree, withPins } from '../src/store/tree.js';
  * appears for them, and only then: every note the user has must be reachable,
  * and no row may claim to hold notes that are not there.
  */
-
-afterEach(cleanup);
 
 const tree = buildFolderTree({ paths: ['personal', 'work', 'work/meetings'] });
 

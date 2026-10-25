@@ -1,9 +1,8 @@
-import { type Editor } from '@milkdown/kit/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createCodeDisplayStore } from '../src/editor/codeDisplay.js';
 import { lineStarts, NUMBERED_LINE_LIMIT } from '../src/editor/codeTools.js';
-import { createRichEditor } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Where the numbers go, and where they stop.
@@ -14,10 +13,8 @@ import { createRichEditor } from '../src/editor/rich.js';
  * exactly one place to put a number in.
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 
@@ -42,19 +39,14 @@ describe('lineStarts', () => {
  */
 describe('the numbering limit', () => {
 	it('leaves a very long block unnumbered', async () => {
-		const root = document.createElement('div');
-		document.body.append(root);
 		const lines = Array.from(
 			{ length: NUMBERED_LINE_LIMIT + 1 },
 			(_, at) => `line ${String(at)}`
 		);
-		const editor = await createRichEditor({
-			root,
+		const { root } = await mountRich({
 			body: `\`\`\`\n${lines.join('\n')}\n\`\`\`\n`,
-			onUserEdit: () => undefined,
 			display: createCodeDisplayStore({ wrap: false, lineNumbers: true }),
-		}).create();
-		editors.push(editor);
+		});
 
 		expect(root.querySelectorAll('.code-line-number')).toHaveLength(0);
 		expect(root.querySelector('.code-block')?.textContent).toContain('line 2000');

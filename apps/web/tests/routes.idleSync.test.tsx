@@ -1,15 +1,14 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { liveQuery } from 'dexie';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { updateLive } from '../src/store/detached.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * A sync run that brings nothing still writes to its source's `syncState` row:
@@ -20,26 +19,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  */
 
 const DROPBOX = 'c-dropbox';
-
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-});
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const pause = (ms: number) =>
 	new Promise((resolve) => {
@@ -80,12 +59,7 @@ describe('a sync run that brings nothing', () => {
 	it('reads no notes for the tree, the list or the loose count', async () => {
 		// Without the device's credential for it, the source is let go of as
 		// revoked when the app opens, and a source let go of is not synced.
-		await db.credentials.put({
-			id: DROPBOX,
-			credential: `sk1_${DROPBOX}`,
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX);
 		await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 		await finishImport(db, DROPBOX);
 		await showConnection(db, DROPBOX);

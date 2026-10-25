@@ -1,14 +1,8 @@
-import {
-	type AnyRouter,
-	createMemoryHistory,
-	createRouter,
-	RouterProvider,
-} from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { type AnyRouter } from '@tanstack/react-router';
+import { screen, waitFor } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
-import { db } from '../src/store/db.js';
+import { renderApp } from './support/app.js';
 
 /**
  * What the component is handed, not what `parseSearch` returns — the two were
@@ -23,29 +17,13 @@ import { db } from '../src/store/db.js';
  * took the whole app down.
  */
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
-
-const openAt = async (url: string) => {
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: [url] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
-};
-
 /** Exactly what `Route.useSearch()` returns: the leaf match's `search`. */
 const received = (router: AnyRouter): Record<string, unknown> =>
 	router.state.matches.at(-1)?.search as Record<string, unknown>;
 
 describe('the query string as the app receives it', () => {
 	it('never hands a component a value the validator refused', async () => {
-		const router = await openAt('/?note={"a":1}&folder=[1]&connect=signin');
+		const router = await renderApp('/?note={"a":1}&folder=[1]&connect=signin');
 
 		expect(received(router).note).toBeUndefined();
 		expect(received(router).folder).toBeUndefined();
@@ -57,7 +35,7 @@ describe('the query string as the app receives it', () => {
 
 	it('refuses a value the default parser turned into something else', async () => {
 		// `?note=7` arrives as the number 7 and `?folder=true` as a boolean.
-		const router = await openAt('/?note=7&folder=true');
+		const router = await renderApp('/?note=7&folder=true');
 
 		expect(received(router).note).toBeUndefined();
 		expect(received(router).folder).toBeUndefined();
@@ -65,7 +43,7 @@ describe('the query string as the app receives it', () => {
 
 	it('still hands over what is valid', async () => {
 		// Read once and taken out, so it is seen by what it does.
-		await openAt('/?connect=denied');
+		await renderApp('/?connect=denied');
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/canceled/);
 	});
@@ -75,7 +53,7 @@ describe('the query string as the app receives it', () => {
 		// re-serialises the rest — the explicit `undefined`s included, and the
 		// folder and note an older link put in the query, which the hash and the
 		// history entry carry now.
-		const router = await openAt('/?note={"a":1}&folder=Work&connect=ok&code=lapsed');
+		const router = await renderApp('/?note={"a":1}&folder=Work&connect=ok&code=lapsed');
 
 		await waitFor(() => {
 			expect(router.state.location.searchStr).not.toContain('connect');

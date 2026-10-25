@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteList, type NoteListProps } from '../src/components/NoteList.js';
 import { type NoteRecord } from '../src/store/db.js';
@@ -23,8 +23,6 @@ vi.mock('../src/store/visibleText.js', async (importOriginal) => {
 		},
 	};
 });
-
-afterEach(cleanup);
 
 beforeEach(() => {
 	drawn.bodies = [];

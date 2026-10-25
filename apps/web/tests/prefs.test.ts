@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import {
 	getCodeDisplay,
 	getDefaultEditorMode,
@@ -10,11 +10,12 @@ import {
 	setPreference,
 } from '../src/store/prefs.js';
 import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../src/store/vault.js';
+import { freshDatabase } from './support/db.js';
 
 let db: NotesDatabase;
 
 beforeEach(async () => {
-	db = createDatabase(`prefs-${crypto.randomUUID()}`);
+	db = freshDatabase();
 	await db.open();
 });
 

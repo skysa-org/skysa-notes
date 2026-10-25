@@ -1,3 +1,4 @@
+import { type FileKind, mediaOf } from './files/mediaTypes.js';
 import { extensionOf } from './markdown/attachments.js';
 import { extensionAt, fitBytes, MAX_NAME_BYTES, utf8Length } from './markdown/slug.js';
 
@@ -8,83 +9,12 @@ import { extensionAt, fitBytes, MAX_NAME_BYTES, utf8Length } from './markdown/sl
  * recorded at upload is the uploader's word, and decides nothing here.
  */
 
-export type FileKind =
-	| 'image'
-	| 'pdf'
-	| 'document'
-	| 'text'
-	| 'spreadsheet'
-	| 'presentation'
-	| 'archive'
-	| 'audio'
-	| 'video'
-	| 'code'
-	| 'file';
+export type { FileKind } from './files/mediaTypes.js';
 
-const KINDS: Readonly<Record<Exclude<FileKind, 'file'>, readonly string[]>> = {
-	image: [
-		'png',
-		'jpg',
-		'jpeg',
-		'gif',
-		'webp',
-		'avif',
-		'svg',
-		'bmp',
-		'heic',
-		'heif',
-		'tif',
-		'tiff',
-	],
-	pdf: ['pdf'],
-	document: ['doc', 'docx', 'odt', 'rtf', 'pages', 'epub'],
-	text: ['txt', 'log', 'markdown', 'rst', 'org'],
-	spreadsheet: ['xls', 'xlsx', 'ods', 'csv', 'tsv', 'numbers'],
-	presentation: ['ppt', 'pptx', 'odp', 'key'],
-	archive: ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'],
-	audio: ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus'],
-	video: ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', 'ogv'],
-	code: [
-		'json',
-		'yaml',
-		'yml',
-		'toml',
-		'xml',
-		'html',
-		'htm',
-		'css',
-		'js',
-		'ts',
-		'py',
-		'rb',
-		'go',
-		'rs',
-		'java',
-		'c',
-		'h',
-		'cpp',
-		'sh',
-		'sql',
-	],
-};
+export const fileKind = (name: string): FileKind => mediaOf(extensionOf(name))?.kind ?? 'file';
 
-const KIND_BY_EXTENSION: ReadonlyMap<string, FileKind> = new Map(
-	Object.entries(KINDS).flatMap(([kind, extensions]) =>
-		extensions.map((extension) => [extension, kind as FileKind] as const)
-	)
-);
-
-export const fileKind = (name: string): FileKind =>
-	KIND_BY_EXTENSION.get(extensionOf(name)) ?? 'file';
-
-/**
- * Whether a browser draws it in an `<img>`: an image the editor shows inline.
- * HEIC and TIFF are images that most browsers cannot draw, so they are chips
- * like any other file rather than a picture that never appears.
- */
-const INLINE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'bmp']);
-
-export const showsInline = (name: string): boolean => INLINE.has(extensionOf(name));
+/** Whether a browser draws it in an `<img>`: an image the editor shows inline. */
+export const showsInline = (name: string): boolean => mediaOf(extensionOf(name))?.inline === true;
 
 /**
  * Whether a picture is drawn from a `data:` URL rather than a `blob:` one: an
@@ -98,63 +28,44 @@ export const showsInline = (name: string): boolean => INLINE.has(extensionOf(nam
 export const drawsFromData = (name: string): boolean => extensionOf(name) === 'svg';
 
 /**
- * The only types a file is opened in a tab as. Each is one a browser shows in a
- * viewer of its own that runs nothing of the file's in this origin.
+ * The only files opened in a tab, by extension, each as its type. Each is one a
+ * browser shows in a viewer of its own that runs nothing of the file's in this
+ * origin. Named here one by one, not read from a flag on the table: this is the
+ * line between a file shown and a file run as the app (`safeOpenType`), and it
+ * is drawn where it can be read whole.
  */
-const OPENS_AS: ReadonlyMap<string, string> = new Map([
-	['png', 'image/png'],
-	['jpg', 'image/jpeg'],
-	['jpeg', 'image/jpeg'],
-	['gif', 'image/gif'],
-	['webp', 'image/webp'],
-	['avif', 'image/avif'],
-	['bmp', 'image/bmp'],
-	['pdf', 'application/pdf'],
-	['mp3', 'audio/mpeg'],
-	['m4a', 'audio/mp4'],
-	['wav', 'audio/wav'],
-	['ogg', 'audio/ogg'],
-	['mp4', 'video/mp4'],
-	['webm', 'video/webm'],
-]);
+const OPENS_AS: ReadonlyMap<string, string> = new Map(
+	[
+		'png',
+		'jpg',
+		'jpeg',
+		'gif',
+		'webp',
+		'avif',
+		'bmp',
+		'pdf',
+		'mp3',
+		'm4a',
+		'wav',
+		'ogg',
+		'mp4',
+		'webm',
+	].flatMap((extension) => {
+		const type = mediaOf(extension)?.type;
+		return type === undefined ? [] : [[extension, type] as const];
+	})
+);
 
 /**
- * The type to tell a provider a file is, as it is uploaded, by its name: one a
- * person adds to a note, where the provider's own preview of it is worth
- * having. Anything else goes up as bytes. This is what the provider records
- * and nothing more — the app reads the extension, never this — so it is not
- * the allowlist below, which is about what this origin will show.
+ * The type to tell a provider a file is, as it is uploaded, by its name (the
+ * table's `upload`). Anything else goes up as bytes. This is what the provider
+ * records and nothing more — the app reads the extension, never this — so it is
+ * not the allowlist below, which is about what this origin will show.
  */
-const UPLOAD_TYPES: ReadonlyMap<string, string> = new Map([
-	['png', 'image/png'],
-	['jpg', 'image/jpeg'],
-	['jpeg', 'image/jpeg'],
-	['gif', 'image/gif'],
-	['webp', 'image/webp'],
-	['avif', 'image/avif'],
-	['svg', 'image/svg+xml'],
-	['bmp', 'image/bmp'],
-	['heic', 'image/heic'],
-	['heif', 'image/heif'],
-	['tif', 'image/tiff'],
-	['tiff', 'image/tiff'],
-	['pdf', 'application/pdf'],
-	['txt', 'text/plain'],
-	['csv', 'text/csv'],
-	['zip', 'application/zip'],
-	['mp3', 'audio/mpeg'],
-	['m4a', 'audio/mp4'],
-	['wav', 'audio/wav'],
-	['mp4', 'video/mp4'],
-	['mov', 'video/quicktime'],
-	['webm', 'video/webm'],
-	['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-	['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-	['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-]);
-
-export const contentTypeOf = (name: string): string | undefined =>
-	UPLOAD_TYPES.get(extensionOf(name));
+export const contentTypeOf = (name: string): string | undefined => {
+	const media = mediaOf(extensionOf(name));
+	return media?.upload === true ? media.type : undefined;
+};
 
 /**
  * The type to give a file's bytes before a tab is opened on them, and the

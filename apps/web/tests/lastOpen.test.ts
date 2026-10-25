@@ -1,7 +1,7 @@
 import { ROOT, VAULT_FOLDER } from '@skysa/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import {
 	getLastOpen,
 	lastWritten,
@@ -12,17 +12,11 @@ import {
 import { createNote, deleteNote } from '../src/store/notes.js';
 import { buildFolderTree, withPins } from '../src/store/tree.js';
 import { updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 let db: NotesDatabase;
-let counter = 0;
-
 beforeEach(() => {
-	counter += 1;
-	db = createDatabase(`test-last-open-${counter}`);
-});
-
-afterEach(async () => {
-	await db.delete();
+	db = freshDatabase();
 });
 
 const pick = (folderPath: string, open?: string, remembered?: string) =>

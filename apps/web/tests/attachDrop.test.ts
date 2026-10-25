@@ -1,4 +1,4 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { setBlockType } from '@milkdown/kit/prose/commands';
 import { undo } from '@milkdown/kit/prose/history';
 import { Slice } from '@milkdown/kit/prose/model';
@@ -15,18 +15,17 @@ import {
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
 import { INSERT_COMMANDS, SLASH_COMMANDS } from '../src/editor/commands.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
 import { settleEditors } from '../src/store/heldEdits.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Files pasted or dropped into the rich editor (#187): a placeholder while each
  * is added, then the file in the note as the user's own edit, where it was put.
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 	vi.restoreAllMocks();
 });
@@ -71,11 +70,8 @@ const added = (href: string, label: string, kind: 'image' | 'file'): Added => ({
 });
 
 const mount = async (body: string, host: AttachmentHost) => {
-	const root = document.createElement('div');
-	document.body.append(root);
 	const onUserEdit = vi.fn();
-	const editor = await createRichEditor({ root, body, onUserEdit, attachments: host }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body, onUserEdit, attachments: host });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	return {
 		editor,

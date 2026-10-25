@@ -36,4 +36,8 @@ export const movedRows = {
 		};
 		return follow(moved.get(noteRef(note)), 8);
 	},
+	/** No moves remembered, as a new page life starts. For tests, where a file is one page life. */
+	clear: (): void => {
+		moved.clear();
+	},
 };

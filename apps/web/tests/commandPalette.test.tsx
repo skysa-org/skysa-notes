@@ -1,7 +1,7 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { parseChord } from '../src/commands/chord.js';
 import {
@@ -19,8 +19,6 @@ import { CommandPalette } from '../src/components/CommandPalette.js';
  * palette that shows the same command with the same chord printed on it, and
  * the ways either could quietly stop being the case.
  */
-
-afterEach(cleanup);
 
 const MOD_K = parseChord('Mod+K');
 
