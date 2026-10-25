@@ -1687,6 +1687,7 @@ packages/
         engine.ts conflicts.ts
         providerOps.ts        # asking the provider where "nothing there" is an answer: orIfNotFound, withParent
         outcome.ts            # what a run comes to (SyncOutcome) and the pieces every outcome is built from
+        progress.ts           # how far the run under way has got, for onProgress: a scan's, a round's and a push's count
         pull/                 # the pull's pure parts, out of engine.ts (#446): batch.ts (what a batch's decisions are reached against) files.ts (the files' replay)
                               #   replay.ts (where a note, a folder, an unreadable file is once the decisions so far are applied)
       markdown/

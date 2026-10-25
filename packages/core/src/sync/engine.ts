@@ -34,6 +34,7 @@ import {
 	conflictPath,
 } from './conflicts.js';
 import { messageOf, metIn, metOf, ok, type SyncOutcome, transient, waitFor } from './outcome.js';
+import { createProgress, type SyncProgress } from './progress.js';
 import { orIfNotFound, withParent } from './providerOps.js';
 import {
 	aliveElsewhere,
@@ -80,6 +81,7 @@ import type {
 } from './store.js';
 
 export type { SyncOutcome, SyncStatus } from './outcome.js';
+export type { SyncProgress } from './progress.js';
 
 /**
  * Pull, push, and the queue between them. docs/ARCHITECTURE.md §7 is the specification;
@@ -92,7 +94,7 @@ export type { SyncOutcome, SyncStatus } from './outcome.js';
  * over-claims, so the next run redoes work instead of skipping it.
  *
  * What it does hold, it holds in memory, for the run under way: how far the
- * scan, round or push has got (`scans`, `rounds`, `pushes`), what the store
+ * scan, round or push has got (`meter`, from `progress.ts`), what the store
  * said and where the files stand for one batch (`storeReads`, `fileViews`),
  * and the folders a turn of the push is making (`making`). One thing outlives
  * a failed pull: what it read and did not commit (`held`), kept so that
@@ -140,48 +142,11 @@ export interface SyncEngineOptions {
 	maxAttempts?: number;
 }
 
-/**
- * How far a long run has got. A scan lists every page before it reads a note,
- * so while `listing` it knows only how many it has `found` so far; after that
- * `found` is the whole of it and `done` counts up to it — a note read, or one
- * this device already holds at that version and so never read, which keeps a
- * scan resumed after an interruption from claiming to fetch it all again.
- * A round from a stored cursor reads all its pages before it decides any
- * (`drainRound`), so it knows how many notes it names before it reads the
- * first: `done` counts each as it is decided, read or already held. Another
- * device's import of a thousand notes is one round, and nothing of it shows
- * until all of it is read, so this is what there is to see meanwhile. While
- * it is still reading its pages it is `listing`, as a scan is, and `total` is
- * how many notes the pages read so far name — said before the first page as
- * none, so a round that takes long over its pages says what it is doing
- * (2026-10-13: another device's notebooks moved was minutes of plain
- * "Syncing…" on a phone, before the first note was counted).
- * A push knows its queue before it starts, so it gives a total. `path` is the
- * file just read or decided, or the one about to be sent, for a caller that
- * shows it.
- */
-export type SyncProgress =
-	| { stage: 'scanning'; found: number; done: number; listing: boolean; path?: string }
-	| { stage: 'receiving'; done: number; total: number; listing: boolean; path?: string }
-	| { stage: 'uploading'; done: number; total: number; path?: string };
-
 export interface SyncEngine {
 	readonly pull: () => Promise<SyncOutcome>;
 	readonly push: () => Promise<SyncOutcome>;
 	/** Pull then push, which is the order that keeps conflicts to a minimum. */
 	readonly sync: () => Promise<SyncOutcome>;
-}
-
-/**
- * A scan's count, as it goes: the notes it has listed, those on pages already
- * applied, those read so far on the page being applied, and whether it is
- * still listing.
- */
-interface ScanCount {
-	notes: Set<string>;
-	settled: number;
-	reading: number;
-	listing: boolean;
 }
 
 /** A file the pull would make a note of, by the rule `decide` applies. */
@@ -202,20 +167,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		onProgress = () => undefined,
 	} = options;
 	const writesAtOnce = Math.max(1, provider.writesAtOnce ?? 1);
-
-	/**
-	 * The scan under way, for `onProgress`, and none during a round. Kept here
-	 * rather than threaded through every decision to the one place a note is
-	 * read; a scheduler runs one pull at a time per engine.
-	 */
-	const scans = new Map<'current', ScanCount>();
-
-	/**
-	 * The round under way, for `onProgress`, and none during a scan: how many
-	 * notes it names, how many of them are decided, and whether it is still
-	 * reading its pages. Kept here for the reason the scan's count is.
-	 */
-	const rounds = new Map<'current', { total: number; done: number; listing: boolean }>();
+	const meter = createProgress(onProgress);
 
 	/**
 	 * Notes a pull has read whose batch has not been committed, by remote id.
@@ -247,31 +199,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const letGo = (entries: readonly ChangeEntry[]) => {
 		entries.forEach((entry) => {
 			if (entry.remoteId !== undefined) held.delete(entry.remoteId);
-		});
-	};
-
-	const reportRound = (path?: string) => {
-		const round = rounds.get('current');
-		if (round === undefined) return;
-		onProgress({
-			stage: 'receiving',
-			done: round.done,
-			total: round.total,
-			listing: round.listing,
-			...(path === undefined ? {} : { path }),
-		});
-	};
-
-	const reportScan = (path?: string) => {
-		const scanning = scans.get('current');
-		if (scanning === undefined) return;
-		const found = scanning.notes.size;
-		onProgress({
-			stage: 'scanning',
-			found,
-			done: Math.min(found, scanning.settled + scanning.reading),
-			listing: scanning.listing,
-			...(path === undefined ? {} : { path }),
 		});
 	};
 
@@ -1856,11 +1783,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isUnreadableError(error)) return 'unreadable' as const;
 			throw error;
 		});
-		const scanning = scans.get('current');
-		if (scanning !== undefined) {
-			scans.set('current', { ...scanning, reading: scanning.reading + 1 });
-			reportScan(entry.path);
-		}
+		meter.scanRead(entry.path);
 		// Gone, and so not an unreadable file either, if it was listed as one. A
 		// file moved into a folder that was then deleted is told, on a feed that
 		// reports folders alone, as this entry and the folder's deletion: no
@@ -2451,11 +2374,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
 			const made = await decide(entry, sofar, { ...batch, deciding: new Set([at]) }, at);
-			const round = rounds.get('current');
-			if (round !== undefined && isNoteEntry(entry)) {
-				rounds.set('current', { ...round, done: round.done + 1 });
-				reportRound(entry.path);
-			}
+			if (isNoteEntry(entry)) meter.roundDecided(entry.path);
 			return [...sofar, ...made];
 		}, Promise.resolve([]));
 		const left = [...decided, ...strandedFiles(decided, batch)];
@@ -2744,11 +2663,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const all = [...entries, ...set.entries];
 		const before = named.size;
 		set.entries.filter(isNoteEntry).forEach((entry) => named.add(entry.remoteId));
-		const round = rounds.get('current');
-		if (round !== undefined && named.size !== before) {
-			rounds.set('current', { ...round, total: named.size });
-			reportRound();
-		}
+		if (named.size !== before) meter.roundNamed(named.size);
 		return set.more ? readRound(set.cursor, all, named) : { entries: all, cursor: set.cursor };
 	};
 
@@ -2756,24 +2671,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const countedRound = async (
 		cursor: string
 	): Promise<{ round: { entries: ChangeEntry[]; cursor: string }; changes: PullChange[] }> => {
-		rounds.set('current', { total: 0, done: 0, listing: true });
-		reportRound();
 		const round = await readRound(cursor, [], new Set());
 		// Counted as `decideAll` will see them, one entry per file. Said even
 		// when it is none, so that what is said is no longer that it is reading.
-		rounds.set('current', {
-			total: deduped(round.entries).filter(isNoteEntry).length,
-			done: 0,
-			listing: false,
-		});
-		reportRound();
+		meter.roundListed(deduped(round.entries).filter(isNoteEntry).length);
 		return { round, changes: await decideAll(round.entries, false) };
 	};
 
 	const drainRound = async (cursor: string): Promise<SyncOutcome> => {
-		const { round, changes } = await countedRound(cursor).finally(() => {
-			rounds.delete('current');
-		});
+		const { round, changes } = await meter.round(() => countedRound(cursor));
 		await store.applyPull({ changes, cursor: round.cursor });
 		letGo(round.entries);
 		return ok({
@@ -2794,11 +2700,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		pages: readonly ChangeSet[]
 	): Promise<readonly ChangeSet[]> => {
 		const set = await provider.changes(cursor);
-		const scanning = scans.get('current');
-		if (scanning !== undefined) {
-			set.entries.filter(isNoteEntry).forEach((entry) => scanning.notes.add(entry.remoteId));
-			reportScan();
-		}
+		meter.scanListed(set.entries.filter(isNoteEntry).map((entry) => entry.remoteId));
 		const all = [...pages, set];
 		return set.more ? listScan(set.cursor, all) : all;
 	};
@@ -2819,11 +2721,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		upload = false
 	): Promise<SyncOutcome> => {
 		const pages = await listScan(undefined, []);
-		const listed = scans.get('current');
-		if (listed !== undefined) {
-			scans.set('current', { ...listed, listing: false });
-			reportScan();
-		}
+		meter.scanListingDone();
 		return applyScan(pages, { pulled: 0, conflicts: [], seen: new Set() }, upload);
 	};
 
@@ -2865,12 +2763,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		letGo(set.entries);
 
 		// Every note on the page is dealt with now, read or already held.
-		const scanning = scans.get('current');
-		if (scanning !== undefined) {
-			const settled = scanning.settled + set.entries.filter(isNoteEntry).length;
-			scans.set('current', { ...scanning, settled, reading: 0 });
-			reportScan();
-		}
+		meter.scanSettled(set.entries.filter(isNoteEntry).length);
 		return applyScan(
 			rest,
 			{
@@ -2887,14 +2780,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const runPull = async (): Promise<SyncOutcome> => {
 		const stored = await store.cursor();
 		/** A scan from the top, counted from nothing. */
-		const scan = (upload = false): Promise<SyncOutcome> => {
-			scans.set('current', { notes: new Set(), settled: 0, reading: 0, listing: true });
-			// Before the first page, which can be long in coming, as a round's is.
-			reportScan();
-			return drainScan(upload).finally(() => {
-				scans.delete('current');
-			});
-		};
+		const scan = (upload = false): Promise<SyncOutcome> => meter.scan(() => drainScan(upload));
 		const attempt = (): Promise<SyncOutcome> =>
 			stored === undefined ? scan() : drainRound(stored);
 
@@ -4081,9 +3967,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			: { ...outcome, status: 'blocked', error: waiting.stuck };
 	};
 
-	/** The push under way, for `onProgress`: how long its queue was. */
-	const pushes = new Map<'current', number>();
-
 	/**
 	 * The writes at the front of the queue that can be sent at once: notes,
 	 * each at its own path, none out of attempts, at most as many as the
@@ -4181,16 +4064,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		making.clear();
 		// Every call is handed what is left, so how far it has got is the rest:
 		// an op passed over, given up on or resolved is as done as one sent.
-		const total = pushes.get('current') ?? 0;
 		const [held, ...rest] = ops;
-		if (total > 0) {
-			onProgress({
-				stage: 'uploading',
-				done: total - ops.length,
-				total,
-				...(held === undefined ? {} : { path: held.targetPath ?? held.path }),
-			});
-		}
+		meter.pushLeft(ops.length, held === undefined ? undefined : (held.targetPath ?? held.path));
 		if (held === undefined) return drained(progress);
 		const batch = together(ops);
 		const ready = batch.length > 1 ? await stillTogether(batch) : undefined;
@@ -4342,10 +4217,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const later = (op: SyncOp): boolean =>
 			op.op === 'upload' && op.attempts > 0 && op.copyOf === undefined;
 		const ops = [...queued.filter((op) => !later(op)), ...queued.filter(later)];
-		pushes.set('current', ops.length);
-		return drainOps(ops, { pushed: 0, conflicts: [] }, false).finally(() => {
-			pushes.delete('current');
-		});
+		return meter.push(ops.length, () => drainOps(ops, { pushed: 0, conflicts: [] }, false));
 	};
 
 	// Same reasoning as `pull`: reading the queue, recording a failure and
