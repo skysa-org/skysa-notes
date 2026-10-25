@@ -155,8 +155,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	// hands a folder's entry to `decideFolder` in turn.
 	const { movedFolderOver, folderIdAt, deleteFolderAfterRescue, doomedFolder, decideFolder } =
 		createPullFolders(context, {
-			// eslint-disable-next-line functional/prefer-tacit -- `decide` is declared below
-			decide: (entry, decided, batch, at) => decide(entry, decided, batch, at),
+			decide: (...args) => decide(...args),
 			cascadeOver,
 			filesNow,
 			notesUnderNow,
