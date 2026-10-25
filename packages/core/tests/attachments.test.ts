@@ -122,6 +122,44 @@ describe('safeOpenType', () => {
 		expect([...opened].filter((type) => !allowed.has(type))).toEqual([]);
 		expect([...opened].filter((type) => /svg|xml|html|script/.test(type))).toEqual([]);
 	});
+
+	it('opens exactly these files in a tab, each as exactly this type', () => {
+		// The allowlist whole, by extension: read from the one media-type table
+		// since #449, so a row changed there for an upload or a kind cannot
+		// widen it unseen.
+		const extensions = [
+			...'png jpg jpeg gif webp avif svg svgz bmp heic heif tif tiff ico cur'.split(' '),
+			...'pdf doc docx odt rtf pages epub txt log markdown md rst org'.split(' '),
+			...'xls xlsx ods csv tsv numbers ppt pptx odp key zip tar gz tgz bz2 xz 7z rar'.split(
+				' '
+			),
+			...'mp3 m4a aac wav flac ogg oga opus mp4 m4v mov webm mkv avi ogv'.split(' '),
+			...'json yaml yml toml xml xsl xslt xht xhtml html htm shtml mht mhtml'.split(' '),
+			...'css js mjs cjs ts wasm swf rdf vtt py rb go rs java c h cpp sh sql'.split(' '),
+		];
+		const opened = Object.fromEntries(
+			extensions
+				.filter((extension) => opensInTab(`a.${extension}`))
+				.map((extension) => [extension, safeOpenType(`a.${extension}`)])
+		);
+
+		expect(opened).toEqual({
+			png: 'image/png',
+			jpg: 'image/jpeg',
+			jpeg: 'image/jpeg',
+			gif: 'image/gif',
+			webp: 'image/webp',
+			avif: 'image/avif',
+			bmp: 'image/bmp',
+			pdf: 'application/pdf',
+			mp3: 'audio/mpeg',
+			m4a: 'audio/mp4',
+			wav: 'audio/wav',
+			ogg: 'audio/ogg',
+			mp4: 'video/mp4',
+			webm: 'video/webm',
+		});
+	});
 });
 
 describe('contentTypeOf', () => {

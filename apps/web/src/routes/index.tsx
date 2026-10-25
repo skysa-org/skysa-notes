@@ -51,6 +51,7 @@ import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast } from '../components/Toast.js';
 import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
@@ -117,6 +118,7 @@ import { type Pins, setNotebookPin, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { rememberRecent } from '../store/recentNotes.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
+import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { nameShown, titleShown } from '../store/titles.js';
 import {
@@ -1047,7 +1049,7 @@ const useOpenPlace = ({
 		// can be one worked out while the note was still begun and not stored —
 		// when the notebook's remembered note was the answer — and arrive after
 		// the note it was about has been stored.
-		if (storedNote?.deletedLocally === 0) return undefined;
+		if (isLive(storedNote)) return undefined;
 		// An answer to the question as it stands, not to one asked a click ago.
 		if (toOpen === undefined || toOpen.folder !== folder || toOpen.open !== noteId) {
 			return undefined;
@@ -1410,10 +1412,7 @@ const Home = () => {
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
 	const noteView = useRef<NoteViewHandle>(null);
-	const noteIdRef = useRef(noteId);
-	useEffect(() => {
-		noteIdRef.current = noteId;
-	}, [noteId]);
+	const noteIdRef = useLatest(noteId);
 
 	/**
 	 * What a search result calls the source it is in. Said only when there is
@@ -2076,7 +2075,7 @@ const Home = () => {
 	 * Keyed by the item, so nothing one showed is there as another opens.
 	 */
 	const passwordColumn = () => {
-		if (openNote !== undefined && openNote.deletedLocally === 0 && isVaultPath(openNote.path)) {
+		if (openNote !== undefined && isLive(openNote) && isVaultPath(openNote.path)) {
 			return (
 				<PasswordItem
 					key={openNote.id}

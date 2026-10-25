@@ -6,6 +6,7 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { Autolink } from '@lezer/markdown';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { rawCaretAboveKeyboard } from './aboveKeyboard.js';
 import { type AttachmentHost, NO_ATTACHMENTS } from './attachHost.js';
 import { isUserEdit, programmatic } from './dirty.js';
@@ -112,22 +113,10 @@ export const RawEditor = ({
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
 	// down and rebuild the editor.
-	const notify = useRef(onUserEdit);
-	useEffect(() => {
-		notify.current = onUserEdit;
-	}, [onUserEdit]);
-	const replaced = useRef(onAdopted);
-	useEffect(() => {
-		replaced.current = onAdopted;
-	}, [onAdopted]);
-	const files = useRef(attachments);
-	useEffect(() => {
-		files.current = attachments;
-	}, [attachments]);
-	const sealing = useRef(secrets);
-	useEffect(() => {
-		sealing.current = secrets;
-	}, [secrets]);
+	const notify = useLatest(onUserEdit);
+	const replaced = useLatest(onAdopted);
+	const files = useLatest(attachments);
+	const sealing = useLatest(secrets);
 	const incoming = useIncomingBody(noteId, body, origin);
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
@@ -223,7 +212,7 @@ export const RawEditor = ({
 		}
 		incoming.adopted();
 		if (current !== body) replaced.current?.();
-	}, [body, origin, incoming]);
+	}, [body, origin, incoming, replaced]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;
 };

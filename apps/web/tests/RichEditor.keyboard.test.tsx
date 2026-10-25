@@ -1,6 +1,6 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RichEditor } from '../src/editor/RichEditor.js';
 
@@ -10,8 +10,6 @@ import { RichEditor } from '../src/editor/RichEditor.js';
  * leaves it on the control after any other (`editor/press.ts`). A harness
  * whose `run` never moved focus would pass whatever focus did here.
  */
-
-afterEach(cleanup);
 
 const surface = (): HTMLElement => {
 	const found = document.querySelector<HTMLElement>('.ProseMirror');

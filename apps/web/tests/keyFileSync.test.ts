@@ -5,10 +5,10 @@ import {
 	type FakeProvider,
 	serializeEncryptionFile,
 } from '@skysa/core';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { createKeyFileSync, type KeyFileSession } from '../src/sync/keyFile.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A source's key file for secrets (docs/ARCHITECTURE.md §7, "Secrets in a
@@ -16,19 +16,12 @@ import { createKeyFileSync, type KeyFileSession } from '../src/sync/keyFile.js';
  * the source up, or over the recipient the caller saw.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
 const RECIPIENT = 'age1320ux0hct0gutc9fu789mqlqjns4fv84w9cz3ytr9mh8fx86fsasr4slrh';
 const OTHER = 'age1sd0r6pa4qjt322tp349nupczfwr0frplh2fjmecl9qptk8ruggws7teph3';
 const AT = new Date(Date.UTC(2026, 9, 14, 18, 2, 11));
 
 const setup = async ({ found = true } = {}) => {
-	const db = createDatabase(`key-file-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({
 		connectionId: 'c1',
 		clientId: 'install',

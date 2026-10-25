@@ -10,7 +10,7 @@ import {
 } from '@skysa/core';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { editedAt } from '../src/components/editedAt.js';
 import type { NoteDraft } from '../src/components/NoteView.js';
@@ -30,14 +30,6 @@ import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.j
  * password shown, edited as it is typed, put back by Cancel, closed by the
  * lock, and a new one stored at its first change.
  */
-
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-});
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };
 

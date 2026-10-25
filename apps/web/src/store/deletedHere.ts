@@ -50,4 +50,8 @@ export const deletedHere = {
 		const ref = noteRef(note);
 		return marks.has(ref) && marks.get(ref) === (await boundAt(db, note));
 	},
+	/** Every mark gone, as a new page life starts. For tests, where a file is one page life. */
+	clear: (): void => {
+		marks.clear();
+	},
 };

@@ -1,3 +1,4 @@
+import { createEmitter } from '../store/emitter.js';
 import { type Chord } from './chord.js';
 
 /**
@@ -61,7 +62,7 @@ export const createCommandRegistry = (): CommandRegistry => {
 	// A Map keyed by id, so a component re-registering the same command as its
 	// closures change replaces rather than duplicates.
 	const commands = new Map<string, Command>();
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	// Each holder is its own object, so releasing one twice is not releasing
 	// somebody else's.
 	const holds = new Set<object>();
@@ -72,9 +73,7 @@ export const createCommandRegistry = (): CommandRegistry => {
 
 	const changed = () => {
 		snapshot.current = [...commands.values()];
-		listeners.forEach((listener) => {
-			listener();
-		});
+		changes.emit();
 	};
 
 	return {
@@ -92,10 +91,7 @@ export const createCommandRegistry = (): CommandRegistry => {
 			};
 		},
 		list: () => snapshot.current,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => listeners.delete(listener);
-		},
+		subscribe: changes.subscribe,
 		suspend: () => {
 			const hold = {};
 			holds.add(hold);

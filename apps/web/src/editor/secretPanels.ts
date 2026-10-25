@@ -1,4 +1,5 @@
 import { t } from '../i18n/t.js';
+import { createEmitter } from '../store/emitter.js';
 import type { Sealer, SecretHost } from './secretHost.js';
 import { createSecretPanel, LABEL_MAX, type SecretPanel } from './secretPanel.js';
 
@@ -76,11 +77,9 @@ export interface SecretPanels {
 
 export const createSecretPanels = (): SecretPanels => {
 	const open = new Map<string, Open>();
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	const changed = () => {
-		listeners.forEach((listener) => {
-			listener();
-		});
+		changes.emit();
 	};
 	const find = (panel: SecretPanel) =>
 		[...open.entries()].find(([, each]) => each.panel === panel);
@@ -111,12 +110,7 @@ export const createSecretPanels = (): SecretPanels => {
 		},
 		all: () => [...open.entries()],
 		refresh: changed,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		subscribe: changes.subscribe,
 	};
 };
 

@@ -26,10 +26,11 @@ import {
 	sealSecret,
 } from '../src/secrets/age.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import { createNote, rewriteNoteBody } from '../src/store/notes.js';
 import { enrol, type Unlock } from '../src/store/secretKeys.js';
 import { setPasswordsShown } from '../src/store/vault.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The fill window's logins (docs/ARCHITECTURE.md §7, "Filling in on a
@@ -38,12 +39,9 @@ import { setPasswordsShown } from '../src/store/vault.js';
  * login filled in, or copied, from the item as it is when chosen.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	document.body.replaceChildren();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const PIN: Unlock = { kind: 'pin', digits: '2468' };
@@ -100,8 +98,7 @@ const setup = async ({
 	/** What to do to the store before the window opens. */
 	before?: (db: NotesDatabase) => Promise<void>;
 } = {}) => {
-	const db = createDatabase(`fill-logins-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	const identity = generateIdentity();
 	const to = parseRecipient(recipientOf(identity));
 	const elsewhere = parseRecipient(recipientOf(generateIdentity()));

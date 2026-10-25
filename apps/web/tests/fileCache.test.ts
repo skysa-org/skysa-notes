@@ -1,19 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type FileRecord, type NotesDatabase } from '../src/store/db.js';
+import { type FileRecord, type NotesDatabase } from '../src/store/db.js';
 import { cacheBytes, evictCache, heldFile, TOUCH_AFTER_MS } from '../src/store/fileCache.js';
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`file-cache-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
+import { freshDatabase } from './support/db.js';
 
 const SCOPE = { connectionId: 'c1' };
 const bufferOf = (value: string): ArrayBuffer => new TextEncoder().encode(value).buffer;

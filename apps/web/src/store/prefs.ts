@@ -1,3 +1,5 @@
+import { type z } from 'zod';
+
 import { type CodeDisplay, DEFAULT_CODE_DISPLAY } from '../editor/codeDisplay.js';
 import { DEFAULT_EDITOR_MODE, type EditorMode, isEditorMode } from '../editor/mode.js';
 import { type NotesDatabase } from './db.js';
@@ -6,6 +8,24 @@ import { type NotesDatabase } from './db.js';
  * App settings. Small enough that a key/value table is the whole story; every
  * read returns a usable default so a fresh install needs no seeding.
  */
+
+/**
+ * A row of JSON, read whatever is in it. One written by a later version, or
+ * hand-edited in devtools, is a value the app cannot use, and so the same as
+ * none (`undefined`) rather than an error on the way into the app.
+ */
+export const readJson = <T>(value: string | undefined, schema: z.ZodType<T>): T | undefined => {
+	if (value === undefined) return undefined;
+	try {
+		const parsed = schema.safeParse(JSON.parse(value));
+		return parsed.success ? parsed.data : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+/** The key of a pref kept for each source: `<name>:<connectionId>`. */
+export const sourceKey = (name: string, connectionId: string): string => `${name}:${connectionId}`;
 
 export const DEFAULT_EDITOR_MODE_KEY = 'defaultEditorMode';
 

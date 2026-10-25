@@ -4,6 +4,7 @@ import Dexie, { type Table, type Transaction } from 'dexie';
 import { type EditorMode } from '../editor/mode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
 import { watchForHeldUp } from './heldUp.js';
+import { isLiveSource } from './rowStates.js';
 import { watchForNewerTab } from './staleTab.js';
 
 /**
@@ -704,18 +705,27 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// item another device had sent by then.
 	db.version(12).stores({}).upgrade(dropCursors);
 
-	// A build with a later version than the last one above, opening this database
-	// in another tab, must find this tab stopped rather than still writing —
-	// `store/staleTab.ts` says why Dexie's default is not that.
+	return db;
+};
+
+/**
+ * What the tab watches `db` for, set up before it opens. Only the app's own
+ * database is watched: the frozen-tab watch adds a listener to `document`, and
+ * a database made for a test, or beside the app's for a moment, would leave one
+ * behind it for every one made. Returns the way to stop watching.
+ */
+export const watchTab = (db: Dexie): (() => void) => {
+	// A build with a later version than the last one in `createDatabase`,
+	// opening this database in another tab, must find this tab stopped rather
+	// than still writing — `store/staleTab.ts` says why Dexie's default is not
+	// that.
 	watchForNewerTab(db);
-	// And a frozen tab must not hold reads open that every other tab then waits
-	// behind — `store/frozenTab.ts`.
-	letGoWhenFrozen(db);
 	// Whether another tab is holding this one up, for the sync's status to say
 	// (`store/heldUp.ts`).
 	watchForHeldUp(db);
-
-	return db;
+	// And a frozen tab must not hold reads open that every other tab then waits
+	// behind — `store/frozenTab.ts`.
+	return letGoWhenFrozen(db);
 };
 
 /**
@@ -767,7 +777,7 @@ export const activeConnectionId = async (
 	// own pile: with nothing else connected it is what there is to show, and
 	// answering `LOCAL` would hide the very notes it was kept to keep in sight.
 	const states = await db.syncState.toArray();
-	const first = states.find((state) => state.detached === undefined) ?? states[0];
+	const first = states.find(isLiveSource) ?? states[0];
 	return first?.connectionId ?? LOCAL_CONNECTION_ID;
 };
 
@@ -780,3 +790,4 @@ export interface ConnectionScope {
 }
 
 export const db = createDatabase();
+watchTab(db);

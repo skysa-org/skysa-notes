@@ -23,6 +23,7 @@ import type {
 } from '../editor/attachHost.js';
 import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { pickFiles } from '../editor/pickFiles.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { copyTurns, nearestCopy } from '../pictures/copies.js';
 import { noShrinker, type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
 import {
@@ -32,6 +33,7 @@ import {
 	type NotesDatabase,
 	type PictureRecord,
 } from '../store/db.js';
+import { createEmitter } from '../store/emitter.js';
 import { heldFile, holdsBytes } from '../store/fileCache.js';
 import {
 	addAttachment,
@@ -211,7 +213,7 @@ export const createNoteAttachments = ({
 	shrinker = pictureShrinker(),
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	const turns = copyTurns<Made>(shrinker);
 	// What this host has handed out and not been given back, let go of with it.
 	const handedOut = new Set<HeldUrl>();
@@ -574,18 +576,9 @@ export const createNoteAttachments = ({
 			});
 		},
 
-		changed: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		changed: changes.subscribe,
 
-		notify: () => {
-			listeners.forEach((listener) => {
-				listener();
-			});
-		},
+		notify: changes.emit,
 
 		dispose: () => {
 			handedOut.forEach((held) => {
@@ -633,22 +626,10 @@ export const useNoteAttachments = (
 	useEffect(() => {
 		current.current = note;
 	}, [note]);
-	const read = useRef(readFile);
-	useEffect(() => {
-		read.current = readFile;
-	}, [readFile]);
-	const told = useRef(report);
-	useEffect(() => {
-		told.current = report;
-	}, [report]);
-	const storing = useRef(store);
-	useEffect(() => {
-		storing.current = store;
-	}, [store]);
-	const adding = useRef(onAdded);
-	useEffect(() => {
-		adding.current = onAdded;
-	}, [onAdded]);
+	const read = useLatest(readFile);
+	const told = useLatest(report);
+	const storing = useLatest(store);
+	const adding = useLatest(onAdded);
 
 	const host = useMemo(
 		() =>
