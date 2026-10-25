@@ -331,6 +331,13 @@ const foldersFirst = (entries: readonly ChangeEntry[]): ChangeEntry[] => {
 	return [...folders, ...rest];
 };
 
+/** Every item of a page applied to the tree, in the order the feed gave them. */
+export const applyAll = (page: Page, items: readonly TreeItem[]): void => {
+	items.forEach((item) => {
+		applyItem(page, item);
+	});
+};
+
 /**
  * Turns an applied page into entries. `roundEnds` is the caller's word that the
  * feed has said everything it will say about this round — its last page — and
@@ -366,13 +373,6 @@ const foldersFirst = (entries: readonly ChangeEntry[]): ChangeEntry[] => {
  *   not mention — is pruned without a word. Something above it that was placed
  *   before the page moved or went, and that is reported at a path covering it.
  */
-/** Every item of a page applied to the tree, in the order the feed gave them. */
-export const applyAll = (page: Page, items: readonly TreeItem[]): void => {
-	items.forEach((item) => {
-		applyItem(page, item);
-	});
-};
-
 export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 	const decided = [...page.changes.values()].map((change): Decided => {
 		const was = wasOf(page, change.id);

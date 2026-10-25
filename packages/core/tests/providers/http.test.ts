@@ -8,7 +8,7 @@ import {
 	readErrorBody,
 	retryNote,
 } from '../../src/providers/http.js';
-import { RateLimitError } from '../../src/providers/types.js';
+import { ProviderResponseError, RateLimitError } from '../../src/providers/types.js';
 
 /**
  * The transport the HTTP adapters share (`providers/http.ts`). The adapters'
@@ -41,6 +41,7 @@ class Raised extends Error {
 
 const transport = (doFetch: FetchLike, token = 't1') =>
 	createTransport({
+		kind: 'gdrive',
 		fetch: doFetch,
 		getAccessToken: () => Promise.resolve(token),
 		failureOf: (response) => Promise.resolve(response.status),
@@ -69,6 +70,7 @@ describe('createTransport', () => {
 		const { seen, doFetch } = recording(() => new Response('{}'));
 		const tokens = ['first', 'second'];
 		const sending = createTransport({
+			kind: 'gdrive',
 			fetch: doFetch,
 			getAccessToken: () => Promise.resolve(tokens.shift() ?? ''),
 			failureOf: (response) => Promise.resolve(response.status),
@@ -93,6 +95,17 @@ describe('createTransport', () => {
 			ok: true,
 			value: {},
 		});
+	});
+
+	it('names an answer that is not a JSON object as the provider’s, not a SyntaxError', async () => {
+		for (const text of ['<html>ok</html>', '{"id":', 'null', '[]', '42']) {
+			const { doFetch } = recording(() => new Response(text));
+			await expect(
+				transport(doFetch).attempt('GET', 'https://example.test/a')
+			).rejects.toThrow(
+				new ProviderResponseError('gdrive sent an answer that is not a JSON object')
+			);
+		}
 	});
 
 	it('hands a failure back from attempt, and throws it from call with the path', async () => {
