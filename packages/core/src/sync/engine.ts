@@ -33,6 +33,7 @@ import {
 	conflictFolderPath,
 	conflictPath,
 } from './conflicts.js';
+import { type Claim, findFreeName } from './names.js';
 import { messageOf, metIn, metOf, ok, type SyncOutcome, transient, waitFor } from './outcome.js';
 import { createProgress, type SyncProgress } from './progress.js';
 import { orIfNotFound, withParent } from './providerOps.js';
@@ -116,6 +117,8 @@ const FREE_PATH_ATTEMPTS = 100;
  * is free when it is chosen, so a second is a race with another device.
  */
 const FILE_BESIDE_ATTEMPTS = 8;
+/** Conflict names a rename is moved to before the remote's last refusal fails it. */
+const MOVE_ASIDE_ATTEMPTS = 10;
 /** Times an op may fail before the engine stops asking and surfaces it. */
 const MAX_ATTEMPTS = 5;
 
@@ -1072,13 +1075,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * lose; leaving it merges both folders' notes into one notebook and loses a
 	 * row, which is how `Archive/old.md` ends up inside `Older`.
 	 */
-	const freeFolderPath = async (
-		path: string,
-		taken: readonly string[],
-		left = FREE_PATH_ATTEMPTS
-	): Promise<string> => {
-		const candidate = conflictFolderPath(path, now(), taken);
-		if ((await store.folderByPath(candidate)) === undefined) return candidate;
+	const freeFolderPath = (path: string, taken: readonly string[]): Promise<string> =>
 		// Bounded, because the loop's termination rests on `conflictFolderName`
 		// recognising the name it just produced when that name is handed back in
 		// `taken`. Those are two folds — the one that writes the name and the one
@@ -1094,11 +1091,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// that is tested for notes, beside `freeNotePath`.) It was found the way
 		// such things are — a mutation of `conflictName`'s fold did not fail the
 		// suite, it hung it.
-		if (left <= 1) {
-			throw new Error(`could not find a free folder path beside ${path}`);
-		}
-		return freeFolderPath(path, [...taken, basename(candidate)], left - 1);
-	};
+		findFreeName<string>({
+			candidate: (names) => conflictFolderPath(path, now(), names),
+			claim: async (candidate) =>
+				(await store.folderByPath(candidate)) === undefined
+					? { free: candidate }
+					: { taken: candidate },
+			attempts: FREE_PATH_ATTEMPTS,
+			exhausted: () => new Error(`could not find a free folder path beside ${path}`),
+			taken,
+		});
 
 	/**
 	 * Which folder row is at `path` once the decisions so far have run: the one
@@ -3035,19 +3037,23 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/**
 	 * Puts a rename beside the name it wanted, when the remote will not give it
 	 * up. Bounded by the provider's own answer: each refusal adds the name it
-	 * refused to the list and asks for the next one.
+	 * refused to the list and asks for the next one, and the last refusal is
+	 * what fails the op.
 	 */
-	const moveAside = async (
-		from: EntryRef,
-		target: string,
-		taken: readonly string[] = []
-	): Promise<RemoteEntry> => {
-		const candidate = conflictPath(target, now(), taken);
-		return provider.move(from, candidate).catch((error: unknown) => {
-			if (!isConflictError(error) || taken.length > 8) throw error;
-			return moveAside(from, target, [...taken, basename(candidate)]);
+	const moveAside = (from: EntryRef, target: string): Promise<RemoteEntry> =>
+		findFreeName({
+			candidate: (taken) => conflictPath(target, now(), taken),
+			claim: (candidate) =>
+				provider
+					.move(from, candidate)
+					.then((entry): Claim<RemoteEntry> => ({ free: entry }))
+					.catch((error: unknown): Claim<RemoteEntry> => {
+						if (!isConflictError(error)) throw error;
+						return { taken: error };
+					}),
+			attempts: MOVE_ASIDE_ATTEMPTS,
+			exhausted: (refusal) => refusal,
 		});
-	};
 
 	const runMove = async (op: SyncOp, note: SyncNote): Promise<void> => {
 		// A move with nowhere to go is a store that lost the column, not a move
@@ -3560,28 +3566,32 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * device of this app setting its own edit aside at the same name in the same
 	 * minute — because that file is one this app made.
 	 */
-	const freeNotePath = async (
+	const freeNotePath = (
 		path: string,
 		taken: readonly string[] = [],
-		onRemote = false,
-		left = FREE_PATH_ATTEMPTS
-	): Promise<string> => {
-		const candidate = conflictPath(path, now(), taken);
-		const next = (): Promise<string> =>
-			freeNotePath(path, [...taken, basename(candidate)], onRemote, left - 1);
+		onRemote = false
+	): Promise<string> =>
 		// Bounded exactly as `freeFolderPath` is, and for the same reason: each
 		// turn here is a request, and a `conflictName` that stopped recognising
 		// its own names would spend them without end. Running out throws, as it
 		// does there, rather than handing back a name nobody has looked at: the
 		// op fails and is retried, where a note displaced onto a taken name
 		// would stand on another note's path.
-		if (left <= 0) throw new Error(`could not find a free note path beside ${path}`);
-		if ((await store.noteByPath(candidate)) !== undefined) return next();
-		if (!onRemote) return candidate;
-		// Unreadable is taken: `fileState` only says `gone` for a path with
-		// nothing at it, which is the one answer that frees the name.
-		return (await fileState({ remoteId: '', path: candidate })) === 'gone' ? candidate : next();
-	};
+		findFreeName<string>({
+			candidate: (names) => conflictPath(path, now(), names),
+			claim: async (candidate) => {
+				if ((await store.noteByPath(candidate)) !== undefined) return { taken: candidate };
+				if (!onRemote) return { free: candidate };
+				// Unreadable is taken: `fileState` only says `gone` for a path with
+				// nothing at it, which is the one answer that frees the name.
+				return (await fileState({ remoteId: '', path: candidate })) === 'gone'
+					? { free: candidate }
+					: { taken: candidate };
+			},
+			attempts: FREE_PATH_ATTEMPTS,
+			exhausted: () => new Error(`could not find a free note path beside ${path}`),
+			taken,
+		});
 
 	/**
 	 * A write that met a file which is not UTF-8 text (`UnreadableError`), by a

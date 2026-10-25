@@ -7222,6 +7222,50 @@ describe('a push conflict over a file another note already holds', () => {
 		expect(provider.contentAt(taken.at(-1) ?? '')).toBeUndefined();
 		expect(provider.contentAt('b.md')).toBe('theirs\n');
 	});
+	describe('a rename the remote refuses at every name', () => {
+		/** `b.md`, taken on the remote, and this many of its conflict names. */
+		const takeBeside = async (count: number): Promise<string[]> => {
+			await remoteFile('b.md', 'theirs\n');
+			const names = Array.from({ length: count }).reduce<string[]>(
+				(taken) => [...taken, basename(conflictPath('b.md', AT, taken))],
+				[]
+			);
+			await Promise.all(names.map((name) => remoteFile(name, 'somebody else\n')));
+			return names;
+		};
+
+		const renameToB = async () => {
+			const entry = await remoteFile('a.md', 'one\n');
+			store.put({ id: 'n1', path: 'b.md', content: 'one\n', ...boundTo(entry) });
+			store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		};
+
+		it('lands at the tenth conflict name', async () => {
+			const taken = await takeBeside(9);
+			await renameToB();
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			const tenth = conflictPath('b.md', AT, taken);
+			expect(provider.contentAt(tenth)).toBe('one\n');
+			expect(provider.contentAt('a.md')).toBeUndefined();
+		});
+
+		it("fails the op on the remote's last refusal, past ten", async () => {
+			const taken = await takeBeside(10);
+			await renameToB();
+
+			const result = await engine.push();
+
+			// One attempt spent, and the file where it was: the remote keeps
+			// every name it refused, and no eleventh was asked for.
+			expect(result.status).toBe('retry');
+			expect(store.ops().map((op) => op.attempts)).toEqual([1]);
+			expect(provider.contentAt('a.md')).toBe('one\n');
+			expect(provider.contentAt(conflictPath('b.md', AT, taken))).toBeUndefined();
+		});
+	});
 });
 
 describe('a rescan naming a folder the same batch has moved', () => {
