@@ -577,7 +577,7 @@ The store's other promises, each pinned by the contract suite:
 
 Bytes are an `ArrayBuffer` rather than a `Blob`. Every browser keeps a large value of either kind out of line, but a `Blob` does not survive the structured clone of the IndexedDB the tests run on.
 
-**Pushing files (2026-10-03, #187).** Three ops, each in `packages/core/src/sync/engine.ts`:
+**Pushing files (2026-10-03, #187).** Three ops, each in `packages/core/src/sync/push/files.ts`:
 - **`upload`** sends a pending row's bytes to where the row is now. The bytes are those held here; for a copy made when a note moved and its file could not go with it, they are the bytes of the file it copies (`copyOf`), read from the remote. The provider is told a content type by extension (`contentTypeOf`), which it records and nothing here reads. A missing parent is made, a level at a time, as for a write. Something already at the name is handled in one of two ways:
   - **The same file** — a file the size of the bytes being sent, that no other row holds and no queued `delete-file` is to take — is adopted. It is this device's own upload whose answer never came back, or the same picture added on another device; names carry the bytes' hash, so a name and a size that both match are almost always that.
   - **Anything else** keeps the path, and the upload goes beside it as `<stem> (conflict <stamp>).<ext>`. The note that links the file is not rewritten. The conflict name is chosen from one listing of the folder and the rows here, not found by trying names: Dropbox and OneDrive take the whole body before they say a name is taken, and a row not yet sent holds its name as surely as a file there. A second clash is a race with another device; eight, and the op fails and is tried again.
@@ -750,7 +750,7 @@ Implemented in `packages/core/src/sync/conflicts.ts`.
 
 ### What the loop above left open, and how the engine answers it
 
-The branch table is the specification; these are the cases it does not mention, each decided in the direction that cannot lose an edit. They live in `packages/core/src/sync/engine.ts`.
+The branch table is the specification; these are the cases it does not mention, each decided in the direction that cannot lose an edit. They live in `packages/core/src/sync/engine.ts` and, for the push, in `packages/core/src/sync/push/`.
 
 - **A file that is not a note is mirrored, and never read as one** ("Pulling files", above); anything at a hidden path is ignored. The app owns the folder but not everything in it: a PDF the user dropped beside their notes would be corrupted by being read as markdown and written back, and `.notesapp.json` is our own bookkeeping. Two separate checks, because the marker happens to satisfy both and would otherwise hide the loss of either.
 - **Same bytes, new version → adopt the version, do not conflict.** This is our own write coming back, or two devices that saved the same thing. Keeping the old version would make the next push send an `expectedVersion` the remote has moved past, manufacturing a conflict over a file that already agrees with us.

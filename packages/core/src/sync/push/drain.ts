@@ -1,17 +1,15 @@
 import { foldName } from '../../markdown/slug.js';
 import { isWithin, normalizePath, parentPath } from '../../paths.js';
 import {
-	type EntryRef,
 	isAuthError,
 	isConflictError,
 	isRateLimitError,
 	isUnreadableError,
-	type RemoteEntry,
 } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
+import { type EngineContext, type FromPull } from '../context.js';
 import { messageOf, ok, type SyncOutcome, waitFor } from '../outcome.js';
 import { withParent } from '../providerOps.js';
-import { type ConflictResolution, type PullChange, type SyncNote, type SyncOp } from '../store.js';
+import { type SyncOp } from '../store.js';
 import { createConflictPush, type Settled } from './conflicts.js';
 import { createFilePush } from './files.js';
 import { createFolderPush } from './folders.js';
@@ -31,17 +29,7 @@ export const createPush = (
 		fileState,
 		resolutionFor,
 		reauthorize,
-	}: {
-		fileState: (ref: EntryRef) => Promise<'there' | 'gone' | 'unreadable'>;
-		resolutionFor: (
-			local: SyncNote,
-			remoteContent: string,
-			remote: RemoteEntry,
-			claimed: ReadonlySet<string>,
-			decided: readonly PullChange[]
-		) => Promise<ConflictResolution>;
-		reauthorize: (() => Promise<void>) | undefined;
-	}
+	}: FromPull & { reauthorize: (() => Promise<void>) | undefined }
 ) => {
 	const { provider, store, maxAttempts, writesAtOnce, meter } = context;
 
