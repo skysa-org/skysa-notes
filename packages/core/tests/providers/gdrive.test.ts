@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { MARKER_FILE } from '../../src/config.js';
-import type { FetchLike } from '../../src/providers/dropbox.js';
-import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -10,6 +10,7 @@ import {
 	CursorResetError,
 	isRateLimitError,
 	NotFoundError,
+	ProviderResponseError,
 	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
@@ -774,6 +775,24 @@ describe('the app folder', () => {
 
 		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
 	});
+
+	it('named gone by the feed is forgotten, so a write before the next round looks again', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.destroy(world.root.id);
+		const stale = { ...world.root };
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+				? new Response(JSON.stringify({ files: [stale] }))
+				: undefined;
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+
+		// The search has caught up; the id this adapter found the folder at is
+		// not used again.
+		world.hooks.intercept = undefined;
+		await expect(world.provider.write('b.md', 'x', {})).rejects.toThrow(/app folder not found/);
+		expect(world.files.some((file) => file.name === 'b.md')).toBe(false);
+	});
 });
 
 describe('the app folder, from one sync to the next', () => {
@@ -1014,9 +1033,12 @@ describe('creating', () => {
 				? new Response(null, { status: 200 })
 				: undefined;
 
-		await expect(world.provider.createFile('big.bin', BIG)).rejects.toThrow(
-			/did not say where/
-		);
+		const failure = world.provider.createFile('big.bin', BIG);
+		await expect(failure).rejects.toThrow(/did not say where/);
+		// An answer Drive should not have given is none of the contract's
+		// errors: no code, so the engine retries it rather than act on it.
+		await expect(failure).rejects.toBeInstanceOf(ProviderResponseError);
+		await expect(failure).rejects.not.toHaveProperty('code');
 	});
 
 	it('refuses a resumable session on any host but Drive\u2019s, and sends it nothing', async () => {

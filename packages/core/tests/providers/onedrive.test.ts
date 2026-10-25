@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { FetchLike } from '../../src/providers/dropbox.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import {
 	AuthError,

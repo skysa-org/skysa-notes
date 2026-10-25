@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
+import { createDropboxProvider } from '../../src/providers/dropbox.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import {
 	AuthError,
 	ConflictError,
