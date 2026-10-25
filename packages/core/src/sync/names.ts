@@ -17,7 +17,7 @@ export interface FreeNameSearch<T> {
 	 * find out — a write or a move that the remote refuses.
 	 */
 	claim: (path: string) => Promise<Claim<T>>;
-	/** Names tried before giving up. */
+	/** Names tried before giving up. The first is always tried, whatever this says. */
 	attempts: number;
 	/** What is thrown when the last of them is taken too, given what said so. */
 	exhausted: (why: unknown) => unknown;
@@ -33,7 +33,7 @@ export interface FreeNameSearch<T> {
  * throws `exhausted`, so the op fails and is retried rather than going on
  * with a name nobody has looked at.
  */
-export const findFreeName = async <T>(search: FreeNameSearch<T>): Promise<T> => {
+export const findFreeName = <T>(search: FreeNameSearch<T>): Promise<T> => {
 	const tryFrom = async (taken: readonly string[], left: number): Promise<T> => {
 		const path = search.candidate(taken);
 		const claimed = await search.claim(path);

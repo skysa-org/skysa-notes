@@ -33,7 +33,7 @@ import {
 	conflictFolderPath,
 	conflictPath,
 } from './conflicts.js';
-import { type Claim, findFreeName } from './names.js';
+import { findFreeName } from './names.js';
 import { messageOf, metIn, metOf, ok, type SyncOutcome, transient, waitFor } from './outcome.js';
 import { createProgress, type SyncProgress } from './progress.js';
 import { orIfNotFound, withParent } from './providerOps.js';
@@ -3041,13 +3041,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * what fails the op.
 	 */
 	const moveAside = (from: EntryRef, target: string): Promise<RemoteEntry> =>
-		findFreeName({
+		findFreeName<RemoteEntry>({
 			candidate: (taken) => conflictPath(target, now(), taken),
 			claim: (candidate) =>
 				provider
 					.move(from, candidate)
-					.then((entry): Claim<RemoteEntry> => ({ free: entry }))
-					.catch((error: unknown): Claim<RemoteEntry> => {
+					.then((entry) => ({ free: entry }))
+					.catch((error: unknown) => {
 						if (!isConflictError(error)) throw error;
 						return { taken: error };
 					}),
