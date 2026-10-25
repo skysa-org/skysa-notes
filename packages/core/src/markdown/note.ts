@@ -1,8 +1,7 @@
 import {
 	joinFrontmatter,
 	type NoteFrontmatter,
-	readFrontmatter,
-	readNoteTimes,
+	readNoteMetadata,
 	splitFrontmatter,
 	writeFrontmatter,
 } from './frontmatter.js';
@@ -44,8 +43,7 @@ export const parseNoteFile = (
 	options: ParseNoteFileOptions = {}
 ): ParsedNoteFile => {
 	const { frontmatter, body } = splitFrontmatter(source);
-	const fields = readFrontmatter(frontmatter);
-	const times = readNoteTimes(frontmatter);
+	const { fields, times } = readNoteMetadata(frontmatter);
 
 	return {
 		...(fields.id === undefined ? {} : { id: fields.id }),
@@ -70,14 +68,14 @@ export interface SerializeNoteFileInput {
 	metadata: NoteFrontmatter;
 }
 
+/** A body that already begins with a line break, in any of the three spellings. */
+const OPENS_BLANK = /^(?:\r\n|\n|\r)/;
+
 /**
  * Write a note back to a file. The app adds frontmatter on first write; on every
  * write after that it edits the block in place, so keys it does not understand
  * are preserved.
  */
-/** A body that already begins with a line break, in any of the three spellings. */
-const OPENS_BLANK = /^(?:\r\n|\n|\r)/;
-
 export const serializeNoteFile = (input: SerializeNoteFileInput): string => {
 	const yaml = writeFrontmatter(input.frontmatter, input.metadata);
 	if (yaml === '') return input.body;
