@@ -56,6 +56,17 @@ const CHANGES: readonly PullChange[] = [
 		},
 	},
 	{ kind: 'forget-unreadable', remoteId: 'r-z' },
+	{
+		kind: 'upsert-note',
+		id: 'c',
+		path: 'Work/c.md',
+		content: '',
+		remote: entry('r-c2', 'Work/c.md'),
+		syncedHash: '',
+	},
+	{ kind: 'adopt-version', id: 'b', remote: entry('r-b2', 'Work/b.md') },
+	{ kind: 'displace-note', id: 'a', path: 'Work/a (moved).md' },
+	{ kind: 'reupload-note', id: 'b' },
 ];
 
 const sequences = (length: number): PullChange[][] =>
