@@ -216,13 +216,19 @@ describe('adoptBody', () => {
 
 		const before = withCtx((ctx) => ctx.get(editorViewCtx).state.doc);
 		// Same document, the formatting a different tool would have written.
-		withCtx((ctx) => {
-			adoptBody(ctx, '* one\n* two\n');
-		});
+		const adoption = withCtx((ctx) => adoptBody(ctx, '* one\n* two\n'));
 		const after = withCtx((ctx) => ctx.get(editorViewCtx).state.doc);
 
+		expect(adoption).toBe('same');
 		expect(after).toBe(before);
 		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('says it replaced the document only when it did', async () => {
+		const { withCtx } = await mount('- one\n- two\n');
+
+		expect(withCtx((ctx) => adoptBody(ctx, '- one\n- two\n- three\n'))).toBe('replaced');
+		expect(withCtx(currentMarkdown)).toBe('- one\n- two\n- three\n');
 	});
 });
 
