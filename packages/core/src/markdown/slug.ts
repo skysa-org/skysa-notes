@@ -1,4 +1,5 @@
 import { NOTE_EXTENSION } from '../config.js';
+import { extensionForType, isImageExtension } from '../files/mediaTypes.js';
 
 /**
  * Filenames are a slug of the title; `id` in frontmatter is the stable identity,
@@ -282,44 +283,6 @@ export const extensionAt = (name: string): number => {
 };
 
 /**
- * The extension for a file whose name has none, by the type the browser gave
- * it: a picture pasted from the clipboard, or a file from a share sheet that
- * came without a name. Only what a person would paste or share; anything else
- * is `bin`.
- */
-const EXTENSION_FOR_TYPE: Readonly<Record<string, string>> = {
-	'image/png': 'png',
-	'image/jpeg': 'jpg',
-	'image/gif': 'gif',
-	'image/webp': 'webp',
-	'image/avif': 'avif',
-	'image/svg+xml': 'svg',
-	'image/bmp': 'bmp',
-	'image/heic': 'heic',
-	'image/heif': 'heif',
-	'image/tiff': 'tiff',
-	'application/pdf': 'pdf',
-	'application/zip': 'zip',
-	'text/plain': 'txt',
-	'text/csv': 'csv',
-	'audio/mpeg': 'mp3',
-	'audio/mp4': 'm4a',
-	'audio/wav': 'wav',
-	'video/mp4': 'mp4',
-	'video/quicktime': 'mov',
-	'video/webm': 'webm',
-};
-
-/** The extensions a pasted picture can have, from its type or its name. */
-const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
-	...Object.entries(EXTENSION_FOR_TYPE)
-		.filter(([type]) => type.startsWith('image/'))
-		.map(([, extension]) => extension),
-	'jpeg',
-	'tif',
-]);
-
-/**
  * A file's own name, as the user gave it, but for what would break on a
  * provider or a disk: the characters a notebook's name loses
  * (`sanitizeFolderName`), so its spaces and capitals stay.
@@ -390,10 +353,10 @@ export const attachmentName = ({
 	const at = extensionAt(name);
 	const own = foldName(name.slice(at + 1));
 	const media = type.split(';')[0]?.trim().toLowerCase() ?? '';
-	const extension = /^[a-z0-9]{1,16}$/.test(own) ? own : (EXTENSION_FOR_TYPE[media] ?? 'bin');
+	const extension = /^[a-z0-9]{1,16}$/.test(own) ? own : (extensionForType(media) ?? 'bin');
 	if (`.${extension}` === NOTE_EXTENSION) return undefined;
 
-	const nameless = pasted && IMAGE_EXTENSIONS.has(extension);
+	const nameless = pasted && isImageExtension(extension);
 	const given = nameless ? '' : name.slice(0, at);
 	const fitted = fitBytes(kept ? keptStem(given) : toSlug(given), ATTACHMENT_STEM_BYTES);
 	// What a cut leaves at the end: a space, or a slug's hyphen.
