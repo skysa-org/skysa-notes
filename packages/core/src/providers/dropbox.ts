@@ -1,18 +1,17 @@
 import { MARKER_FILE } from '../config.js';
 import { isJsonObject, parseJson } from '../json.js';
-import { buildMarker, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
+import { type HttpProviderOptions, isSelf, readAsText, writeMarkerOnce } from './adapter.js';
 import {
 	type Attempt,
 	createTransport,
-	type FetchLike,
 	jsonBody,
 	parseRetryAfter,
 	readErrorBody,
 	type RequestParts,
 	retryNote,
 } from './http.js';
-import { decodeText, responseBytes } from './text.js';
+import { responseBytes } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -46,14 +45,7 @@ import {
 const RPC = 'https://api.dropboxapi.com/2';
 const CONTENT = 'https://content.dropboxapi.com/2';
 
-export interface DropboxProviderOptions {
-	fetch: FetchLike;
-	/** Called per request, so a refreshed token is picked up without rebuilding. */
-	getAccessToken: () => Promise<string>;
-	appVersion: string;
-	clientId: string;
-	userAgent?: string;
-}
+export type DropboxProviderOptions = HttpProviderOptions;
 
 /** Only the fields this adapter reads. Dropbox sends a good deal more. */
 interface Metadata {
@@ -153,25 +145,6 @@ const toFolderEntry = (metadata: Metadata): RemoteEntry => ({
 });
 
 /**
- * Is what is at a path the very entry we were asked to act on?
- *
- * By id wherever both sides have one: that is what the request addressed the
- * entry by, and an `EntryRef`'s path is only as fresh as the caller's last
- * look. A note that has never been pushed carries no id, and then the path is
- * all there is to go on.
- */
-const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
-	entry.remoteId === '' || current.remoteId === ''
-		? // Folded, because Dropbox is case-insensitive and `path_display`
-			// carries the case the *user* typed — so the path that comes back is
-			// routinely spelled differently from the one the caller is holding
-			// for the very same file. Compared exactly, a move that had already
-			// happened would be reported as a conflict, and the conflict rule
-			// would write the user's note aside as a copy of itself.
-			normalizePath(entry.path).toLowerCase() === current.path.toLowerCase()
-		: entry.remoteId === current.remoteId;
-
-/**
  * The metadata for a download, which rides in a header because the body is the
  * file itself.
  *
@@ -206,7 +179,7 @@ const toChangeEntry = (metadata: Metadata): ChangeEntry =>
 		: toEntry(metadata);
 
 export const createDropboxProvider = (options: DropboxProviderOptions): StorageProvider => {
-	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
+	const { fetch: doFetch, getAccessToken } = options;
 
 	const failureOf = async (response: Response): Promise<DropboxFailure> => {
 		const { text, body: errorBody } = await readErrorBody(response);
@@ -355,20 +328,11 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// With App folder access the root exists by construction and has no id of
 		// its own, so this is a constant — which docs/ARCHITECTURE.md §4 allows.
 		const rootId = 'app-folder';
-		if ((await metadataAt(MARKER_FILE)) !== undefined) return { rootId };
-
-		const marker = buildMarker({
-			appVersion,
-			provider: 'dropbox',
-			clientId,
-			...(userAgent === undefined ? {} : { userAgent }),
-		});
-		// `add`, so if another device wrote the marker between the check above and
-		// here, theirs stands and this is a no-op rather than an overwrite.
-		await write(MARKER_FILE, serializeMarker(marker), {}).catch((error: unknown) => {
-			if (error instanceof ConflictError) return;
-			throw error;
-		});
+		await writeMarkerOnce(
+			{ ...options, provider: 'dropbox' },
+			async () => (await metadataAt(MARKER_FILE)) !== undefined,
+			(path, content) => write(path, content, {})
+		);
 		return { rootId };
 	};
 
@@ -406,10 +370,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		return { bytes: await responseBytes(response), version: metadata.rev };
 	};
 
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
-		const { bytes, version } = await readBytes(entry);
-		return { content: decodeText(bytes, entry.path), version };
-	};
+	const read = readAsText(readBytes);
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
 		const result = await tryRpc<{ metadata?: Metadata }>('files/create_folder_v2', {
@@ -483,7 +444,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// such a rename is a move to where the entry already is, and reporting
 		// where it actually is leaves the store agreeing with the provider
 		// rather than holding a name no file has.
-		if (isSelf(entry, current)) return current;
+		if (isSelf(entry, current, 'folded')) return current;
 
 		// "Into itself" that turns out not to be itself is a folder being moved
 		// under its own descendant, which is not a conflict with the entry at

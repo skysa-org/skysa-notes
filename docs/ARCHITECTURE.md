@@ -1679,7 +1679,8 @@ packages/
         types.ts              # StorageProvider interface, errors
         gdrive.ts onedrive.ts dropbox.ts webdav.ts fake.ts
         idTree.ts             # the id → parent tree an id-based change feed is read against (OneDrive, Drive)
-        http.ts               # what the HTTP adapters share: the injected fetch, reading Retry-After
+        http.ts               # what the HTTP adapters share on the wire: the transport, error bodies, Retry-After
+        adapter.ts            # and on the contract's side: the marker, read as text, the root's guard, isSelf
       sync/
         engine.ts conflicts.ts
       markdown/
