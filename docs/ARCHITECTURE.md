@@ -1681,7 +1681,7 @@ packages/
         idTree.ts             # the id → parent tree an id-based change feed is read against (OneDrive, Drive)
       sync/
         engine.ts conflicts.ts
-        pull/                 # the pull's pure parts, out of engine.ts (#446): files.ts (the files' replay)
+        pull/                 # the pull's pure parts, out of engine.ts (#446): batch.ts (what a batch's decisions are reached against) files.ts (the files' replay)
       markdown/
         frontmatter.ts slug.ts
         pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
