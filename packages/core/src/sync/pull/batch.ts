@@ -62,6 +62,18 @@ export const liveEntries = (entries: readonly ChangeEntry[]): LiveEntries =>
 		return map.set(entry.remoteId, [...seen, { path: entry.path, at }]);
 	}, new Map());
 
+/**
+ * Whether the batch lists the thing again after the entry at `at` — at
+ * `apartFrom`'s path or not, where one is given — so that it is still there,
+ * or moves on, whatever that entry said.
+ */
+export const listedAfter = (
+	live: LiveEntries,
+	id: string,
+	at: number,
+	apartFrom?: string
+): boolean => (live.get(id) ?? []).some((entry) => entry.at > at && entry.path !== apartFrom);
+
 /** The same, without what is at a hidden path (`Batch.listed`), each at its own `at`. */
 export const unhidden = (live: LiveEntries): LiveEntries =>
 	new Map(
