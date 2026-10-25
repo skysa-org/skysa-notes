@@ -213,14 +213,25 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * whether a note is dirty again as it applies. Asked again for every entry
 	 * after it, a round of a thousand imported notes is a million reads of
 	 * IndexedDB.
+	 *
+	 * One cache for each read a change is asked about, so each holds the type
+	 * its read gives: the rows under a folder a change moves, and the row of the
+	 * note a change names. No change is both.
 	 */
-	const storeReads = new WeakMap<PullChange, Promise<unknown>>();
+	const storeReads = {
+		notesUnder: new WeakMap<PullChange, Promise<SyncNote[]>>(),
+		noteById: new WeakMap<PullChange, Promise<SyncNote | undefined>>(),
+	};
 
-	const storeRead = <T>(change: PullChange, read: () => Promise<T>): Promise<T> => {
-		const known = storeReads.get(change) as Promise<T> | undefined;
+	const storeRead = <T>(
+		reads: WeakMap<PullChange, Promise<T>>,
+		change: PullChange,
+		read: () => Promise<T>
+	): Promise<T> => {
+		const known = reads.get(change);
 		if (known !== undefined) return known;
 		const reading = read();
-		storeReads.set(change, reading);
+		reads.set(change, reading);
 		return reading;
 	};
 
@@ -237,7 +248,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<SyncNote[]> => {
 		const sources = decided.flatMap((change) =>
 			change.kind === 'move-folder'
-				? [storeRead(change, () => store.notesUnder(change.from))]
+				? [storeRead(storeReads.notesUnder, change, () => store.notesUnder(change.from))]
 				: []
 		);
 		const groups = await Promise.all([store.notesUnder(folder), ...sources]);
@@ -251,11 +262,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const named = decided.flatMap((change) => {
 			if (change.kind === 'conflict') {
 				const { noteId } = change.resolution;
-				return [storeRead(change, () => store.noteById(noteId))];
+				return [storeRead(storeReads.noteById, change, () => store.noteById(noteId))];
 			}
 			if (!('id' in change && 'path' in change)) return [];
 			const { id } = change;
-			return [storeRead(change, () => store.noteById(id))];
+			return [storeRead(storeReads.noteById, change, () => store.noteById(id))];
 		});
 		const rows = await Promise.all(named);
 		// The batch's own first, so a row the store also holds wins: `whereNow`
