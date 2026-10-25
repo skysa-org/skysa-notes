@@ -1,14 +1,13 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import { activeConnectionId, db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * The search is the app's, not the showing source's: it asks every source on
@@ -18,38 +17,13 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 const DROPBOX = 'c-dropbox';
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-});
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
-
 const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title');
 
 /** Two sources, a note about herons in each, and the device's pile showing. */
 const twoSources = async () => {
 	// Held, as a connected source's credential is: one bound without any is
 	// let go the moment it is shown, as a source nothing here can reach.
-	await db.credentials.put({
-		id: DROPBOX,
-		credential: `sk1_${DROPBOX}`,
-		provider: 'dropbox',
-		createdAt: 0,
-	});
+	await holdCredential(db, DROPBOX);
 	await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 	await finishImport(db, DROPBOX);
 	await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Work' });

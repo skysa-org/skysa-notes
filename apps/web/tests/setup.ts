@@ -1,7 +1,21 @@
 // Dexie needs a real IndexedDB; Node has none.
 import 'fake-indexeddb/auto';
 
-import { afterAll, vi } from 'vitest';
+import { cleanup } from '@testing-library/react';
+import { afterAll, afterEach, vi } from 'vitest';
+
+import { deleteFreshDatabases, resetSharedDb } from './support/db.js';
+
+// After every test, in this order: what it rendered is unmounted, then every
+// test starts from an empty database (tests/support/db.ts). Testing Library
+// only cleans up by itself where `afterEach` is a global, and here it is
+// imported. A setup file's `afterEach` runs after the test file's own, so a
+// file's hook still sees what its test rendered.
+afterEach(async () => {
+	cleanup();
+	await deleteFreshDatabases();
+	await resetSharedDb();
+});
 
 // jsdom has no layout, so it implements none of the scrolling API. A component
 // that keeps the active row in view calls this, and an undefined method is a

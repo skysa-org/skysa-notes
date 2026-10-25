@@ -5,13 +5,13 @@ import {
 	createSyncEngine,
 	type RemoteEntry,
 } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // The suite lives beside the port it checks, in `packages/core`, and is not a
 // `*.test.ts` there so that it runs only where a store registers it. `core`
 // cannot import `apps/*`, so this store registers here instead.
 import { describeSyncStoreContract } from '../../../packages/core/tests/sync/storeContract.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import {
 	createNote,
 	deleteNote,
@@ -30,6 +30,7 @@ import {
 	UnboundConnectionError,
 } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 const CONNECTION = 'dropbox-1';
 
@@ -40,19 +41,6 @@ const CONNECTION = 'dropbox-1';
 const boundStore = async (db: NotesDatabase, options: DexieSyncStoreOptions) => {
 	await db.syncState.put({ connectionId: options.connectionId, clientId: 'this-browser' });
 	return createDexieSyncStore(db, options);
-};
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-/** A database of its own for every test, so nothing leaks between them. */
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`sync-store-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
 };
 
 const remote = (path: string, id = 'r1', version = 'v1'): RemoteEntry => ({

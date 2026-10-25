@@ -14,7 +14,6 @@ import {
 } from '../src/secrets/age.js';
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import {
 	enrol,
 	enrolment,
@@ -22,6 +21,7 @@ import {
 	type UnlockedKeys,
 	unlockKeys,
 } from '../src/store/secretKeys.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The host an open note's editor opens and seals its secrets through
@@ -29,12 +29,9 @@ import {
  * device's keys, and the tab's lock, with the unlock asked for over the note.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	document.body.replaceChildren();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const PIN: Unlock = { kind: 'pin', digits: '2468' };
@@ -48,8 +45,7 @@ const setup = async ({
 	enrolled?: boolean;
 	age?: () => Promise<Age>;
 } = {}) => {
-	const db = createDatabase(`note-secrets-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 	const identity = generateIdentity();
 	if (keyFile === 'newer' || keyFile === 'invalid') {

@@ -1,5 +1,5 @@
-import { cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RichEditor } from '../src/editor/RichEditor.js';
 import { fakeHost, fence, openedIn, sealed } from './secretHostFake.js';
@@ -9,8 +9,6 @@ import { fakeHost, fence, openedIn, sealed } from './secretHostFake.js';
  * left, or the other editor chosen. `secretBlock.test.ts` drives the editor
  * without React, and so without whatever takes it away.
  */
-
-afterEach(cleanup);
 
 /** `words` in the open panel, as typing them leaves it; `composing`, mid-character. */
 const type = (words: string, { composing = false }: { composing?: boolean } = {}) => {

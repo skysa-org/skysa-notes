@@ -430,7 +430,10 @@ describe('linkedFiles', () => {
 		const body = `<div>\n${'<img a '.repeat(100_000)}`;
 		const started = performance.now();
 		expect(linkedFiles(body, 'note.md')).toEqual([]);
-		expect(performance.now() - started).toBeLessThan(1_000);
+		// About a tenth of a second on a laptop, and ten times that on a shared
+		// CI runner with coverage on. A read in time that grew with the square
+		// would take minutes, so the line is drawn well clear of both.
+		expect(performance.now() - started).toBeLessThan(5_000);
 	});
 
 	it('leaves out a link to a note or a folder written with an escaped separator', () => {

@@ -632,6 +632,12 @@ const forgetHistory = (view: EditorView): void => {
 };
 
 /**
+ * What became of a body handed to `adoptBody`: already what the document says,
+ * put in its place, or not taken in at all.
+ */
+export type Adoption = 'same' | 'replaced' | 'refused';
+
+/**
  * Put a body into the editor without it counting as an edit — a sync pull, or a
  * change made in raw mode.
  *
@@ -646,15 +652,15 @@ const forgetHistory = (view: EditorView): void => {
  * that only added or took out an empty line was ignored, and the next
  * keystroke wrote the old spacing back over it.
  */
-export const adoptBody = (ctx: Ctx, body: string): boolean => {
+export const adoptBody = (ctx: Ctx, body: string): Adoption => {
 	const view = ctx.get(editorViewCtx);
 
 	// Milkdown types its parser as total, but its own `replaceAll` guards against
 	// a null document — so a parse can evidently fail, and trusting the type here
 	// would crash the editor on the note that proves it.
 	const doc = ctx.get(parserCtx)(body) as ProseNode | null;
-	if (doc === null) return false;
-	if (ctx.get(serializerCtx)(doc) === currentMarkdown(ctx)) return true;
+	if (doc === null) return 'refused';
+	if (ctx.get(serializerCtx)(doc) === currentMarkdown(ctx)) return 'same';
 
 	// Held for the length of the dispatch, because the marker only reaches
 	// transactions appended to this one, and the heading-id plugin answers with a
@@ -671,7 +677,7 @@ export const adoptBody = (ctx: Ctx, body: string): boolean => {
 	} finally {
 		release();
 	}
-	return true;
+	return 'replaced';
 };
 
 /**

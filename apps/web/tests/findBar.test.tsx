@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { FindBar } from '../src/components/FindBar.js';
 import { FindTargetProvider } from '../src/editor/findTarget.js';
@@ -19,8 +19,6 @@ import { RawEditor } from '../src/editor/RawEditor.js';
  * The rich editor's half is `findRich.test.ts` for the position mapping and
  * `RichEditor.switch.test.tsx` for the same round trip against a real Milkdown.
  */
-
-afterEach(cleanup);
 
 const BODY = 'one two one\nthree one four\n';
 
