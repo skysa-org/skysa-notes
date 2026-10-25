@@ -41,4 +41,8 @@ export const goneSources = {
 	forget: (connectionId: string): void => {
 		gone.delete(connectionId);
 	},
+	/** Nothing remembered, as a new page life starts. For tests, where a file is one page life. */
+	clear: (): void => {
+		gone.clear();
+	},
 };

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import {
 	changeUnlock,
 	type DeviceUnlock,
@@ -17,6 +16,7 @@ import {
 	type UnlockedKeys,
 	unlockKeys,
 } from '../src/store/secretKeys.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A source's keys on this device, sealed under how it unlocks
@@ -24,11 +24,8 @@ import {
  * here, and at its full count once, to see that it is what is kept.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	vi.restoreAllMocks();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const ROUNDS = 1000;
@@ -42,8 +39,7 @@ const PASSWORD: Unlock = { kind: 'password', text: 'correct horse' };
 const identity = (fill: number) => new Uint8Array(32).fill(fill);
 
 const setup = async () => {
-	const db = createDatabase(`secret-keys-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install' });
 	const enrolled = async (unlock: Unlock = PIN, identities = [identity(7), identity(9)]) => {
 		const keys = await enrol(db, {

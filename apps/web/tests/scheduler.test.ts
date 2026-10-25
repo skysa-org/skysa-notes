@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type ApiClient } from '../src/api/client.js';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
-import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { heldUpOf } from '../src/store/heldUp.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -25,7 +25,6 @@ import { type RelayFactory } from '../src/sync/relay.js';
 import {
 	createSyncScheduler,
 	type ProviderFactory,
-	type SchedulerEnvironment,
 	type SchedulerEvent,
 	type SchedulerStatus,
 	SYNC_WAIT_MS,
@@ -34,6 +33,9 @@ import {
 	type SyncSchedulerOptions,
 } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
+import { watchedDatabase } from './support/db.js';
+import { fakeEnvironment } from './support/fakes/environment.js';
 
 const HOUR = 60 * 60 * 1000;
 const ACCOUNT = { connectionId: 'c1', provider: 'dropbox', accountId: 'acct' } as const;
@@ -50,72 +52,6 @@ afterEach(async () => {
 		})
 	);
 });
-
-/** Time, the network and the tab, as the test says they are. */
-const fakeEnvironment = () => {
-	const state = { now: 1_000_000, online: true, visible: true, nextId: 0 };
-	const handlers = new Map<SchedulerEvent, Set<() => void>>();
-	const timers = new Map<number, { at: number; callback: () => void }>();
-	/** Each lock's tail: the next holder waits for it. */
-	const locks = new Map<string, Promise<void>>();
-
-	const environment: SchedulerEnvironment = {
-		now: () => state.now,
-		isOnline: () => state.online,
-		isVisible: () => state.visible,
-		listen: (event, handler) => {
-			const set = handlers.get(event) ?? new Set();
-			set.add(handler);
-			handlers.set(event, set);
-			return () => {
-				set.delete(handler);
-			};
-		},
-		setTimer: (callback, ms) => {
-			state.nextId += 1;
-			const id = state.nextId;
-			timers.set(id, { at: state.now + ms, callback });
-			return () => {
-				timers.delete(id);
-			};
-		},
-		withLock: <T>(name: string, work: () => Promise<T>): Promise<T> => {
-			const held = (locks.get(name) ?? Promise.resolve()).then(work);
-			locks.set(
-				name,
-				held.then(
-					() => undefined,
-					() => undefined
-				)
-			);
-			return held;
-		},
-	};
-
-	return {
-		environment,
-		state,
-		fire: (event: SchedulerEvent) => {
-			handlers.get(event)?.forEach((handler) => {
-				handler();
-			});
-		},
-		/** Move the clock on, running every timer that comes due on the way. */
-		advance: (ms: number) => {
-			state.now += ms;
-			[...timers.entries()]
-				.filter(([, timer]) => timer.at <= state.now)
-				.sort(([, a], [, b]) => a.at - b.at)
-				.forEach(([id, timer]) => {
-					timers.delete(id);
-					timer.callback();
-				});
-		},
-		/** How far away each pending timer is. */
-		pending: () =>
-			[...timers.values()].map((timer) => timer.at - state.now).sort((a, b) => a - b),
-	};
-};
 
 type FakeEnvironment = ReturnType<typeof fakeEnvironment>;
 
@@ -244,24 +180,8 @@ const remote = (): Remote => {
 	};
 };
 
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`scheduler-${crypto.randomUUID()}`);
-	// Watched as the app's own is, for whether another tab holds it up.
-	cleanups.push(watchTab(db), () => db.delete());
-	return db;
-};
-
-/** The credential a bound device holds. Without one nothing can mint. */
-const holdCredential = (db: NotesDatabase, connectionId: string) =>
-	db.credentials.put({
-		id: connectionId,
-		credential: `sk1_${connectionId}`,
-		provider: ACCOUNT.provider,
-		createdAt: 0,
-	});
-
 const bound = async (connectionId = 'c1') => {
-	const db = freshDatabase();
+	const db = watchedDatabase();
 	await bindConnection(db, { ...ACCOUNT, connectionId });
 	await holdCredential(db, connectionId);
 	return db;
@@ -371,7 +291,7 @@ const deferred = () => {
 
 describe('with no connection', () => {
 	it('says notes are kept on this device, and asks nothing of anyone', async () => {
-		const { scheduler, server, remote: theRemote } = started(freshDatabase());
+		const { scheduler, server, remote: theRemote } = started(watchedDatabase());
 
 		await quiet();
 
@@ -1104,7 +1024,7 @@ describe('failures', () => {
 		});
 
 		it('does nothing at all with no connection', async () => {
-			const { scheduler, remote: theRemote } = started(freshDatabase());
+			const { scheduler, remote: theRemote } = started(watchedDatabase());
 
 			await scheduler.resync();
 
@@ -1980,7 +1900,7 @@ describe('following the connection', () => {
 describe('a first import', () => {
 	/** A device used before it was connected, now bound for the first time. */
 	const boundWithPile = async () => {
-		const db = freshDatabase();
+		const db = watchedDatabase();
 		await createNote(db, { title: 'Mine', body: 'mine\n' });
 		await bindConnection(db, ACCOUNT);
 		await holdCredential(db, ACCOUNT.connectionId);

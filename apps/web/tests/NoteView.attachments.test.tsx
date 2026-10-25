@@ -44,13 +44,8 @@ const Harness = ({
 	);
 };
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
-	await db.notes.clear();
-	await db.files.clear();
-	await db.fileBytes.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
 	document.body.replaceChildren();
 });
 

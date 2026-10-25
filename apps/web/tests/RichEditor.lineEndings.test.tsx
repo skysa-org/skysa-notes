@@ -1,5 +1,5 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
 import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
@@ -34,12 +34,6 @@ const showing = async (title: string): Promise<void> => {
 		expect(document.querySelector('.ProseMirror')?.textContent).not.toBe('');
 	});
 };
-
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
 
 describe('a note whose lines end the Windows way', () => {
 	it('opens in the rich editor rather than being called unrepresentable', async () => {

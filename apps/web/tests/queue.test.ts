@@ -5,9 +5,9 @@ import {
 	isHidden,
 	type StorageProvider,
 } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { createDatabase, type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
+import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
 import { createFolder, deleteFolder, moveFolder, renameFolder } from '../src/store/folders.js';
 import {
 	createNote,
@@ -25,6 +25,7 @@ import {
 import { queueByNotebook, queueWrite } from '../src/store/queue.js';
 import { createDexieSyncStore, type DexieSyncStoreOptions } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 const CONNECTION = 'dropbox-1';
 const scope = { connectionId: CONNECTION };
@@ -36,18 +37,6 @@ const scope = { connectionId: CONNECTION };
 const boundStore = async (db: NotesDatabase, options: DexieSyncStoreOptions) => {
 	await db.syncState.put({ connectionId: options.connectionId, clientId: 'this-browser' });
 	return createDexieSyncStore(db, options);
-};
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`queue-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
 };
 
 /** The queue as the engine would read it, without the bookkeeping. */

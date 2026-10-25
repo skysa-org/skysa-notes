@@ -1,29 +1,17 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AttachedFiles, sizeOf } from '../src/components/AttachedFiles.js';
 import { notebookMenuItems } from '../src/components/NotebookMenu.js';
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A notebook's Attached files: each file in it, the notes that link it under
  * its name, and Delete for one that none does.
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`attached-files-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const file = (db: NotesDatabase, id: string, path: string, size: number) =>
 	db.files.put({ connectionId: LOCAL_CONNECTION_ID, id, path, size });

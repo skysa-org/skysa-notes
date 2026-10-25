@@ -1,8 +1,9 @@
 import Dexie, { liveQuery } from 'dexie';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import { type HeldUp, heldUpOf } from '../src/store/heldUp.js';
+import { watchedDatabase } from './support/db.js';
 
 /**
  * A tab held up on another (`store/heldUp.ts`). The other tab is another
@@ -21,9 +22,7 @@ afterEach(async () => {
 });
 
 const thisTab = async (): Promise<{ db: NotesDatabase; held: HeldUp }> => {
-	const db = createDatabase(`held-up-${crypto.randomUUID()}`);
-	onTestFinished(watchTab(db));
-	cleanups.push(() => db.delete());
+	const db = watchedDatabase();
 	await db.open();
 	const held = heldUpOf(db);
 	if (held === undefined) throw new Error('watchTab did not watch for waits');

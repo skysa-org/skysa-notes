@@ -1,10 +1,11 @@
 import type Dexie from 'dexie';
 import { liveQuery } from 'dexie';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
+import { deleteAfterTest, watchedDatabase } from './support/db.js';
 
 /**
  * A tab the browser freezes (`store/frozenTab.ts`). What cannot be shown here
@@ -17,17 +18,12 @@ import { tabState } from '../src/store/staleTab.js';
  * comes last.
  */
 
-const opened: Dexie[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	vi.restoreAllMocks();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const thisTab = async (): Promise<NotesDatabase> => {
-	const db = createDatabase(`frozen-${crypto.randomUUID()}`);
-	onTestFinished(watchTab(db));
-	opened.push(db);
+	const db = watchedDatabase();
 	await db.prefs.put({ key: 'before', value: 'kept' });
 	return db;
 };
@@ -36,7 +32,8 @@ const freeze = () => {
 	document.dispatchEvent(new Event('freeze'));
 };
 
-describe('a tab the browser freezes', () => {
+// In the order written, even when the run is shuffled: see above.
+describe('a tab the browser freezes', { shuffle: false }, () => {
 	it('is watched for only on the database the tab is watched through', () => {
 		// A database made for a test, or beside the app's own for a moment, must
 		// not leave a listener on `document` behind it (#445).
@@ -46,7 +43,7 @@ describe('a tab the browser freezes', () => {
 			spy.mock.calls.filter(([type]) => type === 'freeze').map(([, listener]) => listener);
 
 		const db = createDatabase(`frozen-${crypto.randomUUID()}`);
-		opened.push(db);
+		deleteAfterTest(db);
 		expect(freezes(added)).toEqual([]);
 
 		const stop = watchTab(db);
@@ -81,9 +78,7 @@ describe('a tab the browser freezes', () => {
 		// Frozen while an upgrade runs: a slow migration over a big library, on a
 		// phone. Closed then, the open would finish with no connection, and
 		// nothing would ask for one again.
-		const db = createDatabase(`frozen-${crypto.randomUUID()}`);
-		onTestFinished(watchTab(db));
-		opened.push(db);
+		const db = watchedDatabase();
 		db.on('populate', () => {
 			freeze();
 		});
@@ -111,7 +106,7 @@ describe('a tab the browser freezes', () => {
 		// Another tab, as far as Dexie can tell: its own connection, and its
 		// write reaches this one's live queries the way a broadcast would.
 		const other = createDatabase(db.name);
-		opened.push(other);
+		deleteAfterTest(other);
 		await other.prefs.put({ key: 'shared', value: 'from the other tab' });
 
 		try {
@@ -138,7 +133,7 @@ describe('a tab the browser freezes', () => {
 		);
 		const newer = createDatabase(db.name) as Dexie;
 		newer.version(99).stores({ somethingNew: 'id' });
-		opened.push(newer);
+		deleteAfterTest(newer);
 		const upgraded = newer.open();
 		await vi.waitFor(() => {
 			expect(tabState()).toBe('stale');
