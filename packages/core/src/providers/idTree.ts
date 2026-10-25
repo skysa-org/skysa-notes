@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
+import { parseJson } from '../json.js';
 import { joinPath, ROOT } from '../paths.js';
-import type { ChangeEntry, RemoteEntry } from './types.js';
+import { type ChangeEntry, CursorResetError, type RemoteEntry } from './types.js';
 
 // ---------------------------------------------------------------------------
 // The tree an id-based change feed is read against.
@@ -47,6 +48,37 @@ export const pendingSchema = z.tuple([
 	z.number(),
 	z.string().nullable(),
 ]);
+
+/**
+ * The fields every cursor read against a tree has: its version, the root the
+ * tree hangs from, the tree, and what is held for a parent not yet placed. An
+ * adapter's cursor is these and where its own feed resumes.
+ */
+export const treeCursorBase = {
+	v: z.literal(1),
+	root: z.string().min(1),
+	nodes: z.array(nodeSchema),
+	pending: z.array(pendingSchema),
+};
+
+/**
+ * A stored cursor, read back with the adapter's schema. One that does not
+ * parse, or that `accept` refuses, is not one this adapter wrote: a
+ * `CursorResetError`, so the next round starts from nothing rather than from
+ * a tree it cannot trust.
+ */
+export const readTreeCursor = <T>(
+	schema: z.ZodType<T>,
+	cursor: string,
+	provider: string,
+	accept: (read: T) => boolean = () => true
+): T => {
+	const result = schema.safeParse(parseJson(cursor));
+	if (!result.success || !accept(result.data)) {
+		throw new CursorResetError(`${provider} cursor is not one this adapter wrote`);
+	}
+	return result.data;
+};
 
 export type TreeRow = z.infer<typeof nodeSchema>;
 export type Held = z.infer<typeof pendingSchema>;
@@ -297,6 +329,13 @@ const foldersFirst = (entries: readonly ChangeEntry[]): ChangeEntry[] => {
 	].sort((one, two) => depth(one.path) - depth(two.path));
 	const rest = entries.filter((entry) => entry.deleted === true || entry.kind !== 'folder');
 	return [...folders, ...rest];
+};
+
+/** Every item of a page applied to the tree, in the order the feed gave them. */
+export const applyAll = (page: Page, items: readonly TreeItem[]): void => {
+	items.forEach((item) => {
+		applyItem(page, item);
+	});
 };
 
 /**

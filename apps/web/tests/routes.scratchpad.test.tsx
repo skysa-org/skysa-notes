@@ -114,7 +114,9 @@ describe('a card', () => {
 		expect(row.classList.contains('editor-toolbar-row')).toBe(true);
 		expect(within(row).getByRole('group', { name: 'Scratch note' })).toBeDefined();
 		expect(within(row).getByRole('button', { name: 'Color' })).toBeDefined();
-		expect(document.title).toContain('Scratchpad > Trip');
+		await waitFor(() => {
+			expect(document.title).toContain('Scratchpad > Trip');
+		});
 
 		router.history.back();
 		await waitFor(() => {
