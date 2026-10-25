@@ -11,7 +11,7 @@ import {
 import { t } from '../i18n/t.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { frontmatterOf } from './frontmatter.js';
-import { getPreference } from './prefs.js';
+import { getPreference, sourceKey } from './prefs.js';
 
 /**
  * The scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"): quick notes that
@@ -24,7 +24,7 @@ import { getPreference } from './prefs.js';
 export const SCRATCHPAD_LABEL = t('scratchpad.label');
 
 /** The key for whether a source shows its scratchpad on this device. */
-const shownKey = (connectionId: string): string => `scratchpad:${connectionId}`;
+const shownKey = (connectionId: string): string => sourceKey('scratchpad', connectionId);
 
 /**
  * The key for whether a source this device has not shown or hidden the

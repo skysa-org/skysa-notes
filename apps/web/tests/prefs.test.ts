@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { type NotesDatabase } from '../src/store/db.js';
 import {
 	getCodeDisplay,
 	getDefaultEditorMode,
 	getPreference,
+	readJson,
 	setCodeDisplay,
 	setDefaultEditorMode,
 	setPreference,
+	sourceKey,
 } from '../src/store/prefs.js';
 import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../src/store/vault.js';
 import { freshDatabase } from './support/db.js';
@@ -78,5 +81,30 @@ describe('how a password is made', () => {
 		}
 		await setPreference(db, 'passwordGenerator', '{"length":3,"symbols":false}');
 		expect(await getGeneratorOptions(db)).toEqual({ length: 8, symbols: false });
+	});
+});
+
+describe('a row of JSON', () => {
+	const schema = z.array(z.string());
+
+	it('reads what the schema allows', () => {
+		expect(readJson('["a","b"]', schema)).toEqual(['a', 'b']);
+	});
+
+	it.each([undefined, '', 'not json', '{"a":1}', '[1]'])(
+		'reads %j as none, rather than throwing',
+		(value) => {
+			expect(readJson(value, schema)).toBeUndefined();
+		}
+	);
+});
+
+describe('a key kept for each source', () => {
+	it('is the key rows were already stored under', () => {
+		// Rows written by every release since 1.0 are read by these keys.
+		expect(sourceKey('lastOpen', 'c1')).toBe('lastOpen:c1');
+		expect(sourceKey('pinnedNotes', 'c1')).toBe('pinnedNotes:c1');
+		expect(sourceKey('passwords', 'c1')).toBe('passwords:c1');
+		expect(sourceKey('scratchpad', 'c1')).toBe('scratchpad:c1');
 	});
 });

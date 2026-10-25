@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
+import { readJson, sourceKey } from './prefs.js';
 
 /**
  * Notebooks and notes pinned to the top of their list, per source, on this
@@ -101,19 +102,11 @@ export const forgetPinnedNotebooks = async (
  */
 const NOTES = 'pinnedNotes';
 
-const notesKey = (connectionId: string): string => `${NOTES}:${connectionId}`;
+const notesKey = (connectionId: string): string => sourceKey(NOTES, connectionId);
 
 const stored = z.array(z.string());
 
-const read = (value: string | undefined): string[] => {
-	if (value === undefined) return [];
-	try {
-		const parsed = stored.safeParse(JSON.parse(value));
-		return parsed.success ? parsed.data : [];
-	} catch {
-		return [];
-	}
-};
+const read = (value: string | undefined): string[] => readJson(value, stored) ?? [];
 
 export const getPinnedNotes = async (
 	db: Pick<NotesDatabase, 'prefs'>,
