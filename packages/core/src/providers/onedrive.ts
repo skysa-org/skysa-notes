@@ -1,10 +1,17 @@
 import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
-import { asObject, parseJson } from '../json.js';
+import { parseJson } from '../json.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
-import { type FetchLike, parseRetryAfter } from './http.js';
+import {
+	createTransport,
+	type FetchLike,
+	jsonBody,
+	parseRetryAfter,
+	readErrorBody,
+	retryNote,
+} from './http.js';
 import {
 	applyItem,
 	nodeSchema,
@@ -99,13 +106,6 @@ interface GraphFailure {
 	message: string;
 	/** How long Graph asked us to wait, where it said. */
 	retryAfterMs?: number;
-}
-
-type Attempt<T> = { ok: true; value: T } | { ok: false; failure: GraphFailure };
-
-interface RequestParts {
-	headers?: Record<string, string>;
-	body?: string | Uint8Array<ArrayBuffer>;
 }
 
 /**
@@ -291,8 +291,8 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	const rootBox = new Map<'id', string>();
 
 	const failureOf = async (response: Response): Promise<GraphFailure> => {
-		const text = await response.text().catch(() => '');
-		const parsed: { error?: { message?: unknown } } = asObject(parseJson(text));
+		const { text, body } = await readErrorBody(response);
+		const parsed: { error?: { message?: unknown } } = body;
 		// Graph documents seconds, and `parseRetryAfter` also reads the HTTP date
 		// the header is allowed to carry, which some fronts send instead.
 		// https://learn.microsoft.com/en-us/graph/throttling
@@ -331,49 +331,15 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// https://learn.microsoft.com/en-us/graph/errors
 		const throttled = failure.status === 429 || failure.status === 509;
 		if (throttled) {
-			const wait =
-				failure.retryAfterMs === undefined
-					? ''
-					: `, retry after ${String(failure.retryAfterMs / 1000)}s`;
 			throw new RateLimitError(
-				`onedrive throttled (${String(failure.status)})${wait}`,
+				`onedrive throttled (${String(failure.status)})${retryNote(failure.retryAfterMs)}`,
 				failure.retryAfterMs
 			);
 		}
 		throw new Error(`onedrive ${String(failure.status)}: ${detail}`);
 	};
 
-	const attempt = async <T>(
-		method: string,
-		url: string,
-		parts: RequestParts = {}
-	): Promise<Attempt<T>> => {
-		const response = await doFetch(url, {
-			method,
-			headers: { authorization: `Bearer ${await getAccessToken()}`, ...parts.headers },
-			...(parts.body === undefined ? {} : { body: parts.body }),
-		});
-		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		// A delete answers 204 with nothing to parse.
-		const text = await response.text();
-		return { ok: true, value: (text === '' ? {} : JSON.parse(text)) as T };
-	};
-
-	const call = async <T>(
-		method: string,
-		url: string,
-		parts: RequestParts = {},
-		path?: string
-	): Promise<T> => {
-		const result = await attempt<T>(method, url, parts);
-		if (!result.ok) return raise(result.failure, path);
-		return result.value;
-	};
-
-	const json = (body: unknown): RequestParts => ({
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
+	const { attempt, call } = createTransport({ fetch: doFetch, getAccessToken, failureOf, raise });
 
 	const rootId = async (): Promise<string> => {
 		const cached = rootBox.get('id');
@@ -603,7 +569,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const result = await attempt<DriveItem>(
 			'POST',
 			`${byId(parentId)}/children`,
-			json({
+			jsonBody({
 				name: basename(target),
 				folder: {},
 				'@microsoft.graph.conflictBehavior': 'fail',
@@ -650,7 +616,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const result = await attempt<DriveItem>(
 			'PATCH',
 			`${byId(id)}?${FAIL_ON_CONFLICT}`,
-			json({
+			jsonBody({
 				name: basename(target),
 				parentReference: { id: await folderId(parentPath(target)) },
 			})

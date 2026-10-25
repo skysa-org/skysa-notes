@@ -1,6 +1,9 @@
+import { asObject, parseJson } from '../json.js';
+
 /**
- * What the HTTP adapters share: the `fetch` they are given, and how they read
- * a provider's request to wait.
+ * What the HTTP adapters share: the `fetch` they are given, how a request goes
+ * out with its token and comes back as an answer or a failure, and how they
+ * read a provider's request to wait.
  */
 
 /**
@@ -66,4 +69,94 @@ export const parseRetryAfter = (
 	// `reduce`, not `Math.max(...waits)`: the parts come off a header, and
 	// spreading an array of unknown length is a stack the caller does not control.
 	return waits.length === 0 ? undefined : waits.reduce((a, b) => Math.max(a, b));
+};
+
+/** What a request carries beyond its method and URL. */
+export interface RequestParts {
+	headers?: Record<string, string>;
+	body?: string | Uint8Array<ArrayBuffer>;
+}
+
+/** A JSON request body, with the header that says so. */
+export const jsonBody = (body: unknown): RequestParts => ({
+	headers: { 'content-type': 'application/json' },
+	body: JSON.stringify(body),
+});
+
+/**
+ * A failed response's body: its text, and that text read as a JSON object,
+ * which is empty where the body is not one. What a provider says went wrong is
+ * in the object when it said anything; the text is what is left to quote when
+ * it did not, such as an HTML error page from something in between.
+ */
+export const readErrorBody = async (
+	response: Response
+): Promise<{ text: string; body: object }> => {
+	const text = await response.text().catch(() => '');
+	return { text, body: asObject(parseJson(text)) };
+};
+
+/** The end of a rate limit's message, where the provider said how long to wait. */
+export const retryNote = (retryAfterMs: number | undefined): string =>
+	retryAfterMs === undefined ? '' : `, retry after ${String(retryAfterMs / 1000)}s`;
+
+/** A request's answer, or the provider's failure, read but not thrown. */
+export type Attempt<T, F> = { ok: true; value: T } | { ok: false; failure: F };
+
+export interface TransportOptions<F> {
+	fetch: FetchLike;
+	/** Called per request, so a refreshed token is picked up without rebuilding. */
+	getAccessToken: () => Promise<string>;
+	/** What this provider's failed response says. */
+	failureOf: (response: Response) => Promise<F>;
+	/**
+	 * A failure as the error the contract names, where one fits, and an
+	 * `Error` where none does. Given the path the request was about, for a
+	 * `NotFoundError` to name.
+	 */
+	raise: (failure: F, path?: string) => never;
+}
+
+/**
+ * Requests to one provider, with its bearer token on each: `send` for the
+ * response as it came, `attempt` for a JSON answer or the failure, and `call`
+ * for the answer or the failure thrown.
+ */
+export const createTransport = <F>({
+	fetch: doFetch,
+	getAccessToken,
+	failureOf,
+	raise,
+}: TransportOptions<F>) => {
+	const send = async (method: string, url: string, parts: RequestParts = {}): Promise<Response> =>
+		doFetch(url, {
+			method,
+			headers: { authorization: `Bearer ${await getAccessToken()}`, ...parts.headers },
+			...(parts.body === undefined ? {} : { body: parts.body }),
+		});
+
+	const attempt = async <T>(
+		method: string,
+		url: string,
+		parts: RequestParts = {}
+	): Promise<Attempt<T, F>> => {
+		const response = await send(method, url, parts);
+		if (!response.ok) return { ok: false, failure: await failureOf(response) };
+		// A delete answers 204 with nothing to parse.
+		const text = await response.text();
+		return { ok: true, value: (text === '' ? {} : JSON.parse(text)) as T };
+	};
+
+	const call = async <T>(
+		method: string,
+		url: string,
+		parts: RequestParts = {},
+		path?: string
+	): Promise<T> => {
+		const result = await attempt<T>(method, url, parts);
+		if (!result.ok) return raise(result.failure, path);
+		return result.value;
+	};
+
+	return { send, attempt, call };
 };
