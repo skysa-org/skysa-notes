@@ -11,9 +11,8 @@ import {
  * What every part of the engine is handed by `createSyncEngine`: the provider
  * and the store it syncs between, the clock and ids injected for tests, its
  * bounds, a way to renew the token, and the meter that tells `onProgress` how
- * far a run has got. Built
- * once per engine, so the parts moved out of `engine.ts` (#446) share one
- * rather than each closing over its own.
+ * far a run has got. Built once per engine, so the parts moved out of
+ * `engine.ts` (#446) share one rather than each closing over its own.
  */
 export interface EngineContext {
 	readonly provider: StorageProvider;
@@ -26,9 +25,10 @@ export interface EngineContext {
 	readonly writesAtOnce: number;
 	/**
 	 * Mint a fresh access token through the caller's `reauthorize`, and say
-	 * whether there was one to call. Asked after an `AuthError`, at most once a
-	 * run: the pull retries its attempt once, the push resumes its drain once,
-	 * and a second refusal is `paused`.
+	 * whether there was one to call. Nothing here counts the calls: a caller
+	 * asks after an `AuthError`, and at most once a run — the pull retries its
+	 * attempt once, the push resumes its drain once (`retriedAuth`), and a
+	 * second refusal is `paused`.
 	 */
 	readonly renew: () => Promise<boolean>;
 	readonly meter: Meter;

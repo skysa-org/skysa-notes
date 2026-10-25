@@ -70,7 +70,8 @@ export const ok = (partial: Partial<SyncOutcome> = {}): SyncOutcome => ({
 /**
  * A token the provider would not take, after one renewal or with no way to
  * renew it: the connection needs the user, and nothing the scheduler retries
- * will do. Over the outcome so far, so what a push sent before it is kept.
+ * will do. Over the base given: the push passes what it has sent, so that is
+ * still counted; the pull, like `transient`, reports nothing it committed.
  */
 export const paused = (base: SyncOutcome = ok()): SyncOutcome => ({
 	...base,
