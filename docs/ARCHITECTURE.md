@@ -1685,6 +1685,7 @@ packages/
         adapter.ts            # and on the contract's side: the marker, read as text, the root's guard, isSelf
       sync/
         engine.ts conflicts.ts
+        names.ts              # finding a free conflict name: tried in turn, bounded, the last refusal thrown (findFreeName)
         providerOps.ts        # asking the provider where "nothing there" is an answer: orIfNotFound, withParent
         outcome.ts            # what a run comes to (SyncOutcome) and the pieces every outcome is built from
         progress.ts           # how far the run under way has got, for onProgress: a scan's, a round's and a push's count
