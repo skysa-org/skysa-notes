@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import type { FakeProvider } from '../../src/providers/fake.js';
-import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import { decodeText, responseBytes, uploadType } from '../../src/providers/text.js';
