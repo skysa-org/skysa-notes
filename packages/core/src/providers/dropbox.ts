@@ -14,9 +14,9 @@ import {
 	createTransport,
 	jsonBody,
 	parseRetryAfter,
+	rateLimited,
 	readErrorBody,
 	type RequestParts,
-	retryNote,
 } from './http.js';
 import { responseBytes } from './text.js';
 import {
@@ -27,7 +27,7 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	RateLimitError,
+	ProviderResponseError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -102,7 +102,8 @@ const toDropboxPath = (path: string): string => {
  */
 const fromDropboxPath = (path: string | undefined): string => {
 	const normalized = normalizePath(path ?? '');
-	if (normalized === ROOT) throw new Error('dropbox returned an entry with no usable path');
+	if (normalized === ROOT)
+		throw new ProviderResponseError('dropbox returned an entry with no usable path');
 	return normalized;
 };
 
@@ -169,10 +170,13 @@ const toFolderEntry = (metadata: Metadata): RemoteEntry => ({
  * backoff already knows what to do with one.
  */
 const downloadResult = (header: string | null): Metadata => {
-	if (header === null) throw new Error('dropbox sent a download with no metadata header');
+	if (header === null)
+		throw new ProviderResponseError('dropbox sent a download with no metadata header');
 	const parsed = parseJson(header);
 	if (parsed === undefined) {
-		throw new Error('dropbox sent a download whose metadata header is not JSON');
+		throw new ProviderResponseError(
+			'dropbox sent a download whose metadata header is not JSON'
+		);
 	}
 	// `null`, a number and a bare string are all valid JSON and none of them has
 	// the shape below — and `null` in particular would get past a bare cast and
@@ -180,7 +184,9 @@ const downloadResult = (header: string | null): Metadata => {
 	// stack that says nothing about Dropbox. Which is the thing this function
 	// exists to stop. `failureOf` guards the same way for the same reason.
 	if (!isJsonObject(parsed)) {
-		throw new Error('dropbox sent a download whose metadata header is not an object');
+		throw new ProviderResponseError(
+			'dropbox sent a download whose metadata header is not an object'
+		);
 	}
 	return parsed;
 };
@@ -234,12 +240,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (failure.status === 401) throw new AuthError(failure.summary);
 		if (tagged(failure, 'reset')) throw new CursorResetError(failure.summary);
 		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
-		if (failure.status === 429) {
-			throw new RateLimitError(
-				`dropbox rate limit${retryNote(failure.retryAfterMs)}`,
-				failure.retryAfterMs
-			);
-		}
+		if (failure.status === 429) throw rateLimited('dropbox', 429, failure.retryAfterMs);
 		throw new Error(`dropbox ${String(failure.status)}: ${failure.summary}`);
 	};
 
@@ -374,7 +375,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// The body is the file itself, so the metadata rides in a header.
 		const metadata = downloadResult(response.headers.get('dropbox-api-result'));
 		if (metadata.rev === undefined || metadata.rev === '') {
-			throw new Error('dropbox sent a download with no rev');
+			throw new ProviderResponseError('dropbox sent a download with no rev');
 		}
 		return { bytes: await responseBytes(response), version: metadata.rev };
 	};

@@ -211,6 +211,17 @@ export interface StorageProvider {
 }
 
 /**
+ * A provider answered with something this adapter cannot read as the answer
+ * it documents: an item with no id, a file with no version, a page with
+ * neither link. Deliberately without a `code`, so the engine treats it as the
+ * untyped failure it always was — retried, and counted against the op — and
+ * named only so that a log, or a test, can tell it from an outage.
+ */
+export class ProviderResponseError extends Error {
+	override readonly name = 'ProviderResponseError';
+}
+
+/**
  * Errors carry a `code` as well as their class. `instanceof` is the ergonomic
  * check and works today, since `@skysa/core` resolves to one module per bundle;
  * the code is what keeps the guards below honest if core is ever published and

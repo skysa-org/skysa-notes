@@ -10,6 +10,7 @@ import {
 	CursorResetError,
 	isRateLimitError,
 	NotFoundError,
+	ProviderResponseError,
 	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
@@ -1014,9 +1015,12 @@ describe('creating', () => {
 				? new Response(null, { status: 200 })
 				: undefined;
 
-		await expect(world.provider.createFile('big.bin', BIG)).rejects.toThrow(
-			/did not say where/
-		);
+		const failure = world.provider.createFile('big.bin', BIG);
+		await expect(failure).rejects.toThrow(/did not say where/);
+		// An answer Drive should not have given is none of the contract's
+		// errors: no code, so the engine retries it rather than act on it.
+		await expect(failure).rejects.toBeInstanceOf(ProviderResponseError);
+		await expect(failure).rejects.not.toHaveProperty('code');
 	});
 
 	it('refuses a resumable session on any host but Drive\u2019s, and sends it nothing', async () => {

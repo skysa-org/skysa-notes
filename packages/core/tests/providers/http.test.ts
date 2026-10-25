@@ -4,9 +4,11 @@ import {
 	createTransport,
 	type FetchLike,
 	jsonBody,
+	rateLimited,
 	readErrorBody,
 	retryNote,
 } from '../../src/providers/http.js';
+import { RateLimitError } from '../../src/providers/types.js';
 
 /**
  * The transport the HTTP adapters share (`providers/http.ts`). The adapters'
@@ -140,5 +142,22 @@ describe('jsonBody and retryNote', () => {
 		expect(retryNote(7000)).toBe(', retry after 7s');
 		expect(retryNote(1500)).toBe(', retry after 1.5s');
 		expect(retryNote(undefined)).toBe('');
+	});
+});
+
+describe('rateLimited', () => {
+	it('names the provider and the status, with the wait the provider asked for', () => {
+		const error = rateLimited('gdrive', 403, 7000, 'userRateLimitExceeded');
+		expect(error).toBeInstanceOf(RateLimitError);
+		expect(error.message).toBe(
+			'gdrive rate limit (403): userRateLimitExceeded, retry after 7s'
+		);
+		expect(error.retryAfterMs).toBe(7000);
+	});
+
+	it('says nothing more where there is no detail and no wait', () => {
+		const error = rateLimited('dropbox', 429, undefined);
+		expect(error.message).toBe('dropbox rate limit (429)');
+		expect(error.retryAfterMs).toBeUndefined();
 	});
 });

@@ -72,6 +72,7 @@ export {
 	isUnreadableError,
 	NotFoundError,
 	type ProviderErrorCode,
+	ProviderResponseError,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
