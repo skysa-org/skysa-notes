@@ -46,13 +46,11 @@ import {
 } from '../src/store/notes.js';
 import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { disconnectAccount } from '../src/sync/account.js';
-import {
-	createSyncScheduler,
-	type SchedulerEnvironment,
-	type SchedulerEvent,
-	type SyncScheduler,
-} from '../src/sync/scheduler.js';
+import { createSyncScheduler, type SyncScheduler } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
+import { freshDatabase } from './support/db.js';
+import { fakeEnvironment } from './support/fakes/environment.js';
 
 /**
  * Two browsers, one account — Phase 6's soak, as the checklist names it: "two
@@ -172,57 +170,6 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 
 // ------------------------------------------------------------ the browser
 
-/** Time, the network and the tab, as the test says they are. */
-const fakeEnvironment = () => {
-	const state = { now: 1_000_000, online: true, nextId: 0 };
-	const handlers = new Map<SchedulerEvent, Set<() => void>>();
-	const timers = new Map<number, { at: number; callback: () => void }>();
-	const locks = new Map<string, Promise<void>>();
-
-	const environment: SchedulerEnvironment = {
-		now: () => state.now,
-		isOnline: () => state.online,
-		isVisible: () => true,
-		listen: (event, handler) => {
-			const set = handlers.get(event) ?? new Set();
-			set.add(handler);
-			handlers.set(event, set);
-			return () => {
-				set.delete(handler);
-			};
-		},
-		setTimer: (callback, ms) => {
-			state.nextId += 1;
-			const id = state.nextId;
-			timers.set(id, { at: state.now + ms, callback });
-			return () => {
-				timers.delete(id);
-			};
-		},
-		withLock: <T>(name: string, work: () => Promise<T>): Promise<T> => {
-			const held = (locks.get(name) ?? Promise.resolve()).then(work);
-			locks.set(
-				name,
-				held.then(
-					() => undefined,
-					() => undefined
-				)
-			);
-			return held;
-		},
-	};
-
-	return {
-		environment,
-		state,
-		fire: (event: SchedulerEvent) => {
-			handlers.get(event)?.forEach((handler) => {
-				handler();
-			});
-		},
-	};
-};
-
 /**
  * A server minting an access token that never expires within a test, for
  * whichever credential it is shown. The scheduler reaches it through
@@ -239,15 +186,6 @@ const tokenServer = (): Pick<ApiClient, 'withCredential'> => {
 	} as unknown as ApiClient;
 	return { withCredential: () => answering };
 };
-
-/** The credential a device holds for a source, as connecting leaves behind. */
-const holdCredential = (db: NotesDatabase, connectionId: string): Promise<unknown> =>
-	db.credentials.put({
-		id: connectionId,
-		credential: `sk1_${connectionId}`,
-		provider: 'dropbox',
-		createdAt: Date.now(),
-	});
 
 interface Browser {
 	readonly name: string;
@@ -1196,8 +1134,7 @@ describe('one browser over two sources', () => {
 	const twoSources = async () => {
 		const first = createFakeProvider({ startAt: START });
 		const second = createFakeProvider({ startAt: START });
-		const db = createDatabase(`soak-two-${crypto.randomUUID()}`);
-		cleanups.push(() => db.delete());
+		const db = freshDatabase();
 		for (const [connectionId, provider] of [
 			['c-second', 'onedrive'],
 			['c-first', 'dropbox'],

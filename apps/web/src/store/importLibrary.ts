@@ -32,10 +32,13 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { namedByAny } from './fileLinks.js';
-import { foldPath, freePath } from './naming.js';
+import { foldPath, freePath, namesIn, pathDepth, respell } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
 import { queueByNotebook } from './queue.js';
 import { readZip } from './readZip.js';
+import { rowsOf } from './rows.js';
+import { isLive, isLiveSource } from './rowStates.js';
+import { writerTables } from './scopes.js';
 import { eachInSlices } from './slices.js';
 
 /**
@@ -500,7 +503,9 @@ export const planImport = (picked: Picked): ImportPlan => {
 	return {
 		notes,
 		files,
-		folders: [...folders.values()].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b)),
+		folders: [...folders.values()].sort(
+			(a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b)
+		),
 		skipped: [
 			...picked.skipped.filter((skipped) => {
 				const why = excluded(skipped.path);
@@ -513,8 +518,6 @@ export const planImport = (picked: Picked): ImportPlan => {
 	};
 };
 
-const depth = (path: string): number => pathSegments(path).length;
-
 /**
  * A picked path as an import into the scratchpad reads it: a `.scratchpad`
  * folder at the top of what was picked is a scratchpad already, as "Download
@@ -525,7 +528,7 @@ const fromScratchpad = (path: string): string => {
 	return first === SCRATCHPAD_FOLDER && rest.length > 0 ? rest.join('/') : tidy(path);
 };
 
-const atScratchTop = (path: string): boolean => depth(fromScratchpad(path)) === 1;
+const atScratchTop = (path: string): boolean => pathDepth(fromScratchpad(path)) === 1;
 
 /**
  * Whether a file below the top of what was picked is one a note at the top
@@ -549,7 +552,7 @@ const linkedBelow = (files: readonly { path: string; bytes: Bytes }[]) => {
 					? []
 					: linkedFiles(splitFrontmatter(source).body, fromScratchpad(file.path));
 			})
-			.filter((path) => depth(path) > 1)
+			.filter((path) => pathDepth(path) > 1)
 			.map(foldPath)
 	);
 	return (path: string): boolean => linked.has(foldPath(fromScratchpad(path)));
@@ -655,25 +658,9 @@ const notebooksOf = (
 	new Map(
 		[
 			...folders.map((folder) => folder.path),
-			...[...notes.filter((note) => note.deletedLocally === 0), ...files].flatMap((row) =>
-				ancestorPaths(row.path)
-			),
+			...[...notes.filter(isLive), ...files].flatMap((row) => ancestorPaths(row.path)),
 		].map((path) => [foldPath(path), path])
 	);
-
-/**
- * The spelling a path takes in the source: each notebook along it as the
- * source spells it, and as the first path through it spelled it where the
- * source has no such notebook. `spellings` is written to as it goes.
- */
-const respell = (spellings: Map<string, string>, path: string): string => {
-	if (path === '') return path;
-	const known = spellings.get(foldPath(path));
-	if (known !== undefined) return known;
-	const spelled = joinPath(respell(spellings, parentPath(path)), basename(path));
-	spellings.set(foldPath(path), spelled);
-	return spelled;
-};
 
 /**
  * Whether a source takes an import now. A connected one only while it is live —
@@ -688,7 +675,7 @@ const mayImport = async (db: NotesDatabase, connectionId: string): Promise<boole
 		return !(await db.syncState.toArray()).some(holdsPile);
 	}
 	const state = await db.syncState.get(connectionId);
-	return state !== undefined && state.detached === undefined && state.importing === undefined;
+	return state !== undefined && isLiveSource(state) && state.importing === undefined;
 };
 
 /**
@@ -750,64 +737,53 @@ export const importLibrary = async (
 		readAll(plan.notes),
 	]);
 	const now = Date.now();
-	return db.transaction(
-		'rw',
-		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
-		async (): Promise<ImportOutcome> => {
-			if (!(await mayImport(db, connectionId))) {
-				throw new ImportRefusedError('This source cannot take an import now');
-			}
-			const [folderRows, noteRows, fileRows] = await Promise.all([
-				db.folders.where('connectionId').equals(connectionId).toArray(),
-				db.notes.where('connectionId').equals(connectionId).toArray(),
-				db.files.where('connectionId').equals(connectionId).toArray(),
-			]);
-			const spellings = notebooksOf(folderRows, noteRows, fileRows);
-			const stamp = new Date(now);
-
-			const folders = placeFolders(plan, spellings, fileRows, stamp).map(
-				(path): FolderRecord => ({ connectionId, path, createdAt: now })
-			);
-			const files = placeFiles(connectionId, plan, fileRows, spellings, stamp);
-			const notes = placeNotes(
-				connectionId,
-				plan,
-				noteRows,
-				spellings,
-				{ hashes, read },
-				now
-			);
-
-			await db.folders.bulkPut(folders);
-			await db.files.bulkAdd(files.rows.map((file) => file.row));
-			await db.fileBytes.bulkAdd(
-				files.rows.map((file) => ({
-					connectionId,
-					id: file.row.id,
-					bytes: ownBuffer(file.bytes),
-					pinned: 1 as const,
-					lastUsedAt: now,
-				}))
-			);
-			await db.notes.bulkAdd(notes.rows);
-			// As a bind queues a pile it copies (`queueOwed`): notebook by
-			// notebook, each made before what is in it and its files before its
-			// notes, so another device fills in a notebook at a time.
-			await queueByNotebook(db, connectionId, {
-				folders: folders.map((folder) => folder.path),
-				files: files.rows.map((file) => file.row),
-				notes: notes.rows,
-			});
-
-			return {
-				notes: notes.rows.length,
-				files: files.rows.length,
-				folders: folders.length,
-				numbered: notes.numbered,
-				present: files.present,
-			};
+	return db.transaction('rw', writerTables(db), async (): Promise<ImportOutcome> => {
+		if (!(await mayImport(db, connectionId))) {
+			throw new ImportRefusedError('This source cannot take an import now');
 		}
-	);
+		const [folderRows, noteRows, fileRows] = await Promise.all([
+			rowsOf(db.folders, connectionId).toArray(),
+			rowsOf(db.notes, connectionId).toArray(),
+			rowsOf(db.files, connectionId).toArray(),
+		]);
+		const spellings = notebooksOf(folderRows, noteRows, fileRows);
+		const stamp = new Date(now);
+
+		const folders = placeFolders(plan, spellings, fileRows, stamp).map(
+			(path): FolderRecord => ({ connectionId, path, createdAt: now })
+		);
+		const files = placeFiles(connectionId, plan, fileRows, spellings, stamp);
+		const notes = placeNotes(connectionId, plan, noteRows, spellings, { hashes, read }, now);
+
+		await db.folders.bulkPut(folders);
+		await db.files.bulkAdd(files.rows.map((file) => file.row));
+		await db.fileBytes.bulkAdd(
+			files.rows.map((file) => ({
+				connectionId,
+				id: file.row.id,
+				bytes: ownBuffer(file.bytes),
+				pinned: 1 as const,
+				lastUsedAt: now,
+			}))
+		);
+		await db.notes.bulkAdd(notes.rows);
+		// As a bind queues a pile it copies (`queueOwed`): notebook by
+		// notebook, each made before what is in it and its files before its
+		// notes, so another device fills in a notebook at a time.
+		await queueByNotebook(db, connectionId, {
+			folders: folders.map((folder) => folder.path),
+			files: files.rows.map((file) => file.row),
+			notes: notes.rows,
+		});
+
+		return {
+			notes: notes.rows.length,
+			files: files.rows.length,
+			folders: folders.length,
+			numbered: notes.numbered,
+			present: files.present,
+		};
+	});
 };
 
 /**
@@ -854,12 +830,6 @@ const placeFiles = (
 		return [{ row, bytes: file.bytes }];
 	});
 	return { rows, present: present.current };
-};
-
-/** The names, folded, of what `paths` holds directly in `folder`. */
-const namesIn = (paths: Iterable<string>, folder: string): string[] => {
-	const wanted = foldPath(folder);
-	return [...paths].filter((path) => foldPath(parentPath(path)) === wanted).map(basename);
 };
 
 /** A note's file read, as its name in the archive has it. */
@@ -921,11 +891,9 @@ const placeNotes = (
 		// eslint-disable-next-line functional/immutable-data
 		siblings.push(path);
 	};
-	existing
-		.filter((note) => note.deletedLocally === 0)
-		.forEach((note) => {
-			take(note.path);
-		});
+	existing.filter(isLive).forEach((note) => {
+		take(note.path);
+	});
 	const ids = new Set(existing.map((note) => note.id));
 	const numbered = { current: 0 };
 	const rows = plan.notes.map((note, index) => {

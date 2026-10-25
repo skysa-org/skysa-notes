@@ -10,7 +10,7 @@ import {
 	readClipName,
 	type StorageProvider,
 } from '@skysa/core';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
 	addClips,
@@ -20,20 +20,14 @@ import {
 	removeClip,
 	setClipboardShown,
 } from '../src/store/clipboard.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { type ClipboardSession, createClipboardSync } from '../src/sync/clipboard.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The clipboard a source's devices share (docs/ARCHITECTURE.md §7, "The
  * clipboard"): what a paste does here at once (`store/clipboard.ts`), and how
  * that reaches the folder and comes back from it (`sync/clipboard.ts`).
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
 
 const AT = Date.UTC(2026, 9, 6, 15, 30, 12, 123);
 
@@ -49,8 +43,7 @@ const file = (name: string, value: string, type = ''): ClipInput => ({
 });
 
 const setup = async ({ shown = true }: { shown?: boolean } = {}) => {
-	const db = createDatabase(`clipboard-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({
 		connectionId: 'c1',
 		clientId: 'install',

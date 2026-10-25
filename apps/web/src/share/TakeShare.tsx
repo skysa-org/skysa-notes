@@ -7,6 +7,7 @@ import { LOCALE, t } from '../i18n/t.js';
 import { addClips, setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { type ConnectedSource } from '../store/connection.js';
 import { db as appDatabase, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { tabName } from '../sync/account.js';
 import { syncScheduler } from '../sync/runtime.js';
 import { type SyncScheduler } from '../sync/scheduler.js';
@@ -92,7 +93,7 @@ const notConnected = (source: SyncStateRecord | null, name: string): string =>
 
 /** A source whose clipboard a share can go on: connected, and not let go of. */
 const takesClips = (source: SyncStateRecord | null): source is SyncStateRecord =>
-	source !== null && source.detached === undefined && source.provider !== undefined;
+	source !== null && isLiveSource(source) && source.provider !== undefined;
 
 interface Held {
 	readonly id: string;

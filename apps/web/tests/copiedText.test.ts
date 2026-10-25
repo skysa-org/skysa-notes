@@ -1,10 +1,11 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { Fragment, Slice } from '@milkdown/kit/prose/model';
 import { AllSelection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * What a copy out of the rich editor puts on the clipboard as text
@@ -13,18 +14,13 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
  * into whatever the words went to next.
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	const text = (slice: Slice) => view.serializeForClipboard(slice).text;
 	return {

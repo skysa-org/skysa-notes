@@ -8,6 +8,7 @@ import {
 import { useRouter } from '@tanstack/react-router';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import type { Place } from '../routes/place.js';
 import { db, type NoteRecord } from '../store/db.js';
@@ -15,6 +16,7 @@ import { settleEditors } from '../store/heldEdits.js';
 import { useScratchNotes } from '../store/hooks.js';
 import { deleteNote, getNote, isUnnamed, renameNote, setScratchMarks } from '../store/notes.js';
 import type { Moving } from '../store/rearrange.js';
+import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { titleShown } from '../store/titles.js';
 import { visibleBlocks } from '../store/visibleText.js';
@@ -68,7 +70,7 @@ const cardOpen = (
 	opening: boolean
 ): { card: NoteRecord | undefined; openingId: string | undefined } => {
 	if (!cards) return { card: undefined, openingId: undefined };
-	if (openNote?.id === noteId && openNote?.deletedLocally === 0) {
+	if (openNote?.id === noteId && isLive(openNote)) {
 		return { card: openNote, openingId: undefined };
 	}
 	return { card: undefined, openingId: opening ? noteId : undefined };
@@ -187,7 +189,7 @@ export const useScratchpad = ({
 		void settled
 			.then(() => getNote(db, id, { connectionId }))
 			.then((row) =>
-				row !== undefined && row.deletedLocally === 0 && leftBlank(row)
+				row !== undefined && isLive(row) && leftBlank(row)
 					? deleteNote(db, id, scope(row))
 					: undefined
 			)
@@ -251,7 +253,7 @@ export const useScratchpad = ({
 		void settleEditors()
 			.then(() => getNote(db, note.id, scope(note)))
 			.then((row) => {
-				if (row === undefined || row.deletedLocally !== 0) return;
+				if (row === undefined || !isLive(row)) return;
 				pickUp({ kind: 'note', id: row.id, path: row.path, name: titleShown(row.title) });
 			});
 	};
@@ -350,10 +352,7 @@ export const useOpenWhenShown = (
 	open: () => void
 ) => {
 	const seen = useRef<{ connectionId: string; shown: boolean }>(undefined);
-	const opening = useRef(open);
-	useEffect(() => {
-		opening.current = open;
-	}, [open]);
+	const opening = useLatest(open);
 	useEffect(() => {
 		if (connectionId === undefined || shown === undefined) return;
 		const before = seen.current;

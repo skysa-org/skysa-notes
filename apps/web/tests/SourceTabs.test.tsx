@@ -29,11 +29,12 @@ import {
 	renameSource,
 	showConnection,
 } from '../src/store/connection.js';
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
+import { freshDatabase } from './support/db.js';
 
 /** A store that turns the next rename down, as a write IndexedDB refuses does. */
 const store = vi.hoisted(() => ({ refusingRename: false }));
@@ -63,19 +64,10 @@ const STORAGE_FIRST: InstanceConfig = {
 	providers: ['dropbox', 'onedrive'],
 };
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	store.refusingRename = false;
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`tabs-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 type Client = Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 

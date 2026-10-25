@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SearchField, type SearchFieldProps } from '../src/components/SearchField.js';
 import { type NoteRecord } from '../src/store/db.js';
@@ -12,8 +12,6 @@ import { type NoteHit, SEARCH_LIMIT } from '../src/store/search.js';
  * the store's business and what opening a note does is the route's; what is
  * here is the list, what it says, and that choosing from it ends the search.
  */
-
-afterEach(cleanup);
 
 const note = (title: string): NoteRecord =>
 	({

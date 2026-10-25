@@ -1,11 +1,5 @@
-import { fromBase64Url } from '../crypto.js';
-import {
-	type FetchLike,
-	type OAuthCredentials,
-	OAuthError,
-	type StorageOAuth,
-	type TokenSet,
-} from './types.js';
+import { clientForm, postTokenForm, readIdClaims } from './common.js';
+import { type FetchLike, type OAuthCredentials, type StorageOAuth } from './types.js';
 
 /**
  * The storage half of Microsoft OAuth, for OneDrive: Authorization Code + PKCE
@@ -41,78 +35,21 @@ export const MICROSOFT_SCOPES = [
 const endpoint = (credentials: OAuthCredentials, leg: 'authorize' | 'token'): string =>
 	`${AUTHORITY}/${encodeURIComponent(credentials.tenant ?? 'common')}/oauth2/v2.0/${leg}`;
 
-interface TokenResponse {
-	access_token?: string;
-	refresh_token?: string;
-	expires_in?: number;
-	id_token?: string;
-	error?: string;
-}
-
-interface IdClaims {
-	aud?: unknown;
-	sub?: unknown;
-	email?: unknown;
-}
-
-/**
- * The ID token's claims, read without checking its signature. That is allowed
- * here and only here: OpenID Connect Core §3.1.3.7 lets a client that received
- * the token directly from the token endpoint, over TLS, rely on that channel
- * instead. It is never read from anywhere the browser could have touched.
- *
- * The audience is still checked, so a token minted for some other app — which
- * this code path cannot produce, but a misconfigured tenant could — names nobody.
- */
-const claimsOf = (idToken: string | undefined, clientId: string): IdClaims => {
-	const [, payload] = (idToken ?? '').split('.');
-	if (payload === undefined) return {};
-	try {
-		const parsed: unknown = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
-		if (typeof parsed !== 'object' || parsed === null) return {};
-		const claims: IdClaims = parsed;
-		return claims.aud === clientId ? claims : {};
-	} catch {
-		return {};
-	}
-};
-
-const nonEmpty = (value: unknown): string | undefined =>
-	typeof value === 'string' && value !== '' ? value : undefined;
-
 const postForm = async (
 	doFetch: FetchLike,
 	credentials: OAuthCredentials,
 	form: Record<string, string>,
 	now: number
-): Promise<{ tokens: TokenSet; idToken?: string }> => {
-	const response = await doFetch(endpoint(credentials, 'token'), {
-		method: 'POST',
-		headers: { 'content-type': 'application/x-www-form-urlencoded' },
-		body: new URLSearchParams({
-			client_id: credentials.clientId,
-			client_secret: credentials.clientSecret,
-			scope: MICROSOFT_SCOPES,
-			...form,
-		}).toString(),
-	});
-
-	const body = (await response.json().catch(() => ({}))) as TokenResponse;
-	if (!response.ok || body.access_token === undefined) {
-		// `error_description` quotes the request back and carries trace ids; the
-		// operator gets the code alone.
-		throw new OAuthError('microsoft', body.error ?? String(response.status));
-	}
-
-	return {
-		tokens: {
-			accessToken: body.access_token,
-			...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
-			// About an hour. A response with none would otherwise expire on arrival.
-			expiresAt: now + (body.expires_in ?? 3600) * 1000,
-		},
-		...(body.id_token === undefined ? {} : { idToken: body.id_token }),
-	};
+) => {
+	const { tokens, body } = await postTokenForm(
+		doFetch,
+		endpoint(credentials, 'token'),
+		'microsoft',
+		// Microsoft asks for the scopes again at the token endpoint.
+		{ ...clientForm(credentials), scope: MICROSOFT_SCOPES, ...form },
+		now
+	);
+	return { tokens, idToken: body.id_token };
 };
 
 export const onedriveOAuth: StorageOAuth = {
@@ -147,7 +84,6 @@ export const onedriveOAuth: StorageOAuth = {
 			},
 			input.now ?? Date.now()
 		);
-		const claims = claimsOf(idToken, credentials.clientId);
 		// `sub`, not `oid` or `email`. It is immutable and never reused, and it is
 		// pairwise: derived from this app, the user *and the tenant* the user
 		// signed in through — which is all an account id here needs to be. So an
@@ -155,8 +91,7 @@ export const onedriveOAuth: StorageOAuth = {
 		// guests makes every returning user look new. `email` is mutable and may
 		// be absent. Read at the exchange only: the ID token a refresh returns is
 		// one Microsoft says not to rely on, and nothing here needs it.
-		const accountId = nonEmpty(claims.sub);
-		const displayName = nonEmpty(claims.email);
+		const { sub: accountId, email: displayName } = readIdClaims(idToken, credentials.clientId);
 		return {
 			...tokens,
 			...(accountId === undefined ? {} : { accountId }),

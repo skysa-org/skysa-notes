@@ -36,7 +36,7 @@ import { tabState } from './staleTab.js';
  * check can stop it (docs/ARCHITECTURE.md §7, "A newer build in another tab
  * ends this one").
  */
-export const letGoWhenFrozen = (db: Dexie): void => {
+export const letGoWhenFrozen = (db: Dexie): (() => void) => {
 	// Open as far as Dexie is concerned: from the open's `ready` to the next
 	// close. `isOpen()` says so earlier, as soon as the connection is there and
 	// while an upgrade is still running in it; closed then, the open finishes
@@ -53,10 +53,14 @@ export const letGoWhenFrozen = (db: Dexie): void => {
 	db.on('close', () => {
 		open.current = false;
 	});
-	document.addEventListener('freeze', () => {
+	const frozen = () => {
 		// Out of date is closed for good, and a close that leaves auto-open on
 		// would open it again. One still opening is left to finish.
 		if (tabState() === 'stale' || !open.current) return;
 		db.close({ disableAutoOpen: false });
-	});
+	};
+	document.addEventListener('freeze', frozen);
+	return () => {
+		document.removeEventListener('freeze', frozen);
+	};
 };

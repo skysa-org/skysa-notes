@@ -2,6 +2,8 @@ import { ancestorPaths, foldName, isWithin, parentPath, pathSegments } from '@sk
 import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
+import { rowsOf } from './rows.js';
+import { isTombstone } from './rowStates.js';
 
 /**
  * The push queue: what the sync engine owes the remote, in the order it has to
@@ -123,7 +125,7 @@ type Queued = PromiseExtended<void>;
  * own, which a write here must not be taken to be covered by, nor a delete here
  * withdraw.
  */
-const opsFor = (
+export const opsFor = (
 	db: QueueDb,
 	note: Pick<NoteRecord, 'connectionId' | 'id'>
 ): PromiseExtended<OpQueueRecord[]> =>
@@ -165,7 +167,7 @@ const add = (
  */
 export const queueWrite = (db: QueueDb, note: NoteRecord, except?: number): Queued =>
 	// A tombstone owes the remote its delete and nothing else.
-	note.deletedLocally === 1
+	isTombstone(note)
 		? nothing()
 		: opsFor(db, note).then((queued) =>
 				queued.some((op) => op.op === 'write' && op.seq !== except)
@@ -292,9 +294,7 @@ export const queueMkdir = (db: QueueDb, connectionId: string, path: string): Que
  * deleted, and a write that finds no parent makes it (`runOp`).
  */
 export const withdrawMkdirs = (db: QueueDb, connectionId: string, path: string): Queued =>
-	db.opQueue
-		.where('connectionId')
-		.equals(connectionId)
+	rowsOf(db.opQueue, connectionId)
 		.filter((op) => op.op === 'mkdir' && isWithin(op.path, path))
 		.toArray()
 		.then((inside) => db.opQueue.bulkDelete(seqsOf(inside)))
@@ -327,7 +327,7 @@ export const queueRmdir = (
 			);
 
 /** The ops queued for one file, within its connection, as `opsFor` for a note. */
-const opsForFile = (
+export const opsForFile = (
 	db: QueueDb,
 	file: Pick<FileRecord, 'connectionId' | 'id'>
 ): PromiseExtended<OpQueueRecord[]> =>

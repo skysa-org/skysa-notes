@@ -1,8 +1,8 @@
 import { createFakeProvider, createSyncEngine } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { bindConnection, verifyResume } from '../src/store/connection.js';
-import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import { type NoteRecord, type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
 import {
@@ -25,6 +25,7 @@ import {
 	unsyncedIn,
 } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * What a source holds that its remote has not been sent. Made with the app's
@@ -35,18 +36,6 @@ import { createDexieSyncStore } from '../src/sync/store.js';
 const CONNECTION = 'dropbox-1';
 const OTHER = 'gdrive-2';
 const scope = { connectionId: CONNECTION };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`unsynced-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 /** A note as a pull leaves it: clean, with a file on the remote, and nothing queued. */
 const pushedNote = (

@@ -1,3 +1,5 @@
+import { createStore } from '../store/emitter.js';
+
 /**
  * Installing the app from the page (docs/ARCHITECTURE.md §8, "Installing from
  * the browser"): what the browser has said about it, kept from the moment the
@@ -39,14 +41,8 @@ const isInstallPrompt = (event: Event): event is InstallPromptEvent =>
 	'prompt' in event && typeof event.prompt === 'function' && 'userChoice' in event;
 
 export const createInstallPrompt = (target: EventTarget | undefined): InstallPrompt => {
-	const current = new Map<'state', InstallState>([['state', NONE]]);
-	const listeners = new Set<() => void>();
-	const become = (next: InstallState) => {
-		current.set('state', next);
-		listeners.forEach((changed) => {
-			changed();
-		});
-	};
+	const current = createStore<InstallState>(NONE);
+	const become = current.set;
 
 	target?.addEventListener('beforeinstallprompt', (event) => {
 		if (!isInstallPrompt(event)) return;
@@ -66,13 +62,8 @@ export const createInstallPrompt = (target: EventTarget | undefined): InstallPro
 	});
 
 	return {
-		state: () => current.get('state') ?? NONE,
-		subscribe: (changed) => {
-			listeners.add(changed);
-			return () => {
-				listeners.delete(changed);
-			};
-		},
+		state: current.get,
+		subscribe: current.subscribe,
 	};
 };
 

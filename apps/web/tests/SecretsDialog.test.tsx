@@ -15,12 +15,13 @@ import {
 import { type DeviceLock, type Made } from '../src/secrets/deviceLock.js';
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock, type SecretsLock } from '../src/secrets/lock.js';
-import { createDatabase, type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
+import { type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol, enrolment, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
 import { getPasswordsShown } from '../src/store/vault.js';
 import { type KeyFileWrite } from '../src/sync/keyFile.js';
 import { readQr } from './qrRead.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Secrets for a source (docs/ARCHITECTURE.md §7, "Secrets in a note"): setting
@@ -28,12 +29,9 @@ import { readQr } from './qrRead.js';
  * source's key, and, once it is, unlocking, changing how, and letting go.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	document.body.replaceChildren();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const ROUNDS = 1000;
@@ -54,8 +52,7 @@ const setup = async ({
 	record?: Omit<KeyFileRecord, 'connectionId'>;
 	written?: KeyFileWrite;
 } = {}) => {
-	const db = createDatabase(`secrets-dialog-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 	if (record !== undefined) await db.keyFiles.put({ connectionId: 'c1', ...record });
 	const lock: SecretsLock = createSecretsLock({ target: visiblePage() });

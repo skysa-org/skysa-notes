@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { dearmor, looksArmored, mentionsArmor } from './age/armor.js';
 import { encodeIdentity, parseIdentity, spellsRecipient } from './age/keys.js';
 import { ENCRYPTION_FILE, ENCRYPTION_SCHEMA_VERSION } from './config.js';
+import { parseJson } from './json.js';
 import { firstLineEnding, toLf, withLineEnding } from './markdown/lineEndings.js';
 import { parse } from './markdown/pipeline.js';
 import { normalizePath } from './paths.js';
@@ -38,6 +39,17 @@ export const secretFile = (
 /** Whether a fenced block is a secret. */
 export const isSecretBlock = (language: string | null | undefined, text: string): boolean =>
 	secretFile(language, text) !== undefined;
+
+/**
+ * Whether a fenced block is kept out of what is shown or indexed of a note's
+ * words: `age`, and opening as armor, whether the armor reads or not. Every
+ * secret is one (`isSecretBlock`), and so is armor cut short, by a list row's
+ * length or by damage, since what is left of it is ciphertext still. Search
+ * (`withoutArmor`) and previews (`previewBlocks`) both ask this, so that a
+ * card never shows what search has left out, nor the other way round.
+ */
+export const hidesAsSecret = (language: string | null | undefined, text: string): boolean =>
+	language === SECRET_LANGUAGE && looksArmored(text);
 
 /**
  * What a secret's fence calls it, from the rest of its info string after `age`
@@ -93,7 +105,7 @@ export const withoutArmor = (body: string): string => {
 			};
 			const from = position?.start.offset;
 			const to = position?.end.offset;
-			if (lang !== SECRET_LANGUAGE || !looksArmored(value)) return [];
+			if (!hidesAsSecret(lang, value)) return [];
 			if (from === undefined || to === undefined) return [];
 			return [{ from, to, label: secretLabel(meta) ?? '' }];
 		}
@@ -244,13 +256,7 @@ export const serializeEncryptionFile = (file: EncryptionFile): string =>
 	`${JSON.stringify(file, null, 2)}\n`;
 
 export const parseEncryptionFile = (text: string): EncryptionFileRead => {
-	const json = ((): unknown => {
-		try {
-			return JSON.parse(text) as unknown;
-		} catch {
-			return undefined;
-		}
-	})();
+	const json = parseJson(text);
 	const version = versionSchema.safeParse(json);
 	if (!version.success) return { status: 'invalid' };
 	if (version.data.schemaVersion > ENCRYPTION_SCHEMA_VERSION) return { status: 'newer' };

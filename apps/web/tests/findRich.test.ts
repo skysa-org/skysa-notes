@@ -1,10 +1,11 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { EMPTY_QUERY, type FindQuery } from '../src/editor/find.js';
 import { richFindTarget, richMatches } from '../src/editor/findRich.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Find and replace in the rich editor, against a real Milkdown document.
@@ -17,19 +18,14 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
  * it — nested blocks, marks, images — in front of the match.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string, onUserEdit: (markdown: string) => void = () => undefined) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body, onUserEdit });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	return { editor, view, target: richFindTarget(view) };
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

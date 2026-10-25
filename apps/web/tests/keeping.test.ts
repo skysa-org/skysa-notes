@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import {
 	browserKeeper,
 	createKeeping,
 	KEEP_ASKED_KEY,
 	type StorageKeeper,
 } from '../src/store/keeping.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Asking the browser to keep the store, through the seam that stands in for
@@ -14,19 +14,10 @@ import {
  * would put a prompt in front of a test.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`keeping-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 /** A browser that has decided `already`, and answers a request with `answer`. */
 const browser = (already: boolean, answer = false) => {

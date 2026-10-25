@@ -17,6 +17,7 @@ import {
 	useSyncExternalStore,
 } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { useCodeDisplay } from '../store/hooks.js';
 import type { AttachmentHost } from './attachHost.js';
 import { richFindTarget } from './findRich.js';
@@ -138,20 +139,11 @@ const EditorBody = ({
 	toolbarEnd,
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
-	const notify = useRef(onUserEdit);
-	useEffect(() => {
-		notify.current = onUserEdit;
-	}, [onUserEdit]);
+	const notify = useLatest(onUserEdit);
 
-	const unsupported = useRef(onUnsupported);
-	useEffect(() => {
-		unsupported.current = onUnsupported;
-	}, [onUnsupported]);
+	const unsupported = useLatest(onUnsupported);
 
-	const replaced = useRef(onAdopted);
-	useEffect(() => {
-		replaced.current = onAdopted;
-	}, [onAdopted]);
+	const replaced = useLatest(onAdopted);
 
 	const incoming = useIncomingBody(noteId, body, origin);
 	const pluginView = usePluginViewFactory();
@@ -260,11 +252,13 @@ const EditorBody = ({
 		if (!incoming.shouldAdopt(body)) return;
 		editor.action((ctx) => {
 			// Only a body the editor now holds moves what its edits are made
-			// against: one it could not take in is asked about again.
-			if (adoptBody(ctx, body)) {
-				incoming.adopted();
-				replaced.current?.();
-			}
+			// against: one it could not take in is asked about again. And only
+			// one that changed the text has replaced it, as in the raw editor:
+			// a body that already says what the document does leaves what the
+			// user typed where it was (#444).
+			const adoption = adoptBody(ctx, body);
+			if (adoption !== 'refused') incoming.adopted();
+			if (adoption === 'replaced') replaced.current?.();
 			// The same question the editor was built with, asked again of a body
 			// that arrived from somewhere else. A sync pull can bring in markdown
 			// this editor cannot show, and since the check above runs once, this
@@ -272,7 +266,7 @@ const EditorBody = ({
 			const lost = whatIsLost(ctx, body);
 			if (lost !== undefined) unsupported.current(lost);
 		});
-	}, [body, origin, get, incoming, loading]);
+	}, [body, origin, get, incoming, loading, replaced, unsupported]);
 
 	// The editor keeps the selection a toolbar press acts on. A mouse's press
 	// never takes focus away, and the editor is handed it back afterwards, so
