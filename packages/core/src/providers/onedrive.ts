@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
-import { parseJson } from '../json.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import {
 	type HttpProviderOptions,
@@ -13,12 +12,12 @@ import {
 } from './adapter.js';
 import { createTransport, jsonBody, parseRetryAfter, readErrorBody, retryNote } from './http.js';
 import {
-	applyItem,
-	nodeSchema,
+	applyAll,
 	nodesOf,
 	pageFrom,
-	pendingSchema,
+	readTreeCursor,
 	settlePage,
+	treeCursorBase,
 	type TreeItem,
 } from './idTree.js';
 import { responseBytes, uploadType } from './text.js';
@@ -206,11 +205,8 @@ const codesOf = (error: unknown): string[] => {
 // ---------------------------------------------------------------------------
 
 const cursorSchema = z.object({
-	v: z.literal(1),
+	...treeCursorBase,
 	link: z.string(),
-	root: z.string().min(1),
-	nodes: z.array(nodeSchema),
-	pending: z.array(pendingSchema),
 	/** The round under way started from nothing: a first sync, or a reset. */
 	scan: z.boolean(),
 	/** Some item in this round has named the app folder as its parent. */
@@ -219,13 +215,10 @@ const cursorSchema = z.object({
 
 type DeltaCursor = z.infer<typeof cursorSchema>;
 
-const parseCursor = (cursor: string): DeltaCursor => {
-	const result = cursorSchema.safeParse(parseJson(cursor));
-	if (!result.success || !result.data.link.startsWith(`${GRAPH_ORIGIN}/`)) {
-		throw new CursorResetError('onedrive cursor is not one this adapter wrote');
-	}
-	return result.data;
-};
+const parseCursor = (cursor: string): DeltaCursor =>
+	readTreeCursor(cursorSchema, cursor, 'onedrive', (read) =>
+		read.link.startsWith(`${GRAPH_ORIGIN}/`)
+	);
 
 /**
  * A delta item as the tree takes it, or `undefined` for the app folder itself,
@@ -663,10 +656,10 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 
 		const items = result.value.value ?? [];
 		const page = pageFrom(from);
-		items.forEach((item) => {
-			const treeItem = treeItemOf(item, page.root);
-			if (treeItem !== undefined) applyItem(page, treeItem);
-		});
+		applyAll(
+			page,
+			items.flatMap((item) => treeItemOf(item, page.root) ?? [])
+		);
 		// Graph lists "all parent items in the hierarchy" of a changed item unless
 		// asked not to (`deltaExcludeParent`), so when the round ends every
 		// ancestor of what it listed is in the tree or was listed too — which is
