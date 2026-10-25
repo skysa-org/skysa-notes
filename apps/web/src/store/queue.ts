@@ -91,9 +91,9 @@ export const MAX_OP_ATTEMPTS = 8;
 /**
  * Whether an op has been given up on for now, and is holding up everything
  * queued behind it. The one statement of the rule: the engine stops a batch at
- * `attempts >= maxAttempts` (`drainOps` in `packages/core/src/sync/engine.ts`),
- * the scheduler names the op by it, and what is unsynced is called blocked by
- * it.
+ * `attempts >= maxAttempts` (`drainOps` in
+ * `packages/core/src/sync/push/drain.ts`), the scheduler names the op by it,
+ * and what is unsynced is called blocked by it.
  *
  * Never an `rmdir`, because the engine makes the same exception: one that is
  * out of attempts is completed as done and stepped over — it tidies an empty

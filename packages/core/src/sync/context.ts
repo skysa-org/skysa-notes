@@ -1,6 +1,11 @@
-import { type StorageProvider } from '../providers/types.js';
+import { type EntryRef, type RemoteEntry, type StorageProvider } from '../providers/types.js';
 import { type Meter } from './progress.js';
-import { type SyncStore } from './store.js';
+import {
+	type ConflictResolution,
+	type PullChange,
+	type SyncNote,
+	type SyncStore,
+} from './store.js';
 
 /**
  * What every part of the engine is handed by `createSyncEngine`: the provider
@@ -19,4 +24,20 @@ export interface EngineContext {
 	/** Writes the provider takes at once, at least one. */
 	readonly writesAtOnce: number;
 	readonly meter: Meter;
+}
+
+/**
+ * What the push asks of the engine's pull side, which asks the same: whether
+ * a file is there (`fileState`), and how a note and a newer remote version are
+ * reconciled (`resolutionFor`). Handed to the push's parts by name.
+ */
+export interface FromPull {
+	fileState: (ref: EntryRef) => Promise<'there' | 'gone' | 'unreadable'>;
+	resolutionFor: (
+		local: SyncNote,
+		remoteContent: string,
+		remote: RemoteEntry,
+		claimed: ReadonlySet<string>,
+		decided: readonly PullChange[]
+	) => Promise<ConflictResolution>;
 }

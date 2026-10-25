@@ -7,7 +7,7 @@ import {
 	type RemoteEntry,
 } from '../../providers/types.js';
 import { conflictPath } from '../conflicts.js';
-import { type EngineContext } from '../context.js';
+import { type EngineContext, type FromPull } from '../context.js';
 import { findFreeName } from '../names.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
 import { type SyncNote, type SyncOp } from '../store.js';
@@ -28,9 +28,7 @@ export const createNotePush = (
 	{
 		ensureRemoteFolder,
 		fileState,
-	}: Pick<FolderPush, 'ensureRemoteFolder'> & {
-		fileState: (ref: EntryRef) => Promise<'there' | 'gone' | 'unreadable'>;
-	}
+	}: Pick<FolderPush, 'ensureRemoteFolder'> & Pick<FromPull, 'fileState'>
 ) => {
 	const write = (note: SyncNote, expected: string | undefined): Promise<RemoteEntry> =>
 		provider.write(
