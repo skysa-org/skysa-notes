@@ -14,8 +14,13 @@ import {
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFilePath, conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
-import { createSyncEngine, type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
+import { type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
+import { AT, engineFixture, reporting } from './kit/engine.js';
+import { expectSoundStore } from './kit/invariants.js';
+import { entryAt, remoteAt } from './kit/remote.js';
+import { boundTo } from './kit/seed.js';
+import { editHere, renameHere } from './kit/userActions.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
 /**
@@ -30,20 +35,13 @@ let provider: FakeProvider;
 let store: MemoryStore;
 let engine: SyncEngine;
 let ids = 0;
-let fresh = 0;
-
-const AT = new Date('2026-09-15T14:32:10Z');
 
 beforeEach(async () => {
 	ids = 0;
-	fresh = 0;
 	provider = createFakeProvider({ startAt: new Date('2026-01-01T00:00:00Z') });
 	await provider.ensureRoot();
 	store = createMemoryStore();
-	engine = createSyncEngine({
-		provider,
-		store,
-		now: () => AT,
+	engine = engineWith({
 		newId: () => {
 			ids += 1;
 			return `copy-${String(ids)}`;
@@ -51,49 +49,10 @@ beforeEach(async () => {
 	});
 });
 
-/**
- * The same provider, but `changes` reports exactly what it is told to. The fake
- * reports a move as one entry; real providers disagree about that, and the
- * disagreement is where notes get lost, so the shapes they produce are fed in
- * directly rather than waited for.
- */
-const reporting = (base: StorageProvider, entries: readonly ChangeEntry[]): StorageProvider => ({
-	...base,
-	changes: () => Promise.resolve({ entries, cursor: 'reported', more: false }),
-});
+const { engineWith, pullNow, pullPages } = engineFixture(() => ({ provider, store }));
 
-/**
- * The store forgives a `delete-note` for a note that is not there, because a
- * batch that rejects is a batch that is retried for ever. That forgiveness must
- * never be what is holding a test up, so every test asserts it was not used.
- */
 afterEach(() => {
-	expect(store.anomalies()).toEqual([]);
-});
-
-/**
- * The two things that must be true of the store between batches, whatever the
- * provider said. Two rows at one path is a note the sidebar shows twice and two
- * queued writes racing for one file; two rows with one `remoteId` is worse —
- * `noteByRemoteId` only ever hands back one of them, so the other is stale for
- * ever and every edit to it conflicts. Asserted after every test rather than in
- * the handful that happen to think of it.
- */
-afterEach(() => {
-	const notes = store.notes();
-	const paths = notes.map((note) => note.path);
-	expect(paths).toEqual([...new Set(paths)]);
-	const remotes = notes.flatMap((note) => (note.remoteId === undefined ? [] : [note.remoteId]));
-	expect(remotes).toEqual([...new Set(remotes)]);
-});
-
-/** The same two, for files: a picture shown twice, or a link the store cannot keep. */
-afterEach(() => {
-	const files = store.files();
-	const paths = files.map((file) => file.path);
-	expect(paths).toEqual([...new Set(paths)]);
-	const remotes = files.flatMap((file) => (file.remoteId === undefined ? [] : [file.remoteId]));
-	expect(remotes).toEqual([...new Set(remotes)]);
+	expectSoundStore(store);
 });
 
 /** Puts a file on the remote and returns what the provider called it. */
@@ -115,23 +74,16 @@ const killTheCursor = (uploadDifferences?: boolean): void => {
 	});
 };
 
-/** Pulls exactly these entries, whatever the fake would have reported. */
-const pullNow = async (entries: readonly ChangeEntry[]) =>
-	createSyncEngine({
-		provider: reporting(provider, entries),
-		store,
-		now: () => AT,
-		// Distinct from the outer engine's, so an assertion that a note kept
-		// its identity cannot pass by minting the same name twice — and
-		// distinct from each other, so two new files in one batch do not land
-		// on one row and fail the test for a reason of its own making.
-		newId: () => {
-			fresh += 1;
-			return `fresh-${String(fresh)}`;
-		},
-	}).pull();
-
 const noteAt = (path: string) => store.notes().find((note) => note.path === path);
+
+/** A note pulled from the remote the ordinary way, with a cursor stored. */
+const pulledNote = async (path: string, content: string) => {
+	const entry = await remoteFile(path, content);
+	await engine.pull();
+	const note = noteAt(path);
+	if (note === undefined) throw new Error(`no note at ${path}`);
+	return { entry, note };
+};
 
 describe('pull', () => {
 	it('brings a new remote note into the store', async () => {
@@ -200,8 +152,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: first.remoteId,
-			remoteVersion: first.version,
+			...boundTo(first),
 		});
 		await engine.pull();
 
@@ -217,8 +168,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await engine.pull();
 
@@ -237,8 +187,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await engine.pull();
 
@@ -262,8 +211,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await engine.pull();
 
@@ -271,11 +219,7 @@ describe('pull', () => {
 		// so a provider that keeps its version gives us nothing to fetch.
 		const renamed = { ...entry, path: 'b.md' };
 		const reads = provider.callLog().filter((call) => call.op === 'read').length;
-		await createSyncEngine({
-			provider: reporting(provider, [renamed]),
-			store,
-			now: () => AT,
-		}).pull();
+		await engineWith({ provider: reporting(provider, [renamed]) }).pull();
 
 		expect(noteAt('b.md')?.id).toBe('n1');
 		expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
@@ -291,8 +235,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await engine.pull();
 
@@ -300,7 +243,7 @@ describe('pull', () => {
 			{ ...entry, path: 'b.md' },
 			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
 		]);
-		await createSyncEngine({ provider: split, store, now: () => AT }).pull();
+		await engineWith({ provider: split }).pull();
 
 		expect(noteAt('b.md')?.content).toBe('one\n');
 		expect(store.notes()).toHaveLength(1);
@@ -312,8 +255,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await engine.pull();
 
@@ -332,8 +274,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		await engine.pull();
@@ -356,8 +297,7 @@ describe('pull', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'same\n',
-			remoteId: first.remoteId,
-			remoteVersion: first.version,
+			...boundTo(first),
 			dirty: true,
 		});
 		await engine.pull();
@@ -401,7 +341,7 @@ describe('pull', () => {
 		provider = createFakeProvider({ pageSize: 1 });
 		await provider.ensureRoot();
 		store = createMemoryStore();
-		engine = createSyncEngine({ provider, store, now: () => AT });
+		engine = engineWith();
 		await provider.write('a.md', '1\n', {});
 		await provider.write('b.md', '2\n', {});
 
@@ -414,7 +354,7 @@ describe('pull', () => {
 				return provider.changes(cursor);
 			},
 		};
-		const failed = await createSyncEngine({ provider: counted, store, now: () => AT }).pull();
+		const failed = await engineWith({ provider: counted }).pull();
 		expect(failed.status).toBe('retry');
 
 		expect(store.storedCursor()).toBeUndefined();
@@ -427,7 +367,7 @@ describe('pull', () => {
 		provider = createFakeProvider({ pageSize: 1 });
 		await provider.ensureRoot();
 		store = createMemoryStore();
-		engine = createSyncEngine({ provider, store, now: () => AT });
+		engine = engineWith();
 		await provider.write('a.md', '1\n', {});
 		await provider.write('b.md', '2\n', {});
 		await provider.write('c.md', '3\n', {});
@@ -445,8 +385,7 @@ describe('a conflict', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: first.remoteId,
-			remoteVersion: first.version,
+			...boundTo(first),
 			dirty: true,
 		});
 		await provider.write('a.md', 'theirs\n', { expectedVersion: first.version });
@@ -498,8 +437,7 @@ describe('a conflict', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine again\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		await provider.write('a.md', 'theirs again\n', { expectedVersion: entry.version });
@@ -532,8 +470,7 @@ describe('a conflict', () => {
 			id: 'n1',
 			path: `${nfc}/a.md`,
 			content: 'mine\n',
-			remoteId: first.remoteId,
-			remoteVersion: first.version,
+			...boundTo(first),
 			dirty: true,
 		});
 		await provider.write(`${nfc}/a.md`, 'theirs\n', { expectedVersion: first.version });
@@ -566,8 +503,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'two\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -582,8 +518,7 @@ describe('push', () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'first\n', dirty: true });
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		const original = store.completeOp;
-		const engineWithEdit = createSyncEngine({
-			provider,
+		const engineWithEdit = engineWith({
 			store: {
 				...store,
 				completeOp: async (seq, outcome) => {
@@ -591,7 +526,6 @@ describe('push', () => {
 					await original(seq, outcome);
 				},
 			},
-			now: () => AT,
 		});
 
 		await engineWithEdit.push();
@@ -609,8 +543,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -628,8 +561,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -651,8 +583,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -680,8 +611,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
@@ -699,8 +629,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
@@ -720,8 +649,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
@@ -743,8 +671,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
@@ -763,8 +690,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
@@ -784,18 +710,15 @@ describe('push', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
-		const strict = createSyncEngine({
+		const strict = engineWith({
 			provider: {
 				...provider,
 				delete: () => Promise.reject(new NotFoundError('a.md')),
 			},
-			store,
-			now: () => AT,
 		});
 		const result = await strict.push();
 
@@ -864,8 +787,7 @@ describe('push', () => {
 			});
 		};
 
-		const pushing = (base: StorageProvider) =>
-			createSyncEngine({ provider: base, store, now: () => AT }).push();
+		const pushing = (base: StorageProvider) => engineWith({ provider: base }).push();
 
 		/** A provider that takes four at once, as Google Drive does. */
 		beforeEach(async () => {
@@ -874,7 +796,7 @@ describe('push', () => {
 				writesAtOnce: 4,
 			});
 			await provider.ensureRoot();
-			engine = createSyncEngine({ provider, store, now: () => AT });
+			engine = engineWith();
 		});
 
 		it('writes one at a time to a provider that does not say it takes more', async () => {
@@ -915,8 +837,7 @@ describe('push', () => {
 				path: 'b.md',
 				content: 'a, edited\n',
 				dirty: true,
-				remoteId: first.remoteId,
-				remoteVersion: first.version,
+				...boundTo(first),
 				syncedHash: await contentHash('a\n'),
 			});
 			store.put({
@@ -924,8 +845,7 @@ describe('push', () => {
 				path: 'c.md',
 				content: 'b, edited\n',
 				dirty: true,
-				remoteId: second.remoteId,
-				remoteVersion: second.version,
+				...boundTo(second),
 				syncedHash: await contentHash('b\n'),
 			});
 			store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
@@ -1023,8 +943,7 @@ describe('push', () => {
 				path: 'a.md',
 				content: 'mine\n',
 				dirty: true,
-				remoteId: entry.remoteId,
-				remoteVersion: entry.version,
+				...boundTo(entry),
 			});
 			store.put({ id: 'n1', path: 'b.md', content: 'b\n', dirty: true });
 			store.queue({ op: 'write', noteId: 'n0', path: 'a.md' });
@@ -1060,10 +979,7 @@ describe('push', () => {
 					? new AuthError('expired')
 					: undefined;
 			});
-			const withAuth = createSyncEngine({
-				provider,
-				store,
-				now: () => AT,
+			const withAuth = engineWith({
 				reauthorize: () => {
 					refreshed += 1;
 					return Promise.resolve();
@@ -1090,8 +1006,7 @@ describe('push', () => {
 				path: 'b.md',
 				content: 'mine\n',
 				dirty: true,
-				remoteId: entry.remoteId,
-				remoteVersion: entry.version,
+				...boundTo(entry),
 			});
 			store.put({ id: 'n2', path: 'c.md', content: 'c\n', dirty: true });
 			store.put({ id: 'n3', path: 'd.md', content: 'd\n', dirty: true });
@@ -1133,8 +1048,7 @@ describe('push', () => {
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
-			remoteId: seeded.remoteId,
-			remoteVersion: seeded.version,
+			...boundTo(seeded),
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		provider.setFault((call) =>
@@ -1160,8 +1074,7 @@ describe('push', () => {
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'mine\n',
-			remoteId: seeded.remoteId,
-			remoteVersion: seeded.version,
+			...boundTo(seeded),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
 		provider.setFault((call) => {
@@ -1225,8 +1138,7 @@ describe('push', () => {
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
@@ -1256,8 +1168,7 @@ describe('push', () => {
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
@@ -1335,8 +1246,6 @@ describe('pushing a file', () => {
 		return store.queue({ op: 'upload', fileId: 'x1', path, attempts });
 	};
 
-	const remoteAt = (path: string) => provider.snapshot().find((entry) => entry.path === path);
-
 	/** A note behind the upload in the queue, to see whether it waited. */
 	const noteBehind = () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
@@ -1352,7 +1261,7 @@ describe('pushing a file', () => {
 
 		expect(result).toEqual({ status: 'ok', pulled: 0, pushed: 1, conflicts: [] });
 		expect(provider.bytesAt('a-1234abcd.png')).toEqual(PNG);
-		const made = remoteAt('a-1234abcd.png');
+		const made = remoteAt(provider, 'a-1234abcd.png');
 		expect(store.files()).toEqual([
 			{
 				id: 'x1',
@@ -1387,7 +1296,7 @@ describe('pushing a file', () => {
 		store.putFile({ id: 'x2', path: 'b.qqq', size: 3 }, { bytes: OTHER.slice(), pinned: true });
 		store.queue({ op: 'upload', fileId: 'x2', path: 'b.qqq' });
 
-		await createSyncEngine({ provider: telling, store, now: () => AT }).push();
+		await engineWith({ provider: telling }).push();
 
 		expect(asked).toEqual(['image/png', undefined]);
 	});
@@ -1402,8 +1311,7 @@ describe('pushing a file', () => {
 			{
 				id: 'x1',
 				path: 'a.png',
-				remoteId: sent.remoteId,
-				remoteVersion: sent.version,
+				...boundTo(sent),
 				size: PNG.byteLength,
 			},
 		]);
@@ -1422,7 +1330,7 @@ describe('pushing a file', () => {
 		const beside = conflictFilePath('a.png', AT);
 		expect(beside).toMatch(/\.png$/u);
 		expect(provider.bytesAt(beside)).toEqual(PNG);
-		expect(remoteAt('a.png')?.remoteId).toBe(there.remoteId);
+		expect(remoteAt(provider, 'a.png')?.remoteId).toBe(there.remoteId);
 		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
 	});
 
@@ -1433,8 +1341,7 @@ describe('pushing a file', () => {
 		const other = {
 			id: 'x0',
 			path: 'Old/a.png',
-			remoteId: theirs.remoteId,
-			remoteVersion: theirs.version,
+			...boundTo(theirs),
 			size: PNG.byteLength,
 		};
 		store.putFile(other);
@@ -1453,8 +1360,7 @@ describe('pushing a file', () => {
 		store.putFile({
 			id: 'x0',
 			path: 'Trips/a.png',
-			remoteId: original.remoteId,
-			remoteVersion: original.version,
+			...boundTo(original),
 			size: PNG.byteLength,
 		});
 		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
@@ -1470,7 +1376,7 @@ describe('pushing a file', () => {
 		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
 		expect(store.files().map((file) => file.remoteId)).toEqual([
 			original.remoteId,
-			remoteAt('Work/a.png')?.remoteId,
+			remoteAt(provider, 'Work/a.png')?.remoteId,
 		]);
 	});
 
@@ -1594,7 +1500,7 @@ describe('pushing a file', () => {
 		provider.setFault(undefined);
 		expect((await engine.push()).status).toBe('ok');
 		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
-		expect(remoteAt('Trips/a.png')).toBeUndefined();
+		expect(remoteAt(provider, 'Trips/a.png')).toBeUndefined();
 	});
 
 	/** A copy of `Trips/a.png` the user made in `Work`, and the delete of the original. */
@@ -1642,7 +1548,7 @@ describe('pushing a file', () => {
 		provider.setFault(undefined);
 		expect((await engine.push()).status).toBe('ok');
 		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
-		expect(remoteAt('Trips/a.png')).toBeUndefined();
+		expect(remoteAt(provider, 'Trips/a.png')).toBeUndefined();
 	});
 
 	it.each([
@@ -1768,7 +1674,7 @@ describe('pushing a file', () => {
 			},
 		};
 
-		const result = await createSyncEngine({ provider: always, store, now: () => AT }).push();
+		const result = await engineWith({ provider: always }).push();
 
 		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 1 }));
 		expect(provider.snapshot().filter((entry) => entry.path.endsWith('.x'))).toHaveLength(9);
@@ -1784,13 +1690,13 @@ describe('pushing a file', () => {
 
 		expect((await engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('a.png', AT);
-		expect(remoteAt('a.png')).toBeUndefined();
+		expect(remoteAt(provider, 'a.png')).toBeUndefined();
 		expect(provider.bytesAt(beside)).toEqual(PNG);
 		expect(store.files()).toEqual([
 			expect.objectContaining({
 				id: 'x1',
 				path: beside,
-				remoteId: remoteAt(beside)?.remoteId,
+				remoteId: remoteAt(provider, beside)?.remoteId,
 			}),
 		]);
 	});
@@ -1821,7 +1727,7 @@ describe('pushing a file', () => {
 
 		provider.setFault(undefined);
 		expect((await engine.push()).status).toBe('ok');
-		const made = remoteAt('Trips/a.png');
+		const made = remoteAt(provider, 'Trips/a.png');
 		expect(made?.remoteId).not.toBe(original.remoteId);
 		expect(store.files()).toEqual([
 			expect.objectContaining({ id: 'x2', path: 'Trips/a.png', remoteId: made?.remoteId }),
@@ -1852,7 +1758,7 @@ describe('pushing a file', () => {
 		provider.setFault(undefined);
 		expect((await engine.push()).status).toBe('ok');
 		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
-		expect(remoteAt('Home/a.png')).toBeUndefined();
+		expect(remoteAt(provider, 'Home/a.png')).toBeUndefined();
 	});
 
 	it('knows the same file by the size of what it sends', async () => {
@@ -1880,7 +1786,7 @@ describe('pushing a file', () => {
 		// Sent now, it would find the file and leave the directory for good:
 		// an empty notebook, once the delete lands.
 		await copiedThenDeleted();
-		const trips = provider.snapshot().find((entry) => entry.path === 'Trips');
+		const trips = remoteAt(provider, 'Trips');
 		store.queue({ op: 'rmdir', path: 'Trips', remoteId: trips?.remoteId });
 		offline();
 
@@ -1889,13 +1795,12 @@ describe('pushing a file', () => {
 
 		provider.setFault(undefined);
 		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt('Trips')).toBeUndefined();
+		expect(remoteAt(provider, 'Trips')).toBeUndefined();
 	});
 });
 
 describe('moving a file', () => {
 	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 10, 13]);
-	const remoteAt = (path: string) => provider.snapshot().find((entry) => entry.path === path);
 
 	/** A file in `Trips` the user has moved to `Work/a.png`, the move queued. */
 	const movedHere = async () => {
@@ -1904,8 +1809,7 @@ describe('moving a file', () => {
 		store.putFile({
 			id: 'x1',
 			path: 'Work/a.png',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 			size: PNG.byteLength,
 		});
 		store.queue({
@@ -1921,9 +1825,9 @@ describe('moving a file', () => {
 		const file = await movedHere();
 
 		expect((await engine.push()).status).toBe('ok');
-		const landed = remoteAt('Work/a.png');
+		const landed = remoteAt(provider, 'Work/a.png');
 		expect(landed?.remoteId).toBe(file.remoteId);
-		expect(remoteAt('Trips/a.png')).toBeUndefined();
+		expect(remoteAt(provider, 'Trips/a.png')).toBeUndefined();
 		expect(store.files()).toEqual([
 			{
 				id: 'x1',
@@ -1951,7 +1855,7 @@ describe('moving a file', () => {
 		await provider.delete(file);
 
 		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt('Work')).toBeUndefined();
+		expect(remoteAt(provider, 'Work')).toBeUndefined();
 		expect(store.ops()).toEqual([]);
 		expect(store.files()[0]?.remoteId).toBe(file.remoteId);
 	});
@@ -1964,7 +1868,7 @@ describe('moving a file', () => {
 		const there = await provider.createFile('Work/a.png', PNG.slice());
 
 		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt('Trips/a.png')?.remoteId).toBe(file.remoteId);
+		expect(remoteAt(provider, 'Trips/a.png')?.remoteId).toBe(file.remoteId);
 		expect(store.files()).toEqual([
 			expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
 		]);
@@ -1977,8 +1881,8 @@ describe('moving a file', () => {
 
 		expect((await engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('Work/a.png', AT);
-		expect(remoteAt(beside)?.remoteId).toBe(file.remoteId);
-		expect(remoteAt('Work/a.png')?.remoteId).toBe(there.remoteId);
+		expect(remoteAt(provider, beside)?.remoteId).toBe(file.remoteId);
+		expect(remoteAt(provider, 'Work/a.png')?.remoteId).toBe(there.remoteId);
 		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
 	});
 
@@ -1991,14 +1895,14 @@ describe('moving a file', () => {
 		const strict: StorageProvider = {
 			...provider,
 			move: (ref, path) => {
-				const there = remoteAt(path);
+				const there = remoteAt(provider, path);
 				return there === undefined
 					? provider.move(ref, path)
 					: Promise.reject(new ConflictError(there));
 			},
 		};
 
-		const result = await createSyncEngine({ provider: strict, store, now: () => AT }).push();
+		const result = await engineWith({ provider: strict }).push();
 
 		expect(result.status).toBe('ok');
 		expect(store.files()).toEqual([
@@ -2015,15 +1919,14 @@ describe('moving a file', () => {
 		const other = {
 			id: 'x0',
 			path: 'Old/a.png',
-			remoteId: there.remoteId,
-			remoteVersion: there.version,
+			...boundTo(there),
 			size: PNG.byteLength,
 		};
 		store.putFile(other);
 
 		expect((await engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('Work/a.png', AT);
-		expect(remoteAt(beside)?.remoteId).toBe(file.remoteId);
+		expect(remoteAt(provider, beside)?.remoteId).toBe(file.remoteId);
 		expect(store.files()).toEqual([other, expect.objectContaining({ id: 'x1', path: beside })]);
 	});
 
@@ -2046,11 +1949,11 @@ describe('moving a file', () => {
 		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
 
 		expect((await engine.push()).status).toBe('retry');
-		expect(remoteAt('Trips/a.png')?.remoteId).toBe(file.remoteId);
+		expect(remoteAt(provider, 'Trips/a.png')?.remoteId).toBe(file.remoteId);
 
 		provider.setFault(undefined);
 		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt('Work/a.png')?.remoteId).toBe(file.remoteId);
+		expect(remoteAt(provider, 'Work/a.png')?.remoteId).toBe(file.remoteId);
 		expect(store.files()).toEqual([
 			expect.objectContaining({ id: 'x0', path: 'Home/a.png' }),
 			expect.objectContaining({ id: 'x1', path: 'Work/a.png', remoteId: file.remoteId }),
@@ -2071,11 +1974,6 @@ describe('moving a file', () => {
 describe('pulling a file that is not a note', () => {
 	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 10, 13]);
 	const OTHER = new Uint8Array([1, 2, 3]);
-	const remoteAt = (path: string) => {
-		const entry = provider.snapshot().find((each) => each.path === path);
-		if (entry === undefined) throw new Error(`nothing at ${path}`);
-		return entry;
-	};
 	const opsNow = () => store.ops().map(({ seq: _seq, attempts: _attempts, ...op }) => op);
 
 	it('mirrors it as a row, bound, of its size, without reading a byte', async () => {
@@ -2089,8 +1987,7 @@ describe('pulling a file that is not a note', () => {
 			{
 				id: 'copy-1',
 				path: 'Trips/a.png',
-				remoteId: file.remoteId,
-				remoteVersion: file.version,
+				...boundTo(file),
 				size: PNG.byteLength,
 			},
 		]);
@@ -2106,7 +2003,7 @@ describe('pulling a file that is not a note', () => {
 		provider.plantBytes('Trips/a.png', OTHER);
 
 		await engine.pull();
-		const now = remoteAt('Trips/a.png');
+		const now = entryAt(provider, 'Trips/a.png');
 		expect(store.files()).toEqual([
 			{
 				id: 'copy-1',
@@ -2171,7 +2068,7 @@ describe('pulling a file that is not a note', () => {
 		await provider.move(file, 'b.png');
 		const other = await provider.createFile('a.png', OTHER.slice());
 
-		await pullNow([other, remoteAt('b.png')]);
+		await pullNow([other, entryAt(provider, 'b.png')]);
 
 		expect(store.files()).toEqual([
 			expect.objectContaining({ path: 'a.png', remoteId: other.remoteId }),
@@ -2195,7 +2092,7 @@ describe('pulling a file that is not a note', () => {
 
 		await pullNow([
 			{ deleted: true, remoteId: folder.remoteId, path: 'Trips' },
-			remoteAt('a.png'),
+			entryAt(provider, 'a.png'),
 		]);
 
 		expect(store.files()).toEqual([
@@ -2212,7 +2109,7 @@ describe('pulling a file that is not a note', () => {
 		await provider.delete(file);
 		await provider.move(folder, 'Holidays');
 
-		await pullNow([remoteAt('Holidays'), { deleted: true, path: 'Trips/a.png' }]);
+		await pullNow([entryAt(provider, 'Holidays'), { deleted: true, path: 'Trips/a.png' }]);
 
 		expect(store.files()).toEqual([]);
 		expect(store.folders().map((each) => each.path)).toEqual(['Holidays']);
@@ -2239,8 +2136,7 @@ describe('pulling a file that is not a note', () => {
 				{
 					id: 'x1',
 					path: 'a.png',
-					remoteId: there.remoteId,
-					remoteVersion: there.version,
+					...boundTo(there),
 					size: PNG.byteLength,
 				},
 			]);
@@ -2310,7 +2206,7 @@ describe('pulling a file that is not a note', () => {
 			await provider.createFile('Trips/b.png', OTHER.slice());
 			await engine.pull();
 			added('Trips/a.png');
-			await provider.delete(remoteAt('Trips'));
+			await provider.delete(entryAt(provider, 'Trips'));
 
 			expect((await engine.pull()).status).toBe('ok');
 			expect(store.files()).toEqual([{ id: 'x1', path: 'Trips/a.png', size: 8 }]);
@@ -2516,7 +2412,7 @@ describe('pulling a file that is not a note', () => {
 				},
 			]);
 			expect((await engine.push()).status).toBe('ok');
-			expect(remoteAt('Work/a.png').remoteId).toBe(file.remoteId);
+			expect(entryAt(provider, 'Work/a.png').remoteId).toBe(file.remoteId);
 		});
 
 		it('steps aside for a different file arriving at the name it is moving to', async () => {
@@ -2539,7 +2435,7 @@ describe('pulling a file that is not a note', () => {
 		it('keeps the notebook it is moving into when that is deleted there', async () => {
 			await provider.createFolder('Work');
 			const file = await moved();
-			await provider.delete(remoteAt('Work'));
+			await provider.delete(entryAt(provider, 'Work'));
 
 			await engine.pull();
 
@@ -2548,7 +2444,7 @@ describe('pulling a file that is not a note', () => {
 			]);
 			expect(store.folders().map((folder) => folder.path)).toContain('Work');
 			expect((await engine.push()).status).toBe('ok');
-			expect(remoteAt('Work/a.png').remoteId).toBe(file.remoteId);
+			expect(entryAt(provider, 'Work/a.png').remoteId).toBe(file.remoteId);
 		});
 
 		it('steps aside for a file arriving where it is going, though its own news came first', async () => {
@@ -2557,7 +2453,7 @@ describe('pulling a file that is not a note', () => {
 			await provider.createFolder('Work');
 			const there = await provider.createFile('Work/a.png', OTHER.slice());
 
-			await pullNow([remoteAt('Trips/b.png'), there]);
+			await pullNow([entryAt(provider, 'Trips/b.png'), there]);
 
 			const aside = conflictFilePath('Work/a.png', AT);
 			expect(store.files()).toEqual([
@@ -2575,7 +2471,7 @@ describe('pulling a file that is not a note', () => {
 			await moved();
 			await provider.createFolder('Work');
 			const there = await provider.createFile('Work/a.png', OTHER.slice());
-			const trips = remoteAt('Trips');
+			const trips = entryAt(provider, 'Trips');
 			await provider.delete(trips);
 
 			await pullNow([there, { deleted: true, remoteId: trips.remoteId, path: 'Trips' }]);
@@ -2600,7 +2496,7 @@ describe('pulling a file that is not a note', () => {
 				path: 'Work/a.png',
 				targetPath: 'Home/a.png',
 			});
-			const trips = remoteAt('Trips');
+			const trips = entryAt(provider, 'Trips');
 			await provider.delete(trips);
 
 			await pullNow([{ deleted: true, remoteId: trips.remoteId, path: 'Trips' }]);
@@ -2613,8 +2509,11 @@ describe('pulling a file that is not a note', () => {
 		});
 
 		it.each([
-			['by its notebook being deleted there', () => provider.delete(remoteAt('Trips'))],
-			['by its own deletion there', () => provider.delete(remoteAt('Trips/a.png'))],
+			[
+				'by its notebook being deleted there',
+				() => provider.delete(entryAt(provider, 'Trips')),
+			],
+			['by its own deletion there', () => provider.delete(entryAt(provider, 'Trips/a.png'))],
 		])('is let go of when its file is taken %s, held nowhere here', async (_how, take) => {
 			// Pending after the pull whatever is held, so that what the engine
 			// decides next about the row is about a row the store has (#194);
@@ -2633,9 +2532,12 @@ describe('pulling a file that is not a note', () => {
 		});
 
 		it.each([
-			['by its notebook being deleted there', () => provider.delete(remoteAt('Trips'))],
-			['by its own deletion there', () => provider.delete(remoteAt('Trips/a.png'))],
-			['out of sight of a rescan', () => provider.delete(remoteAt('Trips/a.png'))],
+			[
+				'by its notebook being deleted there',
+				() => provider.delete(entryAt(provider, 'Trips')),
+			],
+			['by its own deletion there', () => provider.delete(entryAt(provider, 'Trips/a.png'))],
+			['out of sight of a rescan', () => provider.delete(entryAt(provider, 'Trips/a.png'))],
 		])('is sent again where the user put it when its file is taken %s', async (how, take) => {
 			// The move is the user's, as an edit is: kept as far as this
 			// device can keep it.
@@ -2725,7 +2627,7 @@ describe('pulling a file that is not a note', () => {
 		await provider.delete(a);
 		await provider.move(b, 'A');
 
-		await pullNow([{ deleted: true, remoteId: a.remoteId }, remoteAt('A')]);
+		await pullNow([{ deleted: true, remoteId: a.remoteId }, entryAt(provider, 'A')]);
 
 		expect(store.files()).toEqual([
 			{ id: 'x1', path: conflictFilePath('A/x.png', AT), size: PNG.byteLength },
@@ -2741,7 +2643,7 @@ describe('pulling a file that is not a note', () => {
 		await provider.move(trips, 'Holidays');
 		const other = await provider.createFile('Holidays/a.png', OTHER.slice());
 
-		await pullNow([remoteAt('Holidays'), other]);
+		await pullNow([entryAt(provider, 'Holidays'), other]);
 
 		expect(store.files()).toEqual([
 			expect.objectContaining({ path: 'Holidays/a.png', remoteId: other.remoteId }),
@@ -2806,7 +2708,7 @@ describe('pulling a file that is not a note', () => {
 			await provider.move(folder, 'Holidays');
 
 			await pullNow([
-				remoteAt('Holidays'),
+				entryAt(provider, 'Holidays'),
 				{ deleted: true, path: 'Trips/a.png' },
 				{ ...file, path: '.trash/a.png' },
 			]);
@@ -2942,8 +2844,7 @@ describe('a note deleted here and changed there', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
@@ -2968,8 +2869,7 @@ describe('a move whose file is no longer there', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'body\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 		store.put({ id: 'n2', path: 'c.md', content: 'behind it\n', dirty: true });
@@ -3002,11 +2902,7 @@ describe('a note the user is still typing into', () => {
 			},
 		};
 
-		const result = await createSyncEngine({
-			provider: whileTyping,
-			store,
-			now: () => AT,
-		}).push();
+		const result = await engineWith({ provider: whileTyping }).push();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('and then more\n');
@@ -3022,10 +2918,7 @@ describe('authorization', () => {
 		provider.setFault((call) =>
 			call.op === 'write' && refreshed === 0 ? new AuthError('expired') : undefined
 		);
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -3051,8 +2944,7 @@ describe('authorization', () => {
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
@@ -3060,10 +2952,7 @@ describe('authorization', () => {
 		provider.setFault((call) =>
 			call.op === 'read' && refreshed === 0 ? new AuthError('expired') : undefined
 		);
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -3091,10 +2980,7 @@ describe('authorization', () => {
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		let refreshed = 0;
 		provider.setFault((call) => (call.op === 'write' ? new AuthError('expired') : undefined));
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -3310,7 +3196,7 @@ describe('deletions that are not about a note', () => {
 		// front of the user for something that did not happen.
 		await provider.write('.cache', 'binary\n', {});
 		await engine.pull();
-		const hidden = provider.snapshot().find((node) => node.path === '.cache');
+		const hidden = remoteAt(provider, '.cache');
 		if (hidden === undefined) throw new Error('no file');
 		await provider.delete(hidden);
 
@@ -3326,7 +3212,7 @@ describe('deletions that are not about a note', () => {
 		await provider.write('photo.png', 'binary\n', {});
 		await engine.pull();
 		expect(store.files().map((file) => file.path)).toEqual(['photo.png']);
-		const shot = provider.snapshot().find((node) => node.path === 'photo.png');
+		const shot = remoteAt(provider, 'photo.png');
 		if (shot === undefined) throw new Error('no file');
 		await provider.delete(shot);
 
@@ -3355,8 +3241,7 @@ describe('deletions that are not about a note', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 
 		await pullNow([{ path: 'a.md', deleted: true }]);
@@ -3452,8 +3337,7 @@ describe('a file the user duplicated', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: noteFile('n1', 'my unpushed edit'),
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		await provider.write('a copy.md', noteFile('n1', 'original'), {});
@@ -3531,7 +3415,7 @@ describe('a rescan of a remote that changed while the cursor was dead', () => {
 		await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
 		killTheCursor();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 		await provider.createFolder('Work');
@@ -3640,8 +3524,7 @@ describe('a deletion the same batch also describes as present', () => {
 			id: 'mine',
 			path: 'a.md',
 			content: 'body\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await provider.delete(entry);
 
@@ -3667,8 +3550,7 @@ describe('a deletion the same batch also describes as present', () => {
 			id: 'mine',
 			path: 'b.md',
 			content: 'body\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await provider.delete(entry);
 
@@ -3728,8 +3610,7 @@ describe('a deletion the same batch also describes as present', () => {
 			id: 'mine',
 			path: 'a.md',
 			content: 'my edit\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		await provider.delete(entry);
@@ -3994,7 +3875,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
 		const before = noteAt('Work/a.md');
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		const moved = await provider.move(folder, 'Archive');
 
@@ -4014,7 +3895,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
 		const before = noteAt('Work/a.md');
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		const moved = await provider.move(folder, 'Archive');
 
@@ -4035,7 +3916,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await remoteFile('Work/b.md', 'two\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(file);
 
@@ -4051,7 +3932,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		await provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 
@@ -4167,10 +4048,8 @@ describe('an entry the provider sent twice', () => {
 describe('a store that cannot answer', () => {
 	/** The memory store with one method replaced by a rejection. */
 	const breaking = (method: keyof SyncStore): SyncEngine =>
-		createSyncEngine({
-			provider,
+		engineWith({
 			store: { ...store, [method]: () => Promise.reject(new Error(`${method} failed`)) },
-			now: () => AT,
 		});
 
 	it.each(['cursor', 'pendingOps', 'failOp'] as const)(
@@ -4339,7 +4218,7 @@ describe('a note of ours where a remote one lands', () => {
 
 		// On the remote, `Work` was deleted and made again, and a file moved in.
 		// One batch can carry the deletion of the old one and the file in the new.
-		const old = provider.snapshot().find((node) => node.path === 'Work');
+		const old = remoteAt(provider, 'Work');
 		if (old === undefined) throw new Error('no folder');
 		await provider.delete(old);
 		await provider.createFolder('Work');
@@ -4406,7 +4285,7 @@ describe('a note of ours where a remote one lands', () => {
 		const loose = await remoteFile('loose.md', 'theirs\n');
 		await engine.pull();
 		const before = noteAt('Work/a.md');
-		const old = provider.snapshot().find((node) => node.path === 'Work');
+		const old = remoteAt(provider, 'Work');
 		if (old === undefined) throw new Error('no folder');
 
 		const renamed = await provider.move(old, 'Archive');
@@ -4434,15 +4313,13 @@ describe('a note of ours where a remote one lands', () => {
 			id: 'mine',
 			path: 'Groceries.md',
 			content: 'mine\n',
-			remoteId: ours.remoteId,
-			remoteVersion: ours.version,
+			...boundTo(ours),
 		});
 		store.put({
 			id: 'theirs',
 			path: 'other.md',
 			content: 'theirs\n',
-			remoteId: theirs.remoteId,
-			remoteVersion: theirs.version,
+			...boundTo(theirs),
 		});
 		store.queue({
 			op: 'move',
@@ -4476,7 +4353,7 @@ describe('a note of ours where a remote one lands', () => {
 		await provider.createFolder('Old');
 		await engine.pull();
 		store.put({ id: 'mine', path: 'Old/b.md', content: 'my edit\n', dirty: true });
-		const old = provider.snapshot().find((node) => node.path === 'Old');
+		const old = remoteAt(provider, 'Old');
 		if (old === undefined) throw new Error('no folder');
 
 		const renamed = await provider.move(old, 'New');
@@ -4508,7 +4385,7 @@ describe('a note of ours where a remote one lands', () => {
 			content: 'an earlier copy\n',
 			dirty: true,
 		});
-		const old = provider.snapshot().find((node) => node.path === 'Old');
+		const old = remoteAt(provider, 'Old');
 		if (old === undefined) throw new Error('no folder');
 
 		const renamed = await provider.move(old, 'New');
@@ -4561,8 +4438,7 @@ describe('a note of ours where a remote one lands', () => {
 			id: 'theirs',
 			path: 'other.md',
 			content: 'theirs\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 		});
 		store.put({ id: 'here', path: 'New/b.md', content: 'already here\n', dirty: true });
 		store.put({ id: 'carried', path: 'Old/b.md', content: 'carried in\n', dirty: true });
@@ -4631,8 +4507,7 @@ describe('a push interrupted after the write landed', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -4694,8 +4569,7 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: mine.remoteId,
-			remoteVersion: mine.version,
+			...boundTo(mine),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
@@ -4720,13 +4594,12 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 			id: 'n1',
 			path: 'moved-by-pull.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
 		const seen: string[] = [];
-		const byPath = createSyncEngine({
+		const byPath = engineWith({
 			provider: {
 				...provider,
 				move: (ref, target) => {
@@ -4734,8 +4607,6 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 					return provider.move({ remoteId: ref.remoteId, path: ref.path }, target);
 				},
 			},
-			store,
-			now: () => AT,
 		});
 		await byPath.push();
 
@@ -4751,13 +4622,12 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 			id: 'n1',
 			path: 'moved-by-pull.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
 		const seen: string[] = [];
-		const byPath = createSyncEngine({
+		const byPath = engineWith({
 			provider: {
 				...provider,
 				delete: (ref) => {
@@ -4765,8 +4635,6 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 					return provider.delete(ref);
 				},
 			},
-			store,
-			now: () => AT,
 		});
 		await byPath.push();
 
@@ -4782,8 +4650,7 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md' });
 
@@ -4822,8 +4689,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
@@ -4867,8 +4733,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
@@ -4892,8 +4757,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
@@ -4929,8 +4793,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -4957,8 +4820,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'Work/Inner/a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
@@ -4984,8 +4846,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -5013,8 +4874,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -5043,8 +4903,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
@@ -5082,8 +4941,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: mine.remoteId,
-			remoteVersion: mine.version,
+			...boundTo(mine),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -5122,8 +4980,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
-			remoteId: mine.remoteId,
-			remoteVersion: mine.version,
+			...boundTo(mine),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -5147,8 +5004,7 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -5168,18 +5024,15 @@ describe('a write whose file is not where it was', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		const moved = await provider.move(entry, 'renamed.md');
 
 		// The one thing the fake models differently, fed in as Dropbox sends it.
-		const stable = createSyncEngine({
+		const stable = engineWith({
 			provider: reporting(provider, [{ ...moved, version: entry.version }]),
-			store,
-			now: () => AT,
 		});
 		await stable.pull();
 
@@ -5297,7 +5150,7 @@ describe('the bytes a note last synced', () => {
 			read: () => Promise.resolve({ content: 'one\n', version: entry.version }),
 		};
 
-		const pulled = await createSyncEngine({ provider: stale, store, now: () => AT }).pull();
+		const pulled = await engineWith({ provider: stale }).pull();
 		await engine.sync();
 
 		expect(pulled.conflicts).toHaveLength(1);
@@ -5313,7 +5166,7 @@ describe('the bytes a note last synced', () => {
 		await provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		const note = noteAt('Work/a.md')!;
 		store.put({ ...note, content: 'mine\n', dirty: true });
 		const entries: ChangeEntry[] = [
@@ -5322,11 +5175,7 @@ describe('the bytes a note last synced', () => {
 			{ ...file, path: 'a.md' },
 		];
 
-		await createSyncEngine({
-			provider: reporting(provider, entries),
-			store,
-			now: () => AT,
-		}).pull();
+		await engineWith({ provider: reporting(provider, entries) }).pull();
 
 		expect(noteAt('a.md')).toMatchObject({ id: note.id, remoteId: file.remoteId, dirty: true });
 		expect(hashOf(note.id)).toBe(await contentHash('one\n'));
@@ -5420,8 +5269,7 @@ describe('a dead cursor', () => {
 			id: mine,
 			path: 'a.md',
 			content: 'edited\n',
-			remoteId: one.remoteId,
-			remoteVersion: one.version,
+			...boundTo(one),
 			dirty: true,
 		});
 		await provider.delete(one);
@@ -5463,7 +5311,7 @@ describe('a dead cursor', () => {
 			expect(kept?.dirty).toBeFalsy();
 			killTheCursor(true);
 			// The remote lost it; the store still points at the file it had.
-			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			const file = remoteAt(provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
 			await provider.delete(file);
 
@@ -5490,7 +5338,7 @@ describe('a dead cursor', () => {
 			await remoteFile('Work/a.md', 'one\n');
 			await engine.pull();
 			killTheCursor(true);
-			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			const folder = remoteAt(provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
 			await provider.delete(folder);
 
@@ -5520,7 +5368,7 @@ describe('a dead cursor', () => {
 			await remoteFile('Work/Sub/a.md', 'one\n');
 			await engine.pull();
 			killTheCursor(true);
-			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			const folder = remoteAt(provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
 			await provider.delete(folder);
 
@@ -5551,10 +5399,10 @@ describe('a dead cursor', () => {
 				...store,
 				foldersWithRemote: async () => [...(await store.foldersWithRemote())].reverse(),
 			};
-			const engineOver = createSyncEngine({ provider, store: backwards, now: () => AT });
+			const engineOver = engineWith({ store: backwards });
 			await engineOver.pull();
 			killTheCursor(true);
-			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			const folder = remoteAt(provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
 			await provider.delete(folder);
 
@@ -5646,13 +5494,13 @@ describe('a dead cursor', () => {
 			provider = createFakeProvider({ pageSize: 1 });
 			await provider.ensureRoot();
 			store = createMemoryStore();
-			engine = createSyncEngine({ provider, store, now: () => AT });
+			engine = engineWith();
 			await provider.write('a.md', 'one\n', {});
 			await provider.write('b.md', 'two\n', {});
 			await provider.write('c.md', 'three\n', {});
 			await engine.pull();
 			killTheCursor(true);
-			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			const file = remoteAt(provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
 			await provider.delete(file);
 
@@ -5671,7 +5519,7 @@ describe('a dead cursor', () => {
 			await remoteFile('a.md', 'one\n');
 			await engine.pull();
 			killTheCursor();
-			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			const file = remoteAt(provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
 			await provider.delete(file);
 
@@ -5725,10 +5573,7 @@ describe('a dead cursor', () => {
 		await provider.write('b.md', '2\n', {});
 		await provider.write('c.md', '3\n', {});
 		store = createMemoryStore();
-		engine = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		engine = engineWith({
 			// One id per note. A constant here would have all three land on one
 			// row, and the test would fail for a reason of its own making.
 			newId: () => {
@@ -5813,24 +5658,10 @@ describe('a provider that reports a folder recursively', () => {
 		await provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		const note = noteAt('Work/a.md');
 		if (folder === undefined || note === undefined) throw new Error('not set up');
 		return { file, folder, noteId: note.id };
-	};
-
-	const pullReporting = async (entries: readonly ChangeEntry[]) => {
-		const reported = createSyncEngine({
-			provider: reporting(provider, entries),
-			store,
-			now: () => AT,
-			// Distinct from the ids `setUpWork` handed out, and from each other.
-			newId: () => {
-				fresh += 1;
-				return `fresh-${String(fresh)}`;
-			},
-		});
-		return reported.pull();
 	};
 
 	it('deletes a folder and everything in it without failing the batch', async () => {
@@ -5840,11 +5671,11 @@ describe('a provider that reports a folder recursively', () => {
 		// moves only with the batch, so the next pull gets the same one back.
 		const { file, folder } = await setUpWork();
 		await provider.createFolder('Work/Deep');
-		const deep = provider.snapshot().find((node) => node.path === 'Work/Deep');
+		const deep = remoteAt(provider, 'Work/Deep');
 		if (deep === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/Deep', deleted: true, remoteId: deep.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
@@ -5867,10 +5698,10 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder, noteId } = await setUpWork();
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
-		const out = provider.snapshot().find((node) => node.path === 'a.md');
+		const out = remoteAt(provider, 'a.md');
 		if (out === undefined) throw new Error('no file');
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			out,
@@ -5890,7 +5721,7 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder } = await setUpWork();
 		await provider.delete(folder);
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 		]);
@@ -5909,7 +5740,7 @@ describe('a provider that reports a folder recursively', () => {
 		store.put({ ...note, content: 'mine\n', dirty: true });
 		await provider.delete(folder);
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 		]);
@@ -5923,10 +5754,10 @@ describe('a provider that reports a folder recursively', () => {
 		// folder and the note in it are gone; the last two say where they went.
 		const { file, folder, noteId } = await setUpWork();
 		const moved = await provider.move(folder, 'Archive');
-		const movedFile = provider.snapshot().find((node) => node.path === 'Archive/a.md');
+		const movedFile = remoteAt(provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			moved,
@@ -5952,10 +5783,10 @@ describe('a provider that reports a folder recursively', () => {
 		// thing left to match on is what we already hold at that path.
 		const { folder, noteId } = await setUpWork();
 		const moved = await provider.move(folder, 'Archive');
-		const movedFile = provider.snapshot().find((node) => node.path === 'Archive/a.md');
+		const movedFile = remoteAt(provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true },
 			{ path: 'Work/a.md', deleted: true },
 			moved,
@@ -5982,10 +5813,10 @@ describe('a provider that reports a folder recursively', () => {
 		if (note === undefined) throw new Error('no note');
 		store.put({ ...note, content: 'mine\n', dirty: true });
 		const moved = await provider.move(folder, 'Archive');
-		const movedFile = provider.snapshot().find((each) => each.path === 'Archive/a.md');
+		const movedFile = remoteAt(provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true },
 			{ path: 'Work/a.md', deleted: true },
 			moved,
@@ -6006,10 +5837,10 @@ describe('a provider that reports a folder recursively', () => {
 		store.put({ ...(recorded ? note : unrecorded), content: 'mine\n', dirty: true });
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
-		const out = provider.snapshot().find((each) => each.path === 'a.md');
+		const out = remoteAt(provider, 'a.md');
 		if (out === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			out,
@@ -6049,7 +5880,7 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder } = await setUpWork();
 		await provider.delete(folder);
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
@@ -6070,7 +5901,7 @@ describe('a provider that reports a folder recursively', () => {
 			await setUpWork();
 			store.putFolder({ path: '', remoteId: 'root-id' });
 
-			const result = await pullReporting([{ path, deleted: true, remoteId: 'root-id' }]);
+			const result = await pullNow([{ path, deleted: true, remoteId: 'root-id' }]);
 
 			expect(result.status).toBe('ok');
 			expect(noteAt('Work/a.md')).toBeDefined();
@@ -6085,7 +5916,7 @@ describe('a provider that reports a folder recursively', () => {
 		await setUpWork();
 		const root = await provider.ensureRoot();
 
-		await pullReporting([
+		await pullNow([
 			{
 				remoteId: root.rootId,
 				path: '',
@@ -6194,13 +6025,12 @@ describe('a remote folder move', () => {
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		await engine.pull();
 
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.move(folder, 'Archive');
 		await engine.pull();
@@ -6218,14 +6048,13 @@ describe('a remote folder move', () => {
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
 		await engine.pull();
 
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.move(folder, 'Archive');
 		await engine.pull();
@@ -6525,12 +6354,11 @@ describe('a remote folder delete', () => {
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'one\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 		});
 		await engine.pull();
 
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 		await engine.pull();
@@ -6545,7 +6373,7 @@ describe('a remote folder delete', () => {
 		const folderOnly = createFakeProvider({ folderChanges: 'folder-only' });
 		await folderOnly.ensureRoot();
 		const local = createMemoryStore();
-		const solo = createSyncEngine({ provider: folderOnly, store: local, now: () => AT });
+		const solo = engineWith({ provider: folderOnly, store: local });
 
 		await folderOnly.createFolder('Work');
 		const entry = await folderOnly.write('Work/a.md', 'one\n', {});
@@ -6553,13 +6381,12 @@ describe('a remote folder delete', () => {
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'edited\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		await solo.pull();
 
-		const folder = folderOnly.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(folderOnly, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await folderOnly.delete(folder);
 		await solo.pull();
@@ -6569,7 +6396,7 @@ describe('a remote folder delete', () => {
 		expect(kept?.remoteId).toBeUndefined();
 		// This one drives a store of its own, so the file-wide `afterEach` is
 		// watching the wrong one.
-		expect(local.anomalies()).toEqual([]);
+		expectSoundStore(local);
 	});
 });
 
@@ -6580,8 +6407,7 @@ describe('sync', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -6807,12 +6633,6 @@ describe('a file moved back onto the path a folder rename carried its note off',
 	// `B/x.md` over a file at `A/x.md`, and the next edit finds nothing at its
 	// path, finds the file by id, finds no rename of its own to follow, and
 	// blocks the ordered queue.
-	const edited = (local: MemoryStore, id: string, content: string): void => {
-		const note = local.notes().find((each) => each.id === id);
-		if (note === undefined) throw new Error('no note');
-		local.put({ ...note, content, dirty: true });
-		local.queue({ op: 'write', noteId: id, path: note.path });
-	};
 
 	it('follows the file when the version survived the move', async () => {
 		// Dropbox's `rev` survives a move, so this is decided without a read.
@@ -6839,7 +6659,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 
 		// The version the feed was made to keep is not the fake's own.
 		store.put({ ...(noteAt('A/x.md') as SyncNote), remoteVersion: back.version });
-		edited(store, (before as SyncNote).id, 'edited\n');
+		editHere(store, noteAt('A/x.md') as SyncNote, 'edited\n');
 		expect((await engine.push()).status).toBe('ok');
 		expect(provider.contentAt('A/x.md')).toBe('edited\n');
 		expect(store.ops()).toEqual([]);
@@ -6852,7 +6672,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 			const remote = createFakeProvider({ folderChanges });
 			await remote.ensureRoot();
 			const local = createMemoryStore();
-			const solo = createSyncEngine({ provider: remote, store: local, now: () => AT });
+			const solo = engineWith({ provider: remote, store: local });
 			const folder = await remote.createFolder('A');
 			const file = await remote.write('A/x.md', 'one\n', {});
 			await solo.pull();
@@ -6867,11 +6687,12 @@ describe('a file moved back onto the path a folder rename carried its note off',
 			expect(local.notes().map((note) => note.path)).toEqual(['A/x.md']);
 			expect(local.notes()[0]?.id).toBe(before?.id);
 
-			edited(local, (before as SyncNote).id, 'edited\n');
+			editHere(local, local.notes()[0] as SyncNote, 'edited\n');
 			expect((await solo.push()).status).toBe('ok');
 			expect(remote.contentAt('A/x.md')).toBe('edited\n');
 			expect(local.ops()).toEqual([]);
-			expect(local.anomalies()).toEqual([]);
+			// A store of its own, which the file-wide `afterEach` is not watching.
+			expectSoundStore(local);
 		});
 	}
 
@@ -6882,7 +6703,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 		const file = await remoteFile('A/x.md', 'one\n');
 		await engine.pull();
 		const before = noteAt('A/x.md') as SyncNote;
-		edited(store, before.id, 'edited\n');
+		editHere(store, before, 'edited\n');
 
 		await provider.move(folder, 'B');
 		await provider.createFolder('A');
@@ -6929,8 +6750,7 @@ describe('a queued move whose destination folder is not on the remote yet', () =
 			id: 'n1',
 			path: 'Work/Deep/x.md',
 			content: 'x\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'Work/Deep/x.md' });
 
@@ -6947,8 +6767,7 @@ describe('a queued move whose destination folder is not on the remote yet', () =
 			id: 'n1',
 			path: 'x.md',
 			content: 'x\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'y.md' });
 		await provider.delete(file);
@@ -6973,8 +6792,7 @@ describe('a note the pull conflicted with a write still queued', () => {
 			id: 'n1',
 			path: 'x.md',
 			content: 'my edit\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'x.md' });
@@ -6984,9 +6802,7 @@ describe('a note the pull conflicted with a write still queued', () => {
 		await engine.push();
 
 		expect(provider.contentAt('x.md')).toBe('theirs\n');
-		expect(provider.snapshot().find((entry) => entry.path === 'x.md')?.version).toBe(
-			theirs.version
-		);
+		expect(remoteAt(provider, 'x.md')?.version).toBe(theirs.version);
 		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 });
@@ -7149,8 +6965,7 @@ describe('a note an earlier decision moved into a folder', () => {
 			id: 'n1',
 			path: 'X/a.md',
 			content: 'mine, edited\n',
-			remoteId: mine.remoteId,
-			remoteVersion: mine.version,
+			...boundTo(mine),
 			dirty: true,
 		});
 		// On the remote inside one window: ours moves X → Y (a rename moves no
@@ -7178,8 +6993,7 @@ describe('a note an earlier decision moved into a folder', () => {
 			id: 'n1',
 			path: 'X/a.md',
 			content: 'mine\n',
-			remoteId: mine.remoteId,
-			remoteVersion: mine.version,
+			...boundTo(mine),
 		});
 		const moved = await provider.move(mine, 'Y/a.md');
 		await provider.delete(moved);
@@ -7244,7 +7058,7 @@ describe('a write whose remote folder is gone', () => {
 		store.put({ ...mine, content: 'mine\n', dirty: true });
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
-		const out = provider.snapshot().find((each) => each.path === 'a.md');
+		const out = remoteAt(provider, 'a.md');
 		if (out === undefined) throw new Error('no file at a.md');
 
 		await pullNow([
@@ -7269,8 +7083,7 @@ describe('a pull carrying our own echo of a rename we have not pushed', () => {
 			id: 'n1',
 			path: 'c.md',
 			content: 'x\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'c.md' });
 		const theirs = await remoteFile('c.md', 'theirs\n');
@@ -7299,8 +7112,7 @@ describe('a push conflict over a file another note already holds', () => {
 			id: 'theirs',
 			path: 'c.md',
 			content: 'theirs\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 		});
 		await provider.move(file, 'b.md');
 		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
@@ -7331,8 +7143,7 @@ describe('a push conflict over a file another note already holds', () => {
 			id: 'theirs',
 			path: 'c.md',
 			content: 'theirs\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 		});
 		await provider.move(file, 'b.md');
 		await remoteFile(conflictPath('b.md', AT), 'somebody else\n');
@@ -7387,15 +7198,13 @@ describe('a queued rename onto a path the remote will not give up', () => {
 			id: 'n1',
 			path: 'y.md',
 			content: 'two\n',
-			remoteId: two.remoteId,
-			remoteVersion: two.version,
+			...boundTo(two),
 		});
 		store.put({
 			id: 'n2',
 			path: 'z.md',
 			content: 'one\n',
-			remoteId: one.remoteId,
-			remoteVersion: one.version,
+			...boundTo(one),
 		});
 		store.queue({ op: 'move', noteId: 'n1', path: 'y.md', targetPath: 'z.md' });
 		await provider.move(one, 'z.md');
@@ -7440,17 +7249,14 @@ describe('an op withdrawn after the queue was read', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: 'keep\n',
-			remoteId: kept.remoteId,
-			remoteVersion: kept.version,
+			...boundTo(kept),
 		});
 		const remove = store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 		const stale = await store.pendingOps();
 		await store.completeOp(remove.seq, { kind: 'done' });
 
-		const result = await createSyncEngine({
-			provider,
+		const result = await engineWith({
 			store: { ...store, pendingOps: () => Promise.resolve(stale) },
-			now: () => AT,
 		}).push();
 
 		expect(result).toMatchObject({ status: 'ok', pushed: 0 });
@@ -7470,8 +7276,7 @@ describe('a write that finds nothing, with an unrelated rename queued', () => {
 			id: 'n1',
 			path: 'c.md',
 			content: 'mine\n',
-			remoteId: file.remoteId,
-			remoteVersion: file.version,
+			...boundTo(file),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'c.md' });
@@ -7490,12 +7295,6 @@ describe('a write that finds nothing, with an unrelated rename queued', () => {
  * underneath one device found once it was (`randomRemote.test.ts`). Each test
  * here is one of those findings, reduced to the entries that caused it.
  */
-const entryAt = (path: string) => {
-	const found = provider.snapshot().find((entry) => entry.path === path);
-	if (found === undefined) throw new Error(`nothing at ${path}`);
-	return found;
-};
-
 const folderPaths = () =>
 	store
 		.folders()
@@ -7507,29 +7306,6 @@ const notePaths = () =>
 		.notes()
 		.map((note) => note.path)
 		.sort();
-
-/** The same provider, with `changes` handing out these pages one call at a time. */
-const paging = (base: StorageProvider, pages: readonly (readonly ChangeEntry[] | Error)[]) => {
-	const served = { count: 0 };
-	return {
-		...base,
-		changes: () => {
-			const index = served.count;
-			served.count += 1;
-			const page = pages[index];
-			if (page === undefined) throw new Error('asked for a page past the round');
-			if (page instanceof Error) return Promise.reject(page);
-			return Promise.resolve({
-				entries: page,
-				cursor: `page-${String(index)}`,
-				more: index < pages.length - 1,
-			});
-		},
-	};
-};
-
-const pullPages = (pages: readonly (readonly ChangeEntry[] | Error)[]) =>
-	createSyncEngine({ provider: paging(provider, pages), store, now: () => AT }).pull();
 
 describe('a notebook removed here, whose directory the remote still has', () => {
 	/** The folder paths the remote holds, which is what an `rmdir` is about. */
@@ -7585,7 +7361,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		expect(store.folders()).toEqual([
 			{
 				path: 'Plans',
-				remoteId: provider.snapshot().find((entry) => entry.path === 'Plans')?.remoteId,
+				remoteId: remoteAt(provider, 'Plans')?.remoteId,
 			},
 		]);
 	});
@@ -7686,14 +7462,10 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		await engine.push();
 
 		expect(remoteFolders()).toEqual(['Ours', 'Work']);
-		expect(provider.snapshot().find((entry) => entry.path === 'Work')?.remoteId).toBe(
-			theirs.remoteId
-		);
+		expect(remoteAt(provider, 'Work')?.remoteId).toBe(theirs.remoteId);
 		// Ours is the one the op named, and it is still there too: the folder
 		// that moved away is not what the path says any more.
-		expect(provider.snapshot().find((entry) => entry.path === 'Ours')?.remoteId).toBe(
-			made.remoteId
-		);
+		expect(remoteAt(provider, 'Ours')?.remoteId).toBe(made.remoteId);
 	});
 
 	it('does nothing at all without the id it was queued with', async () => {
@@ -7737,7 +7509,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		store.queue({ op: 'mkdir', path: 'Work' });
 		await engine.pull();
 		await engine.push();
-		const made = provider.snapshot().find((entry) => entry.path === 'Work');
+		const made = remoteAt(provider, 'Work');
 		expect(made?.remoteId).toBe(store.folders()[0]?.remoteId);
 		// The user deletes it again before the next round.
 		store.removeFolder('Work');
@@ -7775,7 +7547,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// marked as left instead, which touches nothing in it.
 		const blind = createFakeProvider({ listsEverything: false });
 		const theirs = createMemoryStore();
-		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
 		theirs.removeFolder('Work');
@@ -7805,7 +7577,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// that keeps a delete from taking it keeps the directory a notebook.
 		const blind = createFakeProvider({ listsEverything: false });
 		const theirs = createMemoryStore();
-		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
 		await blind.write('Work/theirs.md', 'theirs\n', {});
@@ -7825,7 +7597,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		const fake = createFakeProvider({ listsEverything: false });
 		const blind: StorageProvider = { ...fake, leaveFolder: undefined };
 		const theirs = createMemoryStore();
-		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
 		theirs.removeFolder('Work');
@@ -8007,8 +7779,7 @@ describe('a notebook the user moved a note into, removed by another device', () 
 			id: 'n1',
 			path: 'Plans/a.md',
 			content: 'a\n',
-			remoteId: entry.remoteId,
-			remoteVersion: entry.version,
+			...boundTo(entry),
 			syncedHash: await contentHash('a\n'),
 			dirty: false,
 		});
@@ -8100,7 +7871,7 @@ describe('a round of changes spread over several pages', () => {
 		await engine.pull();
 		const before = noteAt('C/A/n.md');
 
-		const moved = await provider.move(entryAt('C/A'), 'B');
+		const moved = await provider.move(entryAt(provider, 'C/A'), 'B');
 		await provider.delete(doomed);
 
 		const result = await pullPages([
@@ -8123,7 +7894,7 @@ describe('a round of changes spread over several pages', () => {
 		await engine.pull();
 		const before = noteAt('C/n.md');
 
-		const moved = await provider.move(entryAt('C/n.md'), 'n.md');
+		const moved = await provider.move(entryAt(provider, 'C/n.md'), 'n.md');
 		await provider.delete(doomed);
 
 		const result = await pullNow([
@@ -8147,12 +7918,11 @@ describe('a round of changes spread over several pages', () => {
 			id: 'n1',
 			path: 'C/n.md',
 			content: 'mine\n',
-			remoteId: first.remoteId,
-			remoteVersion: first.version,
+			...boundTo(first),
 			dirty: true,
 		});
 		await provider.write('C/n.md', 'theirs\n', { expectedVersion: first.version });
-		const moved = await provider.move(entryAt('C/n.md'), 'n.md');
+		const moved = await provider.move(entryAt(provider, 'C/n.md'), 'n.md');
 		await provider.delete(doomed);
 
 		const result = await pullNow([
@@ -8208,7 +7978,7 @@ describe('a round of changes spread over several pages', () => {
 				return store.notesUnder(path);
 			},
 		};
-		const big = createSyncEngine({ provider: paged, store: counting, now: () => AT });
+		const big = engineWith({ provider: paged, store: counting });
 		await big.pull();
 		const notes = 2000;
 		for (let folder = 0; folder < 20; folder += 1) {
@@ -8244,10 +8014,10 @@ describe('a folder moved into what it was', () => {
 		await remoteFile('C/c.md', 'c\n');
 		await engine.pull();
 
-		await provider.move(entryAt('B'), 'C/B');
-		await provider.move(entryAt('C'), 'B');
+		await provider.move(entryAt(provider, 'B'), 'C/B');
+		await provider.move(entryAt(provider, 'C'), 'B');
 
-		const result = await pullNow([entryAt('B/B'), entryAt('B')]);
+		const result = await pullNow([entryAt(provider, 'B/B'), entryAt(provider, 'B')]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'B/B']);
@@ -8297,7 +8067,7 @@ describe('an id-less deletion under a folder the round renames', () => {
 		await engine.pull();
 
 		await provider.delete(gone);
-		const renamed = await provider.move(entryAt('B'), 'A');
+		const renamed = await provider.move(entryAt(provider, 'B'), 'A');
 
 		const result = await pullNow([{ path: 'B/c.md', deleted: true }, renamed]);
 
@@ -8312,7 +8082,7 @@ describe('an id-less deletion under a folder the round renames', () => {
 		await engine.pull();
 
 		await provider.delete(gone);
-		const renamed = await provider.move(entryAt('C'), 'B');
+		const renamed = await provider.move(entryAt(provider, 'C'), 'B');
 
 		const result = await pullNow([
 			{ path: 'C/A', deleted: true },
@@ -8333,8 +8103,8 @@ describe('an id-less deletion under a folder the round renames', () => {
 		await remoteFile('C/A/n.md', 'n\n');
 		await engine.pull();
 
-		const renamed = await provider.move(entryAt('C'), 'B');
-		await provider.move(entryAt('B'), 'Z');
+		const renamed = await provider.move(entryAt(provider, 'C'), 'B');
+		await provider.move(entryAt(provider, 'B'), 'Z');
 
 		const result = await pullNow([{ path: 'C/A', deleted: true }, renamed]);
 
@@ -8354,11 +8124,11 @@ describe('an id-less deletion under a folder the round renames', () => {
 		await engine.pull();
 		const before = noteAt('C/A/n.md');
 
-		const renamed = await provider.move(entryAt('C'), 'B');
-		await provider.move(entryAt('B/A'), 'A');
+		const renamed = await provider.move(entryAt(provider, 'C'), 'B');
+		await provider.move(entryAt(provider, 'B/A'), 'A');
 
 		const first = await pullNow([{ path: 'C/A', deleted: true }, renamed]);
-		const second = await pullNow([entryAt('A')]);
+		const second = await pullNow([entryAt(provider, 'A')]);
 
 		expect(first.status).toBe('ok');
 		expect(second.status).toBe('ok');
@@ -8376,9 +8146,9 @@ describe('an id-less deletion under a folder the round renames', () => {
 		await remoteFile('C/C/B/n.md', 'n\n');
 		await engine.pull();
 
-		await provider.delete(entryAt('C/C/B'));
-		const outer = await provider.move(entryAt('C'), 'A');
-		const inner = await provider.move(entryAt('A/C'), 'A/B');
+		await provider.delete(entryAt(provider, 'C/C/B'));
+		const outer = await provider.move(entryAt(provider, 'C'), 'A');
+		const inner = await provider.move(entryAt(provider, 'A/C'), 'A/B');
 
 		const result = await pullNow([
 			{ path: 'C/C/B', deleted: true },
@@ -8401,9 +8171,9 @@ describe('an id-less deletion under a folder the round renames', () => {
 		await remoteFile('B/a.md', 'a\n');
 		await engine.pull();
 
-		const nested = await provider.move(entryAt('B'), 'A/B');
-		const renamed = await provider.move(entryAt('A'), 'B');
-		await provider.delete(entryAt('B/B'));
+		const nested = await provider.move(entryAt(provider, 'B'), 'A/B');
+		const renamed = await provider.move(entryAt(provider, 'A'), 'B');
+		await provider.delete(entryAt(provider, 'B/B'));
 
 		const result = await pullNow([nested, renamed, { path: 'B/B', deleted: true }]);
 
@@ -8490,7 +8260,7 @@ describe('two id-less deletions of one path', () => {
 		await remoteFile('A/y.md', 'y\n');
 		await engine.pull();
 
-		const renamed = { ...entryAt('A'), path: 'C' };
+		const renamed = { ...entryAt(provider, 'A'), path: 'C' };
 
 		const result = await pullNow([
 			{ path: 'C', deleted: true },
@@ -8567,9 +8337,9 @@ describe('a folder arriving where another is about to leave', () => {
 
 		await provider.move(old, 'X');
 		const made = await provider.createFolder('B');
-		await provider.move(entryAt('X'), 'B/C');
+		await provider.move(entryAt(provider, 'X'), 'B/C');
 
-		const result = await pullNow([made, entryAt('B/C')]);
+		const result = await pullNow([made, entryAt(provider, 'B/C')]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'B/C']);
@@ -8609,12 +8379,12 @@ describe('a folder arriving where another is about to leave', () => {
 		const one = noteAt('D1/S1/n1.md');
 		const two = noteAt('D2/S2/n2.md');
 
-		await provider.move(entryAt('D1/S1'), 'X1');
-		await provider.move(entryAt('D2/S2'), 'X2');
+		await provider.move(entryAt(provider, 'D1/S1'), 'X1');
+		await provider.move(entryAt(provider, 'D2/S2'), 'X2');
 		await provider.delete(d1);
 		await provider.delete(d2);
-		const s1 = await provider.move(entryAt('X1'), 'D2');
-		const s2 = await provider.move(entryAt('X2'), 'D1');
+		const s1 = await provider.move(entryAt(provider, 'X1'), 'D2');
+		const s2 = await provider.move(entryAt(provider, 'X2'), 'D1');
 
 		const result = await pullNow([
 			s1,
@@ -8639,9 +8409,9 @@ describe('a folder arriving where another is about to leave', () => {
 		await remoteFile('C/B/a.md', 'a\n');
 		await engine.pull();
 
-		const inner = await provider.move(entryAt('C/B'), 'C/C');
-		const outer = await provider.move(entryAt('C'), 'B');
-		await provider.delete(entryAt('B'));
+		const inner = await provider.move(entryAt(provider, 'C/B'), 'C/C');
+		const outer = await provider.move(entryAt(provider, 'C'), 'B');
+		await provider.delete(entryAt(provider, 'B'));
 
 		const result = await pullNow([inner, outer, { path: 'B', deleted: true }]);
 
@@ -8661,7 +8431,7 @@ describe('a folder arriving where another is about to leave', () => {
 		await engine.pull();
 		const before = noteAt('B/sub/n.md');
 
-		const moved = await provider.move(entryAt('B/sub'), 'Keep');
+		const moved = await provider.move(entryAt(provider, 'B/sub'), 'Keep');
 		await provider.delete(old);
 		const made = await provider.createFolder('B');
 
@@ -8688,7 +8458,7 @@ describe('a folder arriving where another is about to leave', () => {
 		if (before === undefined) throw new Error('no note');
 		store.put({ ...before, content: 'mine\n', dirty: true });
 
-		const moved = await provider.move(entryAt('B/sub'), 'Keep');
+		const moved = await provider.move(entryAt(provider, 'B/sub'), 'Keep');
 		await provider.delete(old);
 		const made = await provider.createFolder('B');
 
@@ -8714,10 +8484,10 @@ describe('a folder arriving where another is about to leave', () => {
 		await remoteFile('B/X/n.md', 'n\n');
 		await engine.pull();
 
-		await provider.move(entryAt('B'), 'Z');
-		await provider.move(entryAt('Z/X'), 'B');
+		await provider.move(entryAt(provider, 'B'), 'Z');
+		await provider.move(entryAt(provider, 'Z/X'), 'B');
 
-		const result = await pullNow([entryAt('B'), entryAt('Z')]);
+		const result = await pullNow([entryAt(provider, 'B'), entryAt(provider, 'Z')]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'Z']);
@@ -8733,13 +8503,13 @@ describe('a folder arriving where another is about to leave', () => {
 		await engine.pull();
 		const before = noteAt('C/A/n.md');
 
-		await provider.move(entryAt('C/A'), 'X');
+		await provider.move(entryAt(provider, 'C/A'), 'X');
 		await provider.delete(doomed);
-		await provider.move(entryAt('X'), 'C');
+		await provider.move(entryAt(provider, 'X'), 'C');
 
 		const result = await pullNow([
 			{ path: 'C', deleted: true, remoteId: doomed.remoteId },
-			entryAt('C'),
+			entryAt(provider, 'C'),
 		]);
 
 		expect(result.status).toBe('ok');
@@ -8759,11 +8529,15 @@ describe('two notes meeting at a path neither ends up at', () => {
 		await remoteFile('b.md', 'b\n');
 		await engine.pull();
 
-		await provider.move(entryAt('C'), 'A');
-		await provider.move(entryAt('A/c.md'), 'A/a.md');
-		await provider.move(entryAt('b.md'), 'A/c.md');
+		await provider.move(entryAt(provider, 'C'), 'A');
+		await provider.move(entryAt(provider, 'A/c.md'), 'A/a.md');
+		await provider.move(entryAt(provider, 'b.md'), 'A/c.md');
 
-		const result = await pullNow([entryAt('A/c.md'), entryAt('A'), entryAt('A/a.md')]);
+		const result = await pullNow([
+			entryAt(provider, 'A/c.md'),
+			entryAt(provider, 'A'),
+			entryAt(provider, 'A/a.md'),
+		]);
 
 		expect(result.status).toBe('ok');
 		expect(result.conflicts).toEqual([]);
@@ -8778,21 +8552,6 @@ describe('two notes meeting at a path neither ends up at', () => {
  * from the other, and so two devices that no longer agree.
  */
 describe('two devices at random', () => {
-	/** A note pulled from the remote the ordinary way, with a cursor stored. */
-	const pulledNote = async (path: string, content: string) => {
-		const entry = await remoteFile(path, content);
-		await engine.pull();
-		const note = noteAt(path);
-		if (note === undefined) throw new Error(`no note at ${path}`);
-		return { entry, note };
-	};
-
-	/** What `store/queue.ts` does when the user renames a note that has a file. */
-	const renameHere = (note: SyncNote, to: string): void => {
-		store.put({ ...note, path: to });
-		store.queue({ op: 'move', noteId: note.id, path: note.path, targetPath: to });
-	};
-
 	it('does not let a note deleted here before it was pushed take another device’s file', async () => {
 		// The store reports it clean, so claiming it writes the other device's
 		// bytes into a note the user deleted, and its queued delete then
@@ -8850,7 +8609,7 @@ describe('two devices at random', () => {
 		// lets a note whose own file was replaced be claimed. The rename's file
 		// is still at the old name, and claimed, the note forgets it for ever.
 		const { entry, note } = await pulledNote('a.md', 'mine\n');
-		renameHere(note, 'b.md');
+		renameHere(store, note, 'b.md');
 		const theirs = await remoteFile('b.md', 'theirs\n');
 
 		await pullNow([{ path: 'b.md', deleted: true }, theirs]);
@@ -8877,7 +8636,7 @@ describe('two devices at random', () => {
 		const { note } = await pulledNote('b.md', 'kept\n');
 		store.queue({ op: 'delete', noteId: gone.note.id, path: 'a.md' });
 		await engine.push();
-		renameHere(note, 'a.md');
+		renameHere(store, note, 'a.md');
 
 		await pullNow([{ path: 'a.md', deleted: true }]);
 		await engine.push();
@@ -8890,7 +8649,7 @@ describe('two devices at random', () => {
 		// Ahead of a note the user made at the name the rename freed, which has
 		// never had a file for it to be about.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		renameHere(note, 'b.md');
+		renameHere(store, note, 'b.md');
 		store.put({ id: 'made', path: 'a.md', content: 'new\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'made', path: 'a.md' });
 		await provider.delete(entry);
@@ -8905,7 +8664,7 @@ describe('two devices at random', () => {
 		// the queue still names the old path, and something made there later
 		// and deleted is not this note's file.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		renameHere(note, 'b.md');
+		renameHere(store, note, 'b.md');
 		const moved = await provider.move(entry, 'c.md');
 		await pullNow([{ path: 'a.md', deleted: true }, moved]);
 		const later = await remoteFile('a.md', 'later\n');
@@ -8919,7 +8678,7 @@ describe('two devices at random', () => {
 
 	it('takes a note at the path that has a file ahead of the one renamed from it', async () => {
 		const { note } = await pulledNote('a.md', 'one\n');
-		renameHere(note, 'b.md');
+		renameHere(store, note, 'b.md');
 		store.put({
 			id: 'here',
 			path: 'a.md',
@@ -9019,7 +8778,7 @@ describe('two devices at random', () => {
 		// Adopting the version reads nothing, so it says nothing about whether
 		// the file outlived the deletion behind it.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		renameHere(note, 'b.md');
+		renameHere(store, note, 'b.md');
 		await provider.delete(entry);
 
 		await pullNow([entry, { path: 'a.md', deleted: true }]);
@@ -9053,7 +8812,7 @@ describe('two devices at random', () => {
 		const { note } = await pulledNote(copyName, 'renamed\n');
 		store.put({ id: 'made', path: 'b.md', content: 'mine\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'made', path: 'b.md' });
-		renameHere(note, 'r.md');
+		renameHere(store, note, 'r.md');
 		const theirs = await remoteFile('b.md', 'theirs\n');
 
 		await pullNow([theirs]);
@@ -9077,21 +8836,6 @@ describe('a file that is not UTF-8 text', () => {
 	const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
 	const COPY = 'a (conflict 2026-09-15T14-32).md';
 
-	/** A note pulled from the remote the ordinary way, with a cursor stored. */
-	const pulledNote = async (path: string, content: string) => {
-		const entry = await remoteFile(path, content);
-		await engine.pull();
-		const note = noteAt(path);
-		if (note === undefined) throw new Error(`no note at ${path}`);
-		return { entry, note };
-	};
-
-	/** The user's edit, as `store/queue.ts` leaves it. */
-	const editHere = (note: SyncNote, content: string): void => {
-		store.put({ ...note, content, dirty: true });
-		store.queue({ op: 'write', noteId: note.id, path: note.path });
-	};
-
 	const holders = (remoteId: string): SyncNote[] =>
 		store.notes().filter((note) => note.remoteId === remoteId);
 
@@ -9101,12 +8845,6 @@ describe('a file that is not UTF-8 text', () => {
 			.callLog()
 			.filter((call) => call.op === 'write' || call.op === 'move' || call.op === 'delete')
 			.map((call) => `${call.op} ${call.path ?? ''}`);
-
-	const remoteEntryAt = (path: string) => {
-		const found = provider.snapshot().find((each) => each.path === path);
-		if (found === undefined) throw new Error(`nothing on the remote at ${path}`);
-		return found;
-	};
 
 	it('imports nothing, and the pull goes through', async () => {
 		// A throw here is a pull that never moves its cursor: the same entry
@@ -9174,14 +8912,12 @@ describe('a file that is not UTF-8 text', () => {
 		expect(store.ops()).toEqual([]);
 		expect(sent()).toEqual(before);
 		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
-		expect(provider.snapshot().find((each) => each.path === 'a.md')?.remoteId).toBe(
-			entry.remoteId
-		);
+		expect(remoteAt(provider, 'a.md')?.remoteId).toBe(entry.remoteId);
 	});
 
 	it('cuts a dirty note loose and moves it aside, and its edit goes up beside the file', async () => {
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		editHere(note, 'my edit\n');
+		editHere(store, note, 'my edit\n');
 		provider.plantBytes('a.md', LATIN1);
 
 		const pulled = await engine.pull();
@@ -9234,12 +8970,12 @@ describe('a file that is not UTF-8 text', () => {
 		const typing: SyncStore = {
 			...store,
 			applyPull: (batch) => {
-				if (!typed.done) editHere(note, 'typed just now\n');
+				if (!typed.done) editHere(store, note, 'typed just now\n');
 				typed.done = true;
 				return store.applyPull(batch);
 			},
 		};
-		const racing = createSyncEngine({ provider, store: typing, now: () => AT });
+		const racing = engineWith({ store: typing });
 
 		const refused = await racing.pull();
 
@@ -9268,9 +9004,7 @@ describe('a file that is not UTF-8 text', () => {
 		expect(store.notes()).toEqual([]);
 		expect(store.ops()).toEqual([]);
 		expect(sent().filter((call) => call.startsWith('delete'))).toEqual([]);
-		expect(provider.snapshot().find((each) => each.path === 'a.md')?.remoteId).toBe(
-			entry.remoteId
-		);
+		expect(remoteAt(provider, 'a.md')?.remoteId).toBe(entry.remoteId);
 		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
@@ -9351,7 +9085,7 @@ describe('a file that is not UTF-8 text', () => {
 	describe('met by a push', () => {
 		it('sets the edit aside in one drain when the note’s own file cannot be read', async () => {
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			provider.plantBytes('a.md', LATIN1);
 
 			const result = await engine.push();
@@ -9372,7 +9106,7 @@ describe('a file that is not UTF-8 text', () => {
 		it('has cut the note loose even when the copy could not be made', async () => {
 			// Still bound, the retry goes out against the unreadable file's id.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			provider.plantBytes('a.md', LATIN1);
 			provider.setFault((call) =>
 				call.op === 'write' && call.path === COPY ? new Error('network down') : undefined
@@ -9400,7 +9134,7 @@ describe('a file that is not UTF-8 text', () => {
 			// another device's file — is resolved as a conflict with it: a copy
 			// of the copy, under two suffixes.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			provider.plantBytes('a.md', LATIN1);
 			await remoteFile(COPY, 'their edit\n');
 			const next = conflictPath('a.md', AT, [COPY]);
@@ -9415,7 +9149,7 @@ describe('a file that is not UTF-8 text', () => {
 			expect(noteAt(next)).toMatchObject({
 				id: note.id,
 				dirty: false,
-				remoteId: provider.snapshot().find((each) => each.path === next)?.remoteId,
+				remoteId: remoteAt(provider, next)?.remoteId,
 			});
 			expect(holders(entry.remoteId)).toEqual([]);
 			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
@@ -9423,10 +9157,10 @@ describe('a file that is not UTF-8 text', () => {
 
 		it('gives up on a name after as many refusals as a rename does, and says why', async () => {
 			const { note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			provider.plantBytes('a.md', LATIN1);
 			provider.setFault((call) =>
-				call.op === 'write' ? new ConflictError(remoteEntryAt('a.md')) : undefined
+				call.op === 'write' ? new ConflictError(entryAt(provider, 'a.md')) : undefined
 			);
 			const before = sent().length;
 
@@ -9472,7 +9206,7 @@ describe('a file that is not UTF-8 text', () => {
 			// `runWrite`: nothing at the note's path, so the file is asked after
 			// by id. It is there; what it holds is not for this note to replace.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			await provider.move(entry, 'renamed.md');
 			provider.plantBytes('renamed.md', LATIN1);
 
@@ -9589,7 +9323,7 @@ describe('a file that is not UTF-8 text', () => {
 			};
 			return {
 				batches,
-				engine: createSyncEngine({ provider: over, store: watching, now: () => AT }),
+				engine: engineWith({ provider: over, store: watching }),
 			};
 		};
 
@@ -9637,7 +9371,7 @@ describe('a file that is not UTF-8 text', () => {
 			// as a conflict, the user is told the one thing that did not happen
 			// — and the banner is gone by the time they wonder about the name.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			provider.plantBytes('a.md', LATIN1);
 
 			const result = await engine.pull();
@@ -9695,7 +9429,7 @@ describe('a file that is not UTF-8 text', () => {
 			// The note is still at the name it was given. A record re-made for
 			// the rename and left bare would drop the only explanation of it.
 			const { note } = await pulledNote('a.md', 'one\n');
-			editHere(note, 'my edit\n');
+			editHere(store, note, 'my edit\n');
 			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
 			await provider.move(file, 'renamed.md');
@@ -9822,7 +9556,7 @@ describe('a file that is not UTF-8 text', () => {
 				const file = provider.plantBytes('a.md', LATIN1);
 				provider.plantBytes('b.md', LATIN1);
 				await engine.pull();
-				const other = remoteEntryAt('b.md');
+				const other = entryAt(provider, 'b.md');
 
 				// The id and not the path: a deletion that carries an id and is
 				// matched by path anyway takes whatever has the name now.
@@ -10051,10 +9785,10 @@ describe('a file that is not UTF-8 text', () => {
 				await paged.ensureRoot();
 				const first = paged.plantBytes('a.md', LATIN1);
 				const second = paged.plantBytes('b.md', LATIN1);
-				await createSyncEngine({ provider: paged, store, now: () => AT }).pull();
+				await engineWith({ provider: paged }).pull();
 				const dead = store.storedCursor();
 				const pages = { read: 0 };
-				const interrupted = createSyncEngine({
+				const interrupted = engineWith({
 					provider: {
 						...paged,
 						changes: (cursor) => {
@@ -10066,8 +9800,6 @@ describe('a file that is not UTF-8 text', () => {
 								: paged.changes(cursor);
 						},
 					},
-					store,
-					now: () => AT,
 				});
 
 				const result = await interrupted.pull();
@@ -10155,7 +9887,7 @@ describe('a file that is not UTF-8 text', () => {
 		describe('by a push that meets it', () => {
 			it('when the conflict says which file and where', async () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				editHere(note, 'my edit\n');
+				editHere(store, note, 'my edit\n');
 				provider.plantBytes('a.md', LATIN1);
 
 				const result = await engine.push();
@@ -10178,7 +9910,7 @@ describe('a file that is not UTF-8 text', () => {
 
 			it('once, when the name the edit was first given turns out to be taken', async () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				editHere(note, 'my edit\n');
+				editHere(store, note, 'my edit\n');
 				provider.plantBytes('a.md', LATIN1);
 				await remoteFile(COPY, 'their edit\n');
 				const { batches, engine: pushing } = watched();
@@ -10200,7 +9932,7 @@ describe('a file that is not UTF-8 text', () => {
 				// `runWrite` found nothing at the note's path and asked by id. The
 				// file is somewhere, and only its own entry says where.
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				editHere(note, 'my edit\n');
+				editHere(store, note, 'my edit\n');
 				await provider.move(entry, 'renamed.md');
 				provider.plantBytes('renamed.md', LATIN1);
 
@@ -10238,12 +9970,10 @@ describe('a file that is not UTF-8 text', () => {
  * is not counted as fetched, and that a short round says nothing at all.
  */
 describe('progress', () => {
-	const reporting = (base: StorageProvider) => {
+	const watching = (base: StorageProvider) => {
 		const said: SyncProgress[] = [];
-		const counted = createSyncEngine({
+		const counted = engineWith({
 			provider: base,
-			store,
-			now: () => AT,
 			onProgress: (progress) => said.push(progress),
 		});
 		return { said, counted };
@@ -10257,7 +9987,7 @@ describe('progress', () => {
 		await provider.createFolder('Work');
 		await provider.write('notes.txt', 'not a note\n', {});
 		const reads: string[] = [];
-		const { said, counted } = reporting({
+		const { said, counted } = watching({
 			...provider,
 			read: (entry) => {
 				reads.push(entry.path);
@@ -10296,11 +10026,10 @@ describe('progress', () => {
 			id: 'n1',
 			path: 'a.md',
 			content: '1\n',
-			remoteId: held.remoteId,
-			remoteVersion: held.version,
+			...boundTo(held),
 			dirty: false,
 		});
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.pull();
 
@@ -10315,7 +10044,7 @@ describe('progress', () => {
 		await remoteFile('b.md', '2\n');
 		await remoteFile('c.md', '3\n');
 		await provider.createFolder('Work');
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.pull();
 
@@ -10335,7 +10064,7 @@ describe('progress', () => {
 		// note was counted.
 		provider = createFakeProvider({ pageSize: 1 });
 		await provider.ensureRoot();
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 		await counted.pull();
 		await provider.write('a.md', '1\n', {});
 		await provider.createFolder('Work');
@@ -10361,7 +10090,7 @@ describe('progress', () => {
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		await engine.push();
 		const reads: string[] = [];
-		const { said, counted } = reporting({
+		const { said, counted } = watching({
 			...provider,
 			read: (entry) => {
 				reads.push(entry.path);
@@ -10385,7 +10114,7 @@ describe('progress', () => {
 		await remoteFile('a.md', '1\n');
 		await engine.pull();
 		await provider.createFolder('Work');
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.pull();
 
@@ -10400,7 +10129,7 @@ describe('progress', () => {
 		store.put({ id: 'n2', path: 'b.md', content: 'two\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.push();
 
@@ -10422,7 +10151,7 @@ describe('progress', () => {
 		store.queue({ op: 'mkdir', path: 'Work' });
 		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
 		store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
-		const { said, counted } = reporting(four);
+		const { said, counted } = watching(four);
 
 		await counted.push();
 
@@ -10436,7 +10165,7 @@ describe('progress', () => {
 	});
 
 	it('says nothing for a push with nothing to send', async () => {
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 		await counted.push();
 		expect(said).toEqual([]);
 	});
@@ -10540,7 +10269,7 @@ describe('a pull that fails part-way', () => {
 		failFirstReadOf(provider, 'd.md');
 		expect((await engine.pull()).status).toBe('retry');
 		provider.setFault(undefined);
-		const held = provider.snapshot().find((entry) => entry.path === 'a.md');
+		const held = remoteAt(provider, 'a.md');
 		await provider.write('a.md', 'written since\n', { expectedVersion: held?.version });
 		const before = readsOf(provider).length;
 
@@ -10576,10 +10305,7 @@ describe('a pull that fails part-way', () => {
 	it('reads a round once more, not twice, when a token expires part-way', async () => {
 		await sixInARound();
 		let refreshed = 0;
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -10600,7 +10326,7 @@ describe('a pull that fails part-way', () => {
 		const paged = createFakeProvider({ pageSize: 2 });
 		await paged.ensureRoot();
 		for (const path of PATHS) await paged.write(path, `${path}\n`, {});
-		const scanning = createSyncEngine({ provider: paged, store, now: () => AT });
+		const scanning = engineWith({ provider: paged });
 		const before = readsOf(paged).length;
 		failFirstReadOf(paged, 'e.md');
 
