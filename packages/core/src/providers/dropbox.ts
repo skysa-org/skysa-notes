@@ -6,6 +6,7 @@ import {
 	isSelf,
 	outsideRoot,
 	readAsText,
+	refuseRoot,
 	rootFolderEntry,
 	writeMarkerOnce,
 } from './adapter.js';
@@ -56,6 +57,8 @@ const CONTENT = 'https://content.dropboxapi.com/2';
  * own, so its id is a constant — which docs/ARCHITECTURE.md §4 allows.
  */
 const ROOT_ID = 'app-folder';
+
+const rootId = (): Promise<string> => Promise.resolve(ROOT_ID);
 
 export type DropboxProviderOptions = HttpProviderOptions;
 
@@ -409,6 +412,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		await refuseRoot(entry, rootId);
 		if (normalizePath(newPath) === ROOT) throw new NotFoundError(ROOT);
 		const result = await tryRpc<{ metadata?: Metadata }>('files/move_v2', {
 			from_path: target(entry),
@@ -474,13 +478,13 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		throw new ConflictError(current);
 	};
 
-	const remove = (entry: EntryRef): Promise<void> =>
-		outsideRoot(entry.path, async () => {
-			const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
-			// Idempotent: something already gone is the outcome the caller wanted.
-			if (result.ok || tagged(result.failure, 'not_found')) return;
-			raise(result.failure, entry.path);
-		});
+	const remove = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
+		const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
+		// Idempotent: something already gone is the outcome the caller wanted.
+		if (result.ok || tagged(result.failure, 'not_found')) return;
+		raise(result.failure, entry.path);
+	};
 
 	const continued = async (cursor: string): Promise<ListFolderResult> => {
 		const result = await tryRpc<ListFolderResult>('files/list_folder/continue', { cursor });

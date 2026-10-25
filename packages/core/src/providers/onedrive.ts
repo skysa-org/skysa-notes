@@ -7,6 +7,7 @@ import {
 	isSelf,
 	outsideRoot,
 	readAsText,
+	refuseRoot,
 	rootFolderEntry,
 	writeMarkerOnce,
 } from './adapter.js';
@@ -555,6 +556,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		await refuseRoot(entry, rootId);
 		const target = normalizePath(newPath);
 		if (target === ROOT) throw new NotFoundError(target);
 
@@ -594,15 +596,15 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		throw new ConflictError(current);
 	};
 
-	const remove = (entry: EntryRef): Promise<void> =>
-		outsideRoot(entry.path, async () => {
-			const id = await idOf(entry);
-			// Idempotent: something already gone is the outcome the caller wanted.
-			if (id === undefined) return;
-			const result = await attempt<unknown>('DELETE', byId(id));
-			if (result.ok || result.failure.status === 404) return;
-			raise(result.failure, entry.path);
-		});
+	const remove = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
+		const id = await idOf(entry);
+		// Idempotent: something already gone is the outcome the caller wanted.
+		if (id === undefined) return;
+		const result = await attempt<unknown>('DELETE', byId(id));
+		if (result.ok || result.failure.status === 404) return;
+		raise(result.failure, entry.path);
+	};
 
 	/**
 	 * A round from nothing asks for the app folder's id afresh: the user can

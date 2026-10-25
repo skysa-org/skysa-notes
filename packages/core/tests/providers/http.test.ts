@@ -97,12 +97,14 @@ describe('createTransport', () => {
 		});
 	});
 
-	it('names an answer that is not JSON as the provider’s, not a SyntaxError', async () => {
-		for (const text of ['<html>ok</html>', '{"id":']) {
+	it('names an answer that is not a JSON object as the provider’s, not a SyntaxError', async () => {
+		for (const text of ['<html>ok</html>', '{"id":', 'null', '[]', '42']) {
 			const { doFetch } = recording(() => new Response(text));
 			await expect(
 				transport(doFetch).attempt('GET', 'https://example.test/a')
-			).rejects.toThrow(new ProviderResponseError('gdrive sent an answer that is not JSON'));
+			).rejects.toThrow(
+				new ProviderResponseError('gdrive sent an answer that is not a JSON object')
+			);
 		}
 	});
 

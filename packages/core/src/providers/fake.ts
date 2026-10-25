@@ -219,6 +219,16 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		return nodes.get(normalizePath(ref.path));
 	};
 
+	/**
+	 * The root as the entry to delete, leave or move, by its path or its id:
+	 * refused as every adapter refuses it (`refuseRoot` in `adapter.ts`).
+	 */
+	const refuseRoot = (ref: EntryRef): void => {
+		if (normalizePath(ref.path) === ROOT || ref.remoteId === rootEntry().remoteId) {
+			throw new NotFoundError(ROOT);
+		}
+	};
+
 	const isFolder = (path: string): boolean => path === ROOT || nodes.get(path)?.kind === 'folder';
 
 	const requireParent = (path: string): void => {
@@ -420,6 +430,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	const move = (ref: EntryRef, newPath: string): Promise<RemoteEntry> =>
 		settle('move', ref.path, () => {
+			refuseRoot(ref);
 			const node = resolve(ref);
 			if (node === undefined) throw new NotFoundError(ref.path);
 
@@ -462,20 +473,9 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 			return entry;
 		});
 
-	/**
-	 * The root, which no adapter deletes or leaves: refused as they refuse it.
-	 * By id where the ref has one, as `resolve` goes, since the stubs beneath
-	 * the adapters hand on refs that carry an id and no path.
-	 */
-	const refusedAtRoot = (ref: EntryRef): Promise<never> | undefined =>
-		ref.remoteId === rootEntry().remoteId ||
-		(ref.remoteId === '' && normalizePath(ref.path) === ROOT)
-			? Promise.reject(new NotFoundError(ROOT))
-			: undefined;
-
 	const remove = (ref: EntryRef): Promise<void> =>
-		refusedAtRoot(ref) ??
 		settle('delete', ref.path, () => {
+			refuseRoot(ref);
 			const node = resolve(ref);
 			// Idempotent: a push queue that crashed mid-drain must be replayable.
 			if (node === undefined) return;
@@ -487,7 +487,9 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		});
 
 	const leaveFolder = (ref: EntryRef): Promise<void> =>
-		refusedAtRoot(ref) ?? settle('leaveFolder', ref.path, () => undefined);
+		settle('leaveFolder', ref.path, () => {
+			refuseRoot(ref);
+		});
 
 	const scanPage = (offset: number, seqAtStart: number): ChangeSet => {
 		const all = [...nodes.values()].sort(byPath).map(toEntry);

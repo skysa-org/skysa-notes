@@ -1,5 +1,5 @@
 import type { ProviderKind } from '../config.js';
-import { asObject, parseJson } from '../json.js';
+import { asObject, isJsonObject, parseJson } from '../json.js';
 import { ProviderResponseError, RateLimitError } from './types.js';
 
 /**
@@ -162,14 +162,15 @@ export const createTransport = <F>({
 	): Promise<Attempt<T, F>> => {
 		const response = await send(method, url, parts);
 		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		// A delete answers 204 with nothing to parse. Anything else that is not
-		// JSON — a proxy's HTML page sent as a 200, a body cut short — is the
-		// provider's answer gone wrong, not a `SyntaxError` from somewhere deep.
+		// A delete answers 204 with nothing to parse. Every other answer the
+		// adapters read is a JSON object; anything else — a proxy's HTML page
+		// sent as a 200, a `null` — is the provider's answer gone wrong, not a
+		// `SyntaxError` or a `TypeError` from somewhere deep.
 		const text = await response.text();
 		if (text === '') return { ok: true, value: {} as T };
 		const value = parseJson(text);
-		if (value === undefined) {
-			throw new ProviderResponseError(`${kind} sent an answer that is not JSON`);
+		if (!isJsonObject(value)) {
+			throw new ProviderResponseError(`${kind} sent an answer that is not a JSON object`);
 		}
 		return { ok: true, value: value as T };
 	};

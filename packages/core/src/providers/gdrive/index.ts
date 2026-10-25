@@ -5,6 +5,7 @@ import {
 	isSelf,
 	outsideRoot,
 	readAsText,
+	refuseRoot,
 	rootFolderEntry,
 	writeMarkerOnce,
 } from '../adapter.js';
@@ -215,20 +216,21 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * marked as left, and nothing in it is touched (`StorageProvider`). Already
 	 * gone is the outcome the caller wanted.
 	 */
-	const leaveFolder = (entry: EntryRef): Promise<void> =>
-		outsideRoot(entry.path, async () => {
-			const id = await idOf(entry);
-			if (id === undefined) return;
-			const result = await attempt<unknown>(
-				'PATCH',
-				fileUrl(id),
-				jsonBody({ appProperties: { [LEFT_KEY]: LEFT_VALUE } })
-			);
-			if (result.ok || result.failure.status === 404) return;
-			raise(result.failure);
-		});
+	const leaveFolder = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
+		const id = await idOf(entry);
+		if (id === undefined) return;
+		const result = await attempt<unknown>(
+			'PATCH',
+			fileUrl(id),
+			jsonBody({ appProperties: { [LEFT_KEY]: LEFT_VALUE } })
+		);
+		if (result.ok || result.failure.status === 404) return;
+		raise(result.failure);
+	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		await refuseRoot(entry, rootId);
 		const target = normalizePath(newPath);
 		if (target === ROOT) throw new NotFoundError(target);
 
@@ -263,16 +265,15 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	/**
 	 * To the trash, not gone for good, so the user can bring a note back from
 	 * Drive as they could from OneDrive's recycle bin. What was inside a trashed
-	 * folder is trashed with it. Never the app folder, which `idOf` would
-	 * answer for the root as readily as for anything in it.
+	 * folder is trashed with it.
 	 */
-	const remove = (entry: EntryRef): Promise<void> =>
-		outsideRoot(entry.path, async () => {
-			const id = await idOf(entry);
-			// Idempotent: something already gone is the outcome the caller wanted.
-			if (id === undefined) return;
-			await trash(id);
-		});
+	const remove = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
+		const id = await idOf(entry);
+		// Idempotent: something already gone is the outcome the caller wanted.
+		if (id === undefined) return;
+		await trash(id);
+	};
 
 	return {
 		kind: 'gdrive',

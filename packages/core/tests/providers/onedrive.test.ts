@@ -257,6 +257,32 @@ describe('moving', () => {
 	});
 });
 
+describe('the app folder', () => {
+	it('is never deleted or moved, named by its path or its id', async () => {
+		// Graph answers the app folder by its id like any other item, and would
+		// take a PATCH or a DELETE of it, so nothing is to be sent at all.
+		const { doFetch, seen } = scripted((_url, init) => {
+			const root = { id: 'root', name: 'Skysa Notes', folder: {}, eTag: 'e0' };
+			if (init.method === 'GET') return Response.json(root);
+			if (init.method === 'PATCH') return Response.json({ ...root, name: 'Archive' });
+			if (init.method === 'DELETE') return new Response(null, { status: 204 });
+			return undefined;
+		});
+		const provider = over(doFetch);
+
+		for (const named of [
+			{ remoteId: 'root', path: '' },
+			{ remoteId: 'root', path: 'Elsewhere' },
+			{ remoteId: '', path: '' },
+		]) {
+			await expect(provider.delete(named)).rejects.toThrow(NotFoundError);
+			await expect(provider.move(named, 'Archive')).rejects.toThrow(NotFoundError);
+		}
+
+		expect(seen.filter((r) => r.init.method !== 'GET')).toEqual([]);
+	});
+});
+
 describe('mapping Graph failures onto typed errors', () => {
 	it('treats 401 as an auth failure', async () => {
 		const { doFetch } = scripted(() => graphError(401, 'InvalidAuthenticationToken'));

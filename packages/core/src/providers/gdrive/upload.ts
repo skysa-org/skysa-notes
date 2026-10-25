@@ -109,7 +109,8 @@ export const createUploads = (client: DriveClient, appFolder: AppFolder) => {
 			body: content,
 		});
 		if (!sent.ok) return raise(await failureOf(sent), path);
-		// Not JSON reads as nothing made, which is what it tells us.
+		// An answer that is not JSON says nothing of what was made, and is
+		// refused below as one Drive should not have given.
 		const made = asObject(parseJson(await sent.text())) as DriveFile;
 		if (made.id === undefined || made.id === '') {
 			throw new ProviderResponseError(

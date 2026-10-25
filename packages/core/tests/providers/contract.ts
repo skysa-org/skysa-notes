@@ -440,6 +440,24 @@ export const describeProviderContract = (
 				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
 			});
 
+			// An adapter that goes by id would act on the root whatever path the
+			// ref gave.
+			it('refuses the root by its id, under any path', config, async () => {
+				const provider = await open();
+				const { rootId } = await provider.ensureRoot();
+				const named = { remoteId: rootId, path: 'Elsewhere' };
+				await expect(provider.delete(named)).rejects.toThrow(NotFoundError);
+				await expect(provider.move(named, 'Archive')).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
+			it('refuses to move the root', config, async () => {
+				const provider = await open();
+				const root = await provider.createFolder('');
+				await expect(provider.move(root, 'Archive')).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
 			// A left app folder would be hidden from the app that owns it.
 			it('refuses to leave the root', config, async ({ skip }) => {
 				const provider = await open();
