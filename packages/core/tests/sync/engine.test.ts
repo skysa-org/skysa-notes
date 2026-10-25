@@ -7195,6 +7195,33 @@ describe('a push conflict over a file another note already holds', () => {
 		// away: the op is gone from the queue.
 		expect(store.ops()).toEqual([]);
 	});
+	it('fails the op rather than write to a name it has not looked at', async () => {
+		// The same exhaustion as the note that steps aside, met by a note with
+		// no file of its own, which takes its name by writing there: out of
+		// tries, it writes nowhere, moves nowhere, and is retried.
+		const file = await remoteFile('c.md', 'theirs\n');
+		store.put({ id: 'theirs', path: 'c.md', content: 'theirs\n', ...boundTo(file) });
+		await provider.move(file, 'b.md');
+		const taken = Array.from({ length: 101 }).reduce<string[]>(
+			(names) => [...names, basename(conflictPath('b.md', AT, names))],
+			[]
+		);
+		taken.forEach((name, i) => store.put({ id: `copy${i}`, path: name, content: 'copy\n' }));
+		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops().map((op) => op.attempts)).toEqual([1]);
+		expect(store.notes().find((each) => each.id === 'mine')).toMatchObject({
+			path: 'b.md',
+			content: 'mine\n',
+			dirty: true,
+		});
+		expect(provider.contentAt(taken.at(-1) ?? '')).toBeUndefined();
+		expect(provider.contentAt('b.md')).toBe('theirs\n');
+	});
 });
 
 describe('a rescan naming a folder the same batch has moved', () => {

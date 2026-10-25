@@ -107,8 +107,8 @@ export type { SyncProgress } from './progress.js';
  * How many times `freeFolderPath` or `freeNotePath` may ask for a name before
  * giving up. Names go `(conflict <stamp>)`, `-2`, `-3`… so reaching this means
  * a hundred folders or notes already stand aside from one path inside one
- * minute, which is not a state a
- * user produces — it is the two folds having drifted apart.
+ * minute. A user does not produce that state, so reaching the cap is far more
+ * likely the two folds having drifted apart than a hundred real names.
  */
 const FREE_PATH_ATTEMPTS = 100;
 /**
@@ -1088,9 +1088,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// tell. Running out of attempts throws instead, which stops the batch and
 		// leaves the cursor where it was, so the next sync retries the same work.
 		//
-		// Untestable by construction, and kept anyway: reaching the cap requires
-		// the drift it exists for, and a test that produced the drift would be
-		// asserting about a build of the code nobody ships. It was found the way
+		// The drift is untestable by construction, and the cap is kept anyway: a
+		// test that produced the drift would be asserting about a build of the
+		// code nobody ships. (A hundred names really taken reach the cap too, and
+		// that is tested for notes, beside `freeNotePath`.) It was found the way
 		// such things are — a mutation of `conflictName`'s fold did not fail the
 		// suite, it hung it.
 		if (left <= 1) {
