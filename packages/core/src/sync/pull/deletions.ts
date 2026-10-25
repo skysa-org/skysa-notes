@@ -5,10 +5,10 @@ import { orIfNotFound } from '../providerOps.js';
 import { type PullChange, type SyncNote } from '../store.js';
 import { type PullAttachments } from './attachments.js';
 import { aliveElsewhere, type Batch, listedAfter, madeInBatch } from './batch.js';
+import { reestablished } from './decided.js';
 import { type PullFolders } from './folders.js';
 import { type PullNotes } from './notes.js';
 import { type Occupancy } from './occupancy.js';
-import { reestablished } from './reconcile.js';
 import {
 	placement,
 	rebaseThrough,
