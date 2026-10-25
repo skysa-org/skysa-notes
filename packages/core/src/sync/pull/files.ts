@@ -1,5 +1,6 @@
-import { isWithin, rebasePath } from '../../paths.js';
+import { isWithin } from '../../paths.js';
 import { type PullChange, type SyncFile } from '../store.js';
+import { rebaseThrough, survives } from './replay.js';
 
 /**
  * The files that are not notes, as a pull's decisions leave them: where each
@@ -64,10 +65,6 @@ export const startingFiles = (base: FileBase): ReadonlyMap<string, FilePlace> =>
 		])
 	);
 
-/** `rebasePath`, for a path that may not be under `from`. */
-const carried = (path: string, from: string, to: string): string =>
-	isWithin(path, from) ? rebasePath(path, from, to) : path;
-
 /**
  * A folder's deletion, as the store applies it to files: a bound row under
  * it goes, unless the engine names it or its queued move says its file is
@@ -77,10 +74,10 @@ const cascadesOver = (
 	file: FilePlace,
 	change: Extract<PullChange, { kind: 'delete-folder' }>
 ): boolean => {
-	if (!isWithin(file.at, change.path) || file.remoteId === undefined) return false;
+	if (survives(file.at, change) || file.remoteId === undefined) return false;
 	if (change.keepFiles?.includes(file.id) === true) return false;
 	const out =
-		!isWithin(file.remote, change.path) &&
+		survives(file.remote, change) &&
 		(change.was === undefined || !isWithin(file.remote, change.was));
 	return !(file.moving && out);
 };
@@ -96,8 +93,8 @@ export const placedFiles = (
 				id,
 				{
 					...file,
-					at: carried(file.at, change.from, change.to),
-					remote: carried(file.remote, change.from, change.to),
+					at: rebaseThrough(file.at, change),
+					remote: rebaseThrough(file.remote, change),
 				},
 			])
 		);
@@ -107,9 +104,7 @@ export const placedFiles = (
 			[...view].flatMap(([id, file]): [string, FilePlace][] => {
 				if (cascadesOver(file, change)) return [];
 				const stranded =
-					file.moving &&
-					file.remoteId !== undefined &&
-					isWithin(file.remote, change.path);
+					file.moving && file.remoteId !== undefined && !survives(file.remote, change);
 				return [[id, stranded ? { ...file, stranded } : file]];
 			})
 		);

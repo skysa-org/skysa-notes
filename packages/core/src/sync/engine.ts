@@ -55,12 +55,15 @@ import {
 	startingFiles,
 } from './pull/files.js';
 import {
+	folderBefore,
 	folderNow,
 	type Placement,
 	placement,
 	placements,
+	rebaseThrough,
 	remoteNow,
 	removedInBatch,
+	survives,
 	unreadNow,
 	whereNow,
 } from './pull/replay.js';
@@ -714,7 +717,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const gone = await doomedFolder(path, undefined, decided, batch, at);
 		const remoteId = gone === undefined ? undefined : await folderIdAt(gone, decided);
 		if (gone === undefined || remoteId === undefined) return [];
-		const expected = isWithin(gone, over.from) ? rebasePath(gone, over.from, over.to) : gone;
+		const expected = rebaseThrough(gone, over);
 		// Not found there is not proof when it is the parent that is missing:
 		// the provider answers for now, not for where the round ended, and the
 		// folder above may have moved again since the round was read. Kept, a
@@ -1159,27 +1162,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
-	 * Which folder row is at `path` once the decisions so far have run. Walked
-	 * backwards through them to find where whatever is there now came from,
-	 * because the store can only be asked about the paths it already holds — the
-	 * same reason `notesEndingIn` exists on the note side.
+	 * Which folder row is at `path` once the decisions so far have run: the one
+	 * at the path it came from (`folderBefore`), since the store can only be
+	 * asked about the paths it already holds — the same reason `notesEndingIn`
+	 * exists on the note side.
 	 */
 	const folderAt = async (
 		path: string,
 		decided: readonly PullChange[]
 	): Promise<SyncFolder | undefined> => {
-		const origin = decided.reduceRight<string | undefined>((at, change) => {
-			if (at === undefined) return undefined;
-			if (change.kind === 'move-folder') {
-				if (isWithin(at, change.to)) return rebasePath(at, change.to, change.from);
-				// Left behind by the move: whatever was here went with it. Asked
-				// second, because a folder moved into its own old path — `B` to
-				// `B/B` — leaves `B/B` full and `B` empty.
-				return isWithin(at, change.from) ? undefined : at;
-			}
-			if (change.kind === 'delete-folder') return isWithin(at, change.path) ? undefined : at;
-			return at;
-		}, path);
+		const origin = folderBefore(path, decided);
 		return origin === undefined ? undefined : store.folderByPath(origin);
 	};
 
@@ -2628,7 +2620,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			!seen.has(folder.remoteId) &&
 			!kept.folders.has(folder.path) &&
 			!holding.some((path) => isWithin(path, folder.path)) &&
-			!changes.some((c) => c.kind === 'delete-folder' && isWithin(folder.path, c.path));
+			!changes.some((c) => c.kind === 'delete-folder' && !survives(folder.path, c));
 		const doomedFolders = folders.filter(vanished);
 		const forgotten = notes
 			.filter(
