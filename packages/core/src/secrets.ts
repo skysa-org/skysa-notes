@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { dearmor, looksArmored, mentionsArmor } from './age/armor.js';
 import { encodeIdentity, parseIdentity, spellsRecipient } from './age/keys.js';
 import { ENCRYPTION_FILE, ENCRYPTION_SCHEMA_VERSION } from './config.js';
+import { parseJson } from './json.js';
 import { firstLineEnding, toLf, withLineEnding } from './markdown/lineEndings.js';
 import { parse } from './markdown/pipeline.js';
 import { normalizePath } from './paths.js';
@@ -255,13 +256,7 @@ export const serializeEncryptionFile = (file: EncryptionFile): string =>
 	`${JSON.stringify(file, null, 2)}\n`;
 
 export const parseEncryptionFile = (text: string): EncryptionFileRead => {
-	const json = ((): unknown => {
-		try {
-			return JSON.parse(text) as unknown;
-		} catch {
-			return undefined;
-		}
-	})();
+	const json = parseJson(text);
 	const version = versionSchema.safeParse(json);
 	if (!version.success) return { status: 'invalid' };
 	if (version.data.schemaVersion > ENCRYPTION_SCHEMA_VERSION) return { status: 'newer' };
