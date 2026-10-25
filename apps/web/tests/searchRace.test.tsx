@@ -43,10 +43,8 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 
 afterEach(cleanup);
 
-beforeEach(async () => {
+beforeEach(() => {
 	reads.count = 0;
-	await db.notes.clear();
-	await db.folders.clear();
 });
 
 const settle = async (ms: number) => {

@@ -81,12 +81,11 @@ const Harness = ({ id }: { id: string }) => {
 	);
 };
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	store.refusing = false;
 	deletions.length = 0;
 	problems.length = 0;
-	await db.notes.clear();
 });
 
 describe('deleting a note the store will not delete', () => {

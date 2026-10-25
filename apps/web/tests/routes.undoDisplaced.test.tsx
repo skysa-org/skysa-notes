@@ -31,12 +31,9 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 	};
 });
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	store.refusingText = undefined;
-	await db.notes.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
 });
 
 const editorText = () => EditorView.findFromDOM(document.body)?.state.doc.toString();

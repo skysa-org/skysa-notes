@@ -7,6 +7,7 @@ import { StaleTabGate } from '../src/components/StaleTabGate.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';
+import { deleteAfterTest, freshDatabase } from './support/db.js';
 
 /**
  * A newer build opening the database in another tab. One test file, in one
@@ -17,16 +18,10 @@ import { CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';
 /** Later than any version this build declares. */
 const NEWER = 99;
 
-const opened: Dexie[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
+afterEach(cleanup);
 
 const thisTab = async (): Promise<NotesDatabase> => {
-	const db = createDatabase(`stale-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.prefs.put({ key: 'before', value: 'kept' });
 	return db;
 };
@@ -35,11 +30,12 @@ const thisTab = async (): Promise<NotesDatabase> => {
 const newerBuild = (name: string): Dexie => {
 	const db = createDatabase(name) as Dexie;
 	db.version(NEWER).stores({ somethingNew: 'id' });
-	opened.push(db);
+	deleteAfterTest(db);
 	return db;
 };
 
-describe('a tab whose database a newer build has asked for', () => {
+// In the order written, even when the run is shuffled: see above.
+describe('a tab whose database a newer build has asked for', { shuffle: false }, () => {
 	it('says nothing while it is the newest there is', async () => {
 		await thisTab();
 		render(
@@ -138,7 +134,7 @@ describe('a tab whose database a newer build has asked for', () => {
 		newer.close();
 
 		const old = createDatabase(name);
-		opened.push(old);
+		deleteAfterTest(old);
 		// What an editor holds is not written: the newer schema is already
 		// live, and this is old code that would be writing into it.
 		const finish = vi.fn(() => old.prefs.put({ key: 'held', value: 'by the editor' }));

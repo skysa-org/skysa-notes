@@ -1,12 +1,13 @@
 import { VAULT_FOLDER } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { fillSources } from '../src/fill/matches.js';
 import { generateIdentity, recipientOf } from '../src/secrets/age.js';
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol } from '../src/store/secretKeys.js';
 import { setPasswordsShown } from '../src/store/vault.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Which sources the fill window looks in and saves to (docs/ARCHITECTURE.md
@@ -14,18 +15,6 @@ import { setPasswordsShown } from '../src/store/vault.js';
  * shown in this browser and their vault set up on this device; in their
  * tabs' order.
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const fresh = (): NotesDatabase => {
-	const db = createDatabase(`fill-matches-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const source = async (
 	db: NotesDatabase,
@@ -71,7 +60,7 @@ const source = async (
 
 describe('the sources the fill window looks in and saves to', () => {
 	it('are those whose passwords are shown here and whose vault opens here, in their tabs’ order', async () => {
-		const db = fresh();
+		const db = freshDatabase();
 		await source(db, 'late', { boundAt: 20 });
 		await source(db, 'early', { boundAt: 10 });
 		await source(db, 'hidden', { boundAt: 30, shown: false });
@@ -94,7 +83,7 @@ describe('the sources the fill window looks in and saves to', () => {
 	});
 
 	it('leave out the device’s own notes, which have no passwords', async () => {
-		const db = fresh();
+		const db = freshDatabase();
 		await setPasswordsShown(db, LOCAL_CONNECTION_ID, true);
 		await createNote(db, {
 			connectionId: LOCAL_CONNECTION_ID,
@@ -107,7 +96,7 @@ describe('the sources the fill window looks in and saves to', () => {
 	});
 
 	it('are none, and none shown, where no source shows its passwords here', async () => {
-		const db = fresh();
+		const db = freshDatabase();
 		await source(db, 'c1', { shown: false });
 
 		expect(await fillSources(db)).toEqual({ sources: [], shown: false, notSetUp: 0 });

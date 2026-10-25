@@ -12,29 +12,14 @@ import {
 import type { AttachmentProblem, Shown, ShowOptions } from '../src/editor/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlFactory } from '../src/editor/objectUrls.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
-import {
-	createDatabase,
-	type FileRecord,
-	type NoteRecord,
-	type NotesDatabase,
-} from '../src/store/db.js';
+import { type FileRecord, type NoteRecord } from '../src/store/db.js';
 import { createNote, draftNote } from '../src/store/notes.js';
 import { heldCopy, heldPicture, keepPicture } from '../src/store/pictures.js';
 import type { FileRead } from '../src/sync/fileReads.js';
 import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
+import { freshDatabase } from './support/db.js';
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`note-attachments-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
+afterEach(cleanup);
 
 const bufferOf = (value: string): ArrayBuffer => new TextEncoder().encode(value).buffer;
 

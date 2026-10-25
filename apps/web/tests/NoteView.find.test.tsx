@@ -48,12 +48,7 @@ const open = async (body = 'one two one\n') => {
 	return note;
 };
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.prefs.clear();
-});
+afterEach(cleanup);
 
 describe('opening find in a note', () => {
 	it('is not there until it is asked for', async () => {

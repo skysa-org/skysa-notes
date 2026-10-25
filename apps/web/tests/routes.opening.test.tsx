@@ -24,16 +24,11 @@ import { holdTheNotes as heldNotes } from './heldNotes.js';
 
 const holds: (() => void)[] = [];
 
-afterEach(async () => {
+afterEach(() => {
 	holds.splice(0).forEach((release) => {
 		release();
 	});
 	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
 });
 
 const holdTheNotes = async (): Promise<() => void> => {

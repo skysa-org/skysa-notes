@@ -27,9 +27,7 @@ beforeEach(() => {
 	registered.updateServiceWorker.mockReset().mockResolvedValue(undefined);
 });
 
-afterEach(() => {
-	cleanup();
-});
+afterEach(cleanup);
 
 describe('UpdatePrompt', () => {
 	it('makes way before it asks the new build to take over, and says it is updating', async () => {

@@ -18,15 +18,7 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 const DROPBOX = 'c-dropbox';
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-});
+afterEach(cleanup);
 
 const openApp = async () => {
 	await setDefaultEditorMode(db, 'raw');

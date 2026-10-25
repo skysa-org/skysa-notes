@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { beginConnect, credentialFor, keepCredential } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
-	createDatabase,
 	LOCAL_CONNECTION_ID,
 	noteRef,
 	type NotesDatabase,
@@ -22,6 +21,7 @@ import {
 	stopSyncingHere,
 } from '../src/sync/account.js';
 import { updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Reconciling a device with the server, now that what it presents is a
@@ -34,18 +34,6 @@ import { updateNote } from './noteRows.js';
  * lets it go the one way there is: what the remote has leaves the device, and
  * what it was never sent stays under its own source, detached.
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`account-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const connection = (
 	id: string,

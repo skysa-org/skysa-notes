@@ -44,16 +44,10 @@ vi.mock('../src/store/lastOpen.js', async (importOriginal) => {
 	};
 });
 
-afterEach(async () => {
+afterEach(() => {
 	store.lateBy = 0;
 	store.told = 0;
 	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
 });
 
 const openApp = async (at = '/') => {
