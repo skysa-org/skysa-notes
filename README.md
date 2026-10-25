@@ -48,6 +48,7 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 | `pnpm dev` | Web + API dev servers |
 | `pnpm build` | Build core, SPA, then a Worker dry-run bundle |
 | `pnpm test` | Vitest across all packages |
+| `pnpm coverage` | The same tests as one run with coverage, against the thresholds in `vitest.config.ts` |
 | `pnpm lint` / `pnpm lint:fix` | ESLint across all packages, with or without auto-fix |
 | `pnpm typecheck` | `tsc --noEmit` across all packages, and core's source again with no Node types |
 | `pnpm format` / `pnpm format:check` | Prettier write / check |
