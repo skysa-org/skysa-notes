@@ -1,5 +1,5 @@
 import { parentPath, ROOT } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
 	bindConnection,
@@ -8,7 +8,6 @@ import {
 	showConnection,
 } from '../src/store/connection.js';
 import {
-	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	noteRef,
@@ -28,6 +27,7 @@ import {
 import { queueMove, queueWrite } from '../src/store/queue.js';
 import { type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Taking what one source never sent into another one (docs/ARCHITECTURE.md §10).
@@ -44,18 +44,6 @@ const ADA = { connectionId: 'c-ada', provider: 'dropbox', accountId: 'dbid:ada' 
 const BOB = { connectionId: 'c-bob', provider: 'onedrive', accountId: 'ms:bob' } as const;
 const ada = { connectionId: ADA.connectionId };
 const bob = { connectionId: BOB.connectionId };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`move-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const holdCredential = (db: NotesDatabase, connectionId: string) =>
 	db.credentials.put({

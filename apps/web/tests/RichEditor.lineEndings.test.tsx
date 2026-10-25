@@ -35,11 +35,7 @@ const showing = async (title: string): Promise<void> => {
 	});
 };
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
+afterEach(cleanup);
 
 describe('a note whose lines end the Windows way', () => {
 	it('opens in the rich editor rather than being called unrepresentable', async () => {

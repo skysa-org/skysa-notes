@@ -13,9 +13,7 @@ import { generateIdentity } from '../src/secrets/age.js';
  * them all.
  */
 
-afterEach(() => {
-	cleanup();
-});
+afterEach(cleanup);
 
 const EMPTY: readonly string[] = Array.from({ length: 12 }, () => '');
 

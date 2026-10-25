@@ -93,16 +93,13 @@ const flushAutosave = () => {
 	});
 };
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	store.refusing = false;
 	store.refusingText = undefined;
 	store.asked.length = 0;
 	deletions.length = 0;
 	besides.length = 0;
-	await db.notes.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
 });
 
 describe('NoteView, when a save is refused', () => {

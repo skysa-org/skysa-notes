@@ -22,7 +22,7 @@ const GATE = {
 	action: { label: 'See plans', url: 'https://example.com/plans' },
 };
 
-beforeEach(async () => {
+beforeEach(() => {
 	vi.stubGlobal('fetch', (input: string) =>
 		input === '/api/config'
 			? Promise.resolve(
@@ -34,9 +34,6 @@ beforeEach(async () => {
 				)
 			: Promise.reject(new TypeError('offline'))
 	);
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.syncState.clear();
 });
 
 afterEach(() => {

@@ -32,14 +32,6 @@ import { sealed } from './secretHostFake.js';
 
 afterEach(cleanup);
 
-beforeEach(async () => {
-	// The hooks read the singleton database, not an injected one.
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-});
-
 const count = async (): Promise<number | undefined> => {
 	const { result } = renderHook(() => useLooseNoteCount(useActiveConnectionId()));
 	await waitFor(() => {
@@ -424,10 +416,6 @@ describe('useNoteSearch', () => {
  * written is forgotten as soon as the note is closed.
  */
 describe('useCodeDisplay', () => {
-	beforeEach(async () => {
-		await db.prefs.clear();
-	});
-
 	it('starts the editor off where this device left it', async () => {
 		await setCodeDisplay(db, { wrap: true, lineNumbers: true });
 		const store = createCodeDisplayStore();

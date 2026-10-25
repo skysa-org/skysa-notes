@@ -16,15 +16,7 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * it is open or shut. A note chosen from inside opens the notebook it is in.
  */
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-});
+afterEach(cleanup);
 
 const openApp = async () => {
 	await setDefaultEditorMode(db, 'raw');

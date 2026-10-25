@@ -26,11 +26,10 @@ vi.mock('../src/store/lastOpen.js', async (importOriginal) => {
 	};
 });
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	reads.held = false;
 	for (const resolve of reads.waiting.splice(0)) resolve();
-	await db.prefs.clear();
 });
 
 const KEY = `lastOpen:${LOCAL_CONNECTION_ID}`;

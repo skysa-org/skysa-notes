@@ -11,9 +11,7 @@ import { readQr } from './qrRead.js';
  * age writes it, and nothing else.
  */
 
-afterEach(() => {
-	cleanup();
-});
+afterEach(cleanup);
 
 describe('the recovery key’s QR code', () => {
 	it('reads as the key, exactly as age writes it', () => {

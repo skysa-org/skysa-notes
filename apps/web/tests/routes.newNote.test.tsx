@@ -37,18 +37,10 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 	};
 });
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	refusing.current = 0;
 	refusing.asked = 0;
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-	await db.files.clear();
-	await db.fileBytes.clear();
 });
 
 const openApp = async (at = '/') => {

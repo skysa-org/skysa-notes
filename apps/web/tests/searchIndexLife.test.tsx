@@ -70,8 +70,6 @@ beforeEach(async () => {
 	made.refreshes = [];
 	made.stops = 0;
 	made.instead = [];
-	await db.notes.clear();
-	await db.folders.clear();
 	await createNote(db, { title: 'Compost', body: 'turn the heap\n', folderPath: 'garden' });
 });
 

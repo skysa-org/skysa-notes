@@ -27,7 +27,6 @@ import { beginConnect, hashCredential } from '../src/store/credentials.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
-	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
@@ -43,19 +42,9 @@ import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`panel-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
+afterEach(cleanup);
 
 const STORAGE_FIRST: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
 

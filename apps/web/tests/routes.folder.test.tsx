@@ -14,11 +14,7 @@ import { createFolder } from '../src/store/folders.js';
  * nothing at all.
  */
 
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
+afterEach(cleanup);
 
 const openApp = async () => {
 	const router = createRouter({

@@ -23,17 +23,10 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 let fake: FakeWindow | undefined;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.files.clear();
-	await db.fileBytes.clear();
 });
 
 const openApp = async () => {

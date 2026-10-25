@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type ApiClient } from '../src/api/client.js';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { heldUpOf } from '../src/store/heldUp.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -34,6 +34,7 @@ import {
 	type SyncSchedulerOptions,
 } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 const HOUR = 60 * 60 * 1000;
 const ACCOUNT = { connectionId: 'c1', provider: 'dropbox', accountId: 'acct' } as const;
@@ -242,12 +243,6 @@ const remote = (): Remote => {
 		cursors,
 		factory,
 	};
-};
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`scheduler-${crypto.randomUUID()}`);
-	cleanups.push(() => db.delete());
-	return db;
 };
 
 /** The credential a bound device holds. Without one nothing can mint. */
