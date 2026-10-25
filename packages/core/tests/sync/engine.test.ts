@@ -14,8 +14,10 @@ import {
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFilePath, conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
-import { createSyncEngine, type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
+import { type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
+import { AT, engineFixture, reporting } from './kit/engine.js';
+import { expectSoundStore } from './kit/invariants.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
 /**
@@ -30,20 +32,13 @@ let provider: FakeProvider;
 let store: MemoryStore;
 let engine: SyncEngine;
 let ids = 0;
-let fresh = 0;
-
-const AT = new Date('2026-09-15T14:32:10Z');
 
 beforeEach(async () => {
 	ids = 0;
-	fresh = 0;
 	provider = createFakeProvider({ startAt: new Date('2026-01-01T00:00:00Z') });
 	await provider.ensureRoot();
 	store = createMemoryStore();
-	engine = createSyncEngine({
-		provider,
-		store,
-		now: () => AT,
+	engine = engineWith({
 		newId: () => {
 			ids += 1;
 			return `copy-${String(ids)}`;
@@ -51,49 +46,10 @@ beforeEach(async () => {
 	});
 });
 
-/**
- * The same provider, but `changes` reports exactly what it is told to. The fake
- * reports a move as one entry; real providers disagree about that, and the
- * disagreement is where notes get lost, so the shapes they produce are fed in
- * directly rather than waited for.
- */
-const reporting = (base: StorageProvider, entries: readonly ChangeEntry[]): StorageProvider => ({
-	...base,
-	changes: () => Promise.resolve({ entries, cursor: 'reported', more: false }),
-});
+const { engineWith, pullNow, pullPages } = engineFixture(() => ({ provider, store }));
 
-/**
- * The store forgives a `delete-note` for a note that is not there, because a
- * batch that rejects is a batch that is retried for ever. That forgiveness must
- * never be what is holding a test up, so every test asserts it was not used.
- */
 afterEach(() => {
-	expect(store.anomalies()).toEqual([]);
-});
-
-/**
- * The two things that must be true of the store between batches, whatever the
- * provider said. Two rows at one path is a note the sidebar shows twice and two
- * queued writes racing for one file; two rows with one `remoteId` is worse —
- * `noteByRemoteId` only ever hands back one of them, so the other is stale for
- * ever and every edit to it conflicts. Asserted after every test rather than in
- * the handful that happen to think of it.
- */
-afterEach(() => {
-	const notes = store.notes();
-	const paths = notes.map((note) => note.path);
-	expect(paths).toEqual([...new Set(paths)]);
-	const remotes = notes.flatMap((note) => (note.remoteId === undefined ? [] : [note.remoteId]));
-	expect(remotes).toEqual([...new Set(remotes)]);
-});
-
-/** The same two, for files: a picture shown twice, or a link the store cannot keep. */
-afterEach(() => {
-	const files = store.files();
-	const paths = files.map((file) => file.path);
-	expect(paths).toEqual([...new Set(paths)]);
-	const remotes = files.flatMap((file) => (file.remoteId === undefined ? [] : [file.remoteId]));
-	expect(remotes).toEqual([...new Set(remotes)]);
+	expectSoundStore(store);
 });
 
 /** Puts a file on the remote and returns what the provider called it. */
@@ -114,22 +70,6 @@ const killTheCursor = (uploadDifferences?: boolean): void => {
 		return new CursorResetError('reset', uploadDifferences);
 	});
 };
-
-/** Pulls exactly these entries, whatever the fake would have reported. */
-const pullNow = async (entries: readonly ChangeEntry[]) =>
-	createSyncEngine({
-		provider: reporting(provider, entries),
-		store,
-		now: () => AT,
-		// Distinct from the outer engine's, so an assertion that a note kept
-		// its identity cannot pass by minting the same name twice — and
-		// distinct from each other, so two new files in one batch do not land
-		// on one row and fail the test for a reason of its own making.
-		newId: () => {
-			fresh += 1;
-			return `fresh-${String(fresh)}`;
-		},
-	}).pull();
 
 const noteAt = (path: string) => store.notes().find((note) => note.path === path);
 
@@ -271,11 +211,7 @@ describe('pull', () => {
 		// so a provider that keeps its version gives us nothing to fetch.
 		const renamed = { ...entry, path: 'b.md' };
 		const reads = provider.callLog().filter((call) => call.op === 'read').length;
-		await createSyncEngine({
-			provider: reporting(provider, [renamed]),
-			store,
-			now: () => AT,
-		}).pull();
+		await engineWith({ provider: reporting(provider, [renamed]) }).pull();
 
 		expect(noteAt('b.md')?.id).toBe('n1');
 		expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
@@ -300,7 +236,7 @@ describe('pull', () => {
 			{ ...entry, path: 'b.md' },
 			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
 		]);
-		await createSyncEngine({ provider: split, store, now: () => AT }).pull();
+		await engineWith({ provider: split }).pull();
 
 		expect(noteAt('b.md')?.content).toBe('one\n');
 		expect(store.notes()).toHaveLength(1);
@@ -401,7 +337,7 @@ describe('pull', () => {
 		provider = createFakeProvider({ pageSize: 1 });
 		await provider.ensureRoot();
 		store = createMemoryStore();
-		engine = createSyncEngine({ provider, store, now: () => AT });
+		engine = engineWith();
 		await provider.write('a.md', '1\n', {});
 		await provider.write('b.md', '2\n', {});
 
@@ -414,7 +350,7 @@ describe('pull', () => {
 				return provider.changes(cursor);
 			},
 		};
-		const failed = await createSyncEngine({ provider: counted, store, now: () => AT }).pull();
+		const failed = await engineWith({ provider: counted }).pull();
 		expect(failed.status).toBe('retry');
 
 		expect(store.storedCursor()).toBeUndefined();
@@ -427,7 +363,7 @@ describe('pull', () => {
 		provider = createFakeProvider({ pageSize: 1 });
 		await provider.ensureRoot();
 		store = createMemoryStore();
-		engine = createSyncEngine({ provider, store, now: () => AT });
+		engine = engineWith();
 		await provider.write('a.md', '1\n', {});
 		await provider.write('b.md', '2\n', {});
 		await provider.write('c.md', '3\n', {});
@@ -582,8 +518,7 @@ describe('push', () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'first\n', dirty: true });
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		const original = store.completeOp;
-		const engineWithEdit = createSyncEngine({
-			provider,
+		const engineWithEdit = engineWith({
 			store: {
 				...store,
 				completeOp: async (seq, outcome) => {
@@ -591,7 +526,6 @@ describe('push', () => {
 					await original(seq, outcome);
 				},
 			},
-			now: () => AT,
 		});
 
 		await engineWithEdit.push();
@@ -789,13 +723,11 @@ describe('push', () => {
 		});
 		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
-		const strict = createSyncEngine({
+		const strict = engineWith({
 			provider: {
 				...provider,
 				delete: () => Promise.reject(new NotFoundError('a.md')),
 			},
-			store,
-			now: () => AT,
 		});
 		const result = await strict.push();
 
@@ -864,8 +796,7 @@ describe('push', () => {
 			});
 		};
 
-		const pushing = (base: StorageProvider) =>
-			createSyncEngine({ provider: base, store, now: () => AT }).push();
+		const pushing = (base: StorageProvider) => engineWith({ provider: base }).push();
 
 		/** A provider that takes four at once, as Google Drive does. */
 		beforeEach(async () => {
@@ -874,7 +805,7 @@ describe('push', () => {
 				writesAtOnce: 4,
 			});
 			await provider.ensureRoot();
-			engine = createSyncEngine({ provider, store, now: () => AT });
+			engine = engineWith();
 		});
 
 		it('writes one at a time to a provider that does not say it takes more', async () => {
@@ -1060,10 +991,7 @@ describe('push', () => {
 					? new AuthError('expired')
 					: undefined;
 			});
-			const withAuth = createSyncEngine({
-				provider,
-				store,
-				now: () => AT,
+			const withAuth = engineWith({
 				reauthorize: () => {
 					refreshed += 1;
 					return Promise.resolve();
@@ -1387,7 +1315,7 @@ describe('pushing a file', () => {
 		store.putFile({ id: 'x2', path: 'b.qqq', size: 3 }, { bytes: OTHER.slice(), pinned: true });
 		store.queue({ op: 'upload', fileId: 'x2', path: 'b.qqq' });
 
-		await createSyncEngine({ provider: telling, store, now: () => AT }).push();
+		await engineWith({ provider: telling }).push();
 
 		expect(asked).toEqual(['image/png', undefined]);
 	});
@@ -1768,7 +1696,7 @@ describe('pushing a file', () => {
 			},
 		};
 
-		const result = await createSyncEngine({ provider: always, store, now: () => AT }).push();
+		const result = await engineWith({ provider: always }).push();
 
 		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 1 }));
 		expect(provider.snapshot().filter((entry) => entry.path.endsWith('.x'))).toHaveLength(9);
@@ -1998,7 +1926,7 @@ describe('moving a file', () => {
 			},
 		};
 
-		const result = await createSyncEngine({ provider: strict, store, now: () => AT }).push();
+		const result = await engineWith({ provider: strict }).push();
 
 		expect(result.status).toBe('ok');
 		expect(store.files()).toEqual([
@@ -3002,11 +2930,7 @@ describe('a note the user is still typing into', () => {
 			},
 		};
 
-		const result = await createSyncEngine({
-			provider: whileTyping,
-			store,
-			now: () => AT,
-		}).push();
+		const result = await engineWith({ provider: whileTyping }).push();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('and then more\n');
@@ -3022,10 +2946,7 @@ describe('authorization', () => {
 		provider.setFault((call) =>
 			call.op === 'write' && refreshed === 0 ? new AuthError('expired') : undefined
 		);
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -3060,10 +2981,7 @@ describe('authorization', () => {
 		provider.setFault((call) =>
 			call.op === 'read' && refreshed === 0 ? new AuthError('expired') : undefined
 		);
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -3091,10 +3009,7 @@ describe('authorization', () => {
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		let refreshed = 0;
 		provider.setFault((call) => (call.op === 'write' ? new AuthError('expired') : undefined));
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -4167,10 +4082,8 @@ describe('an entry the provider sent twice', () => {
 describe('a store that cannot answer', () => {
 	/** The memory store with one method replaced by a rejection. */
 	const breaking = (method: keyof SyncStore): SyncEngine =>
-		createSyncEngine({
-			provider,
+		engineWith({
 			store: { ...store, [method]: () => Promise.reject(new Error(`${method} failed`)) },
-			now: () => AT,
 		});
 
 	it.each(['cursor', 'pendingOps', 'failOp'] as const)(
@@ -4726,7 +4639,7 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
 		const seen: string[] = [];
-		const byPath = createSyncEngine({
+		const byPath = engineWith({
 			provider: {
 				...provider,
 				move: (ref, target) => {
@@ -4734,8 +4647,6 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 					return provider.move({ remoteId: ref.remoteId, path: ref.path }, target);
 				},
 			},
-			store,
-			now: () => AT,
 		});
 		await byPath.push();
 
@@ -4757,7 +4668,7 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
 		const seen: string[] = [];
-		const byPath = createSyncEngine({
+		const byPath = engineWith({
 			provider: {
 				...provider,
 				delete: (ref) => {
@@ -4765,8 +4676,6 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 					return provider.delete(ref);
 				},
 			},
-			store,
-			now: () => AT,
 		});
 		await byPath.push();
 
@@ -5176,10 +5085,8 @@ describe('a write whose file is not where it was', () => {
 		const moved = await provider.move(entry, 'renamed.md');
 
 		// The one thing the fake models differently, fed in as Dropbox sends it.
-		const stable = createSyncEngine({
+		const stable = engineWith({
 			provider: reporting(provider, [{ ...moved, version: entry.version }]),
-			store,
-			now: () => AT,
 		});
 		await stable.pull();
 
@@ -5297,7 +5204,7 @@ describe('the bytes a note last synced', () => {
 			read: () => Promise.resolve({ content: 'one\n', version: entry.version }),
 		};
 
-		const pulled = await createSyncEngine({ provider: stale, store, now: () => AT }).pull();
+		const pulled = await engineWith({ provider: stale }).pull();
 		await engine.sync();
 
 		expect(pulled.conflicts).toHaveLength(1);
@@ -5322,11 +5229,7 @@ describe('the bytes a note last synced', () => {
 			{ ...file, path: 'a.md' },
 		];
 
-		await createSyncEngine({
-			provider: reporting(provider, entries),
-			store,
-			now: () => AT,
-		}).pull();
+		await engineWith({ provider: reporting(provider, entries) }).pull();
 
 		expect(noteAt('a.md')).toMatchObject({ id: note.id, remoteId: file.remoteId, dirty: true });
 		expect(hashOf(note.id)).toBe(await contentHash('one\n'));
@@ -5551,7 +5454,7 @@ describe('a dead cursor', () => {
 				...store,
 				foldersWithRemote: async () => [...(await store.foldersWithRemote())].reverse(),
 			};
-			const engineOver = createSyncEngine({ provider, store: backwards, now: () => AT });
+			const engineOver = engineWith({ store: backwards });
 			await engineOver.pull();
 			killTheCursor(true);
 			const folder = provider.snapshot().find((node) => node.path === 'Work');
@@ -5646,7 +5549,7 @@ describe('a dead cursor', () => {
 			provider = createFakeProvider({ pageSize: 1 });
 			await provider.ensureRoot();
 			store = createMemoryStore();
-			engine = createSyncEngine({ provider, store, now: () => AT });
+			engine = engineWith();
 			await provider.write('a.md', 'one\n', {});
 			await provider.write('b.md', 'two\n', {});
 			await provider.write('c.md', 'three\n', {});
@@ -5725,10 +5628,7 @@ describe('a dead cursor', () => {
 		await provider.write('b.md', '2\n', {});
 		await provider.write('c.md', '3\n', {});
 		store = createMemoryStore();
-		engine = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		engine = engineWith({
 			// One id per note. A constant here would have all three land on one
 			// row, and the test would fail for a reason of its own making.
 			newId: () => {
@@ -5819,20 +5719,6 @@ describe('a provider that reports a folder recursively', () => {
 		return { file, folder, noteId: note.id };
 	};
 
-	const pullReporting = async (entries: readonly ChangeEntry[]) => {
-		const reported = createSyncEngine({
-			provider: reporting(provider, entries),
-			store,
-			now: () => AT,
-			// Distinct from the ids `setUpWork` handed out, and from each other.
-			newId: () => {
-				fresh += 1;
-				return `fresh-${String(fresh)}`;
-			},
-		});
-		return reported.pull();
-	};
-
 	it('deletes a folder and everything in it without failing the batch', async () => {
 		// The batch names the note twice: once as itself, and once by way of the
 		// folder that cascades to it. The second one is about a row that is no
@@ -5844,7 +5730,7 @@ describe('a provider that reports a folder recursively', () => {
 		if (deep === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/Deep', deleted: true, remoteId: deep.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
@@ -5870,7 +5756,7 @@ describe('a provider that reports a folder recursively', () => {
 		const out = provider.snapshot().find((node) => node.path === 'a.md');
 		if (out === undefined) throw new Error('no file');
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			out,
@@ -5890,7 +5776,7 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder } = await setUpWork();
 		await provider.delete(folder);
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 		]);
@@ -5909,7 +5795,7 @@ describe('a provider that reports a folder recursively', () => {
 		store.put({ ...note, content: 'mine\n', dirty: true });
 		await provider.delete(folder);
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 		]);
@@ -5926,7 +5812,7 @@ describe('a provider that reports a folder recursively', () => {
 		const movedFile = provider.snapshot().find((node) => node.path === 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			moved,
@@ -5955,7 +5841,7 @@ describe('a provider that reports a folder recursively', () => {
 		const movedFile = provider.snapshot().find((node) => node.path === 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true },
 			{ path: 'Work/a.md', deleted: true },
 			moved,
@@ -5985,7 +5871,7 @@ describe('a provider that reports a folder recursively', () => {
 		const movedFile = provider.snapshot().find((each) => each.path === 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true },
 			{ path: 'Work/a.md', deleted: true },
 			moved,
@@ -6009,7 +5895,7 @@ describe('a provider that reports a folder recursively', () => {
 		const out = provider.snapshot().find((each) => each.path === 'a.md');
 		if (out === undefined) throw new Error('no file');
 
-		await pullReporting([
+		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			out,
@@ -6049,7 +5935,7 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder } = await setUpWork();
 		await provider.delete(folder);
 
-		const result = await pullReporting([
+		const result = await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
@@ -6070,7 +5956,7 @@ describe('a provider that reports a folder recursively', () => {
 			await setUpWork();
 			store.putFolder({ path: '', remoteId: 'root-id' });
 
-			const result = await pullReporting([{ path, deleted: true, remoteId: 'root-id' }]);
+			const result = await pullNow([{ path, deleted: true, remoteId: 'root-id' }]);
 
 			expect(result.status).toBe('ok');
 			expect(noteAt('Work/a.md')).toBeDefined();
@@ -6085,7 +5971,7 @@ describe('a provider that reports a folder recursively', () => {
 		await setUpWork();
 		const root = await provider.ensureRoot();
 
-		await pullReporting([
+		await pullNow([
 			{
 				remoteId: root.rootId,
 				path: '',
@@ -6545,7 +6431,7 @@ describe('a remote folder delete', () => {
 		const folderOnly = createFakeProvider({ folderChanges: 'folder-only' });
 		await folderOnly.ensureRoot();
 		const local = createMemoryStore();
-		const solo = createSyncEngine({ provider: folderOnly, store: local, now: () => AT });
+		const solo = engineWith({ provider: folderOnly, store: local });
 
 		await folderOnly.createFolder('Work');
 		const entry = await folderOnly.write('Work/a.md', 'one\n', {});
@@ -6852,7 +6738,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 			const remote = createFakeProvider({ folderChanges });
 			await remote.ensureRoot();
 			const local = createMemoryStore();
-			const solo = createSyncEngine({ provider: remote, store: local, now: () => AT });
+			const solo = engineWith({ provider: remote, store: local });
 			const folder = await remote.createFolder('A');
 			const file = await remote.write('A/x.md', 'one\n', {});
 			await solo.pull();
@@ -7447,10 +7333,8 @@ describe('an op withdrawn after the queue was read', () => {
 		const stale = await store.pendingOps();
 		await store.completeOp(remove.seq, { kind: 'done' });
 
-		const result = await createSyncEngine({
-			provider,
+		const result = await engineWith({
 			store: { ...store, pendingOps: () => Promise.resolve(stale) },
-			now: () => AT,
 		}).push();
 
 		expect(result).toMatchObject({ status: 'ok', pushed: 0 });
@@ -7507,29 +7391,6 @@ const notePaths = () =>
 		.notes()
 		.map((note) => note.path)
 		.sort();
-
-/** The same provider, with `changes` handing out these pages one call at a time. */
-const paging = (base: StorageProvider, pages: readonly (readonly ChangeEntry[] | Error)[]) => {
-	const served = { count: 0 };
-	return {
-		...base,
-		changes: () => {
-			const index = served.count;
-			served.count += 1;
-			const page = pages[index];
-			if (page === undefined) throw new Error('asked for a page past the round');
-			if (page instanceof Error) return Promise.reject(page);
-			return Promise.resolve({
-				entries: page,
-				cursor: `page-${String(index)}`,
-				more: index < pages.length - 1,
-			});
-		},
-	};
-};
-
-const pullPages = (pages: readonly (readonly ChangeEntry[] | Error)[]) =>
-	createSyncEngine({ provider: paging(provider, pages), store, now: () => AT }).pull();
 
 describe('a notebook removed here, whose directory the remote still has', () => {
 	/** The folder paths the remote holds, which is what an `rmdir` is about. */
@@ -7775,7 +7636,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// marked as left instead, which touches nothing in it.
 		const blind = createFakeProvider({ listsEverything: false });
 		const theirs = createMemoryStore();
-		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
 		theirs.removeFolder('Work');
@@ -7805,7 +7666,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// that keeps a delete from taking it keeps the directory a notebook.
 		const blind = createFakeProvider({ listsEverything: false });
 		const theirs = createMemoryStore();
-		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
 		await blind.write('Work/theirs.md', 'theirs\n', {});
@@ -7825,7 +7686,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		const fake = createFakeProvider({ listsEverything: false });
 		const blind: StorageProvider = { ...fake, leaveFolder: undefined };
 		const theirs = createMemoryStore();
-		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
 		theirs.removeFolder('Work');
@@ -8208,7 +8069,7 @@ describe('a round of changes spread over several pages', () => {
 				return store.notesUnder(path);
 			},
 		};
-		const big = createSyncEngine({ provider: paged, store: counting, now: () => AT });
+		const big = engineWith({ provider: paged, store: counting });
 		await big.pull();
 		const notes = 2000;
 		for (let folder = 0; folder < 20; folder += 1) {
@@ -9239,7 +9100,7 @@ describe('a file that is not UTF-8 text', () => {
 				return store.applyPull(batch);
 			},
 		};
-		const racing = createSyncEngine({ provider, store: typing, now: () => AT });
+		const racing = engineWith({ store: typing });
 
 		const refused = await racing.pull();
 
@@ -9589,7 +9450,7 @@ describe('a file that is not UTF-8 text', () => {
 			};
 			return {
 				batches,
-				engine: createSyncEngine({ provider: over, store: watching, now: () => AT }),
+				engine: engineWith({ provider: over, store: watching }),
 			};
 		};
 
@@ -10051,10 +9912,10 @@ describe('a file that is not UTF-8 text', () => {
 				await paged.ensureRoot();
 				const first = paged.plantBytes('a.md', LATIN1);
 				const second = paged.plantBytes('b.md', LATIN1);
-				await createSyncEngine({ provider: paged, store, now: () => AT }).pull();
+				await engineWith({ provider: paged }).pull();
 				const dead = store.storedCursor();
 				const pages = { read: 0 };
-				const interrupted = createSyncEngine({
+				const interrupted = engineWith({
 					provider: {
 						...paged,
 						changes: (cursor) => {
@@ -10066,8 +9927,6 @@ describe('a file that is not UTF-8 text', () => {
 								: paged.changes(cursor);
 						},
 					},
-					store,
-					now: () => AT,
 				});
 
 				const result = await interrupted.pull();
@@ -10238,12 +10097,10 @@ describe('a file that is not UTF-8 text', () => {
  * is not counted as fetched, and that a short round says nothing at all.
  */
 describe('progress', () => {
-	const reporting = (base: StorageProvider) => {
+	const watching = (base: StorageProvider) => {
 		const said: SyncProgress[] = [];
-		const counted = createSyncEngine({
+		const counted = engineWith({
 			provider: base,
-			store,
-			now: () => AT,
 			onProgress: (progress) => said.push(progress),
 		});
 		return { said, counted };
@@ -10257,7 +10114,7 @@ describe('progress', () => {
 		await provider.createFolder('Work');
 		await provider.write('notes.txt', 'not a note\n', {});
 		const reads: string[] = [];
-		const { said, counted } = reporting({
+		const { said, counted } = watching({
 			...provider,
 			read: (entry) => {
 				reads.push(entry.path);
@@ -10300,7 +10157,7 @@ describe('progress', () => {
 			remoteVersion: held.version,
 			dirty: false,
 		});
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.pull();
 
@@ -10315,7 +10172,7 @@ describe('progress', () => {
 		await remoteFile('b.md', '2\n');
 		await remoteFile('c.md', '3\n');
 		await provider.createFolder('Work');
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.pull();
 
@@ -10335,7 +10192,7 @@ describe('progress', () => {
 		// note was counted.
 		provider = createFakeProvider({ pageSize: 1 });
 		await provider.ensureRoot();
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 		await counted.pull();
 		await provider.write('a.md', '1\n', {});
 		await provider.createFolder('Work');
@@ -10361,7 +10218,7 @@ describe('progress', () => {
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		await engine.push();
 		const reads: string[] = [];
-		const { said, counted } = reporting({
+		const { said, counted } = watching({
 			...provider,
 			read: (entry) => {
 				reads.push(entry.path);
@@ -10385,7 +10242,7 @@ describe('progress', () => {
 		await remoteFile('a.md', '1\n');
 		await engine.pull();
 		await provider.createFolder('Work');
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.pull();
 
@@ -10400,7 +10257,7 @@ describe('progress', () => {
 		store.put({ id: 'n2', path: 'b.md', content: 'two\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 
 		await counted.push();
 
@@ -10422,7 +10279,7 @@ describe('progress', () => {
 		store.queue({ op: 'mkdir', path: 'Work' });
 		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
 		store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
-		const { said, counted } = reporting(four);
+		const { said, counted } = watching(four);
 
 		await counted.push();
 
@@ -10436,7 +10293,7 @@ describe('progress', () => {
 	});
 
 	it('says nothing for a push with nothing to send', async () => {
-		const { said, counted } = reporting(provider);
+		const { said, counted } = watching(provider);
 		await counted.push();
 		expect(said).toEqual([]);
 	});
@@ -10576,10 +10433,7 @@ describe('a pull that fails part-way', () => {
 	it('reads a round once more, not twice, when a token expires part-way', async () => {
 		await sixInARound();
 		let refreshed = 0;
-		const withAuth = createSyncEngine({
-			provider,
-			store,
-			now: () => AT,
+		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
 				return Promise.resolve();
@@ -10600,7 +10454,7 @@ describe('a pull that fails part-way', () => {
 		const paged = createFakeProvider({ pageSize: 2 });
 		await paged.ensureRoot();
 		for (const path of PATHS) await paged.write(path, `${path}\n`, {});
-		const scanning = createSyncEngine({ provider: paged, store, now: () => AT });
+		const scanning = engineWith({ provider: paged });
 		const before = readsOf(paged).length;
 		failFirstReadOf(paged, 'e.md');
 
