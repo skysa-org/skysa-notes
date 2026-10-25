@@ -18,7 +18,9 @@ import {
 import { t } from '../i18n/t.js';
 import {
 	activeConnectionId,
+	type ConnectionScope,
 	type FileBytesRecord,
+	type FileKey,
 	type FileRecord,
 	type NoteRecord,
 	type NotesDatabase,
@@ -40,10 +42,6 @@ import { isTombstone } from './rowStates.js';
  * (`deleteFolder` in `store/folders.ts`). docs/ARCHITECTURE.md §7 has the rest.
  */
 
-export interface FileScope {
-	connectionId?: string;
-}
-
 /** Why a file was not added, for the editor to say in the user's words. */
 export type AttachmentRefusal =
 	/** Over `MAX_ATTACHMENT_BYTES`. */
@@ -63,7 +61,7 @@ export class AttachmentRefusedError extends Error {
 	}
 }
 
-export interface AddAttachmentInput extends FileScope {
+export interface AddAttachmentInput extends ConnectionScope {
 	/** The note the file is added to, which says the folder it goes in. */
 	noteId: string;
 	/** The name the file arrived with: what the link shows, and the stem of its own. */
@@ -87,7 +85,7 @@ export interface AddedAttachment {
 	markdown: string;
 }
 
-export const fileKey = (file: Pick<FileRecord, 'connectionId' | 'id'>): [string, string] => [
+export const fileKey = (file: Pick<FileRecord, 'connectionId' | 'id'>): FileKey => [
 	file.connectionId,
 	file.id,
 ];
@@ -258,7 +256,7 @@ export const fileForLink = async (
 /** Every file row's path in a source, for counting what a notebook holds. */
 export const listFilePaths = async (
 	db: Pick<NotesDatabase, 'files' | 'syncState' | 'prefs'>,
-	scope: FileScope = {}
+	scope: ConnectionScope = {}
 ): Promise<string[]> => {
 	const connectionId = scope.connectionId ?? (await activeConnectionId(db));
 	const files = await rowsOf(db.files, connectionId).toArray();

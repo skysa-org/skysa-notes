@@ -19,6 +19,7 @@ import {
 	activeConnectionId,
 	type Detached,
 	type FileRecord,
+	type FolderKey,
 	type FolderRecord,
 	LOCAL_CONNECTION_ID,
 	noteKey,
@@ -350,7 +351,7 @@ const moveRowsTo = async (
 	const spelling = spellingsOn(folders.filter((folder) => folder.connectionId === target));
 	if (only === undefined && !keep) {
 		await db.folders.bulkDelete(
-			foldersLeaving.map((folder): [string, string] => [folder.connectionId, folder.path])
+			foldersLeaving.map((folder): FolderKey => [folder.connectionId, folder.path])
 		);
 	}
 	// Outermost first, so a notebook is spelled after its parent is.
@@ -1046,7 +1047,7 @@ const keepOnly = async (
 	await db.folders.bulkDelete(
 		folders
 			.filter((folder) => !needed.has(foldPath(folder.path)))
-			.map((folder): [string, string] => [folder.connectionId, folder.path])
+			.map((folder): FolderKey => [folder.connectionId, folder.path])
 	);
 
 	const unmade = new Set(unsynced.folders.map((folder) => foldPath(folder.path)));

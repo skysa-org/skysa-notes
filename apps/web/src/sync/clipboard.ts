@@ -11,7 +11,7 @@ import {
 } from '@skysa/core';
 
 import { PREVIEW_CHARS, showsClipboard } from '../store/clipboard.js';
-import { type ClipRecord, type NotesDatabase } from '../store/db.js';
+import { type ClipKey, type ClipRecord, type NotesDatabase } from '../store/db.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
 import { type FileRead, ownBuffer, type ReadingSession } from './fileReads.js';
@@ -250,7 +250,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 	 * removed on the remote too, by the next flush.
 	 */
 	const sent = async (row: ClipRecord, entry: RemoteEntry): Promise<void> => {
-		const key: [string, string] = [row.connectionId, row.name];
+		const key: ClipKey = [row.connectionId, row.name];
 		const remote = { remoteId: entry.remoteId, version: entry.version };
 		const now = await db.clips.get(key);
 		if (now === undefined) {

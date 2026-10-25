@@ -1,7 +1,7 @@
 import { isWithin } from '@skysa/core';
 import { z } from 'zod';
 
-import { type NotesDatabase } from './db.js';
+import { type NoteKey, type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
 import { readJson, sourceKey } from './prefs.js';
 import { rowsOf } from './rows.js';
@@ -124,9 +124,7 @@ export const setNotePinned = (
 ): Promise<void> =>
 	db.transaction('rw', db.prefs, db.notes, async () => {
 		const others = (await getPinnedNotes(db, connectionId)).filter((each) => each !== id);
-		const rows = await db.notes.bulkGet(
-			others.map((each): [string, string] => [connectionId, each])
-		);
+		const rows = await db.notes.bulkGet(others.map((each): NoteKey => [connectionId, each]));
 		const kept = others.filter((_, at) => rows[at] !== undefined);
 		await db.prefs.put({
 			key: notesKey(connectionId),

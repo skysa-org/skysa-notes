@@ -28,6 +28,7 @@ import Dexie from 'dexie';
 import { type EditorMode } from '../editor/mode.js';
 import {
 	activeConnectionId,
+	type ConnectionScope,
 	type Flag,
 	LOCAL_CONNECTION_ID,
 	type NoteKey,
@@ -55,10 +56,6 @@ import { writerTables } from './scopes.js';
  * flag, or the app would rewrite files it was only ever asked to display.
  * See docs/ARCHITECTURE.md §7.
  */
-
-export interface NoteScope {
-	connectionId?: string;
-}
 
 /**
  * Whether `path` is at the fallback filename: `untitled.md`, and in the
@@ -270,18 +267,19 @@ export const createNote = async (
  * file with one id each — so every lookup says which. Asked inside the writer's
  * own transaction, like `activeConnectionId` itself and for its reason.
  */
-const keyFor = async (db: NotesDatabase, id: string, scope: NoteScope = {}): Promise<NoteKey> => [
-	scope.connectionId ?? (await activeConnectionId(db)),
-	id,
-];
+const keyFor = async (
+	db: NotesDatabase,
+	id: string,
+	scope: ConnectionScope = {}
+): Promise<NoteKey> => [scope.connectionId ?? (await activeConnectionId(db)), id];
 
 export const getNote = async (
 	db: NotesDatabase,
 	id: string,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord | undefined> => db.notes.get(await keyFor(db, id, scope));
 
-export interface ListNotesOptions extends NoteScope {
+export interface ListNotesOptions extends ConnectionScope {
 	/** Restrict to notes directly inside this folder. Omit for every note. */
 	folderPath?: string;
 	/** Include tombstoned notes, which the UI never wants and sync always does. */
@@ -414,7 +412,7 @@ const applyEdit = async (
 	db: NotesDatabase,
 	id: string,
 	change: (note: NoteRecord) => NoteEdit | Promise<NoteEdit>,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> =>
 	// `folders` is in scope because a note can move into a folder that does not
 	// exist yet, and creating it belongs to the same all-or-nothing step; the
@@ -500,7 +498,7 @@ export const saveNoteBody = async (
 	typed: string,
 	base?: EditBase,
 	/** Where the note is, for a caller with no `base` to say. */
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> =>
 	db.transaction('rw', writerTables(db), async () => {
 		// A paste can carry a U+0000, and a file holding one is unreadable to
@@ -602,7 +600,7 @@ const applyBody = (
 	db: NotesDatabase,
 	id: string,
 	body: string,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> =>
 	// Every one of these questions — is the note still unnamed, what is it called
 	// now, which filenames are taken — is asked inside the transaction. Asked
@@ -902,7 +900,7 @@ export const renameNote = async (
 	db: NotesDatabase,
 	id: string,
 	title: string,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> =>
 	applyEdit(
 		db,
@@ -928,7 +926,7 @@ export const moveNote = async (
 	db: NotesDatabase,
 	id: string,
 	folderPath: string,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> =>
 	applyEdit(
 		db,
@@ -978,7 +976,7 @@ export const setScratchMarks = (
 	db: NotesDatabase,
 	id: string,
 	marks: { pinned?: true | undefined; color?: string | undefined },
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> =>
 	applyEdit(
 		db,
@@ -991,7 +989,7 @@ export const setNoteTags = async (
 	db: NotesDatabase,
 	id: string,
 	tags: readonly string[],
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<NoteRecord> => {
 	const cleaned = [
 		...new Set(tags.map(normalizeTag).filter((tag): tag is string => tag !== undefined)),
@@ -1023,7 +1021,7 @@ const setDeleted = (
 	db: NotesDatabase,
 	id: string,
 	deleted: Flag,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<void> =>
 	db.transaction('rw', writerTables(db), async () => {
 		const note = await db.notes.get(await keyFor(db, id, scope));
@@ -1040,11 +1038,14 @@ const setDeleted = (
 		if (deleted === 1) await deletedHere.add(db, note);
 	});
 
-export const deleteNote = (db: NotesDatabase, id: string, scope?: NoteScope): Promise<void> =>
+export const deleteNote = (db: NotesDatabase, id: string, scope?: ConnectionScope): Promise<void> =>
 	setDeleted(db, id, 1, scope);
 
-export const restoreNote = (db: NotesDatabase, id: string, scope?: NoteScope): Promise<void> =>
-	setDeleted(db, id, 0, scope);
+export const restoreNote = (
+	db: NotesDatabase,
+	id: string,
+	scope?: ConnectionScope
+): Promise<void> => setDeleted(db, id, 0, scope);
 
 /**
  * Whatever has taken a restored note's path since moves to a free name beside
@@ -1128,12 +1129,12 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 export const purgeNote = async (
 	db: NotesDatabase,
 	id: string,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<void> => {
 	await db.notes.delete(await keyFor(db, id, scope));
 };
 
-export interface ImportNoteFileInput extends NoteScope {
+export interface ImportNoteFileInput extends ConnectionScope {
 	path: string;
 	/** The file exactly as it exists remotely or on disk. */
 	source: string;
@@ -1337,7 +1338,7 @@ export const setNoteEditorMode = async (
 	db: NotesDatabase,
 	id: string,
 	mode: EditorMode,
-	scope: NoteScope = {}
+	scope: ConnectionScope = {}
 ): Promise<void> => {
 	await db.notes.update(await keyFor(db, id, scope), { editorMode: mode });
 };
@@ -1345,7 +1346,7 @@ export const setNoteEditorMode = async (
 /** Notes with unpushed local changes, oldest edit first. */
 export const listDirtyNotes = async (
 	db: NotesDatabase,
-	options: NoteScope = {}
+	options: ConnectionScope = {}
 ): Promise<NoteRecord[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const dirty = await db.notes.where('dirty').equals(1).toArray();
