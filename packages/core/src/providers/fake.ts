@@ -462,7 +462,19 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 			return entry;
 		});
 
+	/**
+	 * The root, which no adapter deletes or leaves: refused as they refuse it.
+	 * By id where the ref has one, as `resolve` goes, since the stubs beneath
+	 * the adapters hand on refs that carry an id and no path.
+	 */
+	const refusedAtRoot = (ref: EntryRef): Promise<never> | undefined =>
+		ref.remoteId === rootEntry().remoteId ||
+		(ref.remoteId === '' && normalizePath(ref.path) === ROOT)
+			? Promise.reject(new NotFoundError(ROOT))
+			: undefined;
+
 	const remove = (ref: EntryRef): Promise<void> =>
+		refusedAtRoot(ref) ??
 		settle('delete', ref.path, () => {
 			const node = resolve(ref);
 			// Idempotent: a push queue that crashed mid-drain must be replayable.
@@ -475,7 +487,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		});
 
 	const leaveFolder = (ref: EntryRef): Promise<void> =>
-		settle('leaveFolder', ref.path, () => undefined);
+		refusedAtRoot(ref) ?? settle('leaveFolder', ref.path, () => undefined);
 
 	const scanPage = (offset: number, seqAtStart: number): ChangeSet => {
 		const all = [...nodes.values()].sort(byPath).map(toEntry);

@@ -471,12 +471,13 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		throw new ConflictError(current);
 	};
 
-	const remove = async (entry: EntryRef): Promise<void> => {
-		const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
-		// Idempotent: something already gone is the outcome the caller wanted.
-		if (result.ok || tagged(result.failure, 'not_found')) return;
-		raise(result.failure, entry.path);
-	};
+	const remove = (entry: EntryRef): Promise<void> =>
+		outsideRoot(entry.path, async () => {
+			const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
+			// Idempotent: something already gone is the outcome the caller wanted.
+			if (result.ok || tagged(result.failure, 'not_found')) return;
+			raise(result.failure, entry.path);
+		});
 
 	const continued = async (cursor: string): Promise<ListFolderResult> => {
 		const result = await tryRpc<ListFolderResult>('files/list_folder/continue', { cursor });

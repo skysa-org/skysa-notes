@@ -428,6 +428,30 @@ export const describeProviderContract = (
 				await expect(provider.move(seeded, '')).rejects.toThrow(NotFoundError);
 				expect((await provider.read(seeded)).content).toBe('kept\n');
 			});
+
+			// Google Drive would answer the root's id and trash the app folder,
+			// and everything with it.
+			it('refuses to delete the root, leaving what is in it', config, async () => {
+				const provider = await open();
+				const seeded = await seedFile(provider, 'a.md', 'kept\n');
+				const root = await provider.createFolder('');
+				await expect(provider.delete(root)).rejects.toThrow(NotFoundError);
+				expect((await provider.read(seeded)).content).toBe('kept\n');
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
+
+			// A left app folder would be hidden from the app that owns it.
+			it('refuses to leave the root', config, async ({ skip }) => {
+				const provider = await open();
+				const { leaveFolder } = provider;
+				if (leaveFolder === undefined) {
+					skip();
+					return;
+				}
+				const root = await provider.createFolder('');
+				await expect(leaveFolder(root)).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list(''))).toContain(MARKER_FILE);
+			});
 		});
 
 		describe('move', () => {

@@ -56,8 +56,8 @@ export const readAsText =
 
 /**
  * `act` on the normalized path, unless it is the root, which no file can be
- * written at: a `NotFoundError`, as the rejection of the promise `act` would
- * have given.
+ * written at and which is never deleted or left: a `NotFoundError`, as the
+ * rejection of the promise `act` would have given.
  */
 export const outsideRoot = <T>(path: string, act: (target: string) => Promise<T>): Promise<T> => {
 	const target = normalizePath(path);
