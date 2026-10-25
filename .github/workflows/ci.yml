@@ -45,6 +45,12 @@ jobs:
             # the two cannot drift: format:check + lint + typecheck + test.
             - run: pnpm verify
 
+            # Exports, files and dependencies nothing uses. Report-only for now
+            # (#461): the first run found 79 unused exports, which are removed
+            # in their own pull requests before this becomes a gate.
+            - run: pnpm knip
+              continue-on-error: true
+
             # A pull request that changes what ships has to say what it does
             # to the version. `pnpm run changeset --empty` is the answer for
             # one that changes nothing observable, and is a real answer rather
