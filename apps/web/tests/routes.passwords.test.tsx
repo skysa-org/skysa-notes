@@ -267,10 +267,12 @@ describe('in a window too narrow for three panes', () => {
 
 		await user.click(await screen.findByRole('button', { name: /^GitHub/u }));
 
+		// The panel closes as the item opens, and the note's trigger comes in a
+		// render after it, once the note is read: waited for, not assumed.
 		await waitFor(() => {
 			expect(panel()).toBeNull();
+			expect(noteTrigger()?.getAttribute('aria-label')).toBe('Note: GitHub');
 		});
-		expect(noteTrigger()?.getAttribute('aria-label')).toBe('Note: GitHub');
 		expect(await screen.findByRole('region', { name: 'GitHub' })).toBeDefined();
 
 		router.history.back();
