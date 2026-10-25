@@ -4966,6 +4966,38 @@ describe('a write whose file is not where it was', () => {
 		);
 	});
 
+	it('fails the op rather than step aside to a name it has not looked at', async () => {
+		// A hundred names beside `b.md` taken in one minute is not a state a
+		// user produces, but running out of tries must not answer it with the
+		// next name unasked: that one is taken too, and the note displaced onto
+		// it would stand on another note's path. It gives up instead, as
+		// `freeFolderPath` does, and the op is left to be retried.
+		const mine = await remoteFile('a.md', 'one\n');
+		await remoteFile('b.md', 'theirs\n');
+		const taken = Array.from({ length: 101 }).reduce<string[]>(
+			(names) => [...names, basename(conflictPath('b.md', AT, names))],
+			[]
+		);
+		taken.forEach((name, i) => store.put({ id: `copy${i}`, path: name, content: 'copy\n' }));
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			...boundTo(mine),
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+
+		const result = await engine.push();
+
+		// One attempt spent, on the op that met the name, and nothing moved.
+		expect(result.status).toBe('retry');
+		expect(store.ops().map((op) => op.attempts)).toEqual([1, 0]);
+		expect(store.notes().find((each) => each.id === 'n1')?.path).toBe('b.md');
+		expect(store.notes().filter((each) => each.path === taken.at(-1))).toHaveLength(1);
+	});
+
 	it('does the same with no rename queued to carry the file after it', async () => {
 		// The same choice of name, reached without the queued `move` that lets
 		// `followTheRename` move the file. What becomes of the op afterwards is

@@ -104,9 +104,10 @@ export type { SyncProgress } from './progress.js';
  */
 
 /**
- * How many times `freeFolderPath` may ask for a name before giving up. Names go
- * `(conflict <stamp>)`, `-2`, `-3`… so reaching this means a hundred folders
- * already stand aside from one path inside one minute, which is not a state a
+ * How many times `freeFolderPath` or `freeNotePath` may ask for a name before
+ * giving up. Names go `(conflict <stamp>)`, `-2`, `-3`… so reaching this means
+ * a hundred folders or notes already stand aside from one path inside one
+ * minute, which is not a state a
  * user produces — it is the two folds having drifted apart.
  */
 const FREE_PATH_ATTEMPTS = 100;
@@ -3569,8 +3570,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			freeNotePath(path, [...taken, basename(candidate)], onRemote, left - 1);
 		// Bounded exactly as `freeFolderPath` is, and for the same reason: each
 		// turn here is a request, and a `conflictName` that stopped recognising
-		// its own names would spend them without end.
-		if (left <= 0) return candidate;
+		// its own names would spend them without end. Running out throws, as it
+		// does there, rather than handing back a name nobody has looked at: the
+		// op fails and is retried, where a note displaced onto a taken name
+		// would stand on another note's path.
+		if (left <= 0) throw new Error(`could not find a free note path beside ${path}`);
 		if ((await store.noteByPath(candidate)) !== undefined) return next();
 		if (!onRemote) return candidate;
 		// Unreadable is taken: `fileState` only says `gone` for a path with
