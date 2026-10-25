@@ -11,6 +11,7 @@ import { type EngineContext } from '../context.js';
 import { findFreeName } from '../names.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
 import { type SyncNote, type SyncOp } from '../store.js';
+import { type FolderPush } from './folders.js';
 
 /**
  * The notes, as a push sends them: written (`runWrite`), following a rename
@@ -27,8 +28,7 @@ export const createNotePush = (
 	{
 		ensureRemoteFolder,
 		fileState,
-	}: {
-		ensureRemoteFolder: (path: string) => Promise<void>;
+	}: Pick<FolderPush, 'ensureRemoteFolder'> & {
 		fileState: (ref: EntryRef) => Promise<'there' | 'gone' | 'unreadable'>;
 	}
 ) => {
