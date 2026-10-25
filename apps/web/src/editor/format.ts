@@ -1,6 +1,7 @@
 import { liftListItem, sinkListItem } from '@milkdown/kit/prose/schema-list';
 import type { EditorState } from '@milkdown/kit/prose/state';
 
+import { createStore } from '../store/emitter.js';
 import { CODE_BLOCK_NODE, LINK_MARK } from './commands.js';
 import { listAround, type ListKind } from './lists.js';
 
@@ -144,26 +145,7 @@ export interface FormatStore {
 	subscribe: (listener: () => void) => () => void;
 }
 
-export const createFormatStore = (): FormatStore => {
-	const held = { current: NO_FORMAT };
-	const listeners = new Set<() => void>();
-
-	return {
-		get: () => held.current,
-		// A reading equal to the one held is not a change, and saying it is would
-		// redraw the toolbar on every keystroke.
-		set: (next) => {
-			if (sameFormat(held.current, next)) return;
-			held.current = next;
-			listeners.forEach((listener) => {
-				listener();
-			});
-		},
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
-	};
-};
+export const createFormatStore = (): FormatStore =>
+	// A reading equal to the one held is not a change, and saying it is would
+	// redraw the toolbar on every keystroke.
+	createStore(NO_FORMAT, sameFormat);

@@ -1,4 +1,5 @@
 import { MARKER_FILE } from '../config.js';
+import { asObject, isJsonObject, parseJson } from '../json.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
 import { decodeText, responseBytes } from './text.js';
@@ -177,19 +178,16 @@ const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
  */
 const downloadResult = (header: string | null): Metadata => {
 	if (header === null) throw new Error('dropbox sent a download with no metadata header');
-	const parsed = ((): unknown => {
-		try {
-			return JSON.parse(header);
-		} catch {
-			throw new Error('dropbox sent a download whose metadata header is not JSON');
-		}
-	})();
+	const parsed = parseJson(header);
+	if (parsed === undefined) {
+		throw new Error('dropbox sent a download whose metadata header is not JSON');
+	}
 	// `null`, a number and a bare string are all valid JSON and none of them has
 	// the shape below — and `null` in particular would get past a bare cast and
 	// come back out as a `TypeError` about reading a property of null, from a
 	// stack that says nothing about Dropbox. Which is the thing this function
 	// exists to stop. `failureOf` guards the same way for the same reason.
-	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+	if (!isJsonObject(parsed)) {
 		throw new Error('dropbox sent a download whose metadata header is not an object');
 	}
 	return parsed;
@@ -205,16 +203,9 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 
 	const failureOf = async (response: Response): Promise<DropboxFailure> => {
 		const text = await response.text().catch(() => '');
-		const parsed = ((): { error_summary?: string; error?: { retry_after?: number } } => {
-			try {
-				const value: unknown = JSON.parse(text);
-				// `null`, a number and a bare string are all valid JSON, and none of
-				// them has the shape below.
-				return typeof value === 'object' && value !== null ? value : {};
-			} catch {
-				return {};
-			}
-		})();
+		const parsed: { error_summary?: string; error?: { retry_after?: number } } = asObject(
+			parseJson(text)
+		);
 		// The header is what the error-handling guide documents ("indicating how
 		// long your app should wait (in seconds) before retrying"); the RPC
 		// routes put the same number in the body's `retry_after`, which is read

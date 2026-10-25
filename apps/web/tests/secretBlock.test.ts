@@ -1,14 +1,15 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { closeHistory, undo } from '@milkdown/kit/prose/history';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { selectedKey } from '../src/editor/attachment.js';
-import { adoptBody, createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { adoptBody, currentMarkdown } from '../src/editor/rich.js';
 import { insertSecretCommand } from '../src/editor/secretBlock.js';
 import { NO_SECRETS, type Sealer, type SecretHost } from '../src/editor/secretHost.js';
 import { labelToWrite } from '../src/editor/secretPanels.js';
 import { fakeHost, fence, openedIn, sealed, sealedForAnother } from './secretHostFake.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * A secret in the rich editor (docs/ARCHITECTURE.md §7, "Secrets in a note"):
@@ -17,21 +18,16 @@ import { fakeHost, fence, openedIn, sealed, sealedForAnother } from './secretHos
  * user's edit.
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 });
 
 const mount = async (body: string, host: SecretHost = NO_SECRETS) => {
-	const root = document.createElement('div');
-	document.body.append(root);
 	const onUserEdit = vi.fn();
-	const editor = await createRichEditor({ root, body, onUserEdit, secrets: host }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body, onUserEdit, secrets: host });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	const blocks = () => [...root.querySelectorAll<HTMLElement>('.secret-block')];
 	const field = () => root.querySelector<HTMLTextAreaElement>('.secret-words');

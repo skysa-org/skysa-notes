@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ScratchModal, Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
@@ -12,8 +12,6 @@ import { fence, sealed } from './secretHostFake.js';
  * box to take a note in, the cards under it with the pinned first, what a card
  * shows of its note, and what its buttons ask the route to do.
  */
-
-afterEach(cleanup);
 
 const card = (
 	id: string,

@@ -1,3 +1,4 @@
+import { isJsonObject, parseJson } from './json.js';
 import { SECRET_LANGUAGE, secretBlocksIn } from './secrets.js';
 
 /**
@@ -44,15 +45,8 @@ export const isEmptyVaultFields = (fields: VaultFields): boolean =>
  * the last. So a later version writes what it adds as text, not as a number.
  */
 export const readVaultPayload = (text: string): VaultPayload | undefined => {
-	const read = ((): unknown => {
-		try {
-			return JSON.parse(text.replace(/^\uFEFF/u, ''));
-		} catch {
-			return undefined;
-		}
-	})();
-	if (typeof read !== 'object' || read === null || Array.isArray(read)) return undefined;
-	const kept = read as Record<string, unknown>;
+	const kept = parseJson(text.replace(/^\uFEFF/u, ''));
+	if (!isJsonObject(kept)) return undefined;
 	if (FIELD_KEYS.some((key) => kept[key] !== undefined && typeof kept[key] !== 'string')) {
 		return undefined;
 	}

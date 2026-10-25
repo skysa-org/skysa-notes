@@ -2,6 +2,7 @@ import { type EntryRef, isAuthError, isNotFoundError, type StorageProvider } fro
 
 import { type FileRecord, type NotesDatabase } from '../store/db.js';
 import { CACHE_BUDGET_BYTES, cacheBytes, evictCache, heldFile } from '../store/fileCache.js';
+import { rowsOf } from '../store/rows.js';
 
 /**
  * A file beside a note, read for showing (#187): from this device where it
@@ -121,9 +122,7 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 		if (file.remoteId !== undefined) {
 			return { entry: { remoteId: file.remoteId, path: file.path } };
 		}
-		const upload = await db.opQueue
-			.where('connectionId')
-			.equals(file.connectionId)
+		const upload = await rowsOf(db.opQueue, file.connectionId)
 			.filter((op) => op.op === 'upload' && op.fileId === file.id)
 			.first();
 		if (upload?.copyOf === undefined) return undefined;

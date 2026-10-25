@@ -1,4 +1,4 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +9,7 @@ import {
 	NO_FORMAT,
 	readFormat,
 } from '../src/editor/format.js';
-import { createRichEditor } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * What the toolbar is told about the selection, read off real documents.
@@ -19,13 +19,8 @@ import { createRichEditor } from '../src/editor/rich.js';
  * that takes the bold off. So this asks a real editor rather than a fixture.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body });
 	return <T>(action: (ctx: Ctx) => T): T => editor.action(action);
 };
 
@@ -60,7 +55,7 @@ const selecting = (word: string) => (ctx: Ctx) => {
 const format = (ctx: Ctx): FormatState => readFormat(ctx.get(editorViewCtx).state);
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+	isNoteName,
 	noteFilename,
 	sanitizeFolderName,
 	slugify,
@@ -285,5 +286,18 @@ describe('sanitizeFolderName', () => {
 	it('sidesteps COM0, LPT0 and the superscript digits', () => {
 		expect(sanitizeFolderName('LPT0')).toBe('LPT0 folder');
 		expect(sanitizeFolderName('COM\u00b2')).toBe('COM\u00b2 folder');
+	});
+});
+
+describe('isNoteName', () => {
+	it.each([
+		['notes/Plan.md', true],
+		['Report.MD', true],
+		['Ünïcode.Md', true],
+		['photo.png', false],
+		['readme.mdx', false],
+		['md', false],
+	])('%s is a note: %s', (name, note) => {
+		expect(isNoteName(name)).toBe(note);
 	});
 });

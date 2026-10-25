@@ -1,6 +1,7 @@
 import { basename, linkedFiles } from '@skysa/core';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
 import { type FileCleanup, fileCleanup } from '../store/fileCleanup.js';
 import { namesFile } from '../store/fileLinks.js';
@@ -42,10 +43,7 @@ export const useFileCleanup = (
 	cleanup: FileCleanup = fileCleanup
 ): FileCleanupVisit => {
 	const ref = note === undefined ? undefined : noteRef(note);
-	const latest = useRef(note);
-	useEffect(() => {
-		latest.current = note;
-	}, [note]);
+	const latest = useLatest(note);
 	const visit = useRef<Visit | undefined>(undefined);
 
 	useEffect(() => {

@@ -1,4 +1,4 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { readFormat } from '../src/editor/format.js';
 import { FormatToolbar } from '../src/editor/FormatToolbar.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * The toolbar on a bar too narrow for it: what does not fit goes into a menu
@@ -70,11 +71,9 @@ beforeEach(() => {
 	});
 });
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
 	cleanup();
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 	if (original.offsetWidth !== undefined) {
 		Object.defineProperty(HTMLElement.prototype, 'offsetWidth', original.offsetWidth);
@@ -85,10 +84,7 @@ afterEach(async () => {
 });
 
 const harness = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body });
 
 	const withCtx = <T,>(action: (ctx: Ctx) => T): T => editor.action(action);
 	const toolbar = () => (

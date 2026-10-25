@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { APP_NAME, MARKER_SCHEMA_VERSION, PROVIDER_KINDS } from './config.js';
+import { parseJson } from './json.js';
 
 /**
  * Debug-only provenance: which install created this folder, with what version.
@@ -52,15 +53,6 @@ export const buildMarker = (input: BuildMarkerInput): Marker => ({
 
 export const serializeMarker = (marker: Marker): string => `${JSON.stringify(marker, null, 2)}\n`;
 
-/** JSON.parse as a result rather than an exception, so callers stay expressions. */
-const readJson = (text: string): { ok: true; value: unknown } | { ok: false } => {
-	try {
-		return { ok: true, value: JSON.parse(text) };
-	} catch {
-		return { ok: false };
-	}
-};
-
 export type MarkerParseResult =
 	/** Marker understood; the connection may sync normally. */
 	| { status: 'ok'; marker: Marker }
@@ -77,10 +69,10 @@ export type MarkerParseResult =
  * docs/ARCHITECTURE.md §3.
  */
 export const parseMarker = (text: string): MarkerParseResult => {
-	const json = readJson(text);
-	if (!json.ok) return { status: 'invalid', reason: 'not valid JSON' };
+	const json = parseJson(text);
+	if (json === undefined) return { status: 'invalid', reason: 'not valid JSON' };
 
-	const parsed = markerSchema.safeParse(json.value);
+	const parsed = markerSchema.safeParse(json);
 	if (!parsed.success) {
 		return {
 			status: 'invalid',

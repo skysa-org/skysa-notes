@@ -78,10 +78,9 @@ const open = async (body: string) => {
 const richTab = () => screen.getByRole('button', { name: 'Rich text' });
 const banner = () => screen.getByRole('status').textContent;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	mounted.bodies.length = 0;
-	await db.notes.clear();
 });
 
 describe('a note the rich editor cannot represent', () => {

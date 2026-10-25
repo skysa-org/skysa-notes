@@ -1,5 +1,7 @@
 import { MAX_CONNECT_CODE } from '@skysa/core';
 
+import { createEmitter } from './emitter.js';
+
 /**
  * A code the operator's policy accepted at the connect gate
  * (`ConnectGate.connectCode` and `EntitlementProvider.checkCode` in
@@ -49,7 +51,7 @@ interface Held {
 }
 
 /** Told after every change to what is held, so a gate showing it can follow. */
-const watchers = new Set<() => void>();
+const watchers = createEmitter();
 
 /** Where the code is when storage is refused, and never read otherwise. */
 const memory: { current: Held | undefined } = { current: undefined };
@@ -96,9 +98,7 @@ const write = (held: Held | undefined): void => {
 	} catch {
 		// Kept in memory above.
 	}
-	watchers.forEach((watcher) => {
-		watcher();
-	});
+	watchers.emit();
 };
 
 /** The code while it is good, and its end. One past its end is let go of as it is read. */
@@ -130,10 +130,10 @@ export const watchConnectCode = (watcher: () => void): (() => void) => {
 	const elsewhere = (event: StorageEvent) => {
 		if (event.key === KEY || event.key === null) watcher();
 	};
-	watchers.add(watcher);
+	const stop = watchers.subscribe(watcher);
 	globalThis.addEventListener('storage', elsewhere);
 	return () => {
-		watchers.delete(watcher);
+		stop();
 		globalThis.removeEventListener('storage', elsewhere);
 	};
 };

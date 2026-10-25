@@ -1,4 +1,5 @@
 import { type NotesDatabase } from './db.js';
+import { createStore } from './emitter.js';
 
 /**
  * Asking the browser to keep this device's notes.
@@ -92,16 +93,8 @@ export interface Keeping {
  * `navigator.storage` after the module has loaded.
  */
 export const createKeeping = (keeper: () => StorageKeeper | undefined): Keeping => {
-	const box = new Map<'state', Kept>([['state', 'unknown']]);
-	const listeners = new Set<() => void>();
-
-	const set = (next: Kept) => {
-		if (box.get('state') === next) return;
-		box.set('state', next);
-		listeners.forEach((listener) => {
-			listener();
-		});
-	};
+	const kept = createStore<Kept>('unknown');
+	const { set } = kept;
 
 	/** What the browser says now, or nothing kept where it cannot say. */
 	const decided = async (storage: StorageKeeper | undefined): Promise<boolean> =>
@@ -126,13 +119,8 @@ export const createKeeping = (keeper: () => StorageKeeper | undefined): Keeping 
 	};
 
 	return {
-		state: () => box.get('state') ?? 'unknown',
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		state: kept.get,
+		subscribe: kept.subscribe,
 		check: async () => {
 			set((await decided(keeper())) ? 'kept' : 'not-kept');
 		},
