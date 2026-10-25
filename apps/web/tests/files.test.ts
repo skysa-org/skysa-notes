@@ -7,7 +7,7 @@ import {
 	MAX_ATTACHMENT_BYTES,
 	type StorageProvider,
 } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
 	abandonImport,
@@ -15,12 +15,7 @@ import {
 	detachConnection,
 	releaseConnection,
 } from '../src/store/connection.js';
-import {
-	createDatabase,
-	type FileRecord,
-	type NotesDatabase,
-	type OpQueueRecord,
-} from '../src/store/db.js';
+import { type FileRecord, type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
 import {
 	addAttachment,
 	type AddAttachmentInput,
@@ -41,21 +36,10 @@ import { queueDeleteFile, queueMoveFile } from '../src/store/queue.js';
 import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 const CONNECTION = 'dropbox-1';
 const scope = { connectionId: CONNECTION };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`files-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer;
 

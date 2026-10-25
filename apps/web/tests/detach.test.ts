@@ -1,5 +1,5 @@
 import { parentPath, ROOT } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
 	bindConnection,
@@ -12,7 +12,6 @@ import { credentialFor } from '../src/store/credentials.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
-	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	noteRef,
@@ -33,6 +32,8 @@ import {
 import { queueWrite } from '../src/store/queue.js';
 import { countOf, isEmpty, type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.js';
+import { holdCredential } from './support/connection.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Letting a source go. The remote is the source of truth, so what it has leaves
@@ -44,26 +45,6 @@ import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.
 const ADA = { connectionId: 'c-ada', provider: 'dropbox', accountId: 'dbid:ada' } as const;
 const BOB = { connectionId: 'c-bob', provider: 'dropbox', accountId: 'dbid:bob' } as const;
 const ada = { connectionId: ADA.connectionId };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`detach-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
-
-const holdCredential = (db: NotesDatabase, connectionId: string) =>
-	db.credentials.put({
-		id: connectionId,
-		credential: `sk1_${connectionId}`,
-		provider: 'dropbox',
-		createdAt: 0,
-	});
 
 /** Ada's source, live: bound, holding a credential, a cursor, a root and a token. */
 const connected = async () => {

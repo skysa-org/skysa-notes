@@ -51,6 +51,7 @@ import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast } from '../components/Toast.js';
 import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
@@ -1410,10 +1411,7 @@ const Home = () => {
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
 	const noteView = useRef<NoteViewHandle>(null);
-	const noteIdRef = useRef(noteId);
-	useEffect(() => {
-		noteIdRef.current = noteId;
-	}, [noteId]);
+	const noteIdRef = useLatest(noteId);
 
 	/**
 	 * What a search result calls the source it is in. Said only when there is

@@ -1,11 +1,12 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { undo as undoCommand } from '@milkdown/kit/prose/history';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { applyList, listAround } from '../src/editor/lists.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Changing a list from one kind to another.
@@ -16,13 +17,8 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
  * somebody would make.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body });
 	return <T>(action: (ctx: Ctx) => T): T => editor.action(action);
 };
 
@@ -60,7 +56,7 @@ const selectFrom = (first: string, last: string) => (ctx: Ctx) => {
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

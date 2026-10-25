@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
+
 /**
  * Debounced autosave.
  *
@@ -334,21 +336,12 @@ export const useAutosave = <T>({
 }: UseAutosaveOptions<T>): Autosave<T> => {
 	const pending = useRef<{ value: T }>(null);
 	const timer = useRef<ReturnType<typeof setTimeout>>(null);
-	const saveRef = useRef(save);
-	useEffect(() => {
-		saveRef.current = save;
-	}, [save]);
-	const supersedesRef = useRef(supersedes);
-	useEffect(() => {
-		supersedesRef.current = supersedes;
-	}, [supersedes]);
+	const saveRef = useLatest(save);
+	const supersedesRef = useLatest(supersedes);
 	// Read by `flush`, which also runs as the cleanup of a note change: set in an
 	// effect, so that cleanup still sees the outgoing note's key, as it does the
 	// outgoing `save`.
-	const keyRef = useRef(key);
-	useEffect(() => {
-		keyRef.current = key;
-	}, [key]);
+	const keyRef = useLatest(key);
 
 	const sitting = useRef(0);
 	const gone = useRef(false);

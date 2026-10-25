@@ -1,4 +1,4 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { DOMParser as ProseParser, DOMSerializer } from '@milkdown/kit/prose/model';
 import { NodeSelection, Selection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,17 +9,16 @@ import {
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * A file beside a note in the rich editor (#187): a chip, read from a link and
  * written back as one, that opens and saves its file through the host.
  */
 
-const editors: Editor[] = [];
-
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
@@ -43,11 +42,8 @@ const fakeHost = (answer: Fetched = { state: 'missing' }) => {
 };
 
 const mount = async (body: string, host: AttachmentHost = NO_ATTACHMENTS) => {
-	const root = document.createElement('div');
-	document.body.append(root);
 	const onUserEdit = vi.fn();
-	const editor = await createRichEditor({ root, body, onUserEdit, attachments: host }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body, onUserEdit, attachments: host });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	const chips = () => [...root.querySelectorAll('.attachment')];
 	return {
