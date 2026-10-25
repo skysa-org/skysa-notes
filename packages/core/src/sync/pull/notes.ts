@@ -11,7 +11,7 @@ import { conflictContent, conflictPath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { type ConflictResolution, type PullChange, type SyncNote } from '../store.js';
 import { type Batch, madeInBatch } from './batch.js';
-import { type PullDeletions, type Reestablished } from './deletions.js';
+import { forgetUnread, type Reestablished } from './deletions.js';
 import { type Occupancy } from './occupancy.js';
 import { type Placement, remoteNow, removedInBatch, unreadNow, whereNow } from './replay.js';
 
@@ -28,17 +28,16 @@ export const createPullNotes = (
 	context: EngineContext,
 	{
 		readNote,
-		forgetUnread,
 		reestablished,
 		notesEndingIn,
 		takenIn,
 	}: {
 		readNote: (entry: RemoteEntry) => Promise<{ content: string; version: string }>;
 		reestablished: Reestablished;
-	} & Pick<PullDeletions, 'forgetUnread'> &
-		Pick<Occupancy, 'notesEndingIn' | 'takenIn'>
+	} & Pick<Occupancy, 'notesEndingIn' | 'takenIn'>
 ) => {
 	const { provider, store, now, newId, meter } = context;
+
 	const resolutionFor = async (
 		local: SyncNote,
 		remoteContent: string,
@@ -632,8 +631,6 @@ export const createPullNotes = (
 			...(await decideKnown(local, found, entry, claimed, after, renaming)),
 		];
 	};
-
-	// ------------------------------------------------------- files, on pull
 
 	/**
 	 * A note's file renamed to a name that is not a note's: it is a file now,

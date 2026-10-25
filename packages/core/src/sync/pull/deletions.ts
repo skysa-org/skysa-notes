@@ -6,9 +6,9 @@ import { type PullChange, type SyncNote } from '../store.js';
 import { type PullAttachments } from './attachments.js';
 import { aliveElsewhere, type Batch, listedAfter, madeInBatch } from './batch.js';
 import { type PullFolders } from './folders.js';
+import { type PullNotes } from './notes.js';
 import { type Occupancy } from './occupancy.js';
 import {
-	type Placement,
 	placement,
 	rebaseThrough,
 	remoteNow,
@@ -24,6 +24,16 @@ import {
  * an unreadable file forgotten with the note or folder it was under
  * (`forgetUnread`). Moved out of `engine.ts` as they were (#446).
  */
+
+/** Stop listing every unreadable file `gone` is true of. */
+export const forgetUnread = (
+	batch: Batch,
+	decided: readonly PullChange[],
+	gone: (remoteId: string, path: string) => boolean
+): PullChange[] =>
+	[...unreadNow(batch.unread, decided)].flatMap(([remoteId, file]): PullChange[] =>
+		gone(remoteId, file.path) ? [{ kind: 'forget-unreadable', remoteId }] : []
+	);
 
 /** The notes and folders a batch's decisions so far write back: `reestablished` in `engine.ts`, handed in. */
 export type Reestablished = (
@@ -44,14 +54,11 @@ export const createPullDeletions = (
 		fileUnderMoved,
 		notesEndingIn,
 		notesUnderNow,
-	}: {
-		forgetNote: (local: SyncNote) => PullChange;
-		stillThere: (placed: Pick<Placement, 'at' | 'remoteId'>) => Promise<boolean>;
-		reestablished: Reestablished;
-	} & Pick<
-		PullFolders,
-		'deleteFolderAfterRescue' | 'doomedFolder' | 'folderIdAt' | 'movedFolderOver'
-	> &
+	}: { reestablished: Reestablished } & Pick<PullNotes, 'forgetNote' | 'stillThere'> &
+		Pick<
+			PullFolders,
+			'deleteFolderAfterRescue' | 'doomedFolder' | 'folderIdAt' | 'movedFolderOver'
+		> &
 		Pick<PullAttachments, 'deletedFile' | 'fileUnderMoved'> &
 		Pick<Occupancy, 'notesEndingIn' | 'notesUnderNow'>
 ) => {
@@ -389,17 +396,7 @@ export const createPullDeletions = (
 		return forgetUnderGone(path, batch, decided);
 	};
 
-	/** Stop listing every unreadable file `gone` is true of. */
-	const forgetUnread = (
-		batch: Batch,
-		decided: readonly PullChange[],
-		gone: (remoteId: string, path: string) => boolean
-	): PullChange[] =>
-		[...unreadNow(batch.unread, decided)].flatMap(([remoteId, file]): PullChange[] =>
-			gone(remoteId, file.path) ? [{ kind: 'forget-unreadable', remoteId }] : []
-		);
-
-	return { decideDeleted, forgetUnread };
+	return { decideDeleted };
 };
 
 /** What the pull's other parts are handed of it. */

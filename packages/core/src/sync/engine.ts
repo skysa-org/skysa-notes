@@ -21,7 +21,7 @@ import {
 	unreadMap,
 } from './pull/batch.js';
 import { createCascade } from './pull/cascade.js';
-import { createPullDeletions } from './pull/deletions.js';
+import { createPullDeletions, forgetUnread, type Reestablished } from './pull/deletions.js';
 import { type FileBase, fileGone } from './pull/files.js';
 import { createPullFolders, type Decide } from './pull/folders.js';
 import { createPullNotes } from './pull/notes.js';
@@ -153,6 +153,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	// Who is where once the decisions so far are applied (`pull/occupancy.ts`).
 	const { notesEndingIn, notesUnderNow, takenIn } = createOccupancy(context);
+
+	// ------------------------------------------------------- files, on pull
 
 	// The files that are not notes, as a pull decides them (`pull/attachments.ts`).
 	const {
@@ -339,7 +341,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * on that deletes the note the same batch has just imported, reports `ok`,
 	 * and stores the cursor, so it never comes back.
 	 */
-	const reestablished = (
+	const reestablished: Reestablished = (
 		changes: readonly PullChange[]
 	): Readonly<{ notes: ReadonlySet<string>; folders: ReadonlySet<string> }> => ({
 		notes: new Set(
@@ -364,12 +366,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	});
 
 	// The notes, as a pull decides them (`pull/notes.ts`), below `reestablished`
-	// as the deletions are; `forgetUnread` is theirs, so it is handed in late-bound.
+	// as the deletions are.
 	const { resolutionFor, fileState, stillThere, forgetNote, keepNote, decideFile, noteNoLonger } =
 		createPullNotes(context, {
 			readNote,
-			// eslint-disable-next-line functional/prefer-tacit -- `forgetUnread` is declared below
-			forgetUnread: (batch, decided, gone) => forgetUnread(batch, decided, gone),
 			reestablished,
 			notesEndingIn,
 			takenIn,
@@ -377,7 +377,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	// The deletions, as a pull decides them (`pull/deletions.ts`): here, below
 	// `reestablished`, which they ask of.
-	const { decideDeleted, forgetUnread } = createPullDeletions(context, {
+	const { decideDeleted } = createPullDeletions(context, {
 		forgetNote,
 		stillThere,
 		reestablished,
