@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseRetryAfter } from '../../src/providers/types.js';
+import { parseRetryAfter } from '../../src/providers/http.js';
 
 /**
  * `Retry-After` is either seconds or an HTTP date, and the adapters read it

@@ -486,7 +486,11 @@ describe('the clipboard panel', () => {
 		await waitFor(() => {
 			expect(items()).toEqual([]);
 		});
-		expect(held).toEqual([]);
+		// Let go of when the thumb's live query sees its bytes gone, which can
+		// be a render after the rows are.
+		await waitFor(() => {
+			expect(held).toEqual([]);
+		});
 	});
 
 	it('takes no URL for a thumb made after the panel was closed', async () => {
