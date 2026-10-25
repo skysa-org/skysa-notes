@@ -1,10 +1,10 @@
 import { basename, joinPath, parentPath } from '../../src/paths.js';
-import type { FetchLike } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
 	type FakeProvider,
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
 import { handler, json, type StubRequest } from './harness.js';
 import { createFrom } from './wireBody.js';

@@ -1,20 +1,26 @@
 import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
-import { asObject, parseJson } from '../json.js';
-import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
-import type { FetchLike } from './dropbox.js';
 import {
-	applyItem,
-	nodeSchema,
+	type HttpProviderOptions,
+	isSelf,
+	outsideRoot,
+	readAsText,
+	rootFolderEntry,
+	writeMarkerOnce,
+} from './adapter.js';
+import { createTransport, jsonBody, parseRetryAfter, rateLimited, readErrorBody } from './http.js';
+import {
+	applyAll,
 	nodesOf,
 	pageFrom,
-	pendingSchema,
+	readTreeCursor,
 	settlePage,
+	treeCursorBase,
 	type TreeItem,
 } from './idTree.js';
-import { decodeText, responseBytes, uploadType } from './text.js';
+import { responseBytes, uploadType } from './text.js';
 import {
 	AuthError,
 	type ChangeSet,
@@ -23,8 +29,7 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	parseRetryAfter,
-	RateLimitError,
+	ProviderResponseError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -65,14 +70,7 @@ const GRAPH = `${GRAPH_ORIGIN}/v1.0`;
 const APPROOT = `${GRAPH}/me/drive/special/approot`;
 const FAIL_ON_CONFLICT = '@microsoft.graph.conflictBehavior=fail';
 
-export interface OneDriveProviderOptions {
-	fetch: FetchLike;
-	/** Called per request, so a refreshed token is picked up without rebuilding. */
-	getAccessToken: () => Promise<string>;
-	appVersion: string;
-	clientId: string;
-	userAgent?: string;
-}
+export type OneDriveProviderOptions = HttpProviderOptions;
 
 /** Only the fields this adapter reads. Graph sends a good deal more. */
 interface DriveItem {
@@ -102,13 +100,6 @@ interface GraphFailure {
 	retryAfterMs?: number;
 }
 
-type Attempt<T> = { ok: true; value: T } | { ok: false; failure: GraphFailure };
-
-interface RequestParts {
-	headers?: Record<string, string>;
-	body?: string | Uint8Array<ArrayBuffer>;
-}
-
 /**
  * Path segments go into the URL one by one. `encodeURIComponent` leaves `'`
  * alone, which Graph accepts in a path; escaping it as well costs nothing and
@@ -135,7 +126,7 @@ const byId = (id: string): string => `${GRAPH}/me/drive/items/${encodeURICompone
  */
 const nameOf = (item: DriveItem): string => {
 	if (item.name === undefined || normalizePath(item.name) === ROOT) {
-		throw new Error('onedrive returned an item with no usable name');
+		throw new ProviderResponseError('onedrive returned an item with no usable name');
 	}
 	return item.name;
 };
@@ -151,11 +142,11 @@ const placed = (path: string, item: DriveItem): string => joinPath(parentPath(pa
  */
 const toEntry = (item: DriveItem, path: string): RemoteEntry => {
 	if (item.id === undefined || item.id === '') {
-		throw new Error('onedrive returned an item with no id');
+		throw new ProviderResponseError('onedrive returned an item with no id');
 	}
 	const folder = item.folder !== undefined;
 	if (!folder && (item.eTag === undefined || item.eTag === '')) {
-		throw new Error('onedrive returned a file with no eTag');
+		throw new ProviderResponseError('onedrive returned a file with no eTag');
 	}
 	return {
 		remoteId: item.id,
@@ -168,16 +159,6 @@ const toEntry = (item: DriveItem, path: string): RemoteEntry => {
 };
 
 /**
- * Is what is at a path the very entry we were asked to act on? By id wherever
- * both have one; otherwise by path, folded, because OneDrive is
- * case-insensitive. The same question, and the same answer, as in `dropbox.ts`.
- */
-const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
-	entry.remoteId === '' || current.remoteId === ''
-		? normalizePath(entry.path).toLowerCase() === current.path.toLowerCase()
-		: entry.remoteId === current.remoteId;
-
-/**
  * A link Graph handed back — `@odata.nextLink`, `@odata.deltaLink` — is followed
  * with the access token attached, so it has to go to Graph. The delta link also
  * lives in a cursor read back from IndexedDB, and a cursor edited to point
@@ -185,7 +166,7 @@ const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
  */
 const graphLink = (link: string): string => {
 	if (!link.startsWith(`${GRAPH_ORIGIN}/`)) {
-		throw new Error('onedrive sent a link that is not on graph.microsoft.com');
+		throw new ProviderResponseError('onedrive sent a link that is not on graph.microsoft.com');
 	}
 	return link;
 };
@@ -224,11 +205,8 @@ const codesOf = (error: unknown): string[] => {
 // ---------------------------------------------------------------------------
 
 const cursorSchema = z.object({
-	v: z.literal(1),
+	...treeCursorBase,
 	link: z.string(),
-	root: z.string().min(1),
-	nodes: z.array(nodeSchema),
-	pending: z.array(pendingSchema),
 	/** The round under way started from nothing: a first sync, or a reset. */
 	scan: z.boolean(),
 	/** Some item in this round has named the app folder as its parent. */
@@ -237,13 +215,10 @@ const cursorSchema = z.object({
 
 type DeltaCursor = z.infer<typeof cursorSchema>;
 
-const parseCursor = (cursor: string): DeltaCursor => {
-	const result = cursorSchema.safeParse(parseJson(cursor));
-	if (!result.success || !result.data.link.startsWith(`${GRAPH_ORIGIN}/`)) {
-		throw new CursorResetError('onedrive cursor is not one this adapter wrote');
-	}
-	return result.data;
-};
+const parseCursor = (cursor: string): DeltaCursor =>
+	readTreeCursor(cursorSchema, cursor, 'onedrive', (read) =>
+		read.link.startsWith(`${GRAPH_ORIGIN}/`)
+	);
 
 /**
  * A delta item as the tree takes it, or `undefined` for the app folder itself,
@@ -256,13 +231,14 @@ const parseCursor = (cursor: string): DeltaCursor => {
  */
 const treeItemOf = (item: DriveItem, root: string): TreeItem | undefined => {
 	const id = item.id;
-	if (id === undefined || id === '') throw new Error('onedrive delta sent an item with no id');
+	if (id === undefined || id === '')
+		throw new ProviderResponseError('onedrive delta sent an item with no id');
 	if (id === root) return undefined;
 	if (item.deleted !== undefined) return { id, gone: true };
 
 	const parent = item.parentReference?.id;
 	if (parent === undefined || parent === '') {
-		throw new Error('onedrive delta sent an item with no parent');
+		throw new ProviderResponseError('onedrive delta sent an item with no parent');
 	}
 	return {
 		id,
@@ -287,13 +263,13 @@ const isDeadLink = (failure: GraphFailure, stored: boolean): boolean =>
 	failure.status === 410 || (stored && (failure.status === 400 || failure.status === 404));
 
 export const createOneDriveProvider = (options: OneDriveProviderOptions): StorageProvider => {
-	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
+	const { fetch: doFetch, getAccessToken } = options;
 	/** The app folder's id, which never changes once Graph has made the folder. */
 	const rootBox = new Map<'id', string>();
 
 	const failureOf = async (response: Response): Promise<GraphFailure> => {
-		const text = await response.text().catch(() => '');
-		const parsed: { error?: { message?: unknown } } = asObject(parseJson(text));
+		const { text, body } = await readErrorBody(response);
+		const parsed: { error?: { message?: unknown } } = body;
 		// Graph documents seconds, and `parseRetryAfter` also reads the HTTP date
 		// the header is allowed to carry, which some fronts send instead.
 		// https://learn.microsoft.com/en-us/graph/throttling
@@ -331,57 +307,18 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// https://learn.microsoft.com/en-us/graph/throttling
 		// https://learn.microsoft.com/en-us/graph/errors
 		const throttled = failure.status === 429 || failure.status === 509;
-		if (throttled) {
-			const wait =
-				failure.retryAfterMs === undefined
-					? ''
-					: `, retry after ${String(failure.retryAfterMs / 1000)}s`;
-			throw new RateLimitError(
-				`onedrive throttled (${String(failure.status)})${wait}`,
-				failure.retryAfterMs
-			);
-		}
+		if (throttled) throw rateLimited('onedrive', failure.status, failure.retryAfterMs, detail);
 		throw new Error(`onedrive ${String(failure.status)}: ${detail}`);
 	};
 
-	const attempt = async <T>(
-		method: string,
-		url: string,
-		parts: RequestParts = {}
-	): Promise<Attempt<T>> => {
-		const response = await doFetch(url, {
-			method,
-			headers: { authorization: `Bearer ${await getAccessToken()}`, ...parts.headers },
-			...(parts.body === undefined ? {} : { body: parts.body }),
-		});
-		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		// A delete answers 204 with nothing to parse.
-		const text = await response.text();
-		return { ok: true, value: (text === '' ? {} : JSON.parse(text)) as T };
-	};
-
-	const call = async <T>(
-		method: string,
-		url: string,
-		parts: RequestParts = {},
-		path?: string
-	): Promise<T> => {
-		const result = await attempt<T>(method, url, parts);
-		if (!result.ok) return raise(result.failure, path);
-		return result.value;
-	};
-
-	const json = (body: unknown): RequestParts => ({
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
+	const { attempt, call } = createTransport({ fetch: doFetch, getAccessToken, failureOf, raise });
 
 	const rootId = async (): Promise<string> => {
 		const cached = rootBox.get('id');
 		if (cached !== undefined) return cached;
 		const item = await call<DriveItem>('GET', APPROOT);
 		if (item.id === undefined || item.id === '') {
-			throw new Error('onedrive returned an app folder with no id');
+			throw new ProviderResponseError('onedrive returned an app folder with no id');
 		}
 		rootBox.set('id', item.id);
 		return item.id;
@@ -473,40 +410,30 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		throw new ConflictError(now);
 	};
 
-	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> => {
-		const target = normalizePath(path);
-		if (target === ROOT) return Promise.reject(new NotFoundError(target));
-		return opts.expectedVersion === undefined
-			? create(target, content)
-			: update(target, content, opts.expectedVersion);
-	};
+	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
+		outsideRoot(path, (target) =>
+			opts.expectedVersion === undefined
+				? create(target, content)
+				: update(target, content, opts.expectedVersion)
+		);
 
 	const createFile = (
 		path: string,
 		bytes: Uint8Array<ArrayBuffer>,
 		opts: CreateFileOptions = {}
-	): Promise<RemoteEntry> => {
-		const target = normalizePath(path);
-		if (target === ROOT) return Promise.reject(new NotFoundError(target));
-		return create(target, bytes, { 'content-type': uploadType(opts.contentType) });
-	};
+	): Promise<RemoteEntry> =>
+		outsideRoot(path, (target) =>
+			create(target, bytes, { 'content-type': uploadType(opts.contentType) })
+		);
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		// Addressing `special/approot` is what makes Graph create the folder.
 		const id = await rootId();
-		if ((await metadataAt(MARKER_FILE)) !== undefined) return { rootId: id };
-
-		const marker = buildMarker({
-			appVersion,
-			provider: 'onedrive',
-			clientId,
-			...(userAgent === undefined ? {} : { userAgent }),
-		});
-		// Create-only, so another device's marker written in between stands.
-		await create(MARKER_FILE, serializeMarker(marker)).catch((error: unknown) => {
-			if (error instanceof ConflictError) return;
-			throw error;
-		});
+		await writeMarkerOnce(
+			{ ...options, provider: 'onedrive' },
+			async () => (await metadataAt(MARKER_FILE)) !== undefined,
+			(path, content) => create(path, content)
+		);
 		return { rootId: id };
 	};
 
@@ -547,10 +474,10 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const version = item.eTag;
 		const download = item['@microsoft.graph.downloadUrl'];
 		if (version === undefined || version === '') {
-			throw new Error('onedrive sent a file with no eTag');
+			throw new ProviderResponseError('onedrive sent a file with no eTag');
 		}
 		if (download === undefined || !download.startsWith('https://')) {
-			throw new Error('onedrive sent a file with no usable download URL');
+			throw new ProviderResponseError('onedrive sent a file with no usable download URL');
 		}
 
 		// No Authorization header: the URL carries its own, and the token must
@@ -561,22 +488,11 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		return { bytes: await responseBytes(response), version };
 	};
 
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
-		const { bytes, version } = await readBytes(entry);
-		return { content: decodeText(bytes, entry.path), version };
-	};
+	const read = readAsText(readBytes);
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
 		const target = normalizePath(path);
-		if (target === ROOT) {
-			return {
-				remoteId: await rootId(),
-				path: ROOT,
-				kind: 'folder',
-				version: '',
-				modifiedAt: '',
-			};
-		}
+		if (target === ROOT) return rootFolderEntry(await rootId());
 
 		const parent = parentPath(target);
 
@@ -604,7 +520,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const result = await attempt<DriveItem>(
 			'POST',
 			`${byId(parentId)}/children`,
-			json({
+			jsonBody({
 				name: basename(target),
 				folder: {},
 				'@microsoft.graph.conflictBehavior': 'fail',
@@ -641,17 +557,22 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// exactly the same is a move already done; the same entry spelled in
 		// another case is a rename of the case alone, which Graph does perform.
 		const occupant = await metadataAt(target);
-		if (occupant !== undefined && isSelf(entry, occupant) && occupant.path === target) {
+		if (
+			occupant !== undefined &&
+			isSelf(entry, occupant, 'folded') &&
+			occupant.path === target
+		) {
 			return occupant;
 		}
-		if (occupant !== undefined && !isSelf(entry, occupant)) throw new ConflictError(occupant);
+		if (occupant !== undefined && !isSelf(entry, occupant, 'folded'))
+			throw new ConflictError(occupant);
 
 		const id = await idOf(entry);
 		if (id === undefined) throw new NotFoundError(entry.path);
 		const result = await attempt<DriveItem>(
 			'PATCH',
 			`${byId(id)}?${FAIL_ON_CONFLICT}`,
-			json({
+			jsonBody({
 				name: basename(target),
 				parentReference: { id: await folderId(parentPath(target)) },
 			})
@@ -663,7 +584,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// Something arrived at the destination between the look and the move.
 		const current = await metadataAt(target);
 		if (current === undefined) return raise(result.failure);
-		if (isSelf(entry, current)) return current;
+		if (isSelf(entry, current, 'folded')) return current;
 		throw new ConflictError(current);
 	};
 
@@ -726,15 +647,15 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const next = result.value['@odata.nextLink'];
 		const link = next ?? result.value['@odata.deltaLink'];
 		if (link === undefined) {
-			throw new Error('onedrive delta sent neither a next nor a delta link');
+			throw new ProviderResponseError('onedrive delta sent neither a next nor a delta link');
 		}
 
 		const items = result.value.value ?? [];
 		const page = pageFrom(from);
-		items.forEach((item) => {
-			const treeItem = treeItemOf(item, page.root);
-			if (treeItem !== undefined) applyItem(page, treeItem);
-		});
+		applyAll(
+			page,
+			items.flatMap((item) => treeItemOf(item, page.root) ?? [])
+		);
 		// Graph lists "all parent items in the hierarchy" of a changed item unless
 		// asked not to (`deltaExcludeParent`), so when the round ends every
 		// ancestor of what it listed is in the tree or was listed too — which is

@@ -71,8 +71,8 @@ export {
 	isRateLimitError,
 	isUnreadableError,
 	NotFoundError,
-	parseRetryAfter,
 	type ProviderErrorCode,
+	ProviderResponseError,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
@@ -82,13 +82,10 @@ export {
 
 export { withoutNul } from './providers/text.js';
 
-export {
-	createDropboxProvider,
-	type DropboxProviderOptions,
-	type FetchLike,
-} from './providers/dropbox.js';
+export { createDropboxProvider, type DropboxProviderOptions } from './providers/dropbox.js';
+export { type FetchLike, parseRetryAfter } from './providers/http.js';
 
-export { createGDriveProvider, type GDriveProviderOptions } from './providers/gdrive.js';
+export { createGDriveProvider, type GDriveProviderOptions } from './providers/gdrive/index.js';
 export { createOneDriveProvider, type OneDriveProviderOptions } from './providers/onedrive.js';
 
 export {
