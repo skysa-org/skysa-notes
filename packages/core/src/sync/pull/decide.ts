@@ -4,7 +4,15 @@ import { type ChangeEntry, type RemoteEntry } from '../../providers/types.js';
 import { type EngineContext } from '../context.js';
 import { type PullChange, type SyncOp, type UnreadableFile } from '../store.js';
 import { type PullAttachments } from './attachments.js';
-import { type Batch, claimedPaths, doomedIn, liveEntries, unhidden, unreadMap } from './batch.js';
+import {
+	type Batch,
+	claimedPaths,
+	doomedIn,
+	liveEntries,
+	type Step,
+	unhidden,
+	unreadMap,
+} from './batch.js';
 import { type Cascade } from './cascade.js';
 import { forgetUnread, type PullDeletions } from './deletions.js';
 import { type FileBase } from './files.js';
@@ -54,23 +62,21 @@ export const createPullDecide = (
 ) => {
 	const decide: Decide = async (
 		entry: ChangeEntry,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		// The marker file and any provider bookkeeping. `isHidden` is the same
 		// rule the UI uses, so nothing the user cannot see becomes a note.
 		if (entry.deleted === true) {
 			if (entry.path !== undefined && isHidden(entry.path)) return [];
-			return decideDeleted(entry, batch, decided, at);
+			return decideDeleted(entry, { batch, decided, at });
 		}
 		// Nothing the app shows, and so nothing it lists as unreadable either: a
 		// file renamed out of sight, or (below) to something that is not a note,
 		// is no longer a note the user is missing.
 		const unlisted = (): PullChange[] =>
-			forgetUnread(batch, decided, (remoteId) => remoteId === entry.remoteId);
+			forgetUnread({ batch, decided }, (remoteId) => remoteId === entry.remoteId);
 		if (isHidden(entry.path)) return unlisted();
-		if (entry.kind === 'folder') return decideFolder(entry, decided, batch, at);
+		if (entry.kind === 'folder') return decideFolder(entry, { batch, decided, at });
 
 		// A file that is not a note: a picture added beside one, or a PDF the
 		// user dropped in from outside the app. Turning it into a note would
@@ -86,12 +92,12 @@ export const createPullDecide = (
 			return [
 				...unlisted(),
 				...(await noteNoLonger(entry, decided)),
-				...decideAttachment(entry, decided, batch, at),
+				...decideAttachment(entry, { batch, decided, at }),
 			];
 		}
 		return [
-			...fileNoLonger(entry, decided, batch),
-			...(await decideFile(entry, decided, batch)),
+			...fileNoLonger(entry, { batch, decided }),
+			...(await decideFile(entry, { batch, decided })),
 		];
 	};
 
@@ -183,12 +189,16 @@ export const createPullDecide = (
 		};
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
-			const made = await decide(entry, sofar, { ...batch, deciding: new Set([at]) }, at);
+			const made = await decide(entry, {
+				batch: { ...batch, deciding: new Set([at]) },
+				decided: sofar,
+				at,
+			});
 			if (isNoteEntry(entry)) meter.roundDecided(entry.path);
 			return [...sofar, ...made];
 		}, Promise.resolve([]));
-		const left = [...decided, ...strandedFiles(decided, batch)];
-		const settled = [...left, ...settleFileClashes(left, batch)];
+		const left = [...decided, ...strandedFiles({ batch, decided })];
+		const settled = [...left, ...settleFileClashes({ batch, decided: left })];
 		return [...settled, ...(await roofOver(settled, files))];
 	};
 

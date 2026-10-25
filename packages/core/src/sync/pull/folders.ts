@@ -14,7 +14,7 @@ import { type EngineContext } from '../context.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
 import { type PullChange, type SyncFolder, type SyncNote } from '../store.js';
 import { type PullAttachments } from './attachments.js';
-import { aliveElsewhere, type Batch, leavesFor, listedAfter, type LiveEntries } from './batch.js';
+import { aliveElsewhere, leavesFor, listedAfter, type LiveEntries, type Step } from './batch.js';
 import { type Cascade } from './cascade.js';
 import { type Occupancy } from './occupancy.js';
 import { folderBefore, folderNow, remoteNow } from './replay.js';
@@ -28,13 +28,8 @@ import { folderBefore, folderNow, remoteNow } from './replay.js';
  * `engine.ts` as they were (#446).
  */
 
-/** One decision, as the pull reaches it: `decide` in `engine.ts`, handed in. */
-export type Decide = (
-	entry: ChangeEntry,
-	decided: readonly PullChange[],
-	batch: Batch,
-	at: number
-) => Promise<PullChange[]>;
+/** One decision, as the pull reaches it: `decide` in `decide.ts`, handed in. */
+export type Decide = (entry: ChangeEntry, step: Step) => Promise<PullChange[]>;
 
 export const createPullFolders = (
 	{ store, now }: EngineContext,
@@ -67,8 +62,7 @@ export const createPullFolders = (
 		path: string | undefined,
 		remoteId: string | undefined,
 		live: LiveEntries,
-		at: number,
-		decided: readonly PullChange[]
+		{ decided, at }: Pick<Step, 'decided' | 'at'>
 	): Promise<MovedOver | undefined> => {
 		if (remoteId !== undefined || path === undefined) return undefined;
 		// Nearest first: the folder closest above the path is the one whose
@@ -154,9 +148,7 @@ export const createPullFolders = (
 	 */
 	const deleteFolderAfterRescue = async (
 		gone: string,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		const inside = (folder: SyncFolder, after: readonly PullChange[]): string | undefined => {
 			const path = folderNow(folder.path, after);
@@ -177,7 +169,14 @@ export const createPullFolders = (
 				const leaving = leavesFor(folder.remoteId, gone, batch, at);
 				if (leaving !== undefined) {
 					const nested = { ...batch, deciding: new Set([...batch.deciding, leaving.at]) };
-					return [...sofar, ...(await decide(leaving.entry, after, nested, leaving.at))];
+					return [
+						...sofar,
+						...(await decide(leaving.entry, {
+							batch: nested,
+							decided: after,
+							at: leaving.at,
+						})),
+					];
 				}
 				// Leaving by an entry already being decided further up: two
 				// folders deleted, each one's subfolder moved to the other's
@@ -222,7 +221,7 @@ export const createPullFolders = (
 				doomedRow?.path ?? gone,
 				batch.renaming,
 				after,
-				filesLeaving(final, after, batch, at)
+				filesLeaving(final, { batch, decided: after, at })
 			),
 		];
 	};
@@ -237,12 +236,7 @@ export const createPullFolders = (
 	 * subfolders rescued above, and to the note a cascade takes that its own
 	 * entry puts back by its id.
 	 */
-	const filesLeaving = (
-		final: string,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
-	): string[] =>
+	const filesLeaving = (final: string, { batch, decided, at }: Step): string[] =>
 		[...filesNow(batch.files, decided).values()].flatMap((file) => {
 			if (file.remoteId === undefined || !isWithin(file.at, final)) return [];
 			const later = listedAfter(batch.listed, file.remoteId, at);
@@ -328,9 +322,7 @@ export const createPullFolders = (
 	const doomedFolder = async (
 		path: string | undefined,
 		remoteId: string | undefined,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<string | undefined> => {
 		// Made inside this cursor window, so there is no row to find it by: a
 		// folder created and removed between two cursors is reported as both,
@@ -394,9 +386,7 @@ export const createPullFolders = (
 	const clearTheWay = async (
 		to: string,
 		remoteId: string,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number,
+		{ batch, decided, at }: Step,
 		from?: string
 	): Promise<PullChange[]> => {
 		const { doomed } = batch;
@@ -419,7 +409,7 @@ export const createPullFolders = (
 		// the round moves out of it: `B/sub` moved to `Keep`, `B` deleted and a
 		// new `B` made, reported new `B` first as an id-tree page puts folders.
 		const inside = from !== undefined && isWithin(from, to);
-		if (named && !inside) return deleteFolderAfterRescue(to, decided, batch, at);
+		if (named && !inside) return deleteFolderAfterRescue(to, { batch, decided, at });
 
 		// Names this batch has already put a folder at, so two folders displaced
 		// out of one path do not both take the same one.
@@ -449,9 +439,7 @@ export const createPullFolders = (
 	const clearTheNotes = async (
 		from: string,
 		to: string,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		const movers = await notesUnderNow(from, decided);
 		const landing = new Map(
@@ -516,23 +504,19 @@ export const createPullFolders = (
 	 */
 	const roomForNewFolder = async (
 		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		const occupant = await folderAt(entry.path, decided);
 		const id = occupant?.remoteId;
 		if (id === undefined || id === entry.remoteId) return [];
 		const movesOn = listedAfter(batch.live, id, at, entry.path);
 		if (!movesOn && !batch.doomed.ids.has(id)) return [];
-		return clearTheWay(entry.path, entry.remoteId, decided, batch, at);
+		return clearTheWay(entry.path, entry.remoteId, { batch, decided, at });
 	};
 
 	const decideFolder = async (
 		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		// The app folder itself, which several providers report as an entry of
 		// its own — Graph's `delta` returns the root item. There is nothing above
@@ -583,20 +567,30 @@ export const createPullFolders = (
 		if (from !== undefined && from !== entry.path) {
 			// In this order: the folder first, because getting it out of the way
 			// takes the notes inside it with it and leaves nothing to displace.
-			const room = await clearTheWay(entry.path, entry.remoteId, decided, batch, at, from);
+			const room = await clearTheWay(
+				entry.path,
+				entry.remoteId,
+				{ batch, decided, at },
+				from
+			);
 			// And asked again after it, since the folder in the way may be the
 			// one this is moving out of — `Z/X` moved up to `B` while `B` is
 			// renamed to `Z` — and has carried this one aside with it. Never
 			// deleted with it: `clearTheWay` moves a folder this one is inside.
 			const moved = whereAfter([...decided, ...room]) ?? from;
-			const spare = await clearTheNotes(moved, entry.path, [...decided, ...room], batch, at);
+			const spare = await clearTheNotes(moved, entry.path, {
+				batch,
+				decided: [...decided, ...room],
+				at,
+			});
 			return [
 				...room,
 				...spare,
 				{ kind: 'move-folder', from: moved, to: entry.path, remoteId: entry.remoteId },
 			];
 		}
-		const room = from === undefined ? await roomForNewFolder(entry, decided, batch, at) : [];
+		const room =
+			from === undefined ? await roomForNewFolder(entry, { batch, decided, at }) : [];
 		return [...room, { kind: 'ensure-folder', path: entry.path, remoteId: entry.remoteId }];
 	};
 
