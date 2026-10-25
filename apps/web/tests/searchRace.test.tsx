@@ -1,5 +1,5 @@
-import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Two writes in quick succession, with the read the first one triggers slower
@@ -40,8 +40,6 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 		},
 	};
 });
-
-afterEach(cleanup);
 
 beforeEach(() => {
 	reads.count = 0;

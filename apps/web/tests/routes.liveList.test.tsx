@@ -1,8 +1,8 @@
 import { EditorView } from '@codemirror/view';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
@@ -16,8 +16,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * it. Each test looks while the store still holds the note as it was, which is
  * what makes it "before the save" and not merely "eventually".
  */
-
-afterEach(cleanup);
 
 const openApp = async () => {
 	await setDefaultEditorMode(db, 'raw');

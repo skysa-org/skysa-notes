@@ -4,8 +4,8 @@ import {
 	createRouter,
 	RouterProvider,
 } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 
@@ -21,8 +21,6 @@ import { routeTree } from '../src/routeTree.gen.js';
  * `db.notes.get({ a: 1 })`, the live query threw during render, and a link
  * took the whole app down.
  */
-
-afterEach(cleanup);
 
 const openAt = async (url: string) => {
 	const router = createRouter({

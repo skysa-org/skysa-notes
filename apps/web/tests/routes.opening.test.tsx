@@ -1,6 +1,6 @@
 import { SCRATCHPAD_FOLDER } from '@skysa/core';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -28,7 +28,6 @@ afterEach(() => {
 	holds.splice(0).forEach((release) => {
 		release();
 	});
-	cleanup();
 });
 
 const holdTheNotes = async (): Promise<() => void> => {

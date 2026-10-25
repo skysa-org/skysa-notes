@@ -1,6 +1,6 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Result } from '../src/api/client.js';
 import { CommandsProvider } from '../src/commands/context.js';
@@ -10,8 +10,6 @@ import { LOCAL_CONNECTION_ID, type NotesDatabase, type SyncStateRecord } from '.
 import { createNote } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { freshDatabase } from './support/db.js';
-
-afterEach(cleanup);
 
 const syncing = (progress?: SchedulerStatus['progress']): SchedulerStatus => ({
 	phase: 'syncing',

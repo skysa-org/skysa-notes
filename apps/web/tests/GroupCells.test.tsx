@@ -1,7 +1,7 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { GroupCells, SIZES, spilled } from '../src/components/GroupCells.js';
 
@@ -10,8 +10,6 @@ import { GroupCells, SIZES, spilled } from '../src/components/GroupCells.js';
  * twelve, or the two of a new key asked back, going on from a cell that fills
  * to the next.
  */
-
-afterEach(cleanup);
 
 describe('what typing into a cell makes of them', () => {
 	const two = [5, 5];

@@ -1,7 +1,7 @@
 import { MAX_ATTACHMENT_BYTES, readClipName } from '@skysa/core';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SHARE_CACHE } from '../src/share/received.js';
 import { TakeShare, whatCame } from '../src/share/TakeShare.js';
@@ -15,8 +15,6 @@ import { freshDatabase } from './support/db.js';
  * site can post to `/share` as well as the share sheet can, and let go of
  * whatever the answer.
  */
-
-afterEach(cleanup);
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
