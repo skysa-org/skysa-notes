@@ -32,7 +32,7 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { namedByAny } from './fileLinks.js';
-import { foldPath, freePath } from './naming.js';
+import { foldPath, freePath, namesIn, pathDepth, respell } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
 import { queueByNotebook } from './queue.js';
 import { readZip } from './readZip.js';
@@ -503,7 +503,9 @@ export const planImport = (picked: Picked): ImportPlan => {
 	return {
 		notes,
 		files,
-		folders: [...folders.values()].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b)),
+		folders: [...folders.values()].sort(
+			(a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b)
+		),
 		skipped: [
 			...picked.skipped.filter((skipped) => {
 				const why = excluded(skipped.path);
@@ -516,8 +518,6 @@ export const planImport = (picked: Picked): ImportPlan => {
 	};
 };
 
-const depth = (path: string): number => pathSegments(path).length;
-
 /**
  * A picked path as an import into the scratchpad reads it: a `.scratchpad`
  * folder at the top of what was picked is a scratchpad already, as "Download
@@ -528,7 +528,7 @@ const fromScratchpad = (path: string): string => {
 	return first === SCRATCHPAD_FOLDER && rest.length > 0 ? rest.join('/') : tidy(path);
 };
 
-const atScratchTop = (path: string): boolean => depth(fromScratchpad(path)) === 1;
+const atScratchTop = (path: string): boolean => pathDepth(fromScratchpad(path)) === 1;
 
 /**
  * Whether a file below the top of what was picked is one a note at the top
@@ -552,7 +552,7 @@ const linkedBelow = (files: readonly { path: string; bytes: Bytes }[]) => {
 					? []
 					: linkedFiles(splitFrontmatter(source).body, fromScratchpad(file.path));
 			})
-			.filter((path) => depth(path) > 1)
+			.filter((path) => pathDepth(path) > 1)
 			.map(foldPath)
 	);
 	return (path: string): boolean => linked.has(foldPath(fromScratchpad(path)));
@@ -661,20 +661,6 @@ const notebooksOf = (
 			...[...notes.filter(isLive), ...files].flatMap((row) => ancestorPaths(row.path)),
 		].map((path) => [foldPath(path), path])
 	);
-
-/**
- * The spelling a path takes in the source: each notebook along it as the
- * source spells it, and as the first path through it spelled it where the
- * source has no such notebook. `spellings` is written to as it goes.
- */
-const respell = (spellings: Map<string, string>, path: string): string => {
-	if (path === '') return path;
-	const known = spellings.get(foldPath(path));
-	if (known !== undefined) return known;
-	const spelled = joinPath(respell(spellings, parentPath(path)), basename(path));
-	spellings.set(foldPath(path), spelled);
-	return spelled;
-};
 
 /**
  * Whether a source takes an import now. A connected one only while it is live —
@@ -844,12 +830,6 @@ const placeFiles = (
 		return [{ row, bytes: file.bytes }];
 	});
 	return { rows, present: present.current };
-};
-
-/** The names, folded, of what `paths` holds directly in `folder`. */
-const namesIn = (paths: Iterable<string>, folder: string): string[] => {
-	const wanted = foldPath(folder);
-	return [...paths].filter((path) => foldPath(parentPath(path)) === wanted).map(basename);
 };
 
 /** A note's file read, as its name in the archive has it. */

@@ -20,7 +20,7 @@ import {
 } from './db.js';
 import { deletedHere } from './deletedHere.js';
 import { handOverToCopies } from './files.js';
-import { foldPath, freePath } from './naming.js';
+import { foldPath, freePath, pathDepth } from './naming.js';
 import { forgetOpenNotebooks, moveOpenNotebooks } from './openNotebooks.js';
 import { dropPictures } from './pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from './pins.js';
@@ -301,9 +301,7 @@ export const moveFolder = async (
 		// Before the rows go: the directories they name are left behind by
 		// the moves below, and their ids are the only thing that will say
 		// which ones they were.
-		const leaving = [...moving].sort(
-			(a, b) => a.path.split('/').length - b.path.split('/').length
-		);
+		const leaving = [...moving].sort((a, b) => pathDepth(a.path) - pathDepth(b.path));
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		const made = await ensureFolder(db, target, { connectionId });
 		// Without their `remoteId`: the folder that id names is still at the old
@@ -319,7 +317,7 @@ export const moveFolder = async (
 		// on the remote too; the notes inside go up as moves of their own, below.
 		// `mkdir` is idempotent, so a folder a note's move also makes costs nothing.
 		const paths = [...new Set([...made, ...moved].map((folder) => folder.path))].sort(
-			(a, b) => a.split('/').length - b.split('/').length
+			(a, b) => pathDepth(a) - pathDepth(b)
 		);
 		await paths.reduce<Promise<void>>(async (pending, path) => {
 			await pending;
@@ -484,7 +482,7 @@ export const deleteFolder = async (
 		// notebook above it takes the directory with it.
 		const leaving = folders
 			.filter((folder) => isWithin(folder.path, target))
-			.sort((a, b) => a.path.split('/').length - b.path.split('/').length);
+			.sort((a, b) => pathDepth(a.path) - pathDepth(b.path));
 		await db.folders.bulkDelete(leaving.map((folder) => [folder.connectionId, folder.path]));
 
 		const notes = await rowsOf(db.notes, connectionId).toArray();

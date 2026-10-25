@@ -9,7 +9,6 @@ import {
 	linkedFiles,
 	parentPath,
 	type ProviderKind,
-	ROOT,
 	type StorageProvider,
 } from '@skysa/core';
 import { type PromiseExtended } from 'dexie';
@@ -33,7 +32,7 @@ import { detachedFrom } from './detached.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
 import { goneSources } from './goneSources.js';
 import { movedRows } from './movedRows.js';
-import { foldPath, freePath } from './naming.js';
+import { foldPath, freePath, pathDepth, respell } from './naming.js';
 import { noteFile } from './notes.js';
 import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
 import { queueByNotebook } from './queue.js';
@@ -133,8 +132,6 @@ const withoutRemote = ({
 	...note
 }: NoteRecord): NoteRecord => note;
 
-const depth = (path: string): number => path.split('/').length;
-
 interface Moved {
 	/** Owed to the new connection as though new. */
 	notes: NoteRecord[];
@@ -153,14 +150,7 @@ interface Moved {
  */
 const spellingsOn = (folders: readonly FolderRecord[]) => {
 	const spellings = new Map(folders.map((folder) => [foldPath(folder.path), folder.path]));
-	const spell = (path: string): string => {
-		if (path === ROOT) return path;
-		const known = spellings.get(foldPath(path));
-		if (known !== undefined) return known;
-		const spelled = joinPath(spell(parentPath(path)), basename(path));
-		spellings.set(foldPath(path), spelled);
-		return spelled;
-	};
+	const spell = (path: string): string => respell(spellings, path);
 	return {
 		/** Whether the target already has this notebook, in some spelling. */
 		has: (path: string): boolean => spellings.has(foldPath(path)),
@@ -356,7 +346,7 @@ const moveRowsTo = async (
 	}
 	// Outermost first, so a notebook is spelled after its parent is.
 	const foldersPlaced = [...foldersLeaving]
-		.sort((a, b) => depth(a.path) - depth(b.path))
+		.sort((a, b) => pathDepth(a.path) - pathDepth(b.path))
 		.flatMap((folder): Placed<FolderRecord>[] => {
 			if (only !== undefined && !only.folders.has(folder.path)) return [];
 			if (spelling.has(folder.path)) return [];
