@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
+import { createDropboxProvider } from '../../src/providers/dropbox.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import {
 	AuthError,
 	ConflictError,
@@ -106,6 +107,8 @@ describe('mapping Dropbox failures onto typed errors', () => {
 		expect(error).not.toBeInstanceOf(NotFoundError);
 		expect(error).not.toBeInstanceOf(CursorResetError);
 		expect(isRateLimitError(error) && error.retryAfterMs).toBe(7000);
+		// Said as the other adapters say theirs: with what Dropbox called it.
+		expect(String(error)).toContain('dropbox rate limit (429): too_many_requests/...');
 		expect(String(error)).toContain('7s');
 	});
 
