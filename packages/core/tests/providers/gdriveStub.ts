@@ -6,7 +6,8 @@ import {
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
-import { bodyBytes, bodyText, createFrom } from './wireBody.js';
+import { handler, json, type StubRequest } from './harness.js';
+import { createFrom } from './wireBody.js';
 
 /**
  * A stand-in for the Google Drive API v3 at the transport layer, over the
@@ -44,13 +45,6 @@ export type GDriveStubOptions = Omit<FakeProviderOptions, 'folderChanges' | 'kin
 	 */
 	resumableAnswer?: 'asked' | 'defaults';
 };
-
-export interface StubRequest {
-	method: string;
-	url: string;
-	headers: Record<string, string>;
-	body?: string;
-}
 
 export interface GDriveStub {
 	fetch: FetchLike;
@@ -125,12 +119,6 @@ const driveError = (status: number, reason: string) =>
 		}),
 		{ status, headers: { 'content-type': 'application/json' } }
 	);
-
-const json = (body: unknown, status = 200) =>
-	new Response(JSON.stringify(body), {
-		status,
-		headers: { 'content-type': 'application/json' },
-	});
 
 const LITERAL = String.raw`'((?:[^'\\]|\\.)*)'`;
 const unescape = (literal: string): string => literal.replace(/\\(.)/g, '$1');
@@ -579,23 +567,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		return routeFile(method, decodeURIComponent(file[1] ?? ''), url, body);
 	};
 
-	const handle = async (raw: string, init: RequestInit): Promise<Response> => {
-		const headers = Object.fromEntries(
-			Object.entries((init.headers ?? {}) as Record<string, string>).map(([key, value]) => [
-				key.toLowerCase(),
-				value,
-			])
-		);
-		const bytes = bodyBytes(init.body);
-		const body = bodyText(init.body);
-		const method = init.method ?? 'GET';
-		requests.push({ method, url: raw, headers, ...(body === '' ? {} : { body }) });
-
-		observe();
-		const response = await route(method, new URL(raw), headers, body, bytes);
-		observe();
-		return response;
-	};
+	const handle = handler(requests, route, observe);
 
 	return {
 		backing,
