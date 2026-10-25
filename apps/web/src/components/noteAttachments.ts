@@ -23,6 +23,7 @@ import type {
 } from '../editor/attachHost.js';
 import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { pickFiles } from '../editor/pickFiles.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { copyTurns, nearestCopy } from '../pictures/copies.js';
 import { noShrinker, type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
 import {
@@ -625,22 +626,10 @@ export const useNoteAttachments = (
 	useEffect(() => {
 		current.current = note;
 	}, [note]);
-	const read = useRef(readFile);
-	useEffect(() => {
-		read.current = readFile;
-	}, [readFile]);
-	const told = useRef(report);
-	useEffect(() => {
-		told.current = report;
-	}, [report]);
-	const storing = useRef(store);
-	useEffect(() => {
-		storing.current = store;
-	}, [store]);
-	const adding = useRef(onAdded);
-	useEffect(() => {
-		adding.current = onAdded;
-	}, [onAdded]);
+	const read = useLatest(readFile);
+	const told = useLatest(report);
+	const storing = useLatest(store);
+	const adding = useLatest(onAdded);
 
 	const host = useMemo(
 		() =>
