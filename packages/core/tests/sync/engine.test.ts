@@ -1786,7 +1786,7 @@ describe('pushing a file', () => {
 		// Sent now, it would find the file and leave the directory for good:
 		// an empty notebook, once the delete lands.
 		await copiedThenDeleted();
-		const trips = provider.snapshot().find((entry) => entry.path === 'Trips');
+		const trips = remoteAt(provider, 'Trips');
 		store.queue({ op: 'rmdir', path: 'Trips', remoteId: trips?.remoteId });
 		offline();
 
@@ -3196,7 +3196,7 @@ describe('deletions that are not about a note', () => {
 		// front of the user for something that did not happen.
 		await provider.write('.cache', 'binary\n', {});
 		await engine.pull();
-		const hidden = provider.snapshot().find((node) => node.path === '.cache');
+		const hidden = remoteAt(provider, '.cache');
 		if (hidden === undefined) throw new Error('no file');
 		await provider.delete(hidden);
 
@@ -3212,7 +3212,7 @@ describe('deletions that are not about a note', () => {
 		await provider.write('photo.png', 'binary\n', {});
 		await engine.pull();
 		expect(store.files().map((file) => file.path)).toEqual(['photo.png']);
-		const shot = provider.snapshot().find((node) => node.path === 'photo.png');
+		const shot = remoteAt(provider, 'photo.png');
 		if (shot === undefined) throw new Error('no file');
 		await provider.delete(shot);
 
@@ -3415,7 +3415,7 @@ describe('a rescan of a remote that changed while the cursor was dead', () => {
 		await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
 		killTheCursor();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 		await provider.createFolder('Work');
@@ -3875,7 +3875,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
 		const before = noteAt('Work/a.md');
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		const moved = await provider.move(folder, 'Archive');
 
@@ -3895,7 +3895,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
 		const before = noteAt('Work/a.md');
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		const moved = await provider.move(folder, 'Archive');
 
@@ -3916,7 +3916,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await remoteFile('Work/b.md', 'two\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(file);
 
@@ -3932,7 +3932,7 @@ describe('a rename the provider does not re-list the children of', () => {
 		await provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 
@@ -4218,7 +4218,7 @@ describe('a note of ours where a remote one lands', () => {
 
 		// On the remote, `Work` was deleted and made again, and a file moved in.
 		// One batch can carry the deletion of the old one and the file in the new.
-		const old = provider.snapshot().find((node) => node.path === 'Work');
+		const old = remoteAt(provider, 'Work');
 		if (old === undefined) throw new Error('no folder');
 		await provider.delete(old);
 		await provider.createFolder('Work');
@@ -4285,7 +4285,7 @@ describe('a note of ours where a remote one lands', () => {
 		const loose = await remoteFile('loose.md', 'theirs\n');
 		await engine.pull();
 		const before = noteAt('Work/a.md');
-		const old = provider.snapshot().find((node) => node.path === 'Work');
+		const old = remoteAt(provider, 'Work');
 		if (old === undefined) throw new Error('no folder');
 
 		const renamed = await provider.move(old, 'Archive');
@@ -4353,7 +4353,7 @@ describe('a note of ours where a remote one lands', () => {
 		await provider.createFolder('Old');
 		await engine.pull();
 		store.put({ id: 'mine', path: 'Old/b.md', content: 'my edit\n', dirty: true });
-		const old = provider.snapshot().find((node) => node.path === 'Old');
+		const old = remoteAt(provider, 'Old');
 		if (old === undefined) throw new Error('no folder');
 
 		const renamed = await provider.move(old, 'New');
@@ -4385,7 +4385,7 @@ describe('a note of ours where a remote one lands', () => {
 			content: 'an earlier copy\n',
 			dirty: true,
 		});
-		const old = provider.snapshot().find((node) => node.path === 'Old');
+		const old = remoteAt(provider, 'Old');
 		if (old === undefined) throw new Error('no folder');
 
 		const renamed = await provider.move(old, 'New');
@@ -5166,7 +5166,7 @@ describe('the bytes a note last synced', () => {
 		await provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		const note = noteAt('Work/a.md')!;
 		store.put({ ...note, content: 'mine\n', dirty: true });
 		const entries: ChangeEntry[] = [
@@ -5311,7 +5311,7 @@ describe('a dead cursor', () => {
 			expect(kept?.dirty).toBeFalsy();
 			killTheCursor(true);
 			// The remote lost it; the store still points at the file it had.
-			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			const file = remoteAt(provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
 			await provider.delete(file);
 
@@ -5338,7 +5338,7 @@ describe('a dead cursor', () => {
 			await remoteFile('Work/a.md', 'one\n');
 			await engine.pull();
 			killTheCursor(true);
-			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			const folder = remoteAt(provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
 			await provider.delete(folder);
 
@@ -5368,7 +5368,7 @@ describe('a dead cursor', () => {
 			await remoteFile('Work/Sub/a.md', 'one\n');
 			await engine.pull();
 			killTheCursor(true);
-			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			const folder = remoteAt(provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
 			await provider.delete(folder);
 
@@ -5402,7 +5402,7 @@ describe('a dead cursor', () => {
 			const engineOver = engineWith({ store: backwards });
 			await engineOver.pull();
 			killTheCursor(true);
-			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			const folder = remoteAt(provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
 			await provider.delete(folder);
 
@@ -5500,7 +5500,7 @@ describe('a dead cursor', () => {
 			await provider.write('c.md', 'three\n', {});
 			await engine.pull();
 			killTheCursor(true);
-			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			const file = remoteAt(provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
 			await provider.delete(file);
 
@@ -5519,7 +5519,7 @@ describe('a dead cursor', () => {
 			await remoteFile('a.md', 'one\n');
 			await engine.pull();
 			killTheCursor();
-			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			const file = remoteAt(provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
 			await provider.delete(file);
 
@@ -5658,7 +5658,7 @@ describe('a provider that reports a folder recursively', () => {
 		await provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await engine.pull();
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		const note = noteAt('Work/a.md');
 		if (folder === undefined || note === undefined) throw new Error('not set up');
 		return { file, folder, noteId: note.id };
@@ -5671,7 +5671,7 @@ describe('a provider that reports a folder recursively', () => {
 		// moves only with the batch, so the next pull gets the same one back.
 		const { file, folder } = await setUpWork();
 		await provider.createFolder('Work/Deep');
-		const deep = provider.snapshot().find((node) => node.path === 'Work/Deep');
+		const deep = remoteAt(provider, 'Work/Deep');
 		if (deep === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 
@@ -5698,7 +5698,7 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder, noteId } = await setUpWork();
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
-		const out = provider.snapshot().find((node) => node.path === 'a.md');
+		const out = remoteAt(provider, 'a.md');
 		if (out === undefined) throw new Error('no file');
 
 		const result = await pullNow([
@@ -5754,7 +5754,7 @@ describe('a provider that reports a folder recursively', () => {
 		// folder and the note in it are gone; the last two say where they went.
 		const { file, folder, noteId } = await setUpWork();
 		const moved = await provider.move(folder, 'Archive');
-		const movedFile = provider.snapshot().find((node) => node.path === 'Archive/a.md');
+		const movedFile = remoteAt(provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -5783,7 +5783,7 @@ describe('a provider that reports a folder recursively', () => {
 		// thing left to match on is what we already hold at that path.
 		const { folder, noteId } = await setUpWork();
 		const moved = await provider.move(folder, 'Archive');
-		const movedFile = provider.snapshot().find((node) => node.path === 'Archive/a.md');
+		const movedFile = remoteAt(provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -5813,7 +5813,7 @@ describe('a provider that reports a folder recursively', () => {
 		if (note === undefined) throw new Error('no note');
 		store.put({ ...note, content: 'mine\n', dirty: true });
 		const moved = await provider.move(folder, 'Archive');
-		const movedFile = provider.snapshot().find((each) => each.path === 'Archive/a.md');
+		const movedFile = remoteAt(provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -5837,7 +5837,7 @@ describe('a provider that reports a folder recursively', () => {
 		store.put({ ...(recorded ? note : unrecorded), content: 'mine\n', dirty: true });
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
-		const out = provider.snapshot().find((each) => each.path === 'a.md');
+		const out = remoteAt(provider, 'a.md');
 		if (out === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -6030,7 +6030,7 @@ describe('a remote folder move', () => {
 		});
 		await engine.pull();
 
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.move(folder, 'Archive');
 		await engine.pull();
@@ -6054,7 +6054,7 @@ describe('a remote folder move', () => {
 		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
 		await engine.pull();
 
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.move(folder, 'Archive');
 		await engine.pull();
@@ -6358,7 +6358,7 @@ describe('a remote folder delete', () => {
 		});
 		await engine.pull();
 
-		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await provider.delete(folder);
 		await engine.pull();
@@ -6386,7 +6386,7 @@ describe('a remote folder delete', () => {
 		});
 		await solo.pull();
 
-		const folder = folderOnly.snapshot().find((node) => node.path === 'Work');
+		const folder = remoteAt(folderOnly, 'Work');
 		if (folder === undefined) throw new Error('no folder');
 		await folderOnly.delete(folder);
 		await solo.pull();
@@ -6396,7 +6396,7 @@ describe('a remote folder delete', () => {
 		expect(kept?.remoteId).toBeUndefined();
 		// This one drives a store of its own, so the file-wide `afterEach` is
 		// watching the wrong one.
-		expect(local.anomalies()).toEqual([]);
+		expectSoundStore(local);
 	});
 });
 
@@ -6633,12 +6633,6 @@ describe('a file moved back onto the path a folder rename carried its note off',
 	// `B/x.md` over a file at `A/x.md`, and the next edit finds nothing at its
 	// path, finds the file by id, finds no rename of its own to follow, and
 	// blocks the ordered queue.
-	const edited = (local: MemoryStore, id: string, content: string): void => {
-		const note = local.notes().find((each) => each.id === id);
-		if (note === undefined) throw new Error('no note');
-		local.put({ ...note, content, dirty: true });
-		local.queue({ op: 'write', noteId: id, path: note.path });
-	};
 
 	it('follows the file when the version survived the move', async () => {
 		// Dropbox's `rev` survives a move, so this is decided without a read.
@@ -6665,7 +6659,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 
 		// The version the feed was made to keep is not the fake's own.
 		store.put({ ...(noteAt('A/x.md') as SyncNote), remoteVersion: back.version });
-		edited(store, (before as SyncNote).id, 'edited\n');
+		editHere(store, noteAt('A/x.md') as SyncNote, 'edited\n');
 		expect((await engine.push()).status).toBe('ok');
 		expect(provider.contentAt('A/x.md')).toBe('edited\n');
 		expect(store.ops()).toEqual([]);
@@ -6693,11 +6687,12 @@ describe('a file moved back onto the path a folder rename carried its note off',
 			expect(local.notes().map((note) => note.path)).toEqual(['A/x.md']);
 			expect(local.notes()[0]?.id).toBe(before?.id);
 
-			edited(local, (before as SyncNote).id, 'edited\n');
+			editHere(local, local.notes()[0] as SyncNote, 'edited\n');
 			expect((await solo.push()).status).toBe('ok');
 			expect(remote.contentAt('A/x.md')).toBe('edited\n');
 			expect(local.ops()).toEqual([]);
-			expect(local.anomalies()).toEqual([]);
+			// A store of its own, which the file-wide `afterEach` is not watching.
+			expectSoundStore(local);
 		});
 	}
 
@@ -6708,7 +6703,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 		const file = await remoteFile('A/x.md', 'one\n');
 		await engine.pull();
 		const before = noteAt('A/x.md') as SyncNote;
-		edited(store, before.id, 'edited\n');
+		editHere(store, before, 'edited\n');
 
 		await provider.move(folder, 'B');
 		await provider.createFolder('A');
@@ -6807,9 +6802,7 @@ describe('a note the pull conflicted with a write still queued', () => {
 		await engine.push();
 
 		expect(provider.contentAt('x.md')).toBe('theirs\n');
-		expect(provider.snapshot().find((entry) => entry.path === 'x.md')?.version).toBe(
-			theirs.version
-		);
+		expect(remoteAt(provider, 'x.md')?.version).toBe(theirs.version);
 		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 });
@@ -7065,7 +7058,7 @@ describe('a write whose remote folder is gone', () => {
 		store.put({ ...mine, content: 'mine\n', dirty: true });
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
-		const out = provider.snapshot().find((each) => each.path === 'a.md');
+		const out = remoteAt(provider, 'a.md');
 		if (out === undefined) throw new Error('no file at a.md');
 
 		await pullNow([
@@ -7368,7 +7361,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		expect(store.folders()).toEqual([
 			{
 				path: 'Plans',
-				remoteId: provider.snapshot().find((entry) => entry.path === 'Plans')?.remoteId,
+				remoteId: remoteAt(provider, 'Plans')?.remoteId,
 			},
 		]);
 	});
@@ -7469,14 +7462,10 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		await engine.push();
 
 		expect(remoteFolders()).toEqual(['Ours', 'Work']);
-		expect(provider.snapshot().find((entry) => entry.path === 'Work')?.remoteId).toBe(
-			theirs.remoteId
-		);
+		expect(remoteAt(provider, 'Work')?.remoteId).toBe(theirs.remoteId);
 		// Ours is the one the op named, and it is still there too: the folder
 		// that moved away is not what the path says any more.
-		expect(provider.snapshot().find((entry) => entry.path === 'Ours')?.remoteId).toBe(
-			made.remoteId
-		);
+		expect(remoteAt(provider, 'Ours')?.remoteId).toBe(made.remoteId);
 	});
 
 	it('does nothing at all without the id it was queued with', async () => {
@@ -7520,7 +7509,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		store.queue({ op: 'mkdir', path: 'Work' });
 		await engine.pull();
 		await engine.push();
-		const made = provider.snapshot().find((entry) => entry.path === 'Work');
+		const made = remoteAt(provider, 'Work');
 		expect(made?.remoteId).toBe(store.folders()[0]?.remoteId);
 		// The user deletes it again before the next round.
 		store.removeFolder('Work');
@@ -8923,9 +8912,7 @@ describe('a file that is not UTF-8 text', () => {
 		expect(store.ops()).toEqual([]);
 		expect(sent()).toEqual(before);
 		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
-		expect(provider.snapshot().find((each) => each.path === 'a.md')?.remoteId).toBe(
-			entry.remoteId
-		);
+		expect(remoteAt(provider, 'a.md')?.remoteId).toBe(entry.remoteId);
 	});
 
 	it('cuts a dirty note loose and moves it aside, and its edit goes up beside the file', async () => {
@@ -9017,9 +9004,7 @@ describe('a file that is not UTF-8 text', () => {
 		expect(store.notes()).toEqual([]);
 		expect(store.ops()).toEqual([]);
 		expect(sent().filter((call) => call.startsWith('delete'))).toEqual([]);
-		expect(provider.snapshot().find((each) => each.path === 'a.md')?.remoteId).toBe(
-			entry.remoteId
-		);
+		expect(remoteAt(provider, 'a.md')?.remoteId).toBe(entry.remoteId);
 		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
@@ -9164,7 +9149,7 @@ describe('a file that is not UTF-8 text', () => {
 			expect(noteAt(next)).toMatchObject({
 				id: note.id,
 				dirty: false,
-				remoteId: provider.snapshot().find((each) => each.path === next)?.remoteId,
+				remoteId: remoteAt(provider, next)?.remoteId,
 			});
 			expect(holders(entry.remoteId)).toEqual([]);
 			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
@@ -10284,7 +10269,7 @@ describe('a pull that fails part-way', () => {
 		failFirstReadOf(provider, 'd.md');
 		expect((await engine.pull()).status).toBe('retry');
 		provider.setFault(undefined);
-		const held = provider.snapshot().find((entry) => entry.path === 'a.md');
+		const held = remoteAt(provider, 'a.md');
 		await provider.write('a.md', 'written since\n', { expectedVersion: held?.version });
 		const before = readsOf(provider).length;
 
