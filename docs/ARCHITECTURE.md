@@ -1694,6 +1694,7 @@ packages/
                               #   replay.ts (where a note, a folder, an unreadable file is once the decisions so far are applied)
                               #   occupancy.ts (which notes end up in or under a folder, and the names a copy there must not take)
                               #   attachments.ts (the files that are not notes, as a pull decides them: placed, adopted, gone, clashing)
+                              #   cascade.ts (what a folder's deletion takes with it, and the folders above a kept note it must not)
         push/                 # the push's parts, out of engine.ts (#446): folders.ts (folders made before a write, and removed or left once empty)
                               #   files.ts (files that are not notes: uploaded, moved, deleted, beside what they meet)
                               #   notes.ts (notes: written after a rename, renamed or moved aside, deleted)

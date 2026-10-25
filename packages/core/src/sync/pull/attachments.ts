@@ -296,3 +296,6 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 		settleFileClashes,
 	};
 };
+
+/** What the pull's other parts are handed of it. */
+export type PullAttachments = ReturnType<typeof createPullAttachments>;
