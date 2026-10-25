@@ -1,7 +1,14 @@
 import { MARKER_FILE } from '../config.js';
 import { isJsonObject, parseJson } from '../json.js';
 import { normalizePath, ROOT } from '../paths.js';
-import { type HttpProviderOptions, isSelf, readAsText, writeMarkerOnce } from './adapter.js';
+import {
+	type HttpProviderOptions,
+	isSelf,
+	outsideRoot,
+	readAsText,
+	rootFolderEntry,
+	writeMarkerOnce,
+} from './adapter.js';
 import {
 	type Attempt,
 	createTransport,
@@ -44,6 +51,11 @@ import {
 
 const RPC = 'https://api.dropboxapi.com/2';
 const CONTENT = 'https://content.dropboxapi.com/2';
+/**
+ * With App folder access the root exists by construction and has no id of its
+ * own, so its id is a constant — which docs/ARCHITECTURE.md §4 allows.
+ */
+const ROOT_ID = 'app-folder';
 
 export type DropboxProviderOptions = HttpProviderOptions;
 
@@ -318,22 +330,19 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
-		upload(path, content, opts.expectedVersion);
+		outsideRoot(path, (target) => upload(target, content, opts.expectedVersion));
 
 	/** `mode: add` with nothing expected: a file or folder in the way is a conflict. */
 	const createFile = (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<RemoteEntry> =>
-		upload(path, bytes, undefined);
+		outsideRoot(path, (target) => upload(target, bytes, undefined));
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
-		// With App folder access the root exists by construction and has no id of
-		// its own, so this is a constant — which docs/ARCHITECTURE.md §4 allows.
-		const rootId = 'app-folder';
 		await writeMarkerOnce(
 			{ ...options, provider: 'dropbox' },
 			async () => (await metadataAt(MARKER_FILE)) !== undefined,
 			(path, content) => write(path, content, {})
 		);
-		return { rootId };
+		return { rootId: ROOT_ID };
 	};
 
 	const list = async (folderPath: string): Promise<RemoteEntry[]> => {
@@ -373,6 +382,12 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	const read = readAsText(readBytes);
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
+		// There already. Asked, Dropbox would refuse the path rather than answer
+		// the app folder: `create_folder_v2` takes a `WritePath`, whose pattern
+		// needs a leading slash, and the root is `''` (as `upload` and `move_v2`
+		// take a `WritePathOrId`, which is why those are refused here too).
+		// https://github.com/dropbox/dropbox-api-spec (`files.stone`, `alias WritePath`)
+		if (normalizePath(path) === ROOT) return rootFolderEntry(ROOT_ID);
 		const result = await tryRpc<{ metadata?: Metadata }>('files/create_folder_v2', {
 			path: toDropboxPath(path),
 			autorename: false,
@@ -390,6 +405,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		if (normalizePath(newPath) === ROOT) throw new NotFoundError(ROOT);
 		const result = await tryRpc<{ metadata?: Metadata }>('files/move_v2', {
 			from_path: target(entry),
 			to_path: toDropboxPath(newPath),
