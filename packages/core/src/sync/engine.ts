@@ -30,7 +30,7 @@ import {
 import { createCascade } from './pull/cascade.js';
 import { createPullDeletions } from './pull/deletions.js';
 import { type FileBase, fileGone } from './pull/files.js';
-import { createPullFolders } from './pull/folders.js';
+import { createPullFolders, type Decide } from './pull/folders.js';
 import { createOccupancy } from './pull/occupancy.js';
 import {
 	folderNow,
@@ -801,7 +801,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return remoteNow(note, decided) === entry.remoteId ? [forgetNote(note)] : [];
 	};
 
-	const decide = async (
+	const decide: Decide = async (
 		entry: ChangeEntry,
 		decided: readonly PullChange[],
 		batch: Batch,
@@ -884,12 +884,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		notesUnderNow,
 		filesNow,
 	});
-	// The folders, as a pull decides them (`pull/folders.ts`). `decide` is handed in
-	// late-bound, since a folder's deletion decides what it rescues.
+	// The folders, as a pull decides them (`pull/folders.ts`). Handed `decide`, since
+	// a folder's deletion decides what it rescues.
 	const { movedFolderOver, folderIdAt, deleteFolderAfterRescue, doomedFolder, decideFolder } =
 		createPullFolders(context, {
-			// eslint-disable-next-line functional/prefer-tacit -- `decide` is declared below
-			decide: (entry, decided, batch, at) => decide(entry, decided, batch, at),
+			decide,
 			cascadeOver,
 			filesNow,
 			notesUnderNow,
