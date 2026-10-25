@@ -17,8 +17,8 @@ import { type PullReconcile } from './reconcile.js';
  * A pull, run: a round from the stored cursor, its pages read whole and then
  * decided (`drainRound`), or a scan from the top, applied a page at a time and
  * reconciled at the end (`drainScan`, `applyScan`); a cursor the provider has
- * let go of answered with a scan, and an expired token with one retry after a
- * refresh (`runPull`, `authRetry`). Moved out of `engine.ts` as they were
+ * let go of answered with a scan, and an expired token, in either, with one
+ * retry after a refresh (`runPull`, `authRetry`). Moved out of `engine.ts`
  * (#446).
  */
 
@@ -193,25 +193,38 @@ export const createPullRun = (
 		const stored = await store.cursor();
 		/** A scan from the top, counted from nothing. */
 		const scan = (upload = false): Promise<SyncOutcome> => meter.scan(() => drainScan(upload));
-		const attempt = (): Promise<SyncOutcome> =>
-			(stored === undefined ? scan() : drainRound(stored)).catch((error: unknown) => {
+		/**
+		 * The scan a dead cursor was answered with, once one has been, and
+		 * whether the provider asked for what it did not return to be sent back
+		 * up. A retry after a refresh goes straight back to that scan: the
+		 * stored cursor is still the one the provider refused (below), and
+		 * asking it again costs a request, shows a round for a moment, and
+		 * leaves `uploadDifferences` to a second refusal that may say less.
+		 */
+		const rescan = new Map<'upload', boolean>();
+		const attempt = (): Promise<SyncOutcome> => {
+			const upload = rescan.get('upload');
+			if (upload !== undefined) return scan(upload);
+			return (stored === undefined ? scan() : drainRound(stored)).catch((error: unknown) => {
 				// The cursor is dead rather than the request. Discarding it and
-				// scanning is the documented recovery, and the stored one is left in
-				// place so an interrupted rescan tries again rather than continuing
-				// from a cursor the provider has already rejected — which is also
-				// what keeps `uploadDifferences` across an interruption, since the
-				// same cursor meets the same refusal and is told the same thing.
+				// scanning is the documented recovery, and the stored one is left
+				// in place so an interrupted rescan tries again rather than
+				// continuing from a cursor the provider has already rejected —
+				// which is also what keeps `uploadDifferences` across an
+				// interruption, since the same cursor meets the same refusal and is
+				// told the same thing.
 				if (isCursorResetError(error)) {
+					rescan.set('upload', error.uploadDifferences === true);
 					return scan(error.uploadDifferences === true);
 				}
 				throw error;
 			});
+		};
 
 		// Around the recovery, not beside it: a token can expire in the scan
 		// that answers a dead cursor, and a cursor can turn out dead on the
-		// retry after a refresh. Beside it, either ended the run as `retry`: a
-		// round trip spent waiting on what a refresh or a scan answers at once.
-		return attempt().catch(async (error: unknown) => {
+		// retry after a refresh. Beside it, either ended the run as `retry`.
+		return attempt().catch((error: unknown) => {
 			if (isAuthError(error)) return authRetry(attempt);
 			throw error;
 		});
