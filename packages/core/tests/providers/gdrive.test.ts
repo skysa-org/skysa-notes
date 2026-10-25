@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { MARKER_FILE } from '../../src/config.js';
-import type { FetchLike } from '../../src/providers/dropbox.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import {
 	AuthError,
 	type ChangeEntry,

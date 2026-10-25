@@ -1,10 +1,11 @@
-import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
+import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
 	type FakeProvider,
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import type { StorageProvider } from '../../src/providers/types.js';
 import { describeProviderContract, type ProviderContractOptions } from './contract.js';

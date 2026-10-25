@@ -2,6 +2,7 @@ import { MARKER_FILE } from '../config.js';
 import { asObject, isJsonObject, parseJson } from '../json.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
+import { type FetchLike, parseRetryAfter } from './http.js';
 import { decodeText, responseBytes } from './text.js';
 import {
 	AuthError,
@@ -11,7 +12,6 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	parseRetryAfter,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
@@ -36,8 +36,6 @@ import {
 
 const RPC = 'https://api.dropboxapi.com/2';
 const CONTENT = 'https://content.dropboxapi.com/2';
-
-export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 export interface DropboxProviderOptions {
 	fetch: FetchLike;

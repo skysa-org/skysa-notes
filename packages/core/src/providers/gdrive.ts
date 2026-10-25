@@ -10,7 +10,7 @@ import {
 	conflictFolderName,
 	conflictNameKeepingExtension,
 } from '../sync/conflicts.js';
-import type { FetchLike } from './dropbox.js';
+import { type FetchLike, parseRetryAfter } from './http.js';
 import {
 	applyItem,
 	arrivals,
@@ -34,7 +34,6 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	parseRetryAfter,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
