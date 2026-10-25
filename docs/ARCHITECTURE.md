@@ -1685,6 +1685,7 @@ packages/
         adapter.ts            # and on the contract's side: the marker, read as text, the root's guard, isSelf
       sync/
         engine.ts conflicts.ts
+        providerOps.ts        # asking the provider where "nothing there" is an answer: orIfNotFound, withParent
         pull/                 # the pull's pure parts, out of engine.ts (#446): batch.ts (what a batch's decisions are reached against) files.ts (the files' replay)
                               #   replay.ts (where a note, a folder, an unreadable file is once the decisions so far are applied)
       markdown/

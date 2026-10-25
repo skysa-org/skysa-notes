@@ -88,7 +88,7 @@ const placedBy =
 		return 'path' in change ? { ...state, at: change.path, remoteId } : { ...state, remoteId };
 	};
 
-export const placedAt = (note: SyncNote): Placement => ({
+const placedAt = (note: SyncNote): Placement => ({
 	at: note.path,
 	dirty: note.dirty,
 	remoteId: note.remoteId,
@@ -119,13 +119,15 @@ export const placements = (decided: readonly PullChange[]): ((note: SyncNote) =>
 					: undefined;
 		return id === undefined ? map : map.set(id, [...(map.get(id) ?? []), index]);
 	}, new Map());
-	return (note) =>
-		[...folders, ...(naming.get(note.id) ?? [])]
+	return (note) => {
+		const step = placedBy(note);
+		return [...folders, ...(naming.get(note.id) ?? [])]
 			.sort((one, two) => one - two)
 			.reduce<Placement>(
-				(state, index) => placedBy(note)(state, decided[index] as PullChange),
+				(state, index) => step(state, decided[index] as PullChange),
 				placedAt(note)
 			);
+	};
 };
 
 /** Where a note ends up, or `undefined` if the batch takes it away. */

@@ -35,6 +35,7 @@ import {
 	conflictFolderPath,
 	conflictPath,
 } from './conflicts.js';
+import { orIfNotFound, withParent } from './providerOps.js';
 import {
 	aliveElsewhere,
 	type Batch,
@@ -815,10 +816,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// folder above may have moved again since the round was read. Kept, a
 		// folder that is gone stays until the next rescan; deleted, one that is
 		// not takes its notes from this device, and nothing lists them again.
-		const beside = await provider.list(parentPath(expected)).catch((error: unknown) => {
-			if (isNotFoundError(error)) return undefined;
-			throw error;
-		});
+		const beside = await orIfNotFound(provider.list(parentPath(expected)), undefined);
 		if (beside === undefined || beside.some((entry) => entry.remoteId === remoteId)) return [];
 		// Nor is a listing without it: the folder may have moved out of there
 		// since, too. What would be lost is its notes, so they are what is
@@ -3157,17 +3155,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 		if (found !== note.remoteVersion) throw changed;
 		const from = { remoteId, path: note.path };
-		const moved = await provider.move(from, note.path).catch(async (problem: unknown) => {
-			// A conflict here — another device has taken the name since our
-			// pull — is thrown as it is. Its file is not this note's, and
-			// `resolvePushConflict` knows it by its id and moves the note aside.
-			// The file is there — the read above found it — so a not-found here
-			// is the folder the note was moved into, made on this device and
-			// with its `mkdir` queued behind this write. As in `runMove`.
-			if (!isNotFoundError(problem)) throw problem;
-			await ensureRemoteFolder(parentPath(note.path));
-			return provider.move(from, note.path);
-		});
+		// A conflict here — another device has taken the name since our
+		// pull — is thrown as it is. Its file is not this note's, and
+		// `resolvePushConflict` knows it by its id and moves the note aside.
+		// The file is there — the read above found it — so a not-found here
+		// is the folder the note was moved into, made on this device and
+		// with its `mkdir` queued behind this write. As in `runMove`.
+		const moved = await withParent(
+			() => provider.move(from, note.path),
+			() => ensureRemoteFolder(parentPath(note.path))
+		);
 		// That check and the move are two calls, and the other device's edit can
 		// land between them. So the write is not checked against the version the
 		// move hands back, which is the version of whatever it moved, but against
@@ -3193,19 +3190,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// whether the file still exists under the id we hold.
 			const id = note.remoteId;
 			if (note.remoteVersion !== undefined && id !== undefined) {
-				const elsewhere = await provider
-					.read({ remoteId: id, path: note.path })
-					.then((file): string | undefined => file.version)
-					// Only a not-found answers the question. Anything else — a
-					// rate limit, an outage, a response the adapter could not
-					// make sense of — is the provider failing to say, and reading
-					// that as "gone" re-creates a file that is still there and
-					// leaves the user with two notes where they had one. Rethrown,
-					// it is a failed op the backoff tries again.
-					.catch((problem: unknown) => {
-						if (!isNotFoundError(problem)) throw problem;
-						return undefined;
-					});
+				// Only a not-found answers the question. Anything else — a
+				// rate limit, an outage, a response the adapter could not
+				// make sense of — is the provider failing to say, and reading
+				// that as "gone" re-creates a file that is still there and
+				// leaves the user with two notes where they had one. Rethrown,
+				// it is a failed op the backoff tries again.
+				const elsewhere = await orIfNotFound(
+					provider.read({ remoteId: id, path: note.path }).then((file) => file.version),
+					undefined
+				);
 				if (elsewhere !== undefined) return followTheRename(note, id, elsewhere, error);
 			}
 
@@ -3374,12 +3368,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 		// Already gone is the outcome we wanted. `delete` is idempotent by
 		// contract, but a provider that reports it as missing is not an error.
-		await provider
-			.delete({ remoteId: note.remoteId, path: note.path })
-			.catch((error: unknown) => {
-				if (isNotFoundError(error)) return;
-				throw error;
-			});
+		await orIfNotFound(
+			provider.delete({ remoteId: note.remoteId, path: note.path }),
+			undefined
+		);
 		await store.completeOp(op.seq, { kind: 'purged', noteId: note.id });
 	};
 
@@ -3393,10 +3385,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * the same way.
 	 */
 	const holdsNoFile = async (path: string): Promise<boolean> => {
-		const entries = await provider.list(path).catch((error: unknown) => {
-			if (isNotFoundError(error)) return [];
-			throw error;
-		});
+		const entries = await orIfNotFound(provider.list(path), []);
 		if (entries.some((entry) => entry.kind === 'file')) return false;
 		return noneOfTheseHolds(
 			entries.flatMap((entry) => (entry.kind === 'folder' ? [entry.path] : []))
@@ -3464,10 +3453,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const files = await store.filesUnder(op.path);
 		if (mine !== undefined || notes.length > 0 || files.length > 0) return finish();
 
-		const beside = await provider.list(parentPath(op.path)).catch((error: unknown) => {
-			if (isNotFoundError(error)) return [];
-			throw error;
-		});
+		const beside = await orIfNotFound(provider.list(parentPath(op.path)), []);
 		const there = beside.find((entry) => entry.remoteId === remoteId);
 		// A folder, at that path: an id that named a file would otherwise take
 		// the file with the same call.
@@ -3480,10 +3466,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 		if (!(await holdsNoFile(op.path))) return finish();
 
-		await remove({ remoteId, path: op.path }).catch((error: unknown) => {
-			if (isNotFoundError(error)) return;
-			throw error;
-		});
+		await orIfNotFound(remove({ remoteId, path: op.path }), undefined);
 		return finish();
 	};
 
@@ -3537,10 +3520,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const namesBeside = async (target: string): Promise<string[]> => {
 		const folder = normalizePath(parentPath(target));
-		const there = await provider.list(folder).catch((error: unknown) => {
-			if (isNotFoundError(error)) return [];
-			throw error;
-		});
+		const there = await orIfNotFound(provider.list(folder), []);
 		const here = (await store.filesUnder(folder)).filter(
 			(file) => normalizePath(parentPath(file.path)) === folder
 		);
@@ -3586,21 +3566,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const create = () =>
 			provider.createFile(path, bytes, type === undefined ? {} : { contentType: type });
 		return (
-			create()
-				// Nothing to put it in: a notebook made here whose `mkdir` has not
-				// gone, or one removed on another device since. As `runWrite`
-				// answers it, and `createFile` makes no parents on any provider.
-				.catch(async (error: unknown) => {
-					if (!isNotFoundError(error)) throw error;
-					await ensureRemoteFolder(parentPath(path));
-					return create();
-				})
-				.catch(async (error: unknown) => {
+			// Nothing to put it in: a notebook made here whose `mkdir` has not
+			// gone, or one removed on another device since. As `runWrite`
+			// answers it, and `createFile` makes no parents on any provider.
+			withParent(create, () => ensureRemoteFolder(parentPath(path))).catch(
+				async (error: unknown) => {
 					if (!isConflictError(error)) throw error;
 					if (await adoptable(error.remote, file, bytes.byteLength)) return error.remote;
 					if (beside !== undefined && beside.left <= 0) throw error;
 					return sendFile(file, bytes, await nextBeside(file.path, beside));
-				})
+				}
+			)
 		);
 	};
 
@@ -3617,13 +3593,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const held = await store.fileBytes(file.id);
 		if (held !== undefined || op.copyOf === undefined) return held;
 		const original = await store.fileByRemoteId(op.copyOf);
-		return provider
-			.readBytes({ remoteId: op.copyOf, path: original?.path ?? file.path })
-			.then(({ bytes }) => bytes)
-			.catch((error: unknown) => {
-				if (isNotFoundError(error)) return undefined;
-				throw error;
-			});
+		return orIfNotFound(
+			provider
+				.readBytes({ remoteId: op.copyOf, path: original?.path ?? file.path })
+				.then(({ bytes }) => bytes),
+			undefined
+		);
 	};
 
 	const runUpload = async (op: SyncOp): Promise<void> => {
@@ -3657,10 +3632,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * its bytes. A folder that is not there holds nothing.
 	 */
 	const stillListed = async (from: EntryRef): Promise<boolean> => {
-		const beside = await provider.list(parentPath(from.path)).catch((error: unknown) => {
-			if (isNotFoundError(error)) return [];
-			throw error;
-		});
+		const beside = await orIfNotFound(provider.list(parentPath(from.path)), []);
 		return beside.some((entry) => entry.remoteId === from.remoteId);
 	};
 
@@ -3733,12 +3705,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const runDeleteFile = async (op: SyncOp): Promise<void> => {
 		if (op.remoteId !== undefined) {
-			await provider
-				.delete({ remoteId: op.remoteId, path: op.path })
-				.catch((error: unknown) => {
-					if (isNotFoundError(error)) return;
-					throw error;
-				});
+			await orIfNotFound(
+				provider.delete({ remoteId: op.remoteId, path: op.path }),
+				undefined
+			);
 		}
 		await store.completeOp(op.seq, { kind: 'done' });
 	};
@@ -3746,27 +3716,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/** Runs one op, or throws. A conflict is thrown, and answered by the caller. */
 	const runOp = async (op: SyncOp): Promise<void> => {
 		if (op.op === 'mkdir') {
-			const made = await provider.createFolder(op.path).catch(async (error: unknown) => {
-				if (!isNotFoundError(error)) throw error;
-				// Nothing above it. A notebook made inside one whose directory
-				// another device has removed since is the ordinary way there:
-				// the row above is still here, so no `mkdir` was owed for it.
-				// The same answer a write that finds no parent gives — and, like
-				// that one, the directory it makes records no id on the row, so
-				// until a pull reports the folder an `rmdir` for it would have
-				// none to name and the notebook is not removable. Self-healing,
-				// and the alternative is a write that leaves the user's note
-				// unsent.
-				// Reached only where the adapter maps a missing parent to
-				// `NotFoundError`: OneDrive and Drive do. Dropbox's does only
-				// for a failure tagged `not_found`, which `create_folder_v2`'s
-				// documented `WriteError` does not carry — and the live check
-				// this comment used to defer to has been done (2026-09-21):
-				// `create_folder_v2` makes the missing parents itself, in the
-				// one call, so on Dropbox this path is never taken.
-				await ensureRemoteFolder(parentPath(op.path));
-				return provider.createFolder(op.path);
-			});
+			// Nothing above it. A notebook made inside one whose directory
+			// another device has removed since is the ordinary way there:
+			// the row above is still here, so no `mkdir` was owed for it.
+			// The same answer a write that finds no parent gives — and, like
+			// that one, the directory it makes records no id on the row, so
+			// until a pull reports the folder an `rmdir` for it would have
+			// none to name and the notebook is not removable. Self-healing,
+			// and the alternative is a write that leaves the user's note
+			// unsent.
+			// Reached only where the adapter maps a missing parent to
+			// `NotFoundError`: OneDrive and Drive do. Dropbox's does only
+			// for a failure tagged `not_found`, which `create_folder_v2`'s
+			// documented `WriteError` does not carry — and the live check
+			// this comment used to defer to has been done (2026-09-21):
+			// `create_folder_v2` makes the missing parents itself, in the
+			// one call, so on Dropbox this path is never taken.
+			const made = await withParent(
+				() => provider.createFolder(op.path),
+				() => ensureRemoteFolder(parentPath(op.path))
+			);
 			// The id goes onto the folder row, for an `rmdir` queued later to say
 			// which folder it means.
 			await store.completeOp(op.seq, { kind: 'made-folder', path: op.path, remote: made });
