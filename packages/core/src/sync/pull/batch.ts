@@ -4,11 +4,12 @@ import { type PullChange, type SyncNote, type UnreadableFile } from '../store.js
 import { type FileBase } from './files.js';
 
 /**
- * What every decision in a pull's batch is reached against (`Batch`), and the
- * readings of its entries that do not depend on any decision: where each
- * living thing is mentioned and how far in (`liveEntries`), what it deletes
- * (`doomedIn`), what it claims (`claimedPaths`), and what the last word about
- * a thing says (`aliveElsewhere`, `leavesFor`).
+ * What every decision in a pull's batch is reached against (`Batch`, and with
+ * the decisions before it, `Step`), and the readings of its entries that do
+ * not depend on any decision: where each living thing is mentioned and how
+ * far in (`liveEntries`), what it deletes (`doomedIn`), what it claims
+ * (`claimedPaths`), and what the last word about a thing says
+ * (`aliveElsewhere`, `leavesFor`).
  */
 
 /**
@@ -201,6 +202,13 @@ export interface Batch {
 	/** The files that are not notes, as the batch found them (`filesNow`). */
 	files: FileBase;
 }
+
+/**
+ * Where one decision stands: the batch, the changes decided before it, and
+ * how far into the batch's entries it is. A decision takes the parts it
+ * reads (`Pick<Step, …>`) by name, not in an order of its own.
+ */
+export type Step = Readonly<{ batch: Batch; decided: readonly PullChange[]; at: number }>;
 
 export const doomedIn = (entries: readonly ChangeEntry[]): Doomed => ({
 	ids: new Set(
