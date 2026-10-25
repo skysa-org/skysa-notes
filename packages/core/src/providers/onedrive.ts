@@ -2,16 +2,16 @@ import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
 import { parseJson } from '../json.js';
-import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import {
-	createTransport,
-	type FetchLike,
-	jsonBody,
-	parseRetryAfter,
-	readErrorBody,
-	retryNote,
-} from './http.js';
+	type HttpProviderOptions,
+	isSelf,
+	outsideRoot,
+	readAsText,
+	rootFolderEntry,
+	writeMarkerOnce,
+} from './adapter.js';
+import { createTransport, jsonBody, parseRetryAfter, readErrorBody, retryNote } from './http.js';
 import {
 	applyItem,
 	nodeSchema,
@@ -21,7 +21,7 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
-import { decodeText, responseBytes, uploadType } from './text.js';
+import { responseBytes, uploadType } from './text.js';
 import {
 	AuthError,
 	type ChangeSet,
@@ -71,14 +71,7 @@ const GRAPH = `${GRAPH_ORIGIN}/v1.0`;
 const APPROOT = `${GRAPH}/me/drive/special/approot`;
 const FAIL_ON_CONFLICT = '@microsoft.graph.conflictBehavior=fail';
 
-export interface OneDriveProviderOptions {
-	fetch: FetchLike;
-	/** Called per request, so a refreshed token is picked up without rebuilding. */
-	getAccessToken: () => Promise<string>;
-	appVersion: string;
-	clientId: string;
-	userAgent?: string;
-}
+export type OneDriveProviderOptions = HttpProviderOptions;
 
 /** Only the fields this adapter reads. Graph sends a good deal more. */
 interface DriveItem {
@@ -165,16 +158,6 @@ const toEntry = (item: DriveItem, path: string): RemoteEntry => {
 		...(folder || item.size === undefined ? {} : { size: item.size }),
 	};
 };
-
-/**
- * Is what is at a path the very entry we were asked to act on? By id wherever
- * both have one; otherwise by path, folded, because OneDrive is
- * case-insensitive. The same question, and the same answer, as in `dropbox.ts`.
- */
-const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
-	entry.remoteId === '' || current.remoteId === ''
-		? normalizePath(entry.path).toLowerCase() === current.path.toLowerCase()
-		: entry.remoteId === current.remoteId;
 
 /**
  * A link Graph handed back — `@odata.nextLink`, `@odata.deltaLink` — is followed
@@ -286,7 +269,7 @@ const isDeadLink = (failure: GraphFailure, stored: boolean): boolean =>
 	failure.status === 410 || (stored && (failure.status === 400 || failure.status === 404));
 
 export const createOneDriveProvider = (options: OneDriveProviderOptions): StorageProvider => {
-	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
+	const { fetch: doFetch, getAccessToken } = options;
 	/** The app folder's id, which never changes once Graph has made the folder. */
 	const rootBox = new Map<'id', string>();
 
@@ -438,40 +421,30 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		throw new ConflictError(now);
 	};
 
-	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> => {
-		const target = normalizePath(path);
-		if (target === ROOT) return Promise.reject(new NotFoundError(target));
-		return opts.expectedVersion === undefined
-			? create(target, content)
-			: update(target, content, opts.expectedVersion);
-	};
+	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
+		outsideRoot(path, (target) =>
+			opts.expectedVersion === undefined
+				? create(target, content)
+				: update(target, content, opts.expectedVersion)
+		);
 
 	const createFile = (
 		path: string,
 		bytes: Uint8Array<ArrayBuffer>,
 		opts: CreateFileOptions = {}
-	): Promise<RemoteEntry> => {
-		const target = normalizePath(path);
-		if (target === ROOT) return Promise.reject(new NotFoundError(target));
-		return create(target, bytes, { 'content-type': uploadType(opts.contentType) });
-	};
+	): Promise<RemoteEntry> =>
+		outsideRoot(path, (target) =>
+			create(target, bytes, { 'content-type': uploadType(opts.contentType) })
+		);
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		// Addressing `special/approot` is what makes Graph create the folder.
 		const id = await rootId();
-		if ((await metadataAt(MARKER_FILE)) !== undefined) return { rootId: id };
-
-		const marker = buildMarker({
-			appVersion,
-			provider: 'onedrive',
-			clientId,
-			...(userAgent === undefined ? {} : { userAgent }),
-		});
-		// Create-only, so another device's marker written in between stands.
-		await create(MARKER_FILE, serializeMarker(marker)).catch((error: unknown) => {
-			if (error instanceof ConflictError) return;
-			throw error;
-		});
+		await writeMarkerOnce(
+			{ ...options, provider: 'onedrive' },
+			async () => (await metadataAt(MARKER_FILE)) !== undefined,
+			(path, content) => create(path, content)
+		);
 		return { rootId: id };
 	};
 
@@ -526,22 +499,11 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		return { bytes: await responseBytes(response), version };
 	};
 
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
-		const { bytes, version } = await readBytes(entry);
-		return { content: decodeText(bytes, entry.path), version };
-	};
+	const read = readAsText(readBytes);
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
 		const target = normalizePath(path);
-		if (target === ROOT) {
-			return {
-				remoteId: await rootId(),
-				path: ROOT,
-				kind: 'folder',
-				version: '',
-				modifiedAt: '',
-			};
-		}
+		if (target === ROOT) return rootFolderEntry(await rootId());
 
 		const parent = parentPath(target);
 
@@ -606,10 +568,15 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// exactly the same is a move already done; the same entry spelled in
 		// another case is a rename of the case alone, which Graph does perform.
 		const occupant = await metadataAt(target);
-		if (occupant !== undefined && isSelf(entry, occupant) && occupant.path === target) {
+		if (
+			occupant !== undefined &&
+			isSelf(entry, occupant, 'folded') &&
+			occupant.path === target
+		) {
 			return occupant;
 		}
-		if (occupant !== undefined && !isSelf(entry, occupant)) throw new ConflictError(occupant);
+		if (occupant !== undefined && !isSelf(entry, occupant, 'folded'))
+			throw new ConflictError(occupant);
 
 		const id = await idOf(entry);
 		if (id === undefined) throw new NotFoundError(entry.path);
@@ -628,7 +595,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// Something arrived at the destination between the look and the move.
 		const current = await metadataAt(target);
 		if (current === undefined) return raise(result.failure);
-		if (isSelf(entry, current)) return current;
+		if (isSelf(entry, current, 'folded')) return current;
 		throw new ConflictError(current);
 	};
 
