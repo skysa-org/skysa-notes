@@ -1,3 +1,4 @@
+import { createEmitter } from '../store/emitter.js';
 import { type UnlockedKeys } from '../store/secretKeys.js';
 
 /**
@@ -70,15 +71,13 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 	const idleMs = options.idleMs ?? IDLE_MS;
 	const now = options.now ?? (() => Date.now());
 	const held = new Map<string, UnlockedKeys>();
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	const prompts = new Map<'open', number>();
 	const last = new Map<'activity', number>();
 	const timer = new Map<'idle', ReturnType<typeof setTimeout>>();
 
 	const notify = () => {
-		listeners.forEach((listener) => {
-			listener();
-		});
+		changes.emit();
 	};
 
 	const isPrompting = () => (prompts.get('open') ?? 0) > 0;
@@ -175,12 +174,7 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 		isUnlocked: (connectionId) => held.has(connectionId),
 		hold,
 		lock,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		subscribe: changes.subscribe,
 		prompting,
 	};
 };
