@@ -70,9 +70,10 @@ const placedBy =
 			return state.dirty ? { ...state, remoteId: undefined } : { ...state, at: undefined };
 		}
 		if (change.kind === 'move-folder') {
-			return state.at === undefined
-				? state
-				: { ...state, at: rebaseThrough(state.at, change) };
+			// The same state where nothing moved: `placements` asks this of every
+			// note for every folder change in a round.
+			const at = state.at === undefined ? undefined : rebaseThrough(state.at, change);
+			return at === state.at ? state : { ...state, at };
 		}
 		if (change.kind === 'conflict') {
 			return change.resolution.noteId === note.id
@@ -216,10 +217,10 @@ export const unreadNow = (
 		}
 		if (change.kind === 'move-folder') {
 			return new Map(
-				[...files].map(([remoteId, file]) => [
-					remoteId,
-					{ ...file, path: rebaseThrough(file.path, change) },
-				])
+				[...files].map(([remoteId, file]) => {
+					const path = rebaseThrough(file.path, change);
+					return [remoteId, path === file.path ? file : { ...file, path }];
+				})
 			);
 		}
 		if (change.kind === 'delete-folder') {

@@ -78,7 +78,7 @@ const cascadesOver = (
 	if (change.keepFiles?.includes(file.id) === true) return false;
 	const out =
 		survives(file.remote, change) &&
-		(change.was === undefined || survives(file.remote, { path: change.was }));
+		(change.was === undefined || !isWithin(file.remote, change.was));
 	return !(file.moving && out);
 };
 
@@ -104,9 +104,7 @@ export const placedFiles = (
 			[...view].flatMap(([id, file]): [string, FilePlace][] => {
 				if (cascadesOver(file, change)) return [];
 				const stranded =
-					file.moving &&
-					file.remoteId !== undefined &&
-					isWithin(file.remote, change.path);
+					file.moving && file.remoteId !== undefined && !survives(file.remote, change);
 				return [[id, stranded ? { ...file, stranded } : file]];
 			})
 		);

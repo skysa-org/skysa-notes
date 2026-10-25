@@ -166,22 +166,36 @@ const STARTING: Folders = new Map(['A', 'A/x', 'B'].map((path) => [path, path]))
 const parentThere = (folders: Folders, path: string): boolean =>
 	!path.includes('/') || folders.has(path.slice(0, path.lastIndexOf('/')));
 
+/**
+ * The simulation's own word for a path in a folder, not `isWithin`: what it
+ * checks the replays against must not be built from what they are built from.
+ */
+const inFolder = (path: string, folder: string): boolean =>
+	path === folder || path.startsWith(`${folder}/`);
+
 /** Taken by a folder at it, or under it: a folder at `B/B` is in a folder `B`. */
 const taken = (folders: Folders, path: string): boolean =>
-	[...folders.keys()].some((each) => each === path || each.startsWith(`${path}/`));
+	[...folders.keys()].some((each) => inFolder(each, path));
 
 /** The folders after one change, or `undefined` where it could not happen. */
 const applied = (folders: Folders, change: PullChange): Folders | undefined => {
 	if (change.kind === 'move-folder') {
-		if (!folders.has(change.from) || taken(folders, change.to)) return undefined;
-		if (!parentThere(folders, change.to) && !change.to.startsWith(`${change.from}/`)) {
-			return undefined;
-		}
-		return new Map([...folders].map(([path, was]) => [rebaseThrough(path, change), was]));
+		const { from, to } = change;
+		if (!folders.has(from) || taken(folders, to) || !parentThere(folders, to)) return undefined;
+		const moved: Folders = new Map(
+			[...folders].map(([path, was]) => [
+				inFolder(path, from) ? `${to}${path.slice(from.length)}` : path,
+				was,
+			])
+		);
+		// Moved into its own old path — `B` to `B/B` — it needs a `B` to be
+		// in: one made in the same round, which is new.
+		const parent = to.slice(0, Math.max(0, to.lastIndexOf('/')));
+		return parent === '' || moved.has(parent) ? moved : new Map([...moved, [parent, 'new']]);
 	}
 	if (change.kind === 'delete-folder') {
 		if (!folders.has(change.path)) return undefined;
-		return new Map([...folders].filter(([path]) => survives(path, change)));
+		return new Map([...folders].filter(([path]) => !inFolder(path, change.path)));
 	}
 	if (change.kind === 'ensure-folder') {
 		if (taken(folders, change.path) || !parentThere(folders, change.path)) return undefined;

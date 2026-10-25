@@ -63,6 +63,7 @@ import {
 	rebaseThrough,
 	remoteNow,
 	removedInBatch,
+	survives,
 	unreadNow,
 	whereNow,
 } from './pull/replay.js';
@@ -2619,7 +2620,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			!seen.has(folder.remoteId) &&
 			!kept.folders.has(folder.path) &&
 			!holding.some((path) => isWithin(path, folder.path)) &&
-			!changes.some((c) => c.kind === 'delete-folder' && isWithin(folder.path, c.path));
+			!changes.some((c) => c.kind === 'delete-folder' && !survives(folder.path, c));
 		const doomedFolders = folders.filter(vanished);
 		const forgotten = notes
 			.filter(
