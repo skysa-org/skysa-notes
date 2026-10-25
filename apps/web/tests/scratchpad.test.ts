@@ -1,7 +1,7 @@
 import { type PreviewLine, previewLineText, readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
+import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import {
 	createNote,
@@ -23,6 +23,7 @@ import {
 	scratchMarks,
 	setScratchpadShown,
 } from '../src/store/scratchpad.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The scratchpad's store (docs/ARCHITECTURE.md §7, "The scratchpad"): whether
@@ -31,15 +32,8 @@ import {
  */
 
 let db: NotesDatabase;
-let counter = 0;
-
 beforeEach(() => {
-	counter += 1;
-	db = createDatabase(`test-scratchpad-${String(counter)}`);
-});
-
-afterEach(async () => {
-	await db.delete();
+	db = freshDatabase();
 });
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };

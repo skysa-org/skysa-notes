@@ -1,11 +1,11 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { linkAt } from '../src/editor/linkRich.js';
-import { createRichEditor } from '../src/editor/rich.js';
 import { linksOpened as opened } from './linksOpened.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * A link in rich text, opened in the browser (docs/ARCHITECTURE.md §7,
@@ -13,24 +13,20 @@ import { linksOpened as opened } from './linksOpened.js';
  * Cmd- or Ctrl-click, and Alt+Enter — none of them an edit.
  */
 
-const editors: Editor[] = [];
 const cleanups: (() => void)[] = [];
 
 afterEach(async () => {
 	cleanups.splice(0).forEach((cleanup) => {
 		cleanup();
 	});
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 	vi.restoreAllMocks();
 });
 
 const mount = async (body: string) => {
-	const root = document.createElement('div');
-	document.body.append(root);
 	const onUserEdit = vi.fn();
-	const editor = await createRichEditor({ root, body, onUserEdit }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body, onUserEdit });
 	const view = editor.action((ctx) => ctx.get(editorViewCtx));
 	view.focus();
 	const chip = () => root.querySelector<HTMLElement>('.link-chip');
@@ -148,7 +144,7 @@ describe('the chip', () => {
 
 	it('goes with the editor', async () => {
 		const { root } = await mount('[the map](https://example.com)\n');
-		await editors.splice(0)[0]?.destroy();
+		await destroyRichEditors();
 		expect(root.querySelector('.link-chip')).toBeNull();
 	});
 });

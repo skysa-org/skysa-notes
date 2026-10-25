@@ -1,5 +1,5 @@
-import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { adoptBody, type Adoption, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
 import { RichEditor } from '../src/editor/RichEditor.js';
@@ -54,8 +54,6 @@ beforeEach(() => {
 	vi.mocked(adoptBody).mockClear();
 	vi.mocked(whatIsLost).mockClear();
 });
-
-afterEach(cleanup);
 
 describe('RichEditor', () => {
 	it('opens the editor on the body it is given, and calls that no edit', async () => {

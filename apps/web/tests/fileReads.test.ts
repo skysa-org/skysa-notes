@@ -5,9 +5,9 @@ import {
 	type FakeProvider,
 	type StorageProvider,
 } from '@skysa/core';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type FileRecord, type NotesDatabase } from '../src/store/db.js';
+import { type FileRecord } from '../src/store/db.js';
 import { queueUpload } from '../src/store/queue.js';
 import {
 	createFileReader,
@@ -15,18 +15,7 @@ import {
 	type FileReaderOptions,
 	type ReadingSession,
 } from '../src/sync/fileReads.js';
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`file-reads-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
+import { freshDatabase } from './support/db.js';
 
 const bytesOf = (value: string): Uint8Array => new TextEncoder().encode(value);
 const text = (read: FileRead): string | undefined =>

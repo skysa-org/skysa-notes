@@ -1,4 +1,4 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { redo, undo, undoDepth } from '@milkdown/kit/prose/history';
 import { Selection } from '@milkdown/kit/prose/state';
@@ -6,11 +6,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	adoptBody,
-	createRichEditor,
 	currentMarkdown,
 	representsFaithfully,
 	whatIsLost,
 } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * The rich editor driven directly, with no React and no contenteditable: jsdom
@@ -19,13 +19,8 @@ import {
  * an edit.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (body: string, onUserEdit: (markdown: string) => void = () => undefined) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit }).create();
-	editors.push(editor);
+	const { editor } = await mountRich({ body, onUserEdit });
 
 	const withCtx = <T>(action: (ctx: Ctx) => T): T => editor.action(action);
 
@@ -42,7 +37,7 @@ const mount = async (body: string, onUserEdit: (markdown: string) => void = () =
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 

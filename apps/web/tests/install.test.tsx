@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InstallBanner } from '../src/install/InstallBanner.js';
 import { type Device, manualInstall } from '../src/install/installHow.js';
 import { createInstallPrompt } from '../src/install/installPrompt.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { getInstallDismissed } from '../src/store/prefs.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * The offer to install the app while it runs in a browser tab
@@ -161,21 +161,17 @@ const displayMode = () => {
 	};
 };
 
-const opened: NotesDatabase[] = [];
-
 beforeEach(() => {
 	displayMode();
 });
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	Reflect.deleteProperty(window, 'matchMedia');
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const show = ({ userAgent = UA.windowsEdge, maxTouchPoints = 0 } = {}) => {
-	const db = createDatabase(`install-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	const target = new EventTarget();
 	const prompt = createInstallPrompt(target);
 	const view = () => (
