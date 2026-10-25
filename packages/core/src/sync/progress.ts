@@ -44,6 +44,9 @@ interface ScanCount {
 	listing: boolean;
 }
 
+/** The engine's one meter, as `createProgress` makes it. */
+export type Meter = ReturnType<typeof createProgress>;
+
 export const createProgress = (onProgress: (progress: SyncProgress) => void) => {
 	/**
 	 * The scan under way, for `onProgress`, and none during a round. Kept by
