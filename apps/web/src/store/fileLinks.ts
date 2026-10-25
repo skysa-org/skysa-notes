@@ -1,6 +1,7 @@
 import { basename, foldName, parentPath } from '@skysa/core';
 
 import type { FileRecord, NoteRecord, NotesDatabase, SyncStateRecord } from './db.js';
+import { type FileKey } from './db.js';
 import { fileKey, handOverToCopies } from './files.js';
 import { foldPath } from './naming.js';
 import { dropPictures } from './pictures.js';
@@ -276,9 +277,7 @@ export const deleteUnlinkedFiles = (
 		[db.syncState, db.notes, db.files, db.fileBytes, db.opQueue, db.pictures, db.pictureBytes],
 		async () => {
 			if (!holdsEveryNote(await db.syncState.get(connectionId))) return [];
-			const found = await db.files.bulkGet(
-				ids.map((id): [string, string] => [connectionId, id])
-			);
+			const found = await db.files.bulkGet(ids.map((id): FileKey => [connectionId, id]));
 			return deleteUnnamed(
 				db,
 				connectionId,

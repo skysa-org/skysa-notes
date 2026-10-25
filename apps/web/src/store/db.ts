@@ -489,17 +489,17 @@ export interface OpQueueRecord {
 
 export type NotesDatabase = Dexie & {
 	notes: Table<NoteRecord, NoteKey>;
-	folders: Table<FolderRecord, [string, string]>;
+	folders: Table<FolderRecord, FolderKey>;
 	syncState: Table<SyncStateRecord, string>;
 	opQueue: Table<OpQueueRecord, number>;
 	prefs: Table<PreferenceRecord, string>;
 	credentials: Table<CredentialRecord, string>;
-	files: Table<FileRecord, [string, string]>;
-	fileBytes: Table<FileBytesRecord, [string, string]>;
-	clips: Table<ClipRecord, [string, string]>;
-	clipBytes: Table<ClipBytesRecord, [string, string]>;
-	clipThumbs: Table<ClipThumbRecord, [string, string]>;
-	pictures: Table<PictureRecord, [string, string]>;
+	files: Table<FileRecord, FileKey>;
+	fileBytes: Table<FileBytesRecord, FileKey>;
+	clips: Table<ClipRecord, ClipKey>;
+	clipBytes: Table<ClipBytesRecord, ClipKey>;
+	clipThumbs: Table<ClipThumbRecord, ClipKey>;
+	pictures: Table<PictureRecord, FileKey>;
 	pictureBytes: Table<PictureBytesRecord, [string, string, PictureVariant]>;
 	keyFiles: Table<KeyFileRecord, string>;
 	secretKeys: Table<SecretKeyRecord, string>;
@@ -512,6 +512,15 @@ const NOTES_REKEYING = 'notesRekeying';
 
 /** A note's primary key: the source it belongs to, then its id within it. */
 export type NoteKey = [connectionId: string, id: string];
+
+/** A file's primary key, in `files` and `fileBytes`, and a picture's of it: its source, then its id. */
+export type FileKey = [connectionId: string, id: string];
+
+/** A notebook's primary key: its source, then its path. */
+export type FolderKey = [connectionId: string, path: string];
+
+/** A clipboard item's primary key: its source, then its name. */
+export type ClipKey = [connectionId: string, name: string];
 
 export const noteKey = (note: Pick<NoteRecord, 'connectionId' | 'id'>): NoteKey => [
 	note.connectionId,
@@ -771,6 +780,14 @@ export const activeConnectionId = async (
 	const first = states.find(isLiveSource) ?? states[0];
 	return first?.connectionId ?? LOCAL_CONNECTION_ID;
 };
+
+/**
+ * Which source a store call is about. Every reader and writer that takes one
+ * acts on the source showing (`activeConnectionId`) where it does not say.
+ */
+export interface ConnectionScope {
+	connectionId?: string;
+}
 
 export const db = createDatabase();
 watchTab(db);
