@@ -1,7 +1,7 @@
 import { NotFoundError, parentPath } from '@skysa/core';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { MoveUnsent } from '../src/components/MoveUnsent.js';
 import {
@@ -38,8 +38,6 @@ const ADA = { connectionId: 'c-ada', provider: 'dropbox', accountId: 'dbid:ada' 
 const ADA_AGAIN = { ...ADA, connectionId: 'c-ada-2' } as const;
 const BOB = { connectionId: 'c-bob', provider: 'onedrive', accountId: 'ms:bob' } as const;
 const ada = { connectionId: ADA.connectionId };
-
-afterEach(cleanup);
 
 /** Bound, and its first import through: an ordinary source. */
 const connected = async (db: NotesDatabase, source: BindInput) => {

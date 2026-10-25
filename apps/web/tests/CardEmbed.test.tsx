@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 
 import { CardEmbed, CardHost } from '../src/components/CardEmbed.js';
 import {
@@ -15,8 +15,6 @@ import {
  * §7, "Drawn from a copy"): the thumb asked for, and the room it takes held
  * from before it comes, so the wall does not place the card again when it does.
  */
-
-afterEach(cleanup);
 
 interface Asked {
 	readonly href: string;

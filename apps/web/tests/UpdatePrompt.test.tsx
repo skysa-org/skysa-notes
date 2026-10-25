@@ -1,5 +1,5 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UpdatePrompt } from '../src/components/UpdatePrompt.js';
 
@@ -26,8 +26,6 @@ beforeEach(() => {
 	registered.setNeedRefresh.mockReset();
 	registered.updateServiceWorker.mockReset().mockResolvedValue(undefined);
 });
-
-afterEach(cleanup);
 
 describe('UpdatePrompt', () => {
 	it('makes way before it asks the new build to take over, and says it is updating', async () => {

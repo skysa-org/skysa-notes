@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
@@ -13,8 +13,6 @@ import { createFolder } from '../src/store/folders.js';
  * somewhere to say so the user types a name, presses Enter, and the app shows
  * nothing at all.
  */
-
-afterEach(cleanup);
 
 const openApp = async () => {
 	const router = createRouter({

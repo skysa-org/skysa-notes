@@ -2,7 +2,7 @@ import '../src/jitless.js';
 
 import { pageSite } from '@skysa/core';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ChannelState, FillChannel } from '../src/fill/channel.js';
 import { FillPage } from '../src/fill/FillPage.js';
@@ -14,8 +14,6 @@ import { freshDatabase } from './support/db.js';
  * says of the page while it does not know it, or cannot read what it says,
  * and the page's site once it does.
  */
-
-afterEach(cleanup);
 
 /** A channel whose state the test moves on. */
 const channelAt = (first: ChannelState) => {

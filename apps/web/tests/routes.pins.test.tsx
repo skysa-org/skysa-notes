@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
@@ -17,8 +17,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * and is tinted; and it stays there when the app is opened again, since it is
  * kept on this device.
  */
-
-afterEach(cleanup);
 
 const openApp = async () => {
 	await setDefaultEditorMode(db, 'raw');
