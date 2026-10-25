@@ -135,3 +135,6 @@ export const createCascade = ({
 
 	return { roofOver, roofsFor, renamesQueued, cascadeOver };
 };
+
+/** What the pull's other parts are handed of it. */
+export type Cascade = ReturnType<typeof createCascade>;
