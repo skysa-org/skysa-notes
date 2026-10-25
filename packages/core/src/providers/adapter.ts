@@ -3,7 +3,7 @@ import { buildMarker, type MarkerCreatedBy, serializeMarker } from '../marker.js
 import { normalizePath, ROOT } from '../paths.js';
 import type { FetchLike } from './http.js';
 import { decodeText } from './text.js';
-import { ConflictError, type EntryRef, NotFoundError, type RemoteEntry } from './types.js';
+import { type EntryRef, isConflictError, NotFoundError, type RemoteEntry } from './types.js';
 
 /**
  * What the HTTP adapters do the same way on the contract's side: the options
@@ -41,7 +41,7 @@ export const writeMarkerOnce = async (
 		...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
 	});
 	await create(MARKER_FILE, serializeMarker(marker)).catch((error: unknown) => {
-		if (error instanceof ConflictError) return;
+		if (isConflictError(error)) return;
 		throw error;
 	});
 };

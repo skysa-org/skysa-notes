@@ -10,7 +10,7 @@ import {
 	rootFolderEntry,
 	writeMarkerOnce,
 } from './adapter.js';
-import { createTransport, jsonBody, parseRetryAfter, readErrorBody, retryNote } from './http.js';
+import { createTransport, jsonBody, parseRetryAfter, rateLimited, readErrorBody } from './http.js';
 import {
 	applyAll,
 	nodesOf,
@@ -29,7 +29,7 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	RateLimitError,
+	ProviderResponseError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -126,7 +126,7 @@ const byId = (id: string): string => `${GRAPH}/me/drive/items/${encodeURICompone
  */
 const nameOf = (item: DriveItem): string => {
 	if (item.name === undefined || normalizePath(item.name) === ROOT) {
-		throw new Error('onedrive returned an item with no usable name');
+		throw new ProviderResponseError('onedrive returned an item with no usable name');
 	}
 	return item.name;
 };
@@ -142,11 +142,11 @@ const placed = (path: string, item: DriveItem): string => joinPath(parentPath(pa
  */
 const toEntry = (item: DriveItem, path: string): RemoteEntry => {
 	if (item.id === undefined || item.id === '') {
-		throw new Error('onedrive returned an item with no id');
+		throw new ProviderResponseError('onedrive returned an item with no id');
 	}
 	const folder = item.folder !== undefined;
 	if (!folder && (item.eTag === undefined || item.eTag === '')) {
-		throw new Error('onedrive returned a file with no eTag');
+		throw new ProviderResponseError('onedrive returned a file with no eTag');
 	}
 	return {
 		remoteId: item.id,
@@ -166,7 +166,7 @@ const toEntry = (item: DriveItem, path: string): RemoteEntry => {
  */
 const graphLink = (link: string): string => {
 	if (!link.startsWith(`${GRAPH_ORIGIN}/`)) {
-		throw new Error('onedrive sent a link that is not on graph.microsoft.com');
+		throw new ProviderResponseError('onedrive sent a link that is not on graph.microsoft.com');
 	}
 	return link;
 };
@@ -231,13 +231,14 @@ const parseCursor = (cursor: string): DeltaCursor =>
  */
 const treeItemOf = (item: DriveItem, root: string): TreeItem | undefined => {
 	const id = item.id;
-	if (id === undefined || id === '') throw new Error('onedrive delta sent an item with no id');
+	if (id === undefined || id === '')
+		throw new ProviderResponseError('onedrive delta sent an item with no id');
 	if (id === root) return undefined;
 	if (item.deleted !== undefined) return { id, gone: true };
 
 	const parent = item.parentReference?.id;
 	if (parent === undefined || parent === '') {
-		throw new Error('onedrive delta sent an item with no parent');
+		throw new ProviderResponseError('onedrive delta sent an item with no parent');
 	}
 	return {
 		id,
@@ -306,12 +307,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// https://learn.microsoft.com/en-us/graph/throttling
 		// https://learn.microsoft.com/en-us/graph/errors
 		const throttled = failure.status === 429 || failure.status === 509;
-		if (throttled) {
-			throw new RateLimitError(
-				`onedrive throttled (${String(failure.status)})${retryNote(failure.retryAfterMs)}`,
-				failure.retryAfterMs
-			);
-		}
+		if (throttled) throw rateLimited('onedrive', failure.status, failure.retryAfterMs, detail);
 		throw new Error(`onedrive ${String(failure.status)}: ${detail}`);
 	};
 
@@ -322,7 +318,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		if (cached !== undefined) return cached;
 		const item = await call<DriveItem>('GET', APPROOT);
 		if (item.id === undefined || item.id === '') {
-			throw new Error('onedrive returned an app folder with no id');
+			throw new ProviderResponseError('onedrive returned an app folder with no id');
 		}
 		rootBox.set('id', item.id);
 		return item.id;
@@ -478,10 +474,10 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const version = item.eTag;
 		const download = item['@microsoft.graph.downloadUrl'];
 		if (version === undefined || version === '') {
-			throw new Error('onedrive sent a file with no eTag');
+			throw new ProviderResponseError('onedrive sent a file with no eTag');
 		}
 		if (download === undefined || !download.startsWith('https://')) {
-			throw new Error('onedrive sent a file with no usable download URL');
+			throw new ProviderResponseError('onedrive sent a file with no usable download URL');
 		}
 
 		// No Authorization header: the URL carries its own, and the token must
@@ -651,7 +647,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const next = result.value['@odata.nextLink'];
 		const link = next ?? result.value['@odata.deltaLink'];
 		if (link === undefined) {
-			throw new Error('onedrive delta sent neither a next nor a delta link');
+			throw new ProviderResponseError('onedrive delta sent neither a next nor a delta link');
 		}
 
 		const items = result.value.value ?? [];

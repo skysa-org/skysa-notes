@@ -1,4 +1,5 @@
 import { asObject, parseJson } from '../json.js';
+import { RateLimitError } from './types.js';
 
 /**
  * What the HTTP adapters share: the `fetch` they are given, how a request goes
@@ -99,6 +100,21 @@ export const readErrorBody = async (
 /** The end of a rate limit's message, where the provider said how long to wait. */
 export const retryNote = (retryAfterMs: number | undefined): string =>
 	retryAfterMs === undefined ? '' : `, retry after ${String(retryAfterMs / 1000)}s`;
+
+/**
+ * A rate limit, said the same way whichever provider set it: who, the status,
+ * what the provider called it where it did, and how long it asked us to wait.
+ */
+export const rateLimited = (
+	provider: string,
+	status: number,
+	retryAfterMs: number | undefined,
+	detail = ''
+): RateLimitError =>
+	new RateLimitError(
+		`${provider} rate limit (${String(status)})${detail === '' ? '' : `: ${detail}`}${retryNote(retryAfterMs)}`,
+		retryAfterMs
+	);
 
 /** A request's answer, or the provider's failure, read but not thrown. */
 export type Attempt<T, F> = { ok: true; value: T } | { ok: false; failure: F };

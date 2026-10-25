@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { concatBytes } from '../age/bytes.js';
 import { APP_FOLDER_NAME, MARKER_FILE } from '../config.js';
 import { isNoteName } from '../markdown/slug.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
@@ -20,6 +21,7 @@ import {
 	createTransport,
 	jsonBody,
 	parseRetryAfter,
+	rateLimited,
 	readErrorBody,
 	type RequestParts,
 } from './http.js';
@@ -47,7 +49,7 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	RateLimitError,
+	ProviderResponseError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -115,7 +117,7 @@ const LEFT_KEY = 'notesappLeft';
 const LEFT_VALUE = '1';
 const FIELDS =
 	'id,name,mimeType,parents,headRevisionId,modifiedTime,createdTime,size,md5Checksum,trashed,appProperties';
-const PAGE_SIZE = '1000';
+const PAGE_SIZE = 1000;
 /**
  * The most a multipart upload is for: "Use this upload type to quickly
  * transfer a small file (5 MB or less)". A larger file goes up resumable,
@@ -126,12 +128,17 @@ const MULTIPART_LIMIT = 5 * 1024 * 1024;
 /** Drive refuses to nest folders deeper than this, so a listing need not go further. */
 const MAX_DEPTH = 100;
 /**
+ * Notes sent at once (`StorageProvider.writesAtOnce`). A note is three or four
+ * requests end to end, so four at once keeps a dozen or so in flight.
+ */
+const WRITES_AT_ONCE = 4;
+/**
  * Folders whose contents are asked for at once (`listArrivals`), as many as
- * writes are sent (`writesAtOnce`). A list is 100 of the 325,000 quota units a
- * user has a minute, so four at a time is nowhere near the limit.
+ * notes are sent. A list is 100 of the 325,000 quota units a user has a
+ * minute, so four at a time is nowhere near the limit.
  * https://developers.google.com/workspace/drive/api/guides/limits
  */
-const LISTS_AT_ONCE = 4;
+const LISTS_AT_ONCE = WRITES_AT_ONCE;
 
 export interface GDriveProviderOptions extends HttpProviderOptions {
 	/** For the stamp in a duplicate's conflict name. */
@@ -241,15 +248,6 @@ const outOfReach = (failure: DriveFailure): boolean =>
 
 const encoder = new TextEncoder();
 
-const joined = (parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> => {
-	const whole = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
-	parts.reduce((at, part) => {
-		whole.set(part, at);
-		return at + part.length;
-	}, 0);
-	return whole;
-};
-
 /** A string literal in a Drive query, with `\` and `'` escaped. */
 const literal = (value: string): string => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
@@ -314,10 +312,10 @@ const usableName = (name: string | undefined): name is string =>
  */
 const toEntry = (file: DriveFile, path: string): RemoteEntry => {
 	if (file.id === undefined || file.id === '')
-		throw new Error('gdrive returned a file with no id');
+		throw new ProviderResponseError('gdrive returned a file with no id');
 	const folder = isFolder(file);
 	if (!folder && (file.headRevisionId === undefined || file.headRevisionId === '')) {
-		throw new Error('gdrive returned a file with no headRevisionId');
+		throw new ProviderResponseError('gdrive returned a file with no headRevisionId');
 	}
 	return {
 		remoteId: file.id,
@@ -339,7 +337,8 @@ const isLeft = (file: DriveFile): boolean => file.appProperties?.[LEFT_KEY] !== 
  */
 const treeItemOf = (file: DriveFile): TreeItem => {
 	const id = file.id;
-	if (id === undefined || id === '') throw new Error('gdrive sent a file with no id');
+	if (id === undefined || id === '')
+		throw new ProviderResponseError('gdrive sent a file with no id');
 	if (file.trashed === true || !usableName(file.name)) return { id, gone: true };
 	const folder = isFolder(file);
 	return {
@@ -362,7 +361,8 @@ const treeItemOf = (file: DriveFile): TreeItem => {
 const changeItem = (change: DriveChange): TreeItem[] => {
 	if (change.changeType === 'drive') return [];
 	const id = change.fileId ?? change.file?.id;
-	if (id === undefined || id === '') throw new Error('gdrive sent a change with no file id');
+	if (id === undefined || id === '')
+		throw new ProviderResponseError('gdrive sent a change with no file id');
 	if (change.removed === true || change.file === undefined) return [{ id, gone: true }];
 	return [treeItemOf({ ...change.file, id })];
 };
@@ -412,8 +412,7 @@ const midRound = (cursor: DriveCursor): boolean =>
  * half kept. The tree's size stands in for the scan's: it is what the app
  * can see, near enough.
  */
-const feedLimit = (nodes: number): number =>
-	2 * Math.max(1, Math.ceil(nodes / Number(PAGE_SIZE))) + 2;
+const feedLimit = (nodes: number): number => 2 * Math.max(1, Math.ceil(nodes / PAGE_SIZE)) + 2;
 
 const parseCursor = (cursor: string): DriveCursor => readTreeCursor(cursorSchema, cursor, 'gdrive');
 
@@ -493,10 +492,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		if (failure.status === 401) throw new AuthError(detail);
 		if (failure.status === 404) throw new NotFoundError(path ?? detail);
 		if (throttled(failure)) {
-			throw new RateLimitError(
-				`gdrive rate limit (${String(failure.status)}): ${detail}`,
-				failure.retryAfterMs
-			);
+			throw rateLimited('gdrive', failure.status, failure.retryAfterMs, detail);
 		}
 		throw new Error(`gdrive ${String(failure.status)}: ${detail}`);
 	};
@@ -516,7 +512,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const params = new URLSearchParams({
 			q,
 			fields: `nextPageToken,files(${FIELDS})`,
-			pageSize: PAGE_SIZE,
+			pageSize: String(PAGE_SIZE),
 			spaces: 'drive',
 			...(pageToken === undefined ? {} : { pageToken }),
 		});
@@ -576,7 +572,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	const idOfRoot = (root: DriveFile): string => {
 		if (root.id === undefined || root.id === '') {
-			throw new Error('gdrive returned an app folder with no id');
+			throw new ProviderResponseError('gdrive returned an app folder with no id');
 		}
 		rootBox.set('id', root.id);
 		rootBox.set('known', root.id);
@@ -759,7 +755,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		].join('\r\n');
 		return {
 			headers: { 'content-type': `multipart/related; boundary=${boundary}` },
-			body: joined([
+			body: concatBytes([
 				encoder.encode(head),
 				content,
 				encoder.encode(`\r\n--${boundary}--\r\n`),
@@ -778,7 +774,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		// Told apart, because which it is answers the live check: a header the
 		// page was not shown reads as `null`.
 		if (location === null) {
-			throw new Error('gdrive started a resumable upload and did not say where it is');
+			throw new ProviderResponseError(
+				'gdrive started a resumable upload and did not say where it is'
+			);
 		}
 		const url = ((): URL | undefined => {
 			try {
@@ -788,7 +786,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			}
 		})();
 		if (url?.origin !== API) {
-			throw new Error('gdrive started a resumable upload somewhere it will not be sent');
+			throw new ProviderResponseError(
+				'gdrive started a resumable upload somewhere it will not be sent'
+			);
 		}
 		return url.toString();
 	};
@@ -819,7 +819,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		if (!sent.ok) return raise(await failureOf(sent), path);
 		const made = JSON.parse(await sent.text()) as DriveFile;
 		if (made.id === undefined || made.id === '') {
-			throw new Error('gdrive finished a resumable upload and did not say what it made');
+			throw new ProviderResponseError(
+				'gdrive finished a resumable upload and did not say what it made'
+			);
 		}
 		const whole = [made.headRevisionId, made.createdTime, made.name, made.size].every(
 			(field) => field !== undefined && field !== ''
@@ -952,7 +954,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		if (isFolder(file) || file.trashed === true) throw new NotFoundError(entry.path);
 		const version = file.headRevisionId;
 		if (version === undefined || version === '') {
-			throw new Error('gdrive sent a file with no headRevisionId');
+			throw new ProviderResponseError('gdrive sent a file with no headRevisionId');
 		}
 
 		const response = await send('GET', `${FILES}/${encodeURIComponent(id)}?alt=media`);
@@ -1071,7 +1073,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			`${CHANGES}/startPageToken`
 		);
 		if (startPageToken === undefined || startPageToken === '') {
-			throw new Error('gdrive sent no start page token');
+			throw new ProviderResponseError('gdrive sent no start page token');
 		}
 		return {
 			v: 1,
@@ -1088,7 +1090,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const params = new URLSearchParams({
 			q: 'trashed = false',
 			fields: `nextPageToken,files(${FIELDS})`,
-			pageSize: PAGE_SIZE,
+			pageSize: String(PAGE_SIZE),
 			spaces: 'drive',
 			...(from.token === '' ? {} : { pageToken: from.token }),
 		});
@@ -1111,7 +1113,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	const feedPage = async (from: DriveCursor, stored: boolean): Promise<Fetched> => {
 		const params = new URLSearchParams({
 			pageToken: from.token,
-			pageSize: PAGE_SIZE,
+			pageSize: String(PAGE_SIZE),
 			spaces: 'drive',
 			includeRemoved: 'true',
 			fields: `nextPageToken,newStartPageToken,changes(changeType,fileId,removed,file(${FIELDS}))`,
@@ -1123,7 +1125,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		if (!result.ok) return raise(result.failure);
 		const next = result.value.nextPageToken ?? result.value.newStartPageToken;
 		if (next === undefined || next === '') {
-			throw new Error('gdrive changes sent neither a next nor a new start token');
+			throw new ProviderResponseError(
+				'gdrive changes sent neither a next nor a new start token'
+			);
 		}
 		const changes = result.value.changes ?? [];
 		return {
@@ -1347,8 +1351,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		listsEverything: false,
 		// So a folder the engine has emptied is marked rather than trashed.
 		leaveFolder,
-		// A note is three or four requests end to end (`StorageProvider`).
-		writesAtOnce: 4,
+		writesAtOnce: WRITES_AT_ONCE,
 		ensureRoot,
 		list,
 		read,
