@@ -1,16 +1,16 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeletedNotice, UNDO_WINDOW_MS } from '../src/components/DeletedNotice.js';
-import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, getNote, purgeNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { placeIn } from './entry.js';
+import { renderApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * Delete is one click and asks nothing, so the way back is the whole of its
@@ -32,12 +32,7 @@ const openApp = async (...titles: string[]) => {
 		)
 	);
 	await db.opQueue.clear();
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
+	const router = await renderApp();
 	return { notes, router };
 };
 
@@ -148,8 +143,7 @@ describe('deleting a note', () => {
 		});
 	});
 
-	const held = (id: string) =>
-		db.credentials.put({ id, credential: `sk1_${id}`, provider: 'dropbox', createdAt: 0 });
+	const held = (id: string) => holdCredential(db, id);
 
 	/** Ada's Dropbox, the source showing. */
 	const connectAda = async () => {

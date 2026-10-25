@@ -10,6 +10,7 @@ import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote, purgeNote, undeleteNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { updateNote } from './noteRows.js';
+import { flushAutosave } from './support/app.js';
 
 /**
  * A save the store refuses. The user is still typing, so the two things that
@@ -84,13 +85,6 @@ const open = async () => {
 		});
 	};
 	return { note, type };
-};
-
-/** What `pagehide` does: the pending save goes now, rather than in two seconds. */
-const flushAutosave = () => {
-	act(() => {
-		window.dispatchEvent(new Event('pagehide'));
-	});
 };
 
 afterEach(() => {

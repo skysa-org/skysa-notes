@@ -11,6 +11,7 @@ import {
 import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -146,12 +147,7 @@ describe('abandoning an import', () => {
 	it('puts the device back exactly as it was before the connect', async () => {
 		const { db } = await usedLocally();
 		const before = await rowsOf(db, LOCAL_CONNECTION_ID);
-		await db.credentials.put({
-			id: DROPBOX.connectionId,
-			credential: 'sk1_x',
-			provider: 'dropbox',
-			createdAt: 0,
-		});
+		await holdCredential(db, DROPBOX.connectionId, { credential: 'sk1_x' });
 		await bindConnection(db, DROPBOX);
 		// Some of the remote has arrived meanwhile.
 		await createNote(db, { connectionId: DROPBOX.connectionId, title: 'Theirs' });

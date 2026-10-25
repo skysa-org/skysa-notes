@@ -1,15 +1,13 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 import { setNotebooksOpen } from '../src/store/openNotebooks.js';
 import { setNotePinned } from '../src/store/pins.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
 
 /**
  * Pinning, from the `⋯` on a row: the row goes to the top of its list, or a
@@ -17,16 +15,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * and is tinted; and it stays there when the app is opened again, since it is
  * kept on this device.
  */
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const list = () => screen.getByRole('region', { name: 'Notes' });
 const rowTitles = () =>

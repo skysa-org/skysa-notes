@@ -1,14 +1,12 @@
 import { EditorView } from '@codemirror/view';
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { flushAutosave, openApp } from './support/app.js';
 
 /**
  * The list says what the editor beside it says, as it is typed: a note's row
@@ -16,16 +14,6 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * it. Each test looks while the store still holds the note as it was, which is
  * what makes it "before the save" and not merely "eventually".
  */
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title');
 const list = () => screen.getByRole('region', { name: 'Notes' });
@@ -40,12 +28,6 @@ const typeInText = (text: string) => {
 			changes: { from: editor.state.doc.length, insert: text },
 			userEvent: 'input.type',
 		});
-	});
-};
-
-const flushAutosave = () => {
-	act(() => {
-		window.dispatchEvent(new Event('pagehide'));
 	});
 };
 
