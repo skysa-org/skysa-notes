@@ -16,21 +16,23 @@ import type { MemoryStore } from '../memoryStore.js';
  *   one of them, so the other is stale for ever and every edit to it conflicts.
  * - **The same two for files:** a picture shown twice, or a link the store
  *   cannot keep.
+ *
+ * Each is a soft assertion, so a store wrong in two ways says both.
  */
 export const expectSoundStore = (store: MemoryStore): void => {
-	expect(store.anomalies()).toEqual([]);
+	expect.soft(store.anomalies()).toEqual([]);
 	const notes = store.notes();
 	const notePaths = notes.map((note) => note.path);
-	expect(notePaths).toEqual([...new Set(notePaths)]);
+	expect.soft(notePaths).toEqual([...new Set(notePaths)]);
 	const noteRemotes = notes.flatMap((note) =>
 		note.remoteId === undefined ? [] : [note.remoteId]
 	);
-	expect(noteRemotes).toEqual([...new Set(noteRemotes)]);
+	expect.soft(noteRemotes).toEqual([...new Set(noteRemotes)]);
 	const files = store.files();
 	const filePaths = files.map((file) => file.path);
-	expect(filePaths).toEqual([...new Set(filePaths)]);
+	expect.soft(filePaths).toEqual([...new Set(filePaths)]);
 	const fileRemotes = files.flatMap((file) =>
 		file.remoteId === undefined ? [] : [file.remoteId]
 	);
-	expect(fileRemotes).toEqual([...new Set(fileRemotes)]);
+	expect.soft(fileRemotes).toEqual([...new Set(fileRemotes)]);
 };

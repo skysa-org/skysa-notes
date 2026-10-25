@@ -88,7 +88,7 @@ export const engineFixture = (world: () => World) => {
 
 	/** Pulls these pages as one round, in order. */
 	const pullPages = (pages: readonly (readonly ChangeEntry[] | Error)[]) =>
-		engineWith({ provider: paging(world().provider, pages) }).pull();
+		engineWith({ provider: paging(world().provider, pages), newId: freshId }).pull();
 
 	return { engineWith, pullNow, pullPages, freshId };
 };
