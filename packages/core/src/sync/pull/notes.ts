@@ -11,9 +11,9 @@ import { conflictContent, conflictPath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { type ConflictResolution, type PullChange, type SyncNote } from '../store.js';
 import { type Batch, madeInBatch } from './batch.js';
+import { reestablished } from './decided.js';
 import { forgetUnread } from './deletions.js';
 import { type Occupancy } from './occupancy.js';
-import { reestablished } from './reconcile.js';
 import { type Placement, remoteNow, removedInBatch, unreadNow, whereNow } from './replay.js';
 
 /**
