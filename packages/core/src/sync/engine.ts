@@ -64,19 +64,6 @@ import {
 	unreadNow,
 	whereNow,
 } from './pull/replay.js';
-
-/**
- * How many times `freeFolderPath` may ask for a name before giving up. Names go
- * `(conflict <stamp>)`, `-2`, `-3`… so reaching this means a hundred folders
- * already stand aside from one path inside one minute, which is not a state a
- * user produces — it is the two folds having drifted apart.
- */
-const FREE_PATH_ATTEMPTS = 100;
-/**
- * Conflict names a file is tried at before its op fails (`nextBeside`). Each
- * is free when it is chosen, so a second is a race with another device.
- */
-const FILE_BESIDE_ATTEMPTS = 8;
 import type {
 	ConflictResolution,
 	PullChange,
@@ -93,17 +80,33 @@ import type {
  * this is it, with the cases it leaves open decided in the direction that
  * cannot lose an edit.
  *
- * The engine holds no state of its own. Everything it knows is in the store,
- * which is what makes it safe to interrupt at any point: a sync that dies
- * halfway leaves a consistent store and a cursor that under-claims rather than
+ * Everything the engine knows that outlasts a run is in the store, which is
+ * what makes it safe to interrupt at any point: a sync that dies halfway
+ * leaves a consistent store and a cursor that under-claims rather than
  * over-claims, so the next run redoes work instead of skipping it.
  *
- * The one exception is what a pull has read and not yet committed (`held`),
- * kept so that redoing the work does not mean downloading it again. It decides
- * nothing: it answers only for a file at the exact version it was read at,
- * whose bytes cannot have changed since.
+ * What it does hold, it holds in memory, for the run under way: how far the
+ * scan, round or push has got (`scans`, `rounds`, `pushes`), what the store
+ * said and where the files stand for one batch (`storeReads`, `fileViews`),
+ * and the folders a turn of the push is making (`making`). One thing outlives
+ * a failed pull: what it read and did not commit (`held`), kept so that
+ * redoing the work does not mean downloading it again. It decides nothing: it
+ * answers only for a file at the exact version it was read at, whose bytes
+ * cannot have changed since.
  */
 
+/**
+ * How many times `freeFolderPath` may ask for a name before giving up. Names go
+ * `(conflict <stamp>)`, `-2`, `-3`… so reaching this means a hundred folders
+ * already stand aside from one path inside one minute, which is not a state a
+ * user produces — it is the two folds having drifted apart.
+ */
+const FREE_PATH_ATTEMPTS = 100;
+/**
+ * Conflict names a file is tried at before its op fails (`nextBeside`). Each
+ * is free when it is chosen, so a second is a race with another device.
+ */
+const FILE_BESIDE_ATTEMPTS = 8;
 /** Times an op may fail before the engine stops asking and surfaces it. */
 const MAX_ATTEMPTS = 5;
 
@@ -366,22 +369,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	// ---------------------------------------------------------------- pull
 
 	/**
-	 * Names a conflict copy or a displacement in this folder must not take:
-	 * what is already there, what this batch is bringing in (`claimed` — the
-	 * copy another device made a minute ago arrives as an ordinary entry), and
-	 * what this batch has already chosen.
-	 */
-	/**
-	 * Every note that is in `folder` once the decisions so far have been
-	 * applied, with where in it each one lands.
-	 *
-	 * Two sources, because the store alone answers neither question. Notes
-	 * already under the folder may be about to move out of it or be taken away,
-	 * and notes under a folder this batch is *moving here* arrive without ever
-	 * being mentioned: a rename re-lists no children, so the entry for the
-	 * folder is the only thing in the batch that says where they went.
-	 */
-	/**
 	 * What the store said when a decision was first asked about, kept with the
 	 * decision, which lives no longer than its batch. Nothing the batch decides
 	 * is applied until every decision is in, and the rest of the batch is
@@ -449,6 +436,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	type Placed = Readonly<{ note: SyncNote; path: string }>;
 
+	/**
+	 * Every note that is in `folder` once the decisions so far have been
+	 * applied, with where in it each one lands.
+	 *
+	 * Two sources, because the store alone answers neither question. Notes
+	 * already under the folder may be about to move out of it or be taken away,
+	 * and notes under a folder this batch is *moving here* arrive without ever
+	 * being mentioned: a rename re-lists no children, so the entry for the
+	 * folder is the only thing in the batch that says where they went.
+	 */
 	const notesEndingIn = async (
 		folder: string,
 		decided: readonly PullChange[]
@@ -474,6 +471,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		});
 	};
 
+	/**
+	 * Names a conflict copy or a displacement in this folder must not take:
+	 * what is already there, what this batch is bringing in (`claimed` — the
+	 * copy another device made a minute ago arrives as an ordinary entry), and
+	 * what this batch has already chosen.
+	 */
 	const takenIn = async (
 		folder: string,
 		claimed: ReadonlySet<string>,
@@ -2394,11 +2397,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
-	 * Sequentially, because a decision can depend on the ones before it — what an
-	 * earlier one removed, what names it took — and because each may fetch
-	 * content.
-	 */
-	/**
 	 * Folder rows for the notes a cascade kept. A `delete-folder` takes every
 	 * row beneath it, but not every note: a dirty one survives and is merely
 	 * cut loose, because an unsaved edit outranks a remote deletion (CLAUDE.md
@@ -2516,6 +2514,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
+	 * The batch's entries, decided one after another, because a decision can
+	 * depend on the ones before it — what an earlier one removed, what names it
+	 * took — and because each may fetch content.
+	 *
 	 * The queue, asked once for the batch: it is what tells a rename the remote
 	 * made from one the user made, and a note the user deleted from one a sync
 	 * took away, and nothing in this batch changes it. A scan reads it for
@@ -3788,17 +3790,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
-	 * A write that lost a race. The remote keeps the path and the local edit
-	 * becomes a note of its own — and the op that carried it is finished in the
-	 * same transaction, because replaying it would overwrite the remote with the
-	 * very bytes the user has just been handed a copy of.
-	 */
-	/**
-	 * A free path beside `path` for a note that has to move out of the way on
-	 * the push side. `freeFolderPath`'s counterpart, and asked of the store
-	 * rather than of a batch: nothing else is in flight here.
-	 */
-	/**
 	 * How an op that could not simply be sent was settled instead: whether it
 	 * reached the remote after all (`SyncOutcome.pushed` counts those), and the
 	 * conflict copy the user is to be told of, if one was made.
@@ -3809,6 +3800,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	}
 
 	/**
+	 * A free path beside `path` for a note that has to move out of the way on
+	 * the push side. `freeFolderPath`'s counterpart, and asked of the store
+	 * rather than of a batch: nothing else is in flight here.
+	 *
 	 * `onRemote` for a caller that cannot find out by trying. `setAside` takes
 	 * the name by writing there and moves on when the write is refused, which
 	 * is the better answer because it claims the name in the same breath; a
@@ -3952,6 +3947,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return note === undefined ? undefined : setAside(op, note);
 	};
 
+	/**
+	 * A write that lost a race. The remote keeps the path and the local edit
+	 * becomes a note of its own — and the op that carried it is finished in the
+	 * same transaction, because replaying it would overwrite the remote with the
+	 * very bytes the user has just been handed a copy of.
+	 */
 	const resolvePushConflict = async (
 		op: SyncOp,
 		remote: RemoteEntry
