@@ -34,7 +34,7 @@ import {
 } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 import { holdCredential } from './support/connection.js';
-import { freshDatabase } from './support/db.js';
+import { watchedDatabase } from './support/db.js';
 import { fakeEnvironment } from './support/fakes/environment.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -181,7 +181,7 @@ const remote = (): Remote => {
 };
 
 const bound = async (connectionId = 'c1') => {
-	const db = freshDatabase();
+	const db = watchedDatabase();
 	await bindConnection(db, { ...ACCOUNT, connectionId });
 	await holdCredential(db, connectionId);
 	return db;
@@ -291,7 +291,7 @@ const deferred = () => {
 
 describe('with no connection', () => {
 	it('says notes are kept on this device, and asks nothing of anyone', async () => {
-		const { scheduler, server, remote: theRemote } = started(freshDatabase());
+		const { scheduler, server, remote: theRemote } = started(watchedDatabase());
 
 		await quiet();
 
@@ -1024,7 +1024,7 @@ describe('failures', () => {
 		});
 
 		it('does nothing at all with no connection', async () => {
-			const { scheduler, remote: theRemote } = started(freshDatabase());
+			const { scheduler, remote: theRemote } = started(watchedDatabase());
 
 			await scheduler.resync();
 
@@ -1900,7 +1900,7 @@ describe('following the connection', () => {
 describe('a first import', () => {
 	/** A device used before it was connected, now bound for the first time. */
 	const boundWithPile = async () => {
-		const db = freshDatabase();
+		const db = watchedDatabase();
 		await createNote(db, { title: 'Mine', body: 'mine\n' });
 		await bindConnection(db, ACCOUNT);
 		await holdCredential(db, ACCOUNT.connectionId);

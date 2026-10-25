@@ -11,7 +11,7 @@ import {
 	UNDERWAY_WAIT_MS,
 } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
-import { deleteAfterTest, freshDatabase } from './support/db.js';
+import { deleteAfterTest, watchedDatabase } from './support/db.js';
 
 /**
  * The editors' held edits, written on request. The stale-tab case comes last:
@@ -190,7 +190,7 @@ describe('settling what the editors hold', () => {
 	});
 
 	it('is still what a tab closing for a newer build writes first', async () => {
-		const db = freshDatabase();
+		const db = watchedDatabase();
 		await db.prefs.put({ key: 'before', value: 'kept' });
 		register(() => db.prefs.put({ key: 'typed', value: 'just now' }));
 

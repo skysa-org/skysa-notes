@@ -2,10 +2,10 @@ import type Dexie from 'dexie';
 import { liveQuery } from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
-import { deleteAfterTest, freshDatabase } from './support/db.js';
+import { deleteAfterTest, watchedDatabase } from './support/db.js';
 
 /**
  * A tab the browser freezes (`store/frozenTab.ts`). What cannot be shown here
@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 const thisTab = async (): Promise<NotesDatabase> => {
-	const db = freshDatabase();
+	const db = watchedDatabase();
 	await db.prefs.put({ key: 'before', value: 'kept' });
 	return db;
 };
@@ -34,6 +34,24 @@ const freeze = () => {
 
 // In the order written, even when the run is shuffled: see above.
 describe('a tab the browser freezes', { shuffle: false }, () => {
+	it('is watched for only on the database the tab is watched through', () => {
+		// A database made for a test, or beside the app's own for a moment, must
+		// not leave a listener on `document` behind it (#445).
+		const added = vi.spyOn(document, 'addEventListener');
+		const removed = vi.spyOn(document, 'removeEventListener');
+		const freezes = (spy: typeof added) =>
+			spy.mock.calls.filter(([type]) => type === 'freeze').map(([, listener]) => listener);
+
+		const db = createDatabase(`frozen-${crypto.randomUUID()}`);
+		deleteAfterTest(db);
+		expect(freezes(added)).toEqual([]);
+
+		const stop = watchTab(db);
+		expect(freezes(added)).toHaveLength(1);
+		stop();
+		expect(freezes(removed)).toEqual(freezes(added));
+	});
+
 	it('lets go of the database as it is frozen', async () => {
 		const db = await thisTab();
 		expect(db.isOpen()).toBe(true);
@@ -60,7 +78,7 @@ describe('a tab the browser freezes', { shuffle: false }, () => {
 		// Frozen while an upgrade runs: a slow migration over a big library, on a
 		// phone. Closed then, the open would finish with no connection, and
 		// nothing would ask for one again.
-		const db = freshDatabase();
+		const db = watchedDatabase();
 		db.on('populate', () => {
 			freeze();
 		});
