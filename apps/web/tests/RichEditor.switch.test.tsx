@@ -1,6 +1,6 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
 import { FindBar } from '../src/components/FindBar.js';
@@ -43,12 +43,6 @@ const showing = async (title: string): Promise<void> => {
 		expect(document.querySelector('.ProseMirror')?.textContent).not.toBe('');
 	});
 };
-
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
 
 describe('moving between two notes in rich mode', () => {
 	it('does not call the second note unrepresentable', async () => {

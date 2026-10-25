@@ -1,40 +1,18 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 import { setNotebooksOpen } from '../src/store/openNotebooks.js';
-import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { openApp } from './support/app.js';
 
 /**
  * A notebook with notebooks inside it lists their notes after its own, each
  * notebook's together under its name, and counts them all on its row whether
  * it is open or shut. A note chosen from inside opens the notebook it is in.
  */
-
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
-	await db.credentials.clear();
-});
-
-const openApp = async () => {
-	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const list = () => screen.getByRole('region', { name: 'Notes' });
 const rowTitles = () =>

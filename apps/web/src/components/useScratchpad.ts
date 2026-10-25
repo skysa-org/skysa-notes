@@ -8,6 +8,7 @@ import {
 import { useRouter } from '@tanstack/react-router';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import type { Place } from '../routes/place.js';
 import { db, type NoteRecord } from '../store/db.js';
@@ -351,10 +352,7 @@ export const useOpenWhenShown = (
 	open: () => void
 ) => {
 	const seen = useRef<{ connectionId: string; shown: boolean }>(undefined);
-	const opening = useRef(open);
-	useEffect(() => {
-		opening.current = open;
-	}, [open]);
+	const opening = useLatest(open);
 	useEffect(() => {
 		if (connectionId === undefined || shown === undefined) return;
 		const before = seen.current;

@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
+import { createStore } from './emitter.js';
+
 /**
  * A notebook or a source being renamed, as it is typed, so that everything on
  * screen naming it — the note list's heading, the bar's dropdowns, the open
@@ -42,31 +44,20 @@ export interface Renamings {
 }
 
 export const createRenamings = (): Renamings => {
-	const held: { current: Renaming | undefined } = { current: undefined };
-	const listeners = new Set<() => void>();
-	const put = (renaming: Renaming | undefined) => {
-		held.current = renaming;
-		listeners.forEach((listener) => {
-			listener();
-		});
-	};
+	const held = createStore<Renaming | undefined>(undefined);
+	const put = held.set;
 	const holds = (kind: Renaming['kind'], key: string) =>
-		held.current?.kind === kind && held.current.key === key;
+		held.get()?.kind === kind && held.get()?.key === key;
 
 	return {
-		get: () => held.current,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
+		get: held.get,
+		subscribe: held.subscribe,
 		typed: (kind, key, text) => {
 			put({ kind, key, text });
 		},
 		give: (kind, key, was) => {
-			if (held.current !== undefined && holds(kind, key))
-				put({ ...held.current, given: { was } });
+			const renaming = held.get();
+			if (renaming !== undefined && holds(kind, key)) put({ ...renaming, given: { was } });
 		},
 		clear: (kind, key) => {
 			if (holds(kind, key)) put(undefined);

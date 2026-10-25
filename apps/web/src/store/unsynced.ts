@@ -10,6 +10,7 @@ import {
 } from './db.js';
 import { foldPath } from './naming.js';
 import { outOfAttempts } from './queue.js';
+import { rowsOf } from './rows.js';
 import { isLive, isTombstone } from './rowStates.js';
 
 /**
@@ -135,19 +136,17 @@ export const unsyncedIn = async (
 	connectionId: string,
 	options: UnsyncedOptions = {}
 ): Promise<Unsynced> => {
-	const rows = await db.notes.where('connectionId').equals(connectionId).toArray();
-	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
-	const ops = await db.opQueue.where('connectionId').equals(connectionId).sortBy('seq');
+	const rows = await rowsOf(db.notes, connectionId).toArray();
+	const folders = await rowsOf(db.folders, connectionId).toArray();
+	const ops = await rowsOf(db.opQueue, connectionId).sortBy('seq');
 	const unverified = (await db.syncState.get(connectionId))?.resumeUnverified === true;
-	const files = await db.files.where('connectionId').equals(connectionId).toArray();
+	const files = await rowsOf(db.files, connectionId).toArray();
 	// Keys alone. A pending row's bytes are pinned, so to hold some is to hold
 	// its own; a bound file's may be a stale version, and are counted anyway
 	// while unverified, since the question then is whether they could be the
 	// only copy.
 	const held = new Set(
-		(await db.fileBytes.where('connectionId').equals(connectionId).primaryKeys()).map(
-			([, id]) => id
-		)
+		(await rowsOf(db.fileBytes, connectionId).primaryKeys()).map(([, id]) => id)
 	);
 	const unsentFiles = files.filter(
 		(file) => file.remoteId === undefined || (unverified && held.has(file.id))

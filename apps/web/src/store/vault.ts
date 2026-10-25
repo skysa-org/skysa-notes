@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 import { t } from '../i18n/t.js';
 import { type NoteRecord, type NotesDatabase } from './db.js';
-import { getPreference, setPreference } from './prefs.js';
+import { getPreference, readJson, setPreference, sourceKey } from './prefs.js';
 import { isLive } from './rowStates.js';
 import { titleShown } from './titles.js';
 
@@ -25,7 +25,7 @@ import { titleShown } from './titles.js';
 export const PASSWORDS_LABEL = t('passwords.label');
 
 /** The key for whether a source shows its passwords on this device. */
-const shownKey = (connectionId: string): string => `passwords:${connectionId}`;
+const shownKey = (connectionId: string): string => sourceKey('passwords', connectionId);
 
 /**
  * Whether this device shows a source's passwords, under the notebooks. Per
@@ -97,17 +97,10 @@ const generatorSchema = z.object({ length: z.number(), symbols: z.boolean() });
  * their passwords are kept.
  */
 export const getGeneratorOptions = async (db: NotesDatabase): Promise<PasswordOptions> => {
-	const stored = await getPreference(db, GENERATOR_KEY);
-	const read = (() => {
-		try {
-			return generatorSchema.safeParse(JSON.parse(stored ?? ''));
-		} catch {
-			return undefined;
-		}
-	})();
-	return read?.success === true
-		? { length: passwordLength(read.data.length), symbols: read.data.symbols }
-		: GENERATOR_DEFAULT;
+	const read = readJson(await getPreference(db, GENERATOR_KEY), generatorSchema);
+	return read === undefined
+		? GENERATOR_DEFAULT
+		: { length: passwordLength(read.length), symbols: read.symbols };
 };
 
 export const setGeneratorOptions = (db: NotesDatabase, options: PasswordOptions): Promise<void> =>

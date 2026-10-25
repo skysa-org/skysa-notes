@@ -1,3 +1,5 @@
+import { createStore } from '../store/emitter.js';
+
 /**
  * How code blocks are shown: wrapped or scrolling, numbered or not.
  *
@@ -34,31 +36,12 @@ const same = (a: CodeDisplay, b: CodeDisplay): boolean =>
 
 export const createCodeDisplayStore = (
 	initial: CodeDisplay = DEFAULT_CODE_DISPLAY
-): CodeDisplayStore => {
-	const held = { current: initial };
-	const listeners = new Set<() => void>();
-
-	return {
-		get: () => held.current,
-		// A value equal to the one held is not a change. It matters here rather
-		// than merely being tidy: every listener redraws a block, and the stored
-		// value arriving from IndexedDB on open is usually the value already in
-		// hand.
-		set: (next) => {
-			if (same(held.current, next)) return;
-			held.current = next;
-			listeners.forEach((listener) => {
-				listener();
-			});
-		},
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
-	};
-};
+): CodeDisplayStore =>
+	// A value equal to the one held is not a change. It matters here rather
+	// than merely being tidy: every listener redraws a block, and the stored
+	// value arriving from IndexedDB on open is usually the value already in
+	// hand.
+	createStore(initial, same);
 
 /**
  * The one the app uses. A singleton because the setting is the app's and not a

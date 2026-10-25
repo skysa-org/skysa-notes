@@ -31,7 +31,9 @@ import {
 	queueRmdir,
 	withdrawMkdirs,
 } from './queue.js';
+import { rowsOf } from './rows.js';
 import { isLive, isTombstone } from './rowStates.js';
+import { libraryTables, writerTables } from './scopes.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -62,8 +64,8 @@ const ancestorsOf = (path: string): string[] =>
  */
 const folderPaths = async (db: NotesDatabase, connectionId: string): Promise<string[]> => {
 	const [folders, notes] = await Promise.all([
-		db.folders.where('connectionId').equals(connectionId).toArray(),
-		db.notes.where('connectionId').equals(connectionId).toArray(),
+		rowsOf(db.folders, connectionId).toArray(),
+		rowsOf(db.notes, connectionId).toArray(),
 	]);
 	const implied = notes
 		// A note the user has deleted draws no notebook, because `listNotes`
@@ -104,9 +106,7 @@ export const ensureFolder = async (
 
 	const wanted = ancestorsOf(path);
 	const existing = new Set(
-		(await db.folders.where('connectionId').equals(connectionId).toArray()).map(
-			(folder) => folder.path
-		)
+		(await rowsOf(db.folders, connectionId).toArray()).map((folder) => folder.path)
 	);
 
 	const created = wanted
@@ -213,7 +213,7 @@ export const listFolders = async (
 	options: FolderScope & { parentPath?: string } = {}
 ): Promise<FolderRecord[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
-	const all = await db.folders.where('connectionId').equals(connectionId).toArray();
+	const all = await rowsOf(db.folders, connectionId).toArray();
 
 	return all
 		.filter(
@@ -244,214 +244,210 @@ export const moveFolder = async (
 	if (source === target) return;
 	if (isWithin(target, source)) throw new Error('A folder cannot be moved inside itself');
 
-	await db.transaction(
-		'rw',
-		[db.folders, db.notes, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
-		async () => {
-			const connectionId = options.connectionId ?? (await activeConnectionId(db));
-			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+	await db.transaction('rw', writerTables(db), async () => {
+		const connectionId = options.connectionId ?? (await activeConnectionId(db));
+		const folders = await rowsOf(db.folders, connectionId).toArray();
 
-			// A notebook already at the destination is the everyday mistake — renaming
-			// "Drafts" to a name another notebook has — and merging the two is not what
-			// anyone meant by a rename. It is also the outcome here that cannot be
-			// undone: `bulkPut` replaces the destination's row, so it loses its
-			// `remoteId` and with it the link to the folder it stands for on the
-			// provider, and the next push makes a second folder rather than finding it.
+		// A notebook already at the destination is the everyday mistake — renaming
+		// "Drafts" to a name another notebook has — and merging the two is not what
+		// anyone meant by a rename. It is also the outcome here that cannot be
+		// undone: `bulkPut` replaces the destination's row, so it loses its
+		// `remoteId` and with it the link to the folder it stands for on the
+		// provider, and the next push makes a second folder rather than finding it.
+		//
+		// Raised as the error `createFolder` already raises, so that a rename in
+		// the sidebar can report the same mistake in the same words the route
+		// already renders for a duplicate notebook name. Nothing calls this yet.
+		//
+		// `isWithin` rather than equality: a row *under* the destination would be
+		// replaced just as quietly.
+		//
+		// Folded, because `archive` and `Archive` are one directory on Drive, on
+		// Dropbox and on macOS. Told apart, a rename onto the other spelling is
+		// waved through and the app ends up with two notebook rows, two
+		// `remoteId`s, and one folder on the provider for them to fight over.
+		//
+		// The exclusion is exact, and deliberately not folded: it has to name the
+		// same rows `moving` does, just below, or a row could be discounted here
+		// and then not actually moved — which is the merge again, arrived at from
+		// the other side.
+		const moving = folders.filter((folder) => isWithin(folder.path, source));
+		const notes = await rowsOf(db.notes, connectionId).toArray();
+		const inside = notes.filter((note) => isWithin(note.path, source));
+		const files = await rowsOf(db.files, connectionId).toArray();
+		const carried = files.filter((file) => isWithin(file.path, source));
+
+		// Nothing is there — before the refusal below, not after it: a move that
+		// moves nothing has no destination to report a duplicate for, and saying
+		// one notebook is in the way of another that does not exist is an answer
+		// to a question nobody asked.
+		//
+		// Read exactly, as `moving` and `inside` are. A source spelled `Archive`
+		// where the row says `archive` therefore finds nothing and does nothing,
+		// rather than the fold the destination gets — the asymmetry is on purpose
+		// and explained below. What it replaces is worse: the only thing that
+		// used to happen was `ensureFolder` conjuring the destination, a notebook
+		// the user never asked for out of a move that moved nothing.
+		if (moving.length === 0 && inside.length === 0 && carried.length === 0) return;
+
+		// A file is in the way as a notebook is. A file keeps its name — the
+		// notes that link it say it — so there is no giving way, as a note
+		// does below; and one under the destination with no folder row over
+		// it is what a pull can leave.
+		const occupying = [...folders, ...files].filter(
+			(each) =>
+				isWithin(foldPath(each.path), foldPath(target)) && !isWithin(each.path, source)
+		);
+		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
+
+		// Before the rows go: the directories they name are left behind by
+		// the moves below, and their ids are the only thing that will say
+		// which ones they were.
+		const leaving = [...moving].sort(
+			(a, b) => a.path.split('/').length - b.path.split('/').length
+		);
+		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
+		const made = await ensureFolder(db, target, { connectionId });
+		// Without their `remoteId`: the folder that id names is still at the old
+		// path until the queued moves run, and a full scan meanwhile — a cursor
+		// reset, or the first after resuming a connection — would read the id at
+		// the old path as a remote rename and put the notebook back.
+		const moved = moving.map(({ remoteId: _remoteId, ...folder }) => ({
+			...folder,
+			path: rebasePath(folder.path, source, target),
+		}));
+		if (moved.length > 0) await db.folders.bulkPut(moved);
+		// Every notebook at its new path, outermost first, so the empty ones exist
+		// on the remote too; the notes inside go up as moves of their own, below.
+		// `mkdir` is idempotent, so a folder a note's move also makes costs nothing.
+		const paths = [...new Set([...made, ...moved].map((folder) => folder.path))].sort(
+			(a, b) => a.split('/').length - b.split('/').length
+		);
+		await paths.reduce<Promise<void>>(async (pending, path) => {
+			await pending;
+			await queueMkdir(db, connectionId, path);
+		}, Promise.resolve());
+
+		// Notes can sit under a path no folder row covers — importing a file
+		// creates no rows, and a pull can report a file before the folder holding
+		// it — so the check above does not catch every collision. It has to be
+		// caught somewhere: two notes at one path is two rows the sidebar shows as
+		// one notebook entry twice over, two queued writes aimed at one file, and
+		// after both have been pushed one `remoteId` between them, at which point
+		// whichever the store hands back second is stale for good.
+		//
+		// Tombstones are in here, and a live note gives way to one.
+		//
+		// Not because two rows at one key is forbidden — a note created at a name
+		// a deleted one still holds is exactly that, by design (see `db.ts`), and
+		// `takenNamesIn` frees a deleted note's name on purpose so the user can
+		// use it again straight away. It is that nothing is gained by adding one
+		// here. There the user chose the name; here the app is renaming somebody's
+		// file on its own, and giving way costs nothing.
+		const outside = notes.filter((note) => !isWithin(note.path, source));
+
+		// Tombstones are placed first, and keep whatever path they land on. A
+		// tombstone is a queued delete rather than a note, so aiming it elsewhere
+		// would delete a file that is not the one it is deleting.
+		//
+		// Where it lands on a path exactly, a reader that finds both rows takes
+		// the live one (`noteAtPath` in `store/notes.ts`). Where it lands on one
+		// that only *folds* to the same name, it does not: `noteAtPath` looks up
+		// a byte-exact key, so the two rows are two keys and nothing brings them
+		// together. That pair is one file on the provider, and a pull delivering
+		// it can revive the tombstone beside the live note. Left as it is
+		// deliberately — the alternative is aiming a delete at the wrong file —
+		// and it is the sharpest reason this whole module gives way early and
+		// often rather than relying on anything downstream to sort it out.
+		//
+		// First rather than in whatever order the rows came back in, because that
+		// order is the order of two random UUIDs: a live note and a tombstone
+		// moving together can hold one path already, and without this which of
+		// them kept it after the move would be a coin toss.
+		const buried = inside
+			.filter(isTombstone)
+			.map((note) => ({ ...note, path: rebasePath(note.path, source, target) }));
+
+		const taken = new Set([...outside, ...buried].map((note) => note.path));
+
+		const relocated = inside.filter(isLive).reduce<NoteRecord[]>((done, note) => {
+			const path = freePath(rebasePath(note.path, source, target), taken);
+			// Every note that lands takes its path out of circulation, so two
+			// notes moving together cannot be given the same one either.
+			taken.add(path);
+			// Deliberately not touching `dirty`: a folder move is metadata only.
 			//
-			// Raised as the error `createFolder` already raises, so that a rename in
-			// the sidebar can report the same mistake in the same words the route
-			// already renders for a duplicate notebook name. Nothing calls this yet.
-			//
-			// `isWithin` rather than equality: a row *under* the destination would be
-			// replaced just as quietly.
-			//
-			// Folded, because `archive` and `Archive` are one directory on Drive, on
-			// Dropbox and on macOS. Told apart, a rename onto the other spelling is
-			// waved through and the app ends up with two notebook rows, two
-			// `remoteId`s, and one folder on the provider for them to fight over.
-			//
-			// The exclusion is exact, and deliberately not folded: it has to name the
-			// same rows `moving` does, just below, or a row could be discounted here
-			// and then not actually moved — which is the merge again, arrived at from
-			// the other side.
-			const moving = folders.filter((folder) => isWithin(folder.path, source));
-			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
-			const inside = notes.filter((note) => isWithin(note.path, source));
-			const files = await db.files.where('connectionId').equals(connectionId).toArray();
-			const carried = files.filter((file) => isWithin(file.path, source));
+			// A note that gave way is a different case — that rename is ours
+			// rather than the folder move's — but it needs nothing more than
+			// any other note here: each one is queued as a move to wherever it
+			// landed, below.
+			return [...done, { ...note, path }];
+		}, buried);
 
-			// Nothing is there — before the refusal below, not after it: a move that
-			// moves nothing has no destination to report a duplicate for, and saying
-			// one notebook is in the way of another that does not exist is an answer
-			// to a question nobody asked.
-			//
-			// Read exactly, as `moving` and `inside` are. A source spelled `Archive`
-			// where the row says `archive` therefore finds nothing and does nothing,
-			// rather than the fold the destination gets — the asymmetry is on purpose
-			// and explained below. What it replaces is worse: the only thing that
-			// used to happen was `ensureFolder` conjuring the destination, a notebook
-			// the user never asked for out of a move that moved nothing.
-			if (moving.length === 0 && inside.length === 0 && carried.length === 0) return;
+		// The files beside the notes go with them, under the names they have,
+		// which the notes' links say. Moved one by one, as the notes are:
+		// ahead of them, so no note arrives anywhere before the files it
+		// links, and ahead of the `rmdir`s, which a file still in the old
+		// directory would keep standing.
+		const rebased = carried.map((file): FileRecord => ({
+			...file,
+			path: rebasePath(file.path, source, target),
+		}));
+		if (rebased.length > 0) await db.files.bulkPut(rebased);
+		await rebased.reduce<Promise<void>>(async (pending, file, at) => {
+			await pending;
+			await queueMoveFile(db, file, carried[at]?.path ?? file.path);
+		}, Promise.resolve());
 
-			// A file is in the way as a notebook is. A file keeps its name — the
-			// notes that link it say it — so there is no giving way, as a note
-			// does below; and one under the destination with no folder row over
-			// it is what a pull can leave.
-			const occupying = [...folders, ...files].filter(
-				(each) =>
-					isWithin(foldPath(each.path), foldPath(target)) && !isWithin(each.path, source)
-			);
-			if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
+		if (relocated.length > 0) await db.notes.bulkPut(relocated);
+		const from = new Map(inside.map((note) => [note.id, note.path]));
+		await relocated.reduce<Promise<void>>(async (pending, note) => {
+			await pending;
+			await queueMove(db, note, from.get(note.id) ?? note.path);
+		}, Promise.resolve());
 
-			// Before the rows go: the directories they name are left behind by
-			// the moves below, and their ids are the only thing that will say
-			// which ones they were.
-			const leaving = [...moving].sort(
-				(a, b) => a.path.split('/').length - b.path.split('/').length
-			);
-			await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
-			const made = await ensureFolder(db, target, { connectionId });
-			// Without their `remoteId`: the folder that id names is still at the old
-			// path until the queued moves run, and a full scan meanwhile — a cursor
-			// reset, or the first after resuming a connection — would read the id at
-			// the old path as a remote rename and put the notebook back.
-			const moved = moving.map(({ remoteId: _remoteId, ...folder }) => ({
-				...folder,
-				path: rebasePath(folder.path, source, target),
-			}));
-			if (moved.length > 0) await db.folders.bulkPut(moved);
-			// Every notebook at its new path, outermost first, so the empty ones exist
-			// on the remote too; the notes inside go up as moves of their own, below.
-			// `mkdir` is idempotent, so a folder a note's move also makes costs nothing.
-			const paths = [...new Set([...made, ...moved].map((folder) => folder.path))].sort(
-				(a, b) => a.split('/').length - b.split('/').length
-			);
-			await paths.reduce<Promise<void>>(async (pending, path) => {
-				await pending;
-				await queueMkdir(db, connectionId, path);
-			}, Promise.resolve());
+		// A notebook whose `mkdir` never went up leaves no directory to remove,
+		// and its op has to go: sent now, it would make one at a path this
+		// device no longer has a row for, and so can never ask to have removed.
+		// After the `mkdir`s above, which are about the destination.
+		await withdrawMkdirs(db, connectionId, source);
 
-			// Notes can sit under a path no folder row covers — importing a file
-			// creates no rows, and a pull can report a file before the folder holding
-			// it — so the check above does not catch every collision. It has to be
-			// caught somewhere: two notes at one path is two rows the sidebar shows as
-			// one notebook entry twice over, two queued writes aimed at one file, and
-			// after both have been pushed one `remoteId` between them, at which point
-			// whichever the store hands back second is stale for good.
-			//
-			// Tombstones are in here, and a live note gives way to one.
-			//
-			// Not because two rows at one key is forbidden — a note created at a name
-			// a deleted one still holds is exactly that, by design (see `db.ts`), and
-			// `takenNamesIn` frees a deleted note's name on purpose so the user can
-			// use it again straight away. It is that nothing is gained by adding one
-			// here. There the user chose the name; here the app is renaming somebody's
-			// file on its own, and giving way costs nothing.
-			const outside = notes.filter((note) => !isWithin(note.path, source));
+		// Open in the sidebar where it was, it is open where it is; and
+		// pinned, pinned.
+		await moveOpenNotebooks(db, connectionId, source, target);
+		await movePinnedNotebooks(db, connectionId, source, target);
 
-			// Tombstones are placed first, and keep whatever path they land on. A
-			// tombstone is a queued delete rather than a note, so aiming it elsewhere
-			// would delete a file that is not the one it is deleting.
-			//
-			// Where it lands on a path exactly, a reader that finds both rows takes
-			// the live one (`noteAtPath` in `store/notes.ts`). Where it lands on one
-			// that only *folds* to the same name, it does not: `noteAtPath` looks up
-			// a byte-exact key, so the two rows are two keys and nothing brings them
-			// together. That pair is one file on the provider, and a pull delivering
-			// it can revive the tombstone beside the live note. Left as it is
-			// deliberately — the alternative is aiming a delete at the wrong file —
-			// and it is the sharpest reason this whole module gives way early and
-			// often rather than relying on anything downstream to sort it out.
-			//
-			// First rather than in whatever order the rows came back in, because that
-			// order is the order of two random UUIDs: a live note and a tombstone
-			// moving together can hold one path already, and without this which of
-			// them kept it after the move would be a coin toss.
-			const buried = inside
-				.filter(isTombstone)
-				.map((note) => ({ ...note, path: rebasePath(note.path, source, target) }));
-
-			const taken = new Set([...outside, ...buried].map((note) => note.path));
-
-			const relocated = inside.filter(isLive).reduce<NoteRecord[]>((done, note) => {
-				const path = freePath(rebasePath(note.path, source, target), taken);
-				// Every note that lands takes its path out of circulation, so two
-				// notes moving together cannot be given the same one either.
-				taken.add(path);
-				// Deliberately not touching `dirty`: a folder move is metadata only.
-				//
-				// A note that gave way is a different case — that rename is ours
-				// rather than the folder move's — but it needs nothing more than
-				// any other note here: each one is queued as a move to wherever it
-				// landed, below.
-				return [...done, { ...note, path }];
-			}, buried);
-
-			// The files beside the notes go with them, under the names they have,
-			// which the notes' links say. Moved one by one, as the notes are:
-			// ahead of them, so no note arrives anywhere before the files it
-			// links, and ahead of the `rmdir`s, which a file still in the old
-			// directory would keep standing.
-			const rebased = carried.map((file): FileRecord => ({
-				...file,
-				path: rebasePath(file.path, source, target),
-			}));
-			if (rebased.length > 0) await db.files.bulkPut(rebased);
-			await rebased.reduce<Promise<void>>(async (pending, file, at) => {
-				await pending;
-				await queueMoveFile(db, file, carried[at]?.path ?? file.path);
-			}, Promise.resolve());
-
-			if (relocated.length > 0) await db.notes.bulkPut(relocated);
-			const from = new Map(inside.map((note) => [note.id, note.path]));
-			await relocated.reduce<Promise<void>>(async (pending, note) => {
-				await pending;
-				await queueMove(db, note, from.get(note.id) ?? note.path);
-			}, Promise.resolve());
-
-			// A notebook whose `mkdir` never went up leaves no directory to remove,
-			// and its op has to go: sent now, it would make one at a path this
-			// device no longer has a row for, and so can never ask to have removed.
-			// After the `mkdir`s above, which are about the destination.
-			await withdrawMkdirs(db, connectionId, source);
-
-			// Open in the sidebar where it was, it is open where it is; and
-			// pinned, pinned.
-			await moveOpenNotebooks(db, connectionId, source, target);
-			await movePinnedNotebooks(db, connectionId, source, target);
-
-			// Last, so the notes are out of them before the engine looks: the
-			// moves above are what leave the old directories empty, and the
-			// engine refuses to remove one that still holds a file. A notebook
-			// moved up into what it was in leaves a directory too: the source is
-			// a subdirectory of the destination, and removing it cannot touch it.
-			//
-			// **Every** directory being left, outermost first, and not only the
-			// outermost — which is all this used to queue, since removing that
-			// one takes the subdirectories with it on every provider. It is not
-			// only about the removal. A sync pulls before it pushes, so between
-			// the move and the push the old directories are still on the remote,
-			// and the rows that named them have been re-pathed and stripped of
-			// their ids: to that pull they are folders nobody owns, and it makes
-			// notebooks of them. The engine already refuses to do that for a
-			// directory whose `rmdir` is queued (`decideFolder`, "a notebook the
-			// user has removed here") — but it matches the op by id *and* path,
-			// which is what keeps it from dropping a folder another device has
-			// moved since, and a subdirectory with no op of its own matched
-			// nothing. So the whole subtree came back: the notebook at the old
-			// path, its ancestors conjured to hold it, and then the `rmdir`
-			// refused because the device held a row there again. One queued op
-			// per directory is what lets that guard see them.
-			//
-			// The extra ops cost almost nothing: the outermost really does take
-			// the rest with it, so each of the others finds nothing where it was
-			// and finishes without sending anything.
-			await leaving.reduce<Promise<void>>(async (pending, folder) => {
-				await pending;
-				await queueRmdir(db, connectionId, folder.path, folder.remoteId);
-			}, Promise.resolve());
-		}
-	);
+		// Last, so the notes are out of them before the engine looks: the
+		// moves above are what leave the old directories empty, and the
+		// engine refuses to remove one that still holds a file. A notebook
+		// moved up into what it was in leaves a directory too: the source is
+		// a subdirectory of the destination, and removing it cannot touch it.
+		//
+		// **Every** directory being left, outermost first, and not only the
+		// outermost — which is all this used to queue, since removing that
+		// one takes the subdirectories with it on every provider. It is not
+		// only about the removal. A sync pulls before it pushes, so between
+		// the move and the push the old directories are still on the remote,
+		// and the rows that named them have been re-pathed and stripped of
+		// their ids: to that pull they are folders nobody owns, and it makes
+		// notebooks of them. The engine already refuses to do that for a
+		// directory whose `rmdir` is queued (`decideFolder`, "a notebook the
+		// user has removed here") — but it matches the op by id *and* path,
+		// which is what keeps it from dropping a folder another device has
+		// moved since, and a subdirectory with no op of its own matched
+		// nothing. So the whole subtree came back: the notebook at the old
+		// path, its ancestors conjured to hold it, and then the `rmdir`
+		// refused because the device held a row there again. One queued op
+		// per directory is what lets that guard see them.
+		//
+		// The extra ops cost almost nothing: the outermost really does take
+		// the rest with it, so each of the others finds nothing where it was
+		// and finishes without sending anything.
+		await leaving.reduce<Promise<void>>(async (pending, folder) => {
+			await pending;
+			await queueRmdir(db, connectionId, folder.path, folder.remoteId);
+		}, Promise.resolve());
+	});
 };
 
 export const renameFolder = async (
@@ -482,81 +478,63 @@ export const deleteFolder = async (
 	const target = normalizePath(path);
 	if (target === '') throw new Error('The root folder cannot be deleted');
 
-	await db.transaction(
-		'rw',
-		[
-			db.folders,
-			db.notes,
-			db.opQueue,
-			db.syncState,
-			db.prefs,
-			db.files,
-			db.fileBytes,
-			db.pictures,
-			db.pictureBytes,
-		],
-		async () => {
-			const connectionId = options.connectionId ?? (await activeConnectionId(db));
-			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
-			// Outermost first, and every one of them: see `moveFolder` for why
-			// a subdirectory needs an op of its own even though removing the
-			// notebook above it takes the directory with it.
-			const leaving = folders
-				.filter((folder) => isWithin(folder.path, target))
-				.sort((a, b) => a.path.split('/').length - b.path.split('/').length);
-			await db.folders.bulkDelete(
-				leaving.map((folder) => [folder.connectionId, folder.path])
-			);
+	await db.transaction('rw', libraryTables(db), async () => {
+		const connectionId = options.connectionId ?? (await activeConnectionId(db));
+		const folders = await rowsOf(db.folders, connectionId).toArray();
+		// Outermost first, and every one of them: see `moveFolder` for why
+		// a subdirectory needs an op of its own even though removing the
+		// notebook above it takes the directory with it.
+		const leaving = folders
+			.filter((folder) => isWithin(folder.path, target))
+			.sort((a, b) => a.path.split('/').length - b.path.split('/').length);
+		await db.folders.bulkDelete(leaving.map((folder) => [folder.connectionId, folder.path]));
 
-			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
-			const tombstoned = notes
-				.filter((note) => isWithin(note.path, target) && isLive(note))
-				.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
-			if (tombstoned.length > 0) await db.notes.bulkPut(tombstoned);
-			await tombstoned.reduce<Promise<void>>(async (pending, note) => {
-				await pending;
-				await deletedHere.add(db, note);
-			}, Promise.resolve());
-			await tombstoned.reduce<Promise<void>>(async (pending, note) => {
-				await pending;
-				await queueDelete(db, note);
-			}, Promise.resolve());
+		const notes = await rowsOf(db.notes, connectionId).toArray();
+		const tombstoned = notes
+			.filter((note) => isWithin(note.path, target) && isLive(note))
+			.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
+		if (tombstoned.length > 0) await db.notes.bulkPut(tombstoned);
+		await tombstoned.reduce<Promise<void>>(async (pending, note) => {
+			await pending;
+			await deletedHere.add(db, note);
+		}, Promise.resolve());
+		await tombstoned.reduce<Promise<void>>(async (pending, note) => {
+			await pending;
+			await queueDelete(db, note);
+		}, Promise.resolve());
 
-			// The files, with no tombstone: nothing brings a file back, so the
-			// row and its bytes go now and the op is what is left of it. A copy
-			// elsewhere that was to read one of them from the remote is handed
-			// the bytes first, where this device has them.
-			const files = await db.files
-				.where('connectionId')
-				.equals(connectionId)
-				.filter((file) => isWithin(file.path, target))
-				.toArray();
-			await files.reduce<Promise<void>>(async (pending, file) => {
-				await pending;
-				await handOverToCopies(db, file);
-				await queueDeleteFile(db, file);
-			}, Promise.resolve());
-			const keys = files.map((file): [string, string] => [file.connectionId, file.id]);
-			await db.files.bulkDelete(keys);
-			await db.fileBytes.bulkDelete(keys);
-			await dropPictures(db, keys);
+		// The files, with no tombstone: nothing brings a file back, so the
+		// row and its bytes go now and the op is what is left of it. A copy
+		// elsewhere that was to read one of them from the remote is handed
+		// the bytes first, where this device has them.
+		const files = await rowsOf(db.files, connectionId)
+			.filter((file) => isWithin(file.path, target))
+			.toArray();
+		await files.reduce<Promise<void>>(async (pending, file) => {
+			await pending;
+			await handOverToCopies(db, file);
+			await queueDeleteFile(db, file);
+		}, Promise.resolve());
+		const keys = files.map((file): [string, string] => [file.connectionId, file.id]);
+		await db.files.bulkDelete(keys);
+		await db.fileBytes.bulkDelete(keys);
+		await dropPictures(db, keys);
 
-			// A notebook the remote never heard of: its `mkdir` is withdrawn rather
-			// than sent, or it would make a directory this device can no longer ask
-			// to have removed, and the next pull would make the notebook again.
-			await withdrawMkdirs(db, connectionId, target);
-			await forgetOpenNotebooks(db, connectionId, target);
-			await forgetPinnedNotebooks(db, connectionId, target);
+		// A notebook the remote never heard of: its `mkdir` is withdrawn rather
+		// than sent, or it would make a directory this device can no longer ask
+		// to have removed, and the next pull would make the notebook again.
+		await withdrawMkdirs(db, connectionId, target);
+		await forgetOpenNotebooks(db, connectionId, target);
+		await forgetPinnedNotebooks(db, connectionId, target);
 
-			// Behind the deletes, which are what empty the directories. The engine
-			// refuses to remove one that still holds a file, so a note another
-			// device wrote into the notebook meanwhile keeps it.
-			await leaving.reduce<Promise<void>>(async (pending, folder) => {
-				await pending;
-				await queueRmdir(db, connectionId, folder.path, folder.remoteId);
-			}, Promise.resolve());
-		}
-	);
+		// Behind the deletes, which are what empty the directories. The engine
+		// refuses to remove one that still holds a file, so a note another
+		// device wrote into the notebook meanwhile keeps it.
+		await leaving.reduce<Promise<void>>(async (pending, folder) => {
+			await pending;
+			await queueRmdir(db, connectionId, folder.path, folder.remoteId);
+		}, Promise.resolve());
+	});
 };
 
 /** Every folder path, sorted, which is enough to render the sidebar tree. */
@@ -565,6 +543,6 @@ export const folderTree = async (
 	options: FolderScope = {}
 ): Promise<string[]> => {
 	const connectionId = options.connectionId ?? (await activeConnectionId(db));
-	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+	const folders = await rowsOf(db.folders, connectionId).toArray();
 	return folders.map((folder) => folder.path).sort((a, b) => a.localeCompare(b));
 };

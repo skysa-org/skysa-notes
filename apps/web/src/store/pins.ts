@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
+import { readJson, sourceKey } from './prefs.js';
+import { rowsOf } from './rows.js';
 import { isLive } from './rowStates.js';
 
 /**
@@ -55,8 +57,8 @@ export const setNotebookPin = (
 ): Promise<void> =>
 	db.transaction('rw', [db.prefs, db.folders, db.notes], async () => {
 		const [folders, notes, top, bottom] = await Promise.all([
-			db.folders.where('connectionId').equals(connectionId).toArray(),
-			db.notes.where('connectionId').equals(connectionId).toArray(),
+			rowsOf(db.folders, connectionId).toArray(),
+			rowsOf(db.notes, connectionId).toArray(),
 			notebooks.top.get(db, connectionId),
 			notebooks.bottom.get(db, connectionId),
 		]);
@@ -102,19 +104,11 @@ export const forgetPinnedNotebooks = async (
  */
 const NOTES = 'pinnedNotes';
 
-const notesKey = (connectionId: string): string => `${NOTES}:${connectionId}`;
+const notesKey = (connectionId: string): string => sourceKey(NOTES, connectionId);
 
 const stored = z.array(z.string());
 
-const read = (value: string | undefined): string[] => {
-	if (value === undefined) return [];
-	try {
-		const parsed = stored.safeParse(JSON.parse(value));
-		return parsed.success ? parsed.data : [];
-	} catch {
-		return [];
-	}
-};
+const read = (value: string | undefined): string[] => readJson(value, stored) ?? [];
 
 export const getPinnedNotes = async (
 	db: Pick<NotesDatabase, 'prefs'>,

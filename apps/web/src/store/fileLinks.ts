@@ -5,6 +5,7 @@ import { fileKey, handOverToCopies } from './files.js';
 import { foldPath } from './naming.js';
 import { dropPictures } from './pictures.js';
 import { queueDeleteFile } from './queue.js';
+import { rowsOf } from './rows.js';
 import { isLiveSource, isTombstone } from './rowStates.js';
 
 /**
@@ -191,7 +192,7 @@ const linking = (
 };
 
 const notesOf = (db: Pick<NotesDatabase, 'notes'>, connectionId: string): Promise<NoteRecord[]> =>
-	db.notes.where('connectionId').equals(connectionId).toArray();
+	rowsOf(db.notes, connectionId).toArray();
 
 /**
  * Whether the device holds every note its source has, as of the last pull:
@@ -220,7 +221,7 @@ export const attachedFiles = (
 	folder: string
 ): Promise<AttachedFile[]> =>
 	db.transaction('r', [db.notes, db.files], async () => {
-		const files = (await db.files.where('connectionId').equals(connectionId).toArray()).filter(
+		const files = (await rowsOf(db.files, connectionId).toArray()).filter(
 			(file) => parentPath(file.path) === folder
 		);
 		if (files.length === 0) return [];
@@ -308,9 +309,7 @@ export const deleteUnlinkedFilesAt = (
 			if (!holdsEveryNote(state)) return undefined;
 			if (state !== undefined && (state.lastSyncAt ?? 0) < since) return undefined;
 			const wanted = new Set(paths.map(foldPath));
-			const files = await db.files
-				.where('connectionId')
-				.equals(connectionId)
+			const files = await rowsOf(db.files, connectionId)
 				.filter((file) => wanted.has(foldPath(file.path)))
 				.toArray();
 			return deleteUnnamed(db, connectionId, files);

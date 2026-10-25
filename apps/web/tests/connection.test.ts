@@ -1,5 +1,5 @@
 import { createFakeProvider, createSyncEngine, isHidden, NotFoundError } from '@skysa/core';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
 	bindConnection,
@@ -15,7 +15,6 @@ import {
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
-	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
@@ -33,20 +32,9 @@ import {
 } from '../src/store/notes.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 const DROPBOX = { connectionId: 'dropbox-1', provider: 'dropbox' } as const;
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`connection-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const queued = async (db: NotesDatabase) =>
 	(await db.opQueue.orderBy('seq').toArray()).map((op) => [op.connectionId, op.op, op.path]);

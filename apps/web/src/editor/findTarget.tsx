@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useContext, useState, useSyncExternalStore } from 'react';
 
+import { createEmitter } from '../store/emitter.js';
 import type { FindTarget } from './find.js';
 
 /**
@@ -33,11 +34,9 @@ interface TargetStore {
 
 const createTargetStore = (): TargetStore => {
 	const held = { current: null as FindTarget | null };
-	const listeners = new Set<() => void>();
+	const changes = createEmitter();
 	const changed = () => {
-		listeners.forEach((listener) => {
-			listener();
-		});
+		changes.emit();
 	};
 
 	return {
@@ -56,10 +55,7 @@ const createTargetStore = (): TargetStore => {
 			};
 		},
 		get: () => held.current,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => listeners.delete(listener);
-		},
+		subscribe: changes.subscribe,
 	};
 };
 

@@ -4,6 +4,8 @@ import { parseDocument } from 'yaml';
 import {
 	joinFrontmatter,
 	readFrontmatter,
+	readNoteMetadata,
+	readNoteTimes,
 	splitFrontmatter,
 	writeFrontmatter,
 } from '../../src/markdown/frontmatter.js';
@@ -1338,5 +1340,23 @@ describe('a block another editor flattened into a heading', () => {
 		// A commented-out line opening a real block looks like the heading.
 		const source = `---\n# id: ${ID} created: 2026-09-21T21:47:18.740Z updated: 2026-09-21T21:47:33.923Z\ntitle: Kept\n---\nbody\n`;
 		expect(readFrontmatter(splitFrontmatter(source).frontmatter)).toEqual({ title: 'Kept' });
+	});
+});
+
+describe('readNoteMetadata', () => {
+	it.each([
+		null,
+		'',
+		'title: Plan\nid: abc\ntags: [one, two]\npinned: true',
+		'created: 2026-01-02T03:04:05Z\nmodified: 2026-02-03',
+		'date created: 2024-05-06\nlastmod: not a time\nupdated: 2025-01-01',
+		'title: [unclosed',
+		'- just\n- a list',
+		'id: 202409141302\ntitle: Zettel',
+	])('reads %j as readFrontmatter and readNoteTimes each do', (block) => {
+		expect(readNoteMetadata(block)).toEqual({
+			fields: readFrontmatter(block),
+			times: readNoteTimes(block),
+		});
 	});
 });
