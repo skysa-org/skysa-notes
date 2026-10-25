@@ -1,10 +1,11 @@
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type CodeDisplayStore, createCodeDisplayStore } from '../src/editor/codeDisplay.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * A code block and the bar of tools under it.
@@ -18,8 +19,6 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
  * rather than the one that was pressed.
  */
 
-const editors: Editor[] = [];
-
 const mount = async (
 	body: string,
 	options: {
@@ -27,20 +26,17 @@ const mount = async (
 		display?: CodeDisplayStore;
 	} = {}
 ) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({
-		root,
+	const { editor, root } = await mountRich({
 		body,
 		onUserEdit: options.onUserEdit ?? (() => undefined),
 		display: options.display,
-	}).create();
-	editors.push(editor);
+	});
 
 	const tool = (name: string) =>
 		root.querySelector<HTMLButtonElement>(`button.code-tool[aria-label="${name}"]`);
 
 	return {
+		editor,
 		root,
 		block: () => root.querySelector<HTMLElement>('.code-block'),
 		picker: root.querySelector<HTMLSelectElement>('select.code-tool-language'),
@@ -87,7 +83,7 @@ const insideCode = (ctx: Ctx): number => {
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 
@@ -165,7 +161,7 @@ describe('the code block tools', () => {
 		editor.place(2);
 		expect(editor.block()?.classList.contains('code-block-active')).toBe(false);
 
-		editor.place(editors[0]?.action(insideCode) ?? 0);
+		editor.place(editor.editor.action(insideCode));
 		expect(editor.block()?.classList.contains('code-block-active')).toBe(true);
 	});
 

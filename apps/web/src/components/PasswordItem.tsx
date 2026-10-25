@@ -28,6 +28,7 @@ import {
 	restoreVaultItem,
 	saveVaultItem,
 } from '../store/notes.js';
+import { isTombstone } from '../store/rowStates.js';
 import { titleShown } from '../store/titles.js';
 import { editedAt } from './editedAt.js';
 import { KEEP_OUT } from './keepOut.js';
@@ -634,7 +635,7 @@ export const PasswordItem = ({
 				// again: what the view shows is not what the item holds.
 				if (
 					stored === undefined ||
-					stored.deletedLocally === 1 ||
+					isTombstone(stored) ||
 					locks.current !== lock ||
 					at.is.state !== 'opened' ||
 					vaultArmor(stored.body) !== at.armor

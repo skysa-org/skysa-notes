@@ -11,7 +11,9 @@ import {
 } from '@skysa/core';
 
 import { PREVIEW_CHARS, showsClipboard } from '../store/clipboard.js';
-import { type ClipRecord, type NotesDatabase } from '../store/db.js';
+import { type ClipKey, type ClipRecord, type NotesDatabase } from '../store/db.js';
+import { rowsOf } from '../store/rows.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { type FileRead, ownBuffer, type ReadingSession } from './fileReads.js';
 
 /**
@@ -192,7 +194,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 	const reconcile = (connectionId: string, items: readonly RemoteEntry[]): Promise<void> =>
 		db.transaction('rw', [db.syncState, db.clips, db.clipBytes, db.clipThumbs], async () => {
 			if (!showsClipboard(await db.syncState.get(connectionId))) return;
-			const rows = await db.clips.where('connectionId').equals(connectionId).toArray();
+			const rows = await rowsOf(db.clips, connectionId).toArray();
 			const listed = new Set(items.map((entry) => basename(entry.path)));
 			// Let go of by another device, or removed here and now gone.
 			const gone = rows.filter((row) => row.state !== 'pending' && !listed.has(row.name));
@@ -225,11 +227,9 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 				(entry) => entry.kind === 'file' && readClipName(basename(entry.path)) !== undefined
 			)
 		);
-		const rows = await db.clips.where('connectionId').equals(connectionId).toArray();
+		const rows = await rowsOf(db.clips, connectionId).toArray();
 		const held = new Set(
-			(await db.clipBytes.where('connectionId').equals(connectionId).primaryKeys()).map(
-				([, name]) => name
-			)
+			(await rowsOf(db.clipBytes, connectionId).primaryKeys()).map(([, name]) => name)
 		);
 		await inTurns(
 			rows.filter(
@@ -250,7 +250,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 	 * removed on the remote too, by the next flush.
 	 */
 	const sent = async (row: ClipRecord, entry: RemoteEntry): Promise<void> => {
-		const key: [string, string] = [row.connectionId, row.name];
+		const key: ClipKey = [row.connectionId, row.name];
 		const remote = { remoteId: entry.remoteId, version: entry.version };
 		const now = await db.clips.get(key);
 		if (now === undefined) {
@@ -300,7 +300,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		const entry = await upload(session, row.name, held.bytes);
 		await db.transaction('rw', [db.syncState, db.clips, db.clipBytes], async () => {
 			const state = await db.syncState.get(row.connectionId);
-			if (state === undefined || state.detached !== undefined) return;
+			if (state === undefined || !isLiveSource(state)) return;
 			await sent(row, entry);
 		});
 		return true;
@@ -322,10 +322,10 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		const session = sessionFor(connectionId);
 		if (session === undefined || !isOnline()) return;
 		const state = await db.syncState.get(connectionId);
-		if (state === undefined || state.detached !== undefined || state.rootId === undefined) {
+		if (state === undefined || !isLiveSource(state) || state.rootId === undefined) {
 			return;
 		}
-		const owed = (await db.clips.where('connectionId').equals(connectionId).toArray())
+		const owed = (await rowsOf(db.clips, connectionId).toArray())
 			.filter((row) => row.state !== 'sent')
 			// Oldest first, so the items arrive on the other devices in the
 			// order they were pasted.
@@ -346,7 +346,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		const tried = new Set(
 			owed.filter((row) => row.state === 'removing').map((row) => row.name)
 		);
-		const late = await db.clips.where('connectionId').equals(connectionId).toArray();
+		const late = await rowsOf(db.clips, connectionId).toArray();
 		if (late.some((row) => row.state === 'removing' && !tried.has(row.name))) {
 			void flush(connectionId);
 		}

@@ -34,6 +34,7 @@ import {
 	setCodeDisplay,
 } from './prefs.js';
 import { listRecentNotes } from './recentNotes.js';
+import { isTombstone } from './rowStates.js';
 import { getScratchpadShown, isScratchNote } from './scratchpad.js';
 import { createNoteSearch, type NoteHit, type NoteSearch } from './search.js';
 import { buildFolderTree, type FolderNode, keptTree, withPins } from './tree.js';
@@ -234,7 +235,7 @@ export const useNoteRead = (id: string | undefined): NoteRecord | null | undefin
 	const read = useLiveQuery(async () => {
 		if (asked.id === undefined || asked.connectionId === undefined) return undefined;
 		const note = await getNote(db, asked.id, { connectionId: asked.connectionId });
-		return { asked, note: note === undefined || note.deletedLocally === 1 ? null : note };
+		return { asked, note: note === undefined || isTombstone(note) ? null : note };
 	}, [asked]);
 	return read?.asked === asked ? read.note : undefined;
 };

@@ -31,6 +31,7 @@ import {
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
 import { holdsAnything } from '../store/exportNotes.js';
 import { type Renaming, type Renamings, shownSourceName } from '../store/renaming.js';
+import { isLiveSource } from '../store/rowStates.js';
 import {
 	anyConnected,
 	CONNECT_FIRST_LABEL,
@@ -120,7 +121,7 @@ const useSourceChoices = (
 		// beside them rather than in front of them. A detached source does not
 		// count — it syncs nowhere.
 		live: ordered.some(
-			(source) => source.connectionId !== LOCAL_CONNECTION_ID && source.detached === undefined
+			(source) => source.connectionId !== LOCAL_CONNECTION_ID && isLiveSource(source)
 		),
 		// "Connect another account" once there is one; before that, what
 		// connecting is (`CONNECT_FIRST_LABEL`).
@@ -287,7 +288,7 @@ const SourceTab = ({
 			// what it plainly says could not find it. Exactly the visible words, so
 			// it still satisfies WCAG 2.5.3.
 			aria-label={
-				source.detached !== undefined
+				!isLiveSource(source)
 					? t('sources.disconnected.label', { source: name })
 					: reconnect
 						? t('sources.reconnect', { source: name })
@@ -302,7 +303,7 @@ const SourceTab = ({
 			}}
 		>
 			<ProviderIcon kind={sourceKind(source)} alert={reconnect} />
-			{source.detached === undefined
+			{isLiveSource(source)
 				? shownName(name)
 				: // Not an icon alone: a source that syncs nowhere is the one thing
 					// about this bar a user must not have to infer from a colour.
@@ -1104,7 +1105,7 @@ export const SourcePanel = ({
 
 	/** Another source's `⋯`: what its panel would offer once it is showing. */
 	const itemsFor = (source: ConnectedSource): OptionsMenuItem[] => {
-		if (source.detached !== undefined) return renameItem(source);
+		if (!isLiveSource(source)) return renameItem(source);
 		const show = (action?: SourceAsk['action']) => () => {
 			setAsked(action === undefined ? null : { connectionId: source.connectionId, action });
 			void showConnection(db, source.connectionId);
@@ -1203,7 +1204,7 @@ export const SourcePanel = ({
 									type="button"
 									className={source.active ? 'row selected' : 'row'}
 									aria-label={
-										source.detached === undefined
+										isLiveSource(source)
 											? name
 											: t('sources.disconnected.label', { source: name })
 									}
@@ -1217,7 +1218,7 @@ export const SourcePanel = ({
 									<span className="row-marked">
 										<ProviderIcon kind={sourceKind(source)} />
 										<span className="row-label">
-											{source.detached === undefined
+											{isLiveSource(source)
 												? name
 												: rich(
 														'sources.disconnected.shown',

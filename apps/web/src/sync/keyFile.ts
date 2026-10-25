@@ -11,6 +11,7 @@ import {
 } from '@skysa/core';
 
 import { type KeyFileRecord, type NotesDatabase } from '../store/db.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { type ReadingSession } from './fileReads.js';
 
 /**
@@ -109,14 +110,14 @@ export const createKeyFileSync = (options: KeyFileSyncOptions): KeyFileSync => {
 	/** A source the device still syncs, with a folder found: one whose file can be read. */
 	const live = async (connectionId: string) => {
 		const state = await db.syncState.get(connectionId);
-		return state !== undefined && state.detached === undefined && state.rootId !== undefined;
+		return state !== undefined && isLiveSource(state) && state.rootId !== undefined;
 	};
 
 	/** What a read found, kept only while the source is still synced here. */
 	const keep = (record: KeyFileRecord): Promise<void> =>
 		db.transaction('rw', [db.syncState, db.keyFiles], async () => {
 			const state = await db.syncState.get(record.connectionId);
-			if (state === undefined || state.detached !== undefined) return;
+			if (state === undefined || !isLiveSource(state)) return;
 			await db.keyFiles.put(record);
 		});
 

@@ -1,6 +1,7 @@
 import { type PictureInfo, type PictureVariant } from '@skysa/core';
 
 import {
+	type FileKey,
 	type FileRecord,
 	type NotesDatabase,
 	type PictureCopyRecord,
@@ -52,9 +53,7 @@ const stampOf = ({ remoteId, remoteVersion }: Bound) => ({
 	...(remoteVersion === undefined ? {} : { version: remoteVersion }),
 });
 
-type Key = [string, string];
-
-const keyOf = (picture: Pick<PictureRecord, 'connectionId' | 'fileId'>): Key => [
+const keyOf = (picture: Pick<PictureRecord, 'connectionId' | 'fileId'>): FileKey => [
 	picture.connectionId,
 	picture.fileId,
 ];
@@ -89,7 +88,12 @@ export interface HeldCopy {
  * Write a use back, read again inside its own transaction so nothing written
  * since is put back over. To the record, which is small: never to the bytes.
  */
-const touch = (db: NotesDatabase, key: Key, variant: PictureVariant, now: number): Promise<void> =>
+const touch = (
+	db: NotesDatabase,
+	key: FileKey,
+	variant: PictureVariant,
+	now: number
+): Promise<void> =>
 	db.transaction('rw', db.pictures, async () => {
 		const picture = await db.pictures.get(key);
 		const copy = picture?.copies[variant];
@@ -147,7 +151,7 @@ export interface MadeCopy extends HeldCopy {
  */
 export const dropPictures = (
 	db: Pick<NotesDatabase, 'pictures' | 'pictureBytes'>,
-	keys: readonly Key[]
+	keys: readonly FileKey[]
 ): Promise<unknown> =>
 	db.pictures.bulkDelete([...keys]).then(() =>
 		db.pictureBytes
@@ -180,7 +184,7 @@ export const forgetPictures = (
  */
 export const restampPicture = async (
 	db: Pick<NotesDatabase, 'pictures'>,
-	key: Key,
+	key: FileKey,
 	from: Bound,
 	to: Bound
 ): Promise<void> => {
@@ -191,7 +195,7 @@ export const restampPicture = async (
 };
 
 /** One copy of one picture: the one just kept, which its own keeping never lets go of. */
-type CopyKey = Readonly<{ key: Key; variant: PictureVariant }>;
+type CopyKey = Readonly<{ key: FileKey; variant: PictureVariant }>;
 
 /** The thumbs let go of last: the newest, as many as fit `THUMB_SHARE` of the budget. */
 const sheltered = <T extends { variant: PictureVariant; copy: PictureCopyRecord }>(

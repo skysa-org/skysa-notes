@@ -8,7 +8,7 @@ import {
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, StrictMode, useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
@@ -27,7 +27,6 @@ import { beginConnect, hashCredential } from '../src/store/credentials.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
-	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
@@ -43,19 +42,8 @@ import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`panel-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
+import { holdCredential } from './support/connection.js';
+import { freshDatabase } from './support/db.js';
 
 const STORAGE_FIRST: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
 
@@ -127,12 +115,7 @@ const backFromConsent = (db: NotesDatabase) => beginConnect(db, 'dropbox');
 
 /** A device holding a credential for `connectionId`, as connecting leaves it. */
 const holding = (db: NotesDatabase, connectionId: string, credential = 'sk1_held') =>
-	db.credentials.put({
-		id: connectionId,
-		credential,
-		provider: 'dropbox',
-		createdAt: Date.now(),
-	});
+	holdCredential(db, connectionId, { credential, createdAt: Date.now() });
 
 /** A button once the user can press it. */
 const enabled = async (name: string): Promise<HTMLElement> => {

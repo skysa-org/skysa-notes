@@ -19,6 +19,8 @@ import { fileKey, heldBytesAreCurrent } from './files.js';
 import { settleEditors } from './heldEdits.js';
 import { foldPath } from './naming.js';
 import { noteFile } from './notes.js';
+import { rowsOf } from './rows.js';
+import { isLive } from './rowStates.js';
 import { type Unsynced } from './unsynced.js';
 
 /**
@@ -560,15 +562,11 @@ const refuseOversize = (rows: readonly FileRecord[], held: ReadonlySet<string>):
 export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Library> =>
 	db.transaction('r', [db.notes, db.folders, db.files, db.fileBytes], async () => {
 		const [notes, folders, rows, held] = await Promise.all([
-			db.notes
-				.where('connectionId')
-				.equals(connectionId)
-				.filter((note) => note.deletedLocally === 0)
-				.toArray(),
-			db.folders.where('connectionId').equals(connectionId).sortBy('path'),
-			db.files.where('connectionId').equals(connectionId).toArray(),
+			rowsOf(db.notes, connectionId).filter(isLive).toArray(),
+			rowsOf(db.folders, connectionId).sortBy('path'),
+			rowsOf(db.files, connectionId).toArray(),
 			// Keys alone, which is all `refuseOversize` needs.
-			db.fileBytes.where('connectionId').equals(connectionId).primaryKeys(),
+			rowsOf(db.fileBytes, connectionId).primaryKeys(),
 		]);
 		refuseOversize(rows, new Set(held.map(([, id]) => id)));
 		return {
@@ -619,26 +617,17 @@ export const unsentLibrary = (db: NotesDatabase, listed: Unsynced): Promise<Libr
  * then looks at the files, whose bytes are read one at a time until one counts.
  */
 export const holdsAnything = async (db: NotesDatabase, connectionId: string): Promise<boolean> =>
-	(await db.folders.where('connectionId').equals(connectionId).count()) > 0 ||
-	(await db.notes
-		.where('connectionId')
-		.equals(connectionId)
-		.filter((note) => note.deletedLocally === 0)
-		.first()) !== undefined ||
+	(await rowsOf(db.folders, connectionId).count()) > 0 ||
+	(await rowsOf(db.notes, connectionId).filter(isLive).first()) !== undefined ||
 	(await holdsFile(db, connectionId));
 
 /** Whether some file of one source has its current bytes here (`holdsAnything`). */
 const holdsFile = (db: NotesDatabase, connectionId: string): Promise<boolean> =>
 	db.transaction('r', db.files, db.fileBytes, async () => {
 		const rows = new Map(
-			(await db.files.where('connectionId').equals(connectionId).toArray()).map((file) => [
-				file.id,
-				file,
-			])
+			(await rowsOf(db.files, connectionId).toArray()).map((file) => [file.id, file])
 		);
-		const held = await db.fileBytes
-			.where('connectionId')
-			.equals(connectionId)
+		const held = await rowsOf(db.fileBytes, connectionId)
 			.filter((bytes) => {
 				const file = rows.get(bytes.id);
 				return file !== undefined && heldBytesAreCurrent(file, bytes);
