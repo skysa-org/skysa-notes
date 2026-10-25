@@ -10031,8 +10031,30 @@ describe('progress', () => {
 
 		await counted.pull();
 
-		const reads = said.filter((p) => p.stage === 'scanning' && p.path !== undefined);
-		expect(reads.map((p) => (p.stage === 'scanning' ? p.done : -1))).toEqual([1, 2, 3]);
+		const listing = (found: number) => ({ stage: 'scanning', found, done: 0, listing: true });
+		const reading = (done: number, path?: string) => ({
+			stage: 'scanning',
+			found: 3,
+			done,
+			listing: false,
+			...(path === undefined ? {} : { path }),
+		});
+		// The marker's page names no note; each page after is read, then applied.
+		expect(said).toEqual([
+			listing(0),
+			listing(0),
+			listing(1),
+			listing(2),
+			listing(3),
+			reading(0),
+			reading(0),
+			reading(1, 'a.md'),
+			reading(1),
+			reading(2, 'b.md'),
+			reading(2),
+			reading(3, 'c.md'),
+			reading(3),
+		]);
 	});
 
 	it('counts a note it already holds as done without reading it', async () => {

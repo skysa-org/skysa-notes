@@ -1,3 +1,5 @@
+import type { SyncOp } from './store.js';
+
 /**
  * How far the run under way has got, for `onProgress`: a scan's count, a
  * round's, and a push's, each kept while it runs and said each time it moves.
@@ -44,18 +46,23 @@ interface ScanCount {
 
 export const createProgress = (onProgress: (progress: SyncProgress) => void) => {
 	/**
-	 * The scan under way, for `onProgress`, and none during a round. Kept here
-	 * rather than threaded through every decision to the one place a note is
-	 * read; a scheduler runs one pull at a time per engine.
+	 * The scan under way, for `onProgress`, and none during a round. Kept by
+	 * the engine's one meter rather than threaded through every decision to
+	 * the one place a note is read; a scheduler runs one pull at a time per
+	 * engine, and each engine makes its own meter.
 	 */
 	const scans = new Map<'current', ScanCount>();
 
 	/**
-	 * The round under way, for `onProgress`, and none during a scan: how many
-	 * notes it names, how many of them are decided, and whether it is still
-	 * reading its pages. Kept here for the reason the scan's count is.
+	 * The round under way, for `onProgress`, and none during a scan: the notes
+	 * its pages name, how many it will decide and how many of them it has, and
+	 * whether it is still reading its pages. Kept for the reason the scan's
+	 * count is.
 	 */
-	const rounds = new Map<'current', { total: number; done: number; listing: boolean }>();
+	const rounds = new Map<
+		'current',
+		{ named: Set<string>; total: number; done: number; listing: boolean }
+	>();
 
 	/** The push under way, for `onProgress`: how long its queue was. */
 	const pushes = new Map<'current', number>();
@@ -129,24 +136,32 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 
 	/** `during`, as a round counted from nothing, said before its first page. */
 	const round = <T>(during: () => Promise<T>): Promise<T> => {
-		rounds.set('current', { total: 0, done: 0, listing: true });
+		rounds.set('current', { named: new Set(), total: 0, done: 0, listing: true });
 		reportRound();
 		return during().finally(() => {
 			rounds.delete('current');
 		});
 	};
 
-	/** How many notes the round's pages read so far name, now that it has grown. */
-	const roundNamed = (total: number): void => {
+	/**
+	 * The notes a round's page names, by remote id: the total so far is how
+	 * many the pages read so far name, said where that has grown.
+	 */
+	const roundListed = (ids: readonly string[]): void => {
 		const counted = rounds.get('current');
 		if (counted === undefined) return;
-		rounds.set('current', { ...counted, total });
+		const before = counted.named.size;
+		ids.forEach((id) => counted.named.add(id));
+		if (counted.named.size === before) return;
+		rounds.set('current', { ...counted, total: counted.named.size });
 		reportRound();
 	};
 
 	/** Every page read: the notes the round will decide, none of them yet. */
-	const roundListed = (total: number): void => {
-		rounds.set('current', { total, done: 0, listing: false });
+	const roundListingDone = (total: number): void => {
+		const counted = rounds.get('current');
+		if (counted === undefined) return;
+		rounds.set('current', { ...counted, total, done: 0, listing: false });
 		reportRound();
 	};
 
@@ -166,15 +181,15 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 		});
 	};
 
-	/** The push with this many ops left, the next of them at `path`. */
-	const pushLeft = (left: number, path: string | undefined): void => {
+	/** The push with this many ops left, `next` the first of them. */
+	const pushLeft = (left: number, next: SyncOp | undefined): void => {
 		const total = pushes.get('current') ?? 0;
 		if (total === 0) return;
 		onProgress({
 			stage: 'uploading',
 			done: total - left,
 			total,
-			...(path === undefined ? {} : { path }),
+			...(next === undefined ? {} : { path: next.targetPath ?? next.path }),
 		});
 	};
 
@@ -185,12 +200,10 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 		scanRead,
 		scanSettled,
 		round,
-		roundNamed,
 		roundListed,
+		roundListingDone,
 		roundDecided,
 		push,
 		pushLeft,
 	};
 };
-
-export type Progress = ReturnType<typeof createProgress>;

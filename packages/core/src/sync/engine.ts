@@ -2655,26 +2655,22 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const readRound = async (
 		cursor: string,
-		entries: readonly ChangeEntry[],
-		/** The notes the pages so far name, by remote id, for the count. */
-		named: Set<string>
+		entries: readonly ChangeEntry[]
 	): Promise<{ entries: ChangeEntry[]; cursor: string }> => {
 		const set = await provider.changes(cursor);
 		const all = [...entries, ...set.entries];
-		const before = named.size;
-		set.entries.filter(isNoteEntry).forEach((entry) => named.add(entry.remoteId));
-		if (named.size !== before) meter.roundNamed(named.size);
-		return set.more ? readRound(set.cursor, all, named) : { entries: all, cursor: set.cursor };
+		meter.roundListed(set.entries.filter(isNoteEntry).map((entry) => entry.remoteId));
+		return set.more ? readRound(set.cursor, all) : { entries: all, cursor: set.cursor };
 	};
 
-	/** A round's pages, then its decisions, counted as it goes (`rounds`). */
+	/** A round's pages, then its decisions, counted as it goes (`meter`). */
 	const countedRound = async (
 		cursor: string
 	): Promise<{ round: { entries: ChangeEntry[]; cursor: string }; changes: PullChange[] }> => {
-		const round = await readRound(cursor, [], new Set());
+		const round = await readRound(cursor, []);
 		// Counted as `decideAll` will see them, one entry per file. Said even
 		// when it is none, so that what is said is no longer that it is reading.
-		meter.roundListed(deduped(round.entries).filter(isNoteEntry).length);
+		meter.roundListingDone(deduped(round.entries).filter(isNoteEntry).length);
 		return { round, changes: await decideAll(round.entries, false) };
 	};
 
@@ -4065,7 +4061,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// Every call is handed what is left, so how far it has got is the rest:
 		// an op passed over, given up on or resolved is as done as one sent.
 		const [held, ...rest] = ops;
-		meter.pushLeft(ops.length, held === undefined ? undefined : (held.targetPath ?? held.path));
+		meter.pushLeft(ops.length, held);
 		if (held === undefined) return drained(progress);
 		const batch = together(ops);
 		const ready = batch.length > 1 ? await stillTogether(batch) : undefined;
