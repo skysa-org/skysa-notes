@@ -1,20 +1,15 @@
 import { EditorView } from '@codemirror/view';
-import {
-	createMemoryHistory,
-	createRouter,
-	type RouterHistory,
-	RouterProvider,
-} from '@tanstack/react-router';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { type RouterHistory } from '@tanstack/react-router';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
+import { renderApp } from './support/app.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -30,30 +25,19 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
 let fake: FakeWindow | undefined;
 let widths: FakeWidths | undefined;
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
 	fake?.restore();
 	fake = undefined;
 	widths?.restore();
 	widths = undefined;
-	await db.notes.clear();
-	await db.folders.clear();
-	await db.opQueue.clear();
-	await db.prefs.clear();
-	await db.syncState.clear();
 });
 
 const openApp = async (width = 800) => {
 	fake = windowWidth(width);
 	await setDefaultEditorMode(db, 'raw');
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-	return router;
+	return renderApp();
 };
 
 /** The Back an Android phone's swipe from the edge is. */

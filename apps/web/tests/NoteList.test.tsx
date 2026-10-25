@@ -1,6 +1,6 @@
 import { ROOT } from '@skysa/core';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { NoteList } from '../src/components/NoteList.js';
 import { type NoteRecord } from '../src/store/db.js';
@@ -11,8 +11,6 @@ import { createRenamings } from '../src/store/renaming.js';
  * put a note in, and an empty notebook — and telling the user the wrong one is
  * how an app that is merely slow looks broken.
  */
-
-afterEach(cleanup);
 
 const note = (title: string, body = ''): NoteRecord =>
 	({

@@ -80,7 +80,7 @@ const writesNothing = (req: DBCoreMutateRequest): boolean =>
 		? false
 		: (req.type === 'delete' ? req.keys : req.values).length === 0;
 
-/** Follow `db`'s transactions, from before it opens (`createDatabase`). */
+/** Follow `db`'s transactions, from before it opens (`watchTab`). */
 export const watchForHeldUp = (db: Dexie): void => {
 	/** This tab's transactions still going, oldest first, and whether each has had an answer. */
 	const going = new Map<DBCoreTransaction, { answered: boolean }>();

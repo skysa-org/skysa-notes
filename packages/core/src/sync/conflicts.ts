@@ -5,7 +5,14 @@ import {
 	splitFrontmatter,
 } from '../markdown/frontmatter.js';
 import { serializeNoteFile } from '../markdown/note.js';
-import { extensionAt, fitBytes, foldName, MAX_NAME_BYTES, utf8Length } from '../markdown/slug.js';
+import {
+	extensionAt,
+	fitBytes,
+	foldName,
+	isNoteName,
+	MAX_NAME_BYTES,
+	utf8Length,
+} from '../markdown/slug.js';
 import { basename, replaceBasename } from '../paths.js';
 
 /**
@@ -77,9 +84,7 @@ export const conflictFilename = (
 	// Folded, so `Report.MD` from a Windows tool loses its extension here rather
 	// than keeping it and taking a second one — the same question `deriveTitle`
 	// and `store/naming.ts` ask, answered the same way.
-	const stem = foldName(filename).endsWith(NOTE_EXTENSION)
-		? filename.slice(0, -NOTE_EXTENSION.length)
-		: filename;
+	const stem = isNoteName(filename) ? filename.slice(0, -NOTE_EXTENSION.length) : filename;
 	return conflictName(stem, NOTE_EXTENSION, at, taken);
 };
 

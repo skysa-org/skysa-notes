@@ -41,6 +41,17 @@ export const isSecretBlock = (language: string | null | undefined, text: string)
 	secretFile(language, text) !== undefined;
 
 /**
+ * Whether a fenced block is kept out of what is shown or indexed of a note's
+ * words: `age`, and opening as armor, whether the armor reads or not. Every
+ * secret is one (`isSecretBlock`), and so is armor cut short, by a list row's
+ * length or by damage, since what is left of it is ciphertext still. Search
+ * (`withoutArmor`) and previews (`previewBlocks`) both ask this, so that a
+ * card never shows what search has left out, nor the other way round.
+ */
+export const hidesAsSecret = (language: string | null | undefined, text: string): boolean =>
+	language === SECRET_LANGUAGE && looksArmored(text);
+
+/**
  * What a secret's fence calls it, from the rest of its info string after `age`
  * (a fence's `meta`): shown where the secret is closed in place of the app's
  * own word for one. Plain text, read by anyone who can read the note.
@@ -94,7 +105,7 @@ export const withoutArmor = (body: string): string => {
 			};
 			const from = position?.start.offset;
 			const to = position?.end.offset;
-			if (lang !== SECRET_LANGUAGE || !looksArmored(value)) return [];
+			if (!hidesAsSecret(lang, value)) return [];
 			if (from === undefined || to === undefined) return [];
 			return [{ from, to, label: secretLabel(meta) ?? '' }];
 		}

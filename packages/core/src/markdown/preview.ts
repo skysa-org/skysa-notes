@@ -1,7 +1,6 @@
 import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
-import { looksArmored } from '../age/armor.js';
-import { isSecretBlock, SECRET_LANGUAGE, secretLabel } from '../secrets.js';
+import { hidesAsSecret, secretLabel } from '../secrets.js';
 import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 import { decodeCharacterReferences } from './references.js';
@@ -14,7 +13,7 @@ import { decodeCharacterReferences } from './references.js';
  * thematic breaks all go. So does inline syntax: `**bold**` reads "bold", and a
  * link reads as its words without its URL. A code block keeps every character it
  * holds, because inside one nothing is markdown, and that is also what the
- * editor shows there — except a secret (`isSecretBlock`), whose ciphertext is no
+ * editor shows there — except a secret (`hidesAsSecret`), whose ciphertext is no
  * words of the note's: it is a line of its own with no words in it, only a
  * secret's mark (`PreviewEmbed`), so no list, card or search ever holds a run of
  * base64, and a card can say "Secret" where the note has one
@@ -244,8 +243,7 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 			// A secret cut short is one still: a list row's opening is cut at a
 			// length (`visibleText.ts` in the web app), and what is left of the
 			// armor would otherwise be shown as the code it is not.
-			return isSecretBlock(node.lang, node.value) ||
-				(node.lang === SECRET_LANGUAGE && looksArmored(node.value))
+			return hidesAsSecret(node.lang, node.value)
 				? as([[{ text: '', marks: [], embed: secretEmbed(node.meta) }]])
 				: as(plainLines(node.value), { code: true });
 		case 'html':
