@@ -49,9 +49,11 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 | `pnpm build` | Build core, SPA, then a Worker dry-run bundle |
 | `pnpm size` | Check the built SPA against its size budget (after `pnpm build`) |
 | `pnpm test` | Vitest across all packages |
+| `pnpm coverage` | The same tests as one run with coverage, against the thresholds in `vitest.config.ts` |
 | `pnpm lint` / `pnpm lint:fix` | ESLint across all packages, with or without auto-fix |
 | `pnpm typecheck` | `tsc --noEmit` across all packages, and core's source again with no Node types |
 | `pnpm format` / `pnpm format:check` | Prettier write / check |
+| `pnpm knip` | Unused files, exports and dependencies (CI reports it; it does not gate yet) |
 | `pnpm verify` | format:check + lint + typecheck + test — run before every commit |
 | `pnpm db:generate` | Generate a Drizzle migration from the schema |
 | `pnpm db:migrate` / `pnpm db:migrate:remote` | Apply migrations locally / to Cloudflare |
