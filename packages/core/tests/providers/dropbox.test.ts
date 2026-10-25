@@ -107,6 +107,8 @@ describe('mapping Dropbox failures onto typed errors', () => {
 		expect(error).not.toBeInstanceOf(NotFoundError);
 		expect(error).not.toBeInstanceOf(CursorResetError);
 		expect(isRateLimitError(error) && error.retryAfterMs).toBe(7000);
+		// Said as the other adapters say theirs: with what Dropbox called it.
+		expect(String(error)).toContain('dropbox rate limit (429): too_many_requests/...');
 		expect(String(error)).toContain('7s');
 	});
 

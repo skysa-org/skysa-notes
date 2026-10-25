@@ -240,7 +240,9 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (failure.status === 401) throw new AuthError(failure.summary);
 		if (tagged(failure, 'reset')) throw new CursorResetError(failure.summary);
 		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
-		if (failure.status === 429) throw rateLimited('dropbox', 429, failure.retryAfterMs);
+		if (failure.status === 429) {
+			throw rateLimited('dropbox', 429, failure.retryAfterMs, failure.summary);
+		}
 		throw new Error(`dropbox ${String(failure.status)}: ${failure.summary}`);
 	};
 
