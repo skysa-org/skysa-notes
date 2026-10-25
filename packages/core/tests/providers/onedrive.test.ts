@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { FetchLike } from '../../src/providers/dropbox.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import {
 	AuthError,
@@ -254,6 +254,32 @@ describe('moving', () => {
 		const moved = await over(doFetch).move({ remoteId: 'f1', path: 'a.md' }, 'A.md');
 		expect(moved.path).toBe('A.md');
 		expect(seen.some((r) => r.init.method === 'PATCH')).toBe(true);
+	});
+});
+
+describe('the app folder', () => {
+	it('is never deleted or moved, named by its path or its id', async () => {
+		// Graph answers the app folder by its id like any other item, and would
+		// take a PATCH or a DELETE of it, so nothing is to be sent at all.
+		const { doFetch, seen } = scripted((_url, init) => {
+			const root = { id: 'root', name: 'Skysa Notes', folder: {}, eTag: 'e0' };
+			if (init.method === 'GET') return Response.json(root);
+			if (init.method === 'PATCH') return Response.json({ ...root, name: 'Archive' });
+			if (init.method === 'DELETE') return new Response(null, { status: 204 });
+			return undefined;
+		});
+		const provider = over(doFetch);
+
+		for (const named of [
+			{ remoteId: 'root', path: '' },
+			{ remoteId: 'root', path: 'Elsewhere' },
+			{ remoteId: '', path: '' },
+		]) {
+			await expect(provider.delete(named)).rejects.toThrow(NotFoundError);
+			await expect(provider.move(named, 'Archive')).rejects.toThrow(NotFoundError);
+		}
+
+		expect(seen.filter((r) => r.init.method !== 'GET')).toEqual([]);
 	});
 });
 
