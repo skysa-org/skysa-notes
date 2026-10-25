@@ -26,9 +26,9 @@ export const readJson = <T>(value: string | undefined, schema: z.ZodType<T>): T 
 
 /**
  * Every pref kept for each source, by name. `sourceKey` takes nothing else, so
- * a pref added for a source is added here, and forgetting the source
- * (`forgetSourcePrefs`) or resuming it under a new id (`carrySourcePrefs`)
- * cannot miss it (#452).
+ * a pref added for a source is added here, and `store/sourcePrefs.ts`, which
+ * forgets a source's prefs with it and carries them to it under a new id, is
+ * made to say how it merges (#452).
  */
 export const PREF_KEYS = [
 	'lastOpen',
@@ -45,44 +45,6 @@ export type SourcePref = (typeof PREF_KEYS)[number];
 /** The key of a pref kept for each source: `<name>:<connectionId>`. */
 export const sourceKey = (name: SourcePref, connectionId: string): string =>
 	`${name}:${connectionId}`;
-
-/**
- * A source forgotten on this device: what it remembered of it goes too. Prefs
- * an earlier release left behind for a source it forgot are left alone, since
- * nothing here can tell one of those from a source this device has not loaded.
- */
-export const forgetSourcePrefs = async (
-	db: Pick<NotesDatabase, 'prefs'>,
-	connectionId: string
-): Promise<void> => {
-	await db.prefs.bulkDelete(PREF_KEYS.map((name) => sourceKey(name, connectionId)));
-};
-
-/**
- * Detached sources resumed under `connectionId`: the user is back at the same
- * library, so what this device remembered of it comes too, pins and all. The
- * first of `from` to hold a pref gives it, unless `connectionId` holds that
- * pref already; the old ids' rows go either way, as `carryKeys` does with a
- * key.
- */
-export const carrySourcePrefs = async (
-	db: Pick<NotesDatabase, 'prefs'>,
-	from: readonly string[],
-	connectionId: string
-): Promise<void> => {
-	if (from.length === 0) return;
-	await Promise.all(
-		PREF_KEYS.map(async (name) => {
-			const key = sourceKey(name, connectionId);
-			const held = await db.prefs.bulkGet(from.map((id) => sourceKey(name, id)));
-			const carried = held.find((row) => row !== undefined);
-			if (carried !== undefined && (await db.prefs.get(key)) === undefined) {
-				await db.prefs.put({ key, value: carried.value });
-			}
-		})
-	);
-	await db.prefs.bulkDelete(from.flatMap((id) => PREF_KEYS.map((name) => sourceKey(name, id))));
-};
 
 export const DEFAULT_EDITOR_MODE_KEY = 'defaultEditorMode';
 

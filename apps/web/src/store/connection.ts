@@ -35,11 +35,11 @@ import { movedRows } from './movedRows.js';
 import { foldPath, freePath, pathDepth, respell } from './naming.js';
 import { noteFile } from './notes.js';
 import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
-import { carrySourcePrefs, forgetSourcePrefs } from './prefs.js';
 import { queueByNotebook } from './queue.js';
 import { rowsOf } from './rows.js';
 import { isLive, isLiveSource, isTombstone } from './rowStates.js';
 import { sourceTables } from './scopes.js';
+import { carrySourcePrefs, forgetSourcePrefs } from './sourcePrefs.js';
 import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from './unsynced.js';
 
 /**
@@ -116,6 +116,7 @@ type Scope = Pick<
 	| 'pictureBytes'
 	| 'keyFiles'
 	| 'secretKeys'
+	| 'prefs'
 >;
 
 /** `accountId` on a `syncState` row, or nothing where the API did not name one. */
@@ -717,6 +718,19 @@ const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
 export const holdsPile = (state: SyncStateRecord): boolean =>
 	state.importing !== undefined && isLiveSource(state);
 
+/**
+ * The pile copied into a source by a bind. For good, with no import to cancel
+ * back to (`importing`) and none holding it already (`held`), it is empty, and
+ * what was remembered of it names nothing.
+ */
+const pileCopied = async (
+	db: Pick<NotesDatabase, 'prefs'>,
+	{ importing, held }: { importing: boolean; held: boolean }
+): Promise<void> => {
+	if (importing || held) return;
+	await forgetSourcePrefs(db, LOCAL_CONNECTION_ID);
+};
+
 /** A source with no row of its own and nothing detached to resume: new here. */
 const firstBinding = (
 	states: readonly SyncStateRecord[],
@@ -777,6 +791,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 					undefined,
 					importing !== undefined
 				);
+		await pileCopied(db, { importing: importing !== undefined, held: states.some(holdsPile) });
 		const moved = together(together(resumed, waiting), copied);
 
 		// Every other connected source keeps its `syncState` row, and with it its
@@ -1113,6 +1128,8 @@ export const finishImport = (db: NotesDatabase, connectionId: string): Promise<v
 
 const clearPile = async (db: Scope): Promise<void> => {
 	await forgetRows(db, LOCAL_CONNECTION_ID);
+	// Nothing left of the pile for them to name.
+	await forgetSourcePrefs(db, LOCAL_CONNECTION_ID);
 };
 
 /** Every row a connection holds, of every kind, and every op queued for it. */

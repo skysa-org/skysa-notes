@@ -72,6 +72,52 @@ export const rememberRecent = async (
 };
 
 /**
+ * Rewrite the list, and not at all where nothing changes: inside the caller's
+ * transaction, which is the one forgetting or binding the source. `change` is
+ * handed the keys newest first and returns them in the same order.
+ *
+ * Dexie's own promise, not an `async` function's, as `forgetClips` in
+ * `store/connection.ts` says why: a native layer more between the transaction
+ * and this write is one Dexie does not follow, and it commits early.
+ */
+const rewrite = (
+	db: Pick<NotesDatabase, 'prefs'>,
+	change: (keys: readonly NoteKey[]) => NoteKey[]
+): Promise<unknown> =>
+	db.prefs.get(KEY).then((row) => {
+		const value = JSON.stringify(change(read(row?.value)));
+		const same = row === undefined ? value === '[]' : value === row.value;
+		return same ? undefined : db.prefs.put({ key: KEY, value });
+	});
+
+/** A source forgotten: its notes leave the list (`store/sourcePrefs.ts`). */
+export const forgetRecentOf = (
+	db: Pick<NotesDatabase, 'prefs'>,
+	connectionId: string
+): Promise<unknown> => rewrite(db, (keys) => keys.filter(([source]) => source !== connectionId));
+
+/**
+ * Sources resumed under `connectionId`: their notes keep their places in the
+ * list, under the id they are under now. Where that names a note twice, the
+ * newer place is the one kept.
+ */
+export const carryRecent = (
+	db: Pick<NotesDatabase, 'prefs'>,
+	from: readonly string[],
+	connectionId: string
+): Promise<unknown> =>
+	rewrite(db, (keys) => {
+		const moved = keys.map(([source, id]): NoteKey => [
+			from.includes(source) ? connectionId : source,
+			id,
+		]);
+		return moved.filter(
+			([source, id], at) =>
+				moved.findIndex(([other, otherId]) => other === source && otherId === id) === at
+		);
+	});
+
+/**
  * The notes to list, newest first: those still on the device and not deleted,
  * notes and not cards or password items, and not `skip` — the note on screen,
  * as a `noteRef`, which there is no going back to. At most `RECENT_SHOWN`.

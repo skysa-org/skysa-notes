@@ -2,9 +2,11 @@ import { parentPath, ROOT } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
 import {
+	abandonImport,
 	bindConnection,
 	connectedSources,
 	detachConnection,
+	finishImport,
 	releaseConnection,
 	showConnection,
 } from '../src/store/connection.js';
@@ -30,8 +32,14 @@ import {
 	saveNoteBody,
 } from '../src/store/notes.js';
 import { getPinnedNotes, setNotePinned } from '../src/store/pins.js';
-import { DEFAULT_EDITOR_MODE_KEY, PREF_KEYS, sourceKey } from '../src/store/prefs.js';
+import {
+	DEFAULT_EDITOR_MODE_KEY,
+	PREF_KEYS,
+	sourceKey,
+	type SourcePref,
+} from '../src/store/prefs.js';
 import { queueWrite } from '../src/store/queue.js';
+import { getRecentKeys, rememberRecent } from '../src/store/recentNotes.js';
 import { countOf, isEmpty, type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.js';
 import { holdCredential } from './support/connection.js';
@@ -1048,16 +1056,38 @@ describe('a source’s keys for secrets (§7)', () => {
 });
 
 describe('what this device remembers of a source (#452)', () => {
-	/** Every pref kept for a source, set to `value`. */
-	const remembering = (db: NotesDatabase, connectionId: string, value = 'kept') =>
-		db.prefs.bulkPut(PREF_KEYS.map((name) => ({ key: sourceKey(name, connectionId), value })));
+	/** A value of each pref's own shape, as the modules that keep them write them. */
+	const VALUES: Readonly<Record<SourcePref, string>> = {
+		lastOpen: JSON.stringify({ folder: 'Work', notes: { Work: 'n1' } }),
+		openNotebooks: JSON.stringify(['Work']),
+		passwords: 'true',
+		pinnedNotebooks: JSON.stringify(['Work']),
+		bottomPinnedNotebooks: JSON.stringify(['Later']),
+		pinnedNotes: JSON.stringify(['n1']),
+		scratchpad: 'false',
+	};
 
-	const remembered = async (db: NotesDatabase, connectionId: string) =>
-		(await db.prefs.bulkGet(PREF_KEYS.map((name) => sourceKey(name, connectionId)))).map(
-			(row) => row?.value
+	const remembering = (
+		db: NotesDatabase,
+		connectionId: string,
+		values: Partial<Record<SourcePref, string>> = VALUES
+	) =>
+		db.prefs.bulkPut(
+			Object.entries(values).map(([name, value]) => ({
+				key: sourceKey(name as SourcePref, connectionId),
+				value,
+			}))
 		);
 
-	const NONE = PREF_KEYS.map(() => undefined);
+	const remembered = async (db: NotesDatabase, connectionId: string) => {
+		const rows = await db.prefs.bulkGet(PREF_KEYS.map((name) => sourceKey(name, connectionId)));
+		return Object.fromEntries(
+			PREF_KEYS.flatMap((name, at) => {
+				const value = rows[at]?.value;
+				return value === undefined ? [] : [[name, value]];
+			})
+		);
+	};
 
 	/** Ada's source, remembered, and let go of with a note it was never sent. */
 	const detachedRemembering = async () => {
@@ -1074,20 +1104,23 @@ describe('what this device remembers of a source (#452)', () => {
 		await pushed(db, 'plan.md');
 		await remembering(db, ADA.connectionId);
 		await remembering(db, BOB.connectionId);
+		await rememberRecent(db, BOB.connectionId, 'n2');
+		await rememberRecent(db, ADA.connectionId, 'n1');
 		await db.prefs.put({ key: DEFAULT_EDITOR_MODE_KEY, value: 'raw' });
 
 		await detachConnection(db, ada);
 
 		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
-		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
-		expect(await remembered(db, BOB.connectionId)).toEqual(PREF_KEYS.map(() => 'kept'));
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
+		expect(await remembered(db, BOB.connectionId)).toEqual(VALUES);
+		expect(await getRecentKeys(db)).toEqual([[BOB.connectionId, 'n2']]);
 		expect((await db.prefs.get(DEFAULT_EDITOR_MODE_KEY))?.value).toBe('raw');
 	});
 
 	it('stays while notes it was never sent do', async () => {
 		const db = await detachedRemembering();
 
-		expect(await remembered(db, ADA.connectionId)).toEqual(PREF_KEYS.map(() => 'kept'));
+		expect(await remembered(db, ADA.connectionId)).toEqual(VALUES);
 	});
 
 	it('goes when those notes are discarded', async () => {
@@ -1101,16 +1134,18 @@ describe('what this device remembers of a source (#452)', () => {
 			})
 		).toBe('released');
 
-		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
 	});
 
 	it('goes home with the notes, under a new id for the same account', async () => {
 		const db = await detachedRemembering();
+		await rememberRecent(db, ADA.connectionId, 'n1');
 
 		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
 
-		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
-		expect(await remembered(db, 'c-ada-2')).toEqual(PREF_KEYS.map(() => 'kept'));
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
+		expect(await remembered(db, 'c-ada-2')).toEqual(VALUES);
+		expect(await getRecentKeys(db)).toEqual([['c-ada-2', 'n1']]);
 	});
 
 	it('keeps a pinned note pinned when it goes home under a new id', async () => {
@@ -1124,15 +1159,48 @@ describe('what this device remembers of a source (#452)', () => {
 		expect(await getPinnedNotes(db, 'c-ada-2')).toEqual([note.id]);
 	});
 
-	it('gives way to what the connection it goes home to already remembers', async () => {
+	it('is merged with what the connection it goes home to remembers already', async () => {
 		const db = await detachedRemembering();
-		await db.prefs.put({ key: sourceKey('lastOpen', 'c-ada-2'), value: 'its own' });
+		await remembering(db, 'c-ada-2', {
+			lastOpen: JSON.stringify({ folder: 'Other', notes: { Work: 'n9', Other: 'n2' } }),
+			pinnedNotes: JSON.stringify(['n2', 'n1']),
+			scratchpad: 'true',
+		});
 
 		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
 
-		expect((await db.prefs.get(sourceKey('lastOpen', 'c-ada-2')))?.value).toBe('its own');
-		expect((await db.prefs.get(sourceKey('scratchpad', 'c-ada-2')))?.value).toBe('kept');
-		expect(await remembered(db, ADA.connectionId)).toEqual(NONE);
+		expect(await remembered(db, 'c-ada-2')).toEqual({
+			...VALUES,
+			// Its own notebook, and its own note where both name one notebook.
+			lastOpen: JSON.stringify({ folder: 'Other', notes: { Work: 'n9', Other: 'n2' } }),
+			// Both, its own last, as the newest.
+			pinnedNotes: JSON.stringify(['n2', 'n1']),
+			scratchpad: 'true',
+		});
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
+	});
+
+	it('comes home from every detached source of the account at once', async () => {
+		const db = await detachedRemembering();
+		// The same account let go of twice, under two ids, each still holding
+		// something unsent.
+		const state = await db.syncState.get(ADA.connectionId);
+		if (state === undefined) throw new Error('no detached source');
+		await db.syncState.put({ ...state, connectionId: 'c-ada-0' });
+		await remembering(db, 'c-ada-0', {
+			pinnedNotes: JSON.stringify(['n3']),
+			openNotebooks: JSON.stringify(['Work', 'Old']),
+		});
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		const home = await remembered(db, 'c-ada-2');
+		expect(JSON.parse(home.pinnedNotes ?? '[]')).toEqual(expect.arrayContaining(['n1', 'n3']));
+		expect(JSON.parse(home.openNotebooks ?? '[]')).toEqual(
+			expect.arrayContaining(['Work', 'Old'])
+		);
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
+		expect(await remembered(db, 'c-ada-0')).toEqual({});
 	});
 
 	it('stays where it is under the same id, live again', async () => {
@@ -1140,6 +1208,32 @@ describe('what this device remembers of a source (#452)', () => {
 
 		await bindConnection(db, ADA);
 
-		expect(await remembered(db, ADA.connectionId)).toEqual(PREF_KEYS.map(() => 'kept'));
+		expect(await remembered(db, ADA.connectionId)).toEqual(VALUES);
+	});
+
+	it('goes for a source whose first import is cancelled, and the pile keeps its own', async () => {
+		const db = freshDatabase();
+		await remembering(db, LOCAL_CONNECTION_ID);
+		await bindConnection(db, ADA);
+		await remembering(db, ADA.connectionId);
+
+		expect(await abandonImport(db, ADA.connectionId)).toBe('abandoned');
+
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
+		expect(await remembered(db, LOCAL_CONNECTION_ID)).toEqual(VALUES);
+	});
+
+	it('goes for the pile once its import is done and the pile with it', async () => {
+		const db = freshDatabase();
+		await remembering(db, LOCAL_CONNECTION_ID);
+		await rememberRecent(db, LOCAL_CONNECTION_ID, 'n1');
+		await bindConnection(db, ADA);
+		// Kept while the import can still be cancelled back to the pile.
+		expect(await remembered(db, LOCAL_CONNECTION_ID)).toEqual(VALUES);
+
+		await finishImport(db, ADA.connectionId);
+
+		expect(await remembered(db, LOCAL_CONNECTION_ID)).toEqual({});
+		expect(await getRecentKeys(db)).toEqual([]);
 	});
 });
