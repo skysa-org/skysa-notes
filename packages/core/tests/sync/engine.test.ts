@@ -10019,6 +10019,22 @@ describe('progress', () => {
 		expect(reads.sort()).toEqual(['a.md', 'b.md']);
 	});
 
+	it('counts each note once across pages, the one being read and the ones applied', async () => {
+		// One note a page, so a page's reads are let go of as it is applied:
+		// counted again, the third page would say three done with two.
+		provider = createFakeProvider({ pageSize: 1 });
+		await provider.ensureRoot();
+		await provider.write('a.md', '1\n', {});
+		await provider.write('b.md', '2\n', {});
+		await provider.write('c.md', '3\n', {});
+		const { said, counted } = watching(provider);
+
+		await counted.pull();
+
+		const reads = said.filter((p) => p.stage === 'scanning' && p.path !== undefined);
+		expect(reads.map((p) => (p.stage === 'scanning' ? p.done : -1))).toEqual([1, 2, 3]);
+	});
+
 	it('counts a note it already holds as done without reading it', async () => {
 		const held = await remoteFile('a.md', '1\n');
 		await remoteFile('b.md', '2\n');
