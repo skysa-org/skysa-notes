@@ -1696,6 +1696,7 @@ packages/
                               #   files.ts (files that are not notes: uploaded, moved, deleted, beside what they meet)
                               #   notes.ts (notes: written after a rename, renamed or moved aside, deleted)
                               #   conflicts.ts (a write the remote would not take: set aside under a conflict name, or reconciled)
+                              #   drain.ts (the queue drained in order, op by op, writes sent together, a failed op answered; createPush wires the parts)
       markdown/
         frontmatter.ts slug.ts
         pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
