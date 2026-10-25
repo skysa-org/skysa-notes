@@ -274,7 +274,6 @@ export const createPullDeletions = (
 		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		const { path, remoteId } = entry;
-		const { live } = batch;
 
 		// A file that is not a note, first: it is matched by id or by where
 		// its file is, and never takes a note or a folder with it.
@@ -306,7 +305,7 @@ export const createPullDeletions = (
 		const { note: local, byOldName } = await deletedNote(entry, { batch, decided });
 
 		if (await movedNotDeleted(path, remoteId, local, { batch, decided, at })) return [];
-		const moved = await movedFolderOver(path, remoteId, live, { decided, at });
+		const moved = await movedFolderOver(path, remoteId, { batch, decided, at });
 		if (moved?.kind === 'itself') return [];
 		if (moved?.kind === 'under' && path !== undefined) {
 			return [

@@ -14,7 +14,7 @@ import { type EngineContext } from '../context.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
 import { type PullChange, type SyncFolder, type SyncNote } from '../store.js';
 import { type PullAttachments } from './attachments.js';
-import { aliveElsewhere, leavesFor, listedAfter, type LiveEntries, type Step } from './batch.js';
+import { aliveElsewhere, leavesFor, listedAfter, type Step } from './batch.js';
 import { type Cascade } from './cascade.js';
 import { type Occupancy } from './occupancy.js';
 import { folderBefore, folderNow, remoteNow } from './replay.js';
@@ -61,8 +61,7 @@ export const createPullFolders = (
 	const movedFolderOver = async (
 		path: string | undefined,
 		remoteId: string | undefined,
-		live: LiveEntries,
-		{ decided, at }: Pick<Step, 'decided' | 'at'>
+		{ batch: { live }, decided, at }: Step
 	): Promise<MovedOver | undefined> => {
 		if (remoteId !== undefined || path === undefined) return undefined;
 		// Nearest first: the folder closest above the path is the one whose
