@@ -57,6 +57,7 @@ import {
 import { settleEditors } from '../store/heldEdits.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
 import { getNote } from '../store/notes.js';
+import { rowsOf } from '../store/rows.js';
 import { getScratchpadShown, setScratchpadShown } from '../store/scratchpad.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
@@ -1545,9 +1546,9 @@ const prepare = async (
 		await Promise.race([push().catch(() => undefined), after(LAST_PUSH_MS)]);
 	}
 	const listed = await unsyncedIn(database, connectionId);
-	const standing = (
-		await database.folders.where('connectionId').equals(connectionId).toArray()
-	).map((folder) => folder.path);
+	const standing = (await rowsOf(database.folders, connectionId).toArray()).map(
+		(folder) => folder.path
+	);
 	return { listed, seen: seenIn(listed, standing), failing: holdsTextFor(settled, connectionId) };
 };
 
