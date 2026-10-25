@@ -3,7 +3,7 @@ import { type DeletedEntry, type RemoteEntry } from '../../providers/types.js';
 import { conflictFilePath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { type PullChange, type SyncOp } from '../store.js';
-import { aliveElsewhere, type Batch, listedAfter } from './batch.js';
+import { aliveElsewhere, type Batch, listedAfter, type Step } from './batch.js';
 import { type FileBase, fileGone, type FilePlace, placedFiles, startingFiles } from './files.js';
 
 /**
@@ -33,7 +33,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	});
 
 	/** The rows a folder's deletion left with no file (`FilePlace.stranded`). */
-	const strandedFiles = (decided: readonly PullChange[], batch: Batch): PullChange[] =>
+	const strandedFiles = ({ batch, decided }: Pick<Step, 'batch' | 'decided'>): PullChange[] =>
 		[...filesNow(batch.files, decided).values()].flatMap((file) =>
 			file.stranded ? [fileGone(file)] : []
 		);
@@ -95,9 +95,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	const clearFilePath = (
 		path: string,
 		own: string | undefined,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): PullChange[] =>
 		[...filesNow(batch.files, decided).values()]
 			.filter((file) => file.at === path && file.id !== own)
@@ -117,17 +115,15 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	 * answer never came, or the same picture added on two devices — which is
 	 * adopted rather than sent again; otherwise a new row.
 	 */
-	const decideAttachment = (
-		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
-	): PullChange[] => {
+	const decideAttachment = (entry: RemoteEntry, { batch, decided, at }: Step): PullChange[] => {
 		// The user has deleted it here, and the delete has not run: what the
 		// remote says of it is old news, and the store would pass it over.
 		if (batch.files.deleting.has(entry.remoteId)) return [];
-		const taken = originsTaken(entry, decided, batch, at);
-		return [...taken, ...placeAttachment(entry, [...decided, ...taken], batch, at)];
+		const taken = originsTaken(entry, { batch, decided, at });
+		return [
+			...taken,
+			...placeAttachment(entry, { batch, decided: [...decided, ...taken], at }),
+		];
 	};
 
 	/**
@@ -139,12 +135,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	 * moved away, the move would find nothing to move and leave the row bound
 	 * to nothing. Gone, as a deletion would have said (#194).
 	 */
-	const originsTaken = (
-		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
-	): PullChange[] =>
+	const originsTaken = (entry: RemoteEntry, { batch, decided, at }: Step): PullChange[] =>
 		[...filesNow(batch.files, decided).values()].flatMap((file) => {
 			if (!file.moving || file.remoteId === undefined || file.remote !== entry.path)
 				return [];
@@ -152,12 +143,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 			return file.remoteId === entry.remoteId || later ? [] : [fileGone(file)];
 		});
 
-	const placeAttachment = (
-		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
-	): PullChange[] => {
+	const placeAttachment = (entry: RemoteEntry, { batch, decided, at }: Step): PullChange[] => {
 		const view = [...filesNow(batch.files, decided).values()];
 		const size = entry.size ?? 0;
 		const own = view.find((file) => file.remoteId === entry.remoteId);
@@ -171,7 +157,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 				return [{ kind: 'upsert-file', fileId: own.id, path: own.at, remote: entry }];
 			}
 			return [
-				...clearFilePath(entry.path, own.id, decided, batch, at),
+				...clearFilePath(entry.path, own.id, { batch, decided, at }),
 				{ kind: 'upsert-file', fileId: own.id, path: entry.path, remote: entry },
 			];
 		}
@@ -190,7 +176,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 			];
 		}
 		return [
-			...clearFilePath(entry.path, undefined, decided, batch, at),
+			...clearFilePath(entry.path, undefined, { batch, decided, at }),
 			{ kind: 'upsert-file', fileId: newId(), path: entry.path, remote: entry },
 		];
 	};
@@ -198,8 +184,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	/** The other way round: a file renamed into a note. Its row goes. */
 	const fileNoLonger = (
 		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): PullChange[] => {
 		const file = [...filesNow(batch.files, decided).values()].find(
 			(each) => each.remoteId === entry.remoteId
@@ -216,9 +201,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	 */
 	const deletedFile = (
 		{ path, remoteId }: DeletedEntry,
-		batch: Batch,
-		decided: readonly PullChange[],
-		at: number
+		{ batch, decided, at }: Step
 	): PullChange[] | undefined => {
 		const rows = [...filesNow(batch.files, decided).values()];
 		const file =
@@ -242,8 +225,7 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	const fileUnderMoved = (
 		path: string,
 		over: Readonly<{ from: string; to: string }>,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): PullChange[] => {
 		const was = rebasePath(path, over.from, over.to);
 		const file = [...filesNow(batch.files, decided).values()].find(
@@ -263,7 +245,10 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 	 * two such rows the file really is, nothing in the batch says any more,
 	 * and the wrong one costs a picture that does not show until a scan.
 	 */
-	const settleFileClashes = (decided: readonly PullChange[], batch: Batch): PullChange[] => {
+	const settleFileClashes = ({
+		batch,
+		decided,
+	}: Pick<Step, 'batch' | 'decided'>): PullChange[] => {
 		const groups = [...filesNow(batch.files, decided).values()].reduce<
 			Map<string, FilePlace[]>
 		>((map, file) => map.set(file.at, [...(map.get(file.at) ?? []), file]), new Map());
