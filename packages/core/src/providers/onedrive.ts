@@ -7,6 +7,7 @@ import {
 	isSelf,
 	outsideRoot,
 	readAsText,
+	refuseRoot,
 	rootFolderEntry,
 	writeMarkerOnce,
 } from './adapter.js';
@@ -311,7 +312,13 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		throw new Error(`onedrive ${String(failure.status)}: ${detail}`);
 	};
 
-	const { attempt, call } = createTransport({ fetch: doFetch, getAccessToken, failureOf, raise });
+	const { attempt, call } = createTransport({
+		kind: 'onedrive',
+		fetch: doFetch,
+		getAccessToken,
+		failureOf,
+		raise,
+	});
 
 	const rootId = async (): Promise<string> => {
 		const cached = rootBox.get('id');
@@ -549,6 +556,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		await refuseRoot(entry, rootId);
 		const target = normalizePath(newPath);
 		if (target === ROOT) throw new NotFoundError(target);
 
@@ -589,6 +597,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	};
 
 	const remove = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
 		const id = await idOf(entry);
 		// Idempotent: something already gone is the outcome the caller wanted.
 		if (id === undefined) return;
