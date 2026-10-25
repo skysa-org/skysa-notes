@@ -143,3 +143,6 @@ export const createFolderPush = ({ provider, store }: EngineContext) => {
 
 	return { ensureRemoteFolder, making, runRmdir };
 };
+
+/** What the push's other parts are handed of it. */
+export type FolderPush = ReturnType<typeof createFolderPush>;
