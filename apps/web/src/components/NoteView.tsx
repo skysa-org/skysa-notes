@@ -26,6 +26,7 @@ import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor, type RichEditorProps } from '../editor/RichEditor.js';
 import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
@@ -726,10 +727,7 @@ export const NoteView = ({
 
 	// The note as last shown. An edit carries it: a copy of the edit is written
 	// from it, and a note a sync deleted is brought back as it.
-	const shown = useRef(note);
-	useEffect(() => {
-		shown.current = note;
-	}, [note]);
+	const shownRef = useLatest(note);
 
 	const save = useCallback(
 		({ body, origin, note: typedInto }: Edit, context?: SaveContext) => {
@@ -783,13 +781,13 @@ export const NoteView = ({
 			// Stored before the edit is held: the save that follows opens its
 			// write after this one, and so finds the note there to write into.
 			if (draft !== undefined) void draft.store();
-			const typedInto = shown.current;
+			const typedInto = shownRef.current;
 			if (typedInto !== undefined) liveEdits?.typed(noteRef(typedInto), body, origin);
 			change({ body, origin, note: typedInto });
 			edited();
 			editedInVisit(body, origin);
 		},
-		[change, edited, draft, liveEdits, editedInVisit]
+		[change, edited, draft, liveEdits, editedInVisit, shownRef]
 	);
 
 	const rename = useCallback(

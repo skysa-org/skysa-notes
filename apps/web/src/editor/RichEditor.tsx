@@ -17,6 +17,7 @@ import {
 	useSyncExternalStore,
 } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { useCodeDisplay } from '../store/hooks.js';
 import type { AttachmentHost } from './attachHost.js';
 import { richFindTarget } from './findRich.js';
@@ -138,20 +139,11 @@ const EditorBody = ({
 	toolbarEnd,
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
-	const notify = useRef(onUserEdit);
-	useEffect(() => {
-		notify.current = onUserEdit;
-	}, [onUserEdit]);
+	const notify = useLatest(onUserEdit);
 
-	const unsupported = useRef(onUnsupported);
-	useEffect(() => {
-		unsupported.current = onUnsupported;
-	}, [onUnsupported]);
+	const unsupported = useLatest(onUnsupported);
 
-	const replaced = useRef(onAdopted);
-	useEffect(() => {
-		replaced.current = onAdopted;
-	}, [onAdopted]);
+	const replaced = useLatest(onAdopted);
 
 	const incoming = useIncomingBody(noteId, body, origin);
 	const pluginView = usePluginViewFactory();
@@ -274,7 +266,7 @@ const EditorBody = ({
 			const lost = whatIsLost(ctx, body);
 			if (lost !== undefined) unsupported.current(lost);
 		});
-	}, [body, origin, get, incoming, loading]);
+	}, [body, origin, get, incoming, loading, replaced, unsupported]);
 
 	// The editor keeps the selection a toolbar press acts on. A mouse's press
 	// never takes focus away, and the editor is handed it back afterwards, so
