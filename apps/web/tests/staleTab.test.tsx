@@ -1,13 +1,13 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type Dexie from 'dexie';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { StaleTabGate } from '../src/components/StaleTabGate.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';
-import { deleteAfterTest, freshDatabase } from './support/db.js';
+import { deleteAfterTest, watchedDatabase } from './support/db.js';
 
 /**
  * A newer build opening the database in another tab. One test file, in one
@@ -19,7 +19,7 @@ import { deleteAfterTest, freshDatabase } from './support/db.js';
 const NEWER = 99;
 
 const thisTab = async (): Promise<NotesDatabase> => {
-	const db = freshDatabase();
+	const db = watchedDatabase();
 	await db.prefs.put({ key: 'before', value: 'kept' });
 	return db;
 };
@@ -132,6 +132,7 @@ describe('a tab whose database a newer build has asked for', { shuffle: false },
 		newer.close();
 
 		const old = createDatabase(name);
+		onTestFinished(watchTab(old));
 		deleteAfterTest(old);
 		// What an editor holds is not written: the newer schema is already
 		// live, and this is old code that would be writing into it.

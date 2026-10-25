@@ -1,6 +1,7 @@
 import type Dexie from 'dexie';
+import { onTestFinished } from 'vitest';
 
-import { createDatabase, db, type NotesDatabase } from '../../src/store/db.js';
+import { createDatabase, db, type NotesDatabase, watchTab } from '../../src/store/db.js';
 import { deletedHere } from '../../src/store/deletedHere.js';
 import { goneSources } from '../../src/store/goneSources.js';
 import { movedRows } from '../../src/store/movedRows.js';
@@ -25,6 +26,17 @@ const opened: Dexie[] = [];
 export const freshDatabase = (): NotesDatabase => {
 	const made = createDatabase(`test-${crypto.randomUUID()}`);
 	opened.push(made);
+	return made;
+};
+
+/**
+ * A database of the test's own, watched as the app's own is (`watchTab`): for
+ * a newer tab, another tab holding it up, and the page being frozen. The
+ * watchers stop when the test finishes, and the database is deleted.
+ */
+export const watchedDatabase = (): NotesDatabase => {
+	const made = freshDatabase();
+	onTestFinished(watchTab(made));
 	return made;
 };
 
