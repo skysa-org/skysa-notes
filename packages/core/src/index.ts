@@ -85,7 +85,7 @@ export { withoutNul } from './providers/text.js';
 export { createDropboxProvider, type DropboxProviderOptions } from './providers/dropbox.js';
 export { type FetchLike, parseRetryAfter } from './providers/http.js';
 
-export { createGDriveProvider, type GDriveProviderOptions } from './providers/gdrive.js';
+export { createGDriveProvider, type GDriveProviderOptions } from './providers/gdrive/index.js';
 export { createOneDriveProvider, type OneDriveProviderOptions } from './providers/onedrive.js';
 
 export {

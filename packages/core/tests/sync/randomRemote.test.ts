@@ -4,7 +4,7 @@ import { foldName } from '../../src/markdown/slug.js';
 import { isHidden, isWithin, joinPath, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
-import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import type { ChangeEntry, RemoteEntry, StorageProvider } from '../../src/providers/types.js';

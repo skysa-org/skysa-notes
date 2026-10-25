@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { MARKER_FILE } from '../../src/config.js';
-import { createGDriveProvider } from '../../src/providers/gdrive.js';
+import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import {
 	AuthError,
@@ -774,6 +774,24 @@ describe('the app folder', () => {
 				: undefined;
 
 		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+	});
+
+	it('named gone by the feed is forgotten, so a write before the next round looks again', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.destroy(world.root.id);
+		const stale = { ...world.root };
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+				? new Response(JSON.stringify({ files: [stale] }))
+				: undefined;
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+
+		// The search has caught up; the id this adapter found the folder at is
+		// not used again.
+		world.hooks.intercept = undefined;
+		await expect(world.provider.write('b.md', 'x', {})).rejects.toThrow(/app folder not found/);
+		expect(world.files.some((file) => file.name === 'b.md')).toBe(false);
 	});
 });
 
