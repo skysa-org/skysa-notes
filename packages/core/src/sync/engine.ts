@@ -1085,9 +1085,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// The drift is untestable by construction, and the cap is kept anyway: a
 		// test that produced the drift would be asserting about a build of the
 		// code nobody ships. (A hundred names really taken reach the cap too, and
-		// that is tested for notes, beside `freeNotePath`.) It was found the way
-		// such things are — a mutation of `conflictName`'s fold did not fail the
-		// suite, it hung it.
+		// that is tested for notes, through `freeNotePath` in
+		// `push/conflicts.ts`.) It was found the way such things are — a
+		// mutation of `conflictName`'s fold did not fail the suite, it hung it.
 		findFreeName<string>({
 			candidate: (names) => conflictFolderPath(path, now(), names),
 			claim: async (candidate) =>
