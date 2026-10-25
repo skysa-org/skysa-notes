@@ -6,6 +6,15 @@ import { basename } from '../paths.js';
  * counter rather than the same name again.
  */
 
+/**
+ * How many times `freeFolderPath` or `freeNotePath` may ask for a name before
+ * giving up. Names go `(conflict <stamp>)`, `-2`, `-3`… so reaching this means
+ * a hundred folders or notes already stand aside from one path inside one
+ * minute. A user does not produce that state, so reaching the cap is far more
+ * likely the two folds having drifted apart than a hundred real names.
+ */
+export const FREE_PATH_ATTEMPTS = 100;
+
 /** One try at a name: what claiming it gave, or that it was taken and what said so. */
 export type Claim<T> = { free: T } | { taken: unknown };
 
