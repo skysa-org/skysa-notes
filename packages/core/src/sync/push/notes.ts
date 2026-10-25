@@ -323,3 +323,6 @@ export const createNotePush = (
 
 	return { write, runWrite, runMove, runDelete };
 };
+
+/** What the push's other parts are handed of it. */
+export type NotePush = ReturnType<typeof createNotePush>;
