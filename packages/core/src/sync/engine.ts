@@ -42,6 +42,7 @@ import {
 	doomedIn,
 	leavesFor,
 	type LiveEntries,
+	listedAfter,
 	liveEntries,
 	madeInBatch,
 	unhidden,
@@ -598,9 +599,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					: await doomedFolder(path, remoteId, decided, batch, at);
 		const here = path !== undefined && placedAt === path;
 		const alive = (id: string): boolean =>
-			here
-				? (live.get(id) ?? []).some((entry) => entry.at > at)
-				: aliveElsewhere(live, id, path, at);
+			here ? listedAfter(live, id, at) : aliveElsewhere(live, id, path, at);
 		if (remoteId !== undefined && alive(remoteId)) return true;
 		return local?.remoteId !== undefined && alive(local.remoteId);
 	};
@@ -658,7 +657,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// on, as for `movedNotDeleted`: `A` renamed to `B` carries `A/B` to
 			// `B/B`, and its entry at `A/B` is where it was, not where it went.
 			const alive = placed
-				? (live.get(id) ?? []).some((entry) => entry.at > at)
+				? listedAfter(live, id, at)
 				: aliveElsewhere(live, id, candidate, at);
 			if (!alive) return [];
 			const last = (live.get(id) ?? []).at(-1);
@@ -1099,7 +1098,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): string[] =>
 		[...filesNow(batch.files, decided).values()].flatMap((file) => {
 			if (file.remoteId === undefined || !isWithin(file.at, final)) return [];
-			const later = (batch.listed.get(file.remoteId) ?? []).some((entry) => entry.at > at);
+			const later = listedAfter(batch.listed, file.remoteId, at);
 			return later ? [file.id] : [];
 		});
 
@@ -1330,12 +1329,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// which is the last word about it, or was never in the batch at all.
 		const movesOn = (note: SyncNote, path: string): boolean => {
 			const remoteId = remoteNow(note, decided);
-			return (
-				remoteId !== undefined &&
-				(batch.live.get(remoteId) ?? []).some(
-					(later) => later.at > at && later.path !== path
-				)
-			);
+			return remoteId !== undefined && listedAfter(batch.live, remoteId, at, path);
 		};
 		const sitting = await notesUnderNow(to, decided);
 		return sitting.reduce<Promise<PullChange[]>>(async (pending, entry) => {
@@ -1392,9 +1386,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const occupant = await folderAt(entry.path, decided);
 		const id = occupant?.remoteId;
 		if (id === undefined || id === entry.remoteId) return [];
-		const movesOn = (batch.live.get(id) ?? []).some(
-			(later) => later.at > at && later.path !== entry.path
-		);
+		const movesOn = listedAfter(batch.live, id, at, entry.path);
 		if (!movesOn && !batch.doomed.ids.has(id)) return [];
 		return clearTheWay(entry.path, entry.remoteId, decided, batch, at);
 	};
@@ -2015,9 +2007,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					const aside = freeFilePath(path, view, batch);
 					return [...changes, { kind: 'displace-file', fileId: file.id, path: aside }];
 				}
-				const later = (batch.listed.get(file.remoteId) ?? []).some(
-					(entry) => entry.at > at
-				);
+				const later = listedAfter(batch.listed, file.remoteId, at);
 				return later ? changes : [...changes, { kind: 'delete-file', fileId: file.id }];
 			}, []);
 
@@ -2058,7 +2048,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		[...filesNow(batch.files, decided).values()].flatMap((file) => {
 			if (!file.moving || file.remoteId === undefined || file.remote !== entry.path)
 				return [];
-			const later = (batch.listed.get(file.remoteId) ?? []).some((each) => each.at > at);
+			const later = listedAfter(batch.listed, file.remoteId, at);
 			return file.remoteId === entry.remoteId || later ? [] : [fileGone(file)];
 		});
 
@@ -2155,7 +2145,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (file?.remoteId === undefined) return undefined;
 		const here = path !== undefined && file.remote === path;
 		const alive = here
-			? (batch.listed.get(file.remoteId) ?? []).some((each) => each.at > at)
+			? listedAfter(batch.listed, file.remoteId, at)
 			: aliveElsewhere(batch.listed, file.remoteId, path, at);
 		return alive ? [] : [fileGone(file)];
 	};

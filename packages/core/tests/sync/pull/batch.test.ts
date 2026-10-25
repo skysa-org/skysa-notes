@@ -7,6 +7,7 @@ import {
 	claimedPaths,
 	doomedIn,
 	leavesFor,
+	listedAfter,
 	liveEntries,
 	unhidden,
 } from '../../../src/sync/pull/batch.js';
@@ -47,6 +48,21 @@ describe('liveEntries and unhidden', () => {
 	it('leaves out what is at a hidden path, and a thing only ever there', () => {
 		const live = liveEntries([file('a', '.trash/a.md'), file('a', 'a.md'), file('b', '.b.md')]);
 		expect([...unhidden(live)]).toEqual([['a', [{ path: 'a.md', at: 1 }]]]);
+	});
+});
+
+describe('listedAfter', () => {
+	const live = liveEntries([file('a', 'a.md'), gone('a', 'a.md'), file('a', 'b.md')]);
+
+	it('is a listing after the entry, and not one at or before it', () => {
+		expect(listedAfter(live, 'a', 1)).toBe(true);
+		expect(listedAfter(live, 'a', 2)).toBe(false);
+		expect(listedAfter(live, 'z', 0)).toBe(false);
+	});
+
+	it('is one somewhere else, where a path is given to be apart from', () => {
+		expect(listedAfter(live, 'a', 0, 'a.md')).toBe(true);
+		expect(listedAfter(live, 'a', 0, 'b.md')).toBe(false);
 	});
 });
 
