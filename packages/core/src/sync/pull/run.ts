@@ -194,18 +194,24 @@ export const createPullRun = (
 		/** A scan from the top, counted from nothing. */
 		const scan = (upload = false): Promise<SyncOutcome> => meter.scan(() => drainScan(upload));
 		const attempt = (): Promise<SyncOutcome> =>
-			stored === undefined ? scan() : drainRound(stored);
+			(stored === undefined ? scan() : drainRound(stored)).catch((error: unknown) => {
+				// The cursor is dead rather than the request. Discarding it and
+				// scanning is the documented recovery, and the stored one is left in
+				// place so an interrupted rescan tries again rather than continuing
+				// from a cursor the provider has already rejected — which is also
+				// what keeps `uploadDifferences` across an interruption, since the
+				// same cursor meets the same refusal and is told the same thing.
+				if (isCursorResetError(error)) {
+					return scan(error.uploadDifferences === true);
+				}
+				throw error;
+			});
 
+		// Around the recovery, not beside it: a token can expire in the scan
+		// that answers a dead cursor, and a cursor can turn out dead on the
+		// retry after a refresh. Beside it, either ended the run as `retry`: a
+		// round trip spent waiting on what a refresh or a scan answers at once.
 		return attempt().catch(async (error: unknown) => {
-			// The cursor is dead rather than the request. Discarding it and
-			// scanning is the documented recovery, and the stored one is left in
-			// place so an interrupted rescan tries again rather than continuing
-			// from a cursor the provider has already rejected — which is also
-			// what keeps `uploadDifferences` across an interruption, since the
-			// same cursor meets the same refusal and is told the same thing.
-			if (isCursorResetError(error)) {
-				return scan(error.uploadDifferences === true);
-			}
 			if (isAuthError(error)) return authRetry(attempt);
 			throw error;
 		});

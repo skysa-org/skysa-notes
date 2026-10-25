@@ -3034,6 +3034,56 @@ describe('authorization', () => {
 		expect(asked).toBe(1);
 	});
 
+	it('refreshes for a token that expires in the scan that answers a dead cursor', async () => {
+		await pulledNote('a.md', 'one\n');
+		await remoteFile('b.md', 'two\n');
+		let asked = 0;
+		let refreshed = 0;
+		provider.setFault((call) => {
+			if (call.op !== 'changes') return undefined;
+			asked += 1;
+			if (asked === 1) return new CursorResetError('reset');
+			return refreshed === 0 ? new AuthError('expired') : undefined;
+		});
+		const withAuth = engineWith({
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.pull();
+
+		expect(refreshed).toBe(1);
+		expect(result.status).toBe('ok');
+		expect(noteAt('b.md')?.content).toBe('two\n');
+	});
+
+	it('scans when the cursor turns out dead on the retry after a refresh', async () => {
+		await pulledNote('a.md', 'one\n');
+		await remoteFile('b.md', 'two\n');
+		let asked = 0;
+		let refreshed = 0;
+		provider.setFault((call) => {
+			if (call.op !== 'changes') return undefined;
+			asked += 1;
+			if (asked === 1) return new AuthError('expired');
+			return asked === 2 ? new CursorResetError('reset') : undefined;
+		});
+		const withAuth = engineWith({
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.pull();
+
+		expect(refreshed).toBe(1);
+		expect(result.status).toBe('ok');
+		expect(noteAt('b.md')?.content).toBe('two\n');
+	});
+
 	it('pauses a pull from a stored cursor after one refresh, and keeps the cursor', async () => {
 		await remoteFile('a.md', 'one\n');
 		expect((await engine.pull()).status).toBe('ok');
