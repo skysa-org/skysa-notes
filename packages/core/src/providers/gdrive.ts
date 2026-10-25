@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import { APP_FOLDER_NAME, MARKER_FILE } from '../config.js';
-import { parseJson } from '../json.js';
 import { isNoteName } from '../markdown/slug.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import {
@@ -25,16 +24,17 @@ import {
 	type RequestParts,
 } from './http.js';
 import {
+	applyAll,
 	applyItem,
 	arrivals,
 	hideLeftFolders,
-	nodeSchema,
 	nodesOf,
 	type Page,
 	pageFrom,
 	pathOf,
-	pendingSchema,
+	readTreeCursor,
 	settlePage,
+	treeCursorBase,
 	type TreeItem,
 } from './idTree.js';
 import { responseBytes, uploadType } from './text.js';
@@ -377,15 +377,12 @@ const changeItem = (change: DriveChange): TreeItem[] => {
 // ---------------------------------------------------------------------------
 
 const cursorSchema = z.object({
-	v: z.literal(1),
+	...treeCursorBase,
 	phase: z.enum(['scan', 'feed']),
 	/** The page to fetch: a `files.list` page token in a scan, a changes token after. */
 	token: z.string(),
 	/** Where the feed begins once the scan is done. */
 	start: z.string().min(1),
-	root: z.string().min(1),
-	nodes: z.array(nodeSchema),
-	pending: z.array(pendingSchema),
 	/**
 	 * Pages of the feed this round has read, on a cursor written mid-round
 	 * (`feedLimit`). Absent at a round's start, and on every cursor written
@@ -418,11 +415,7 @@ const midRound = (cursor: DriveCursor): boolean =>
 const feedLimit = (nodes: number): number =>
 	2 * Math.max(1, Math.ceil(nodes / Number(PAGE_SIZE))) + 2;
 
-const parseCursor = (cursor: string): DriveCursor => {
-	const result = cursorSchema.safeParse(parseJson(cursor));
-	if (!result.success) throw new CursorResetError('gdrive cursor is not one this adapter wrote');
-	return result.data;
-};
+const parseCursor = (cursor: string): DriveCursor => readTreeCursor(cursorSchema, cursor, 'gdrive');
 
 /**
  * On a token we stored, Drive's answer to one it cannot use is not documented.
@@ -1310,9 +1303,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		}
 
 		const page = pageFrom(from);
-		fetched.items.forEach((item) => {
-			applyItem(page, item);
-		});
+		applyAll(page, fetched.items);
 		// A scan lists everything already, so only a feed round lists arrivals.
 		if (from.phase === 'feed') await listArrivals(page, arrivals(page));
 		await clashes(page).reduce(async (done, clash) => {
