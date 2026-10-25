@@ -1701,6 +1701,7 @@ packages/
                               #   decided.ts (what a batch's decisions have already spoken for: written back, or said anything about)
                               #   reconcile.ts (a scan's last word on what it never mentioned)
                               #   decide.ts (a batch decided entry by entry, each sent to the part for its kind)
+                              #   run.ts (a pull run: a round from the cursor or a scan from the top, a cursor reset, one auth retry)
         push/                 # the push's parts, out of engine.ts (#446): folders.ts (folders made before a write, and removed or left once empty)
                               #   files.ts (files that are not notes: uploaded, moved, deleted, beside what they meet)
                               #   notes.ts (notes: written after a rename, renamed or moved aside, deleted)

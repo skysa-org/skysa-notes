@@ -194,3 +194,6 @@ export const createPullDecide = (
 
 	return { decide, deduped, decideAll };
 };
+
+/** What the pull's other parts are handed of it. */
+export type PullDecide = ReturnType<typeof createPullDecide>;
