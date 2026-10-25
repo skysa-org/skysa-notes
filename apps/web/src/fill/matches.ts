@@ -17,6 +17,7 @@ import {
 	type NotesDatabase,
 	type UnlockKind,
 } from '../store/db.js';
+import { isLive } from '../store/rowStates.js';
 import { enrolment } from '../store/secretKeys.js';
 import { titleShown } from '../store/titles.js';
 import { getPasswordsShown, isVaultNote, listVaultNotes } from '../store/vault.js';
@@ -201,7 +202,7 @@ export const loginFor = async (
 	const note = await db.notes.get(
 		noteKey({ connectionId: match.connectionId, id: match.noteId })
 	);
-	if (note === undefined || note.deletedLocally !== 0 || !isVaultNote(note)) return undefined;
+	if (note === undefined || !isLive(note) || !isVaultNote(note)) return undefined;
 	const read = readItem(age, note, identities, page);
 	return read.state === 'fills' ? read.login : undefined;
 };

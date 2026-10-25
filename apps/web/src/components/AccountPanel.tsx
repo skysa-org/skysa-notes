@@ -58,6 +58,7 @@ import { settleEditors } from '../store/heldEdits.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
 import { getNote } from '../store/notes.js';
 import { rowsOf } from '../store/rows.js';
+import { isLiveSource, isTombstone } from '../store/rowStates.js';
 import { getScratchpadShown, setScratchpadShown } from '../store/scratchpad.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
@@ -1063,7 +1064,7 @@ const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: stri
 	// The paragraph is part of the answer: rendered outside, it would be an
 	// empty line under the message while the query is out, and for good after
 	// it for a note that is gone.
-	if (note === undefined || note.deletedLocally === 1 || isVaultPath(note.path)) return null;
+	if (note === undefined || isTombstone(note) || isVaultPath(note.path)) return null;
 	return (
 		<p className="muted">
 			<Link to="/" {...noteLink(note)}>
@@ -2529,7 +2530,7 @@ export const AccountPanel = ({
 			);
 		}
 
-		if (bound.state.detached !== undefined) {
+		if (!isLiveSource(bound.state)) {
 			return (
 				<Detached
 					key={bound.state.connectionId}

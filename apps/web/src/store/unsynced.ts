@@ -11,6 +11,7 @@ import {
 import { foldPath } from './naming.js';
 import { outOfAttempts } from './queue.js';
 import { rowsOf } from './rows.js';
+import { isLive, isTombstone } from './rowStates.js';
 
 /**
  * What one source holds on this device that its remote has never been sent.
@@ -155,7 +156,7 @@ export const unsyncedIn = async (
 	const moved = notesWith(ops, 'move');
 	const made = new Set(ops.flatMap((op) => (op.op === 'mkdir' ? [op.path] : [])));
 
-	const live = rows.filter((note) => note.deletedLocally === 0);
+	const live = rows.filter(isLive);
 	const unsent = (note: NoteRecord): boolean =>
 		unverified || note.dirty === 1 || note.remoteId === undefined || written.has(note.id);
 
@@ -192,7 +193,7 @@ export const unsyncedIn = async (
 	return {
 		notes,
 		renames: live.filter((note) => !unsent(note) && moved.has(note.id)),
-		deletes: rows.filter((note) => note.deletedLocally === 1 && note.remoteId !== undefined),
+		deletes: rows.filter((note) => isTombstone(note) && note.remoteId !== undefined),
 		folders: folders.filter(unsentFolder),
 		rmdirs: ops.filter((op) => op.op === 'rmdir'),
 		files: unsentFiles,

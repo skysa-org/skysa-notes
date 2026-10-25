@@ -4,6 +4,7 @@ import Dexie, { type Table, type Transaction } from 'dexie';
 import { type EditorMode } from '../editor/mode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
 import { watchForHeldUp } from './heldUp.js';
+import { isLiveSource } from './rowStates.js';
 import { watchForNewerTab } from './staleTab.js';
 
 /**
@@ -767,7 +768,7 @@ export const activeConnectionId = async (
 	// own pile: with nothing else connected it is what there is to show, and
 	// answering `LOCAL` would hide the very notes it was kept to keep in sight.
 	const states = await db.syncState.toArray();
-	const first = states.find((state) => state.detached === undefined) ?? states[0];
+	const first = states.find(isLiveSource) ?? states[0];
 	return first?.connectionId ?? LOCAL_CONNECTION_ID;
 };
 
