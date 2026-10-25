@@ -11,8 +11,9 @@ import { conflictContent, conflictPath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { type ConflictResolution, type PullChange, type SyncNote } from '../store.js';
 import { type Batch, madeInBatch } from './batch.js';
-import { forgetUnread, type Reestablished } from './deletions.js';
+import { forgetUnread } from './deletions.js';
 import { type Occupancy } from './occupancy.js';
+import { reestablished } from './reconcile.js';
 import { type Placement, remoteNow, removedInBatch, unreadNow, whereNow } from './replay.js';
 
 /**
@@ -28,12 +29,10 @@ export const createPullNotes = (
 	context: EngineContext,
 	{
 		readNote,
-		reestablished,
 		notesEndingIn,
 		takenIn,
 	}: {
 		readNote: (entry: RemoteEntry) => Promise<{ content: string; version: string }>;
-		reestablished: Reestablished;
 	} & Pick<Occupancy, 'notesEndingIn' | 'takenIn'>
 ) => {
 	const { provider, store, now, newId, meter } = context;
