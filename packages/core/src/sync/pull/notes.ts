@@ -10,7 +10,7 @@ import {
 import { conflictContent, conflictPath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { type ConflictResolution, type PullChange, type SyncNote } from '../store.js';
-import { type Batch, madeInBatch } from './batch.js';
+import { madeInBatch, type Step } from './batch.js';
 import { reestablished } from './decided.js';
 import { forgetUnread } from './deletions.js';
 import { type Occupancy } from './occupancy.js';
@@ -123,8 +123,7 @@ export const createPullNotes = (
 	 */
 	const noteForEntry = async (
 		entry: RemoteEntry,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): Promise<SyncNote | undefined> => {
 		const byId = await store.noteByRemoteId(entry.remoteId);
 		if (byId !== undefined) return byId;
@@ -200,8 +199,7 @@ export const createPullNotes = (
 	 */
 	const idForNewNote = async (
 		content: string,
-		decided: readonly PullChange[],
-		batch: Batch
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): Promise<string> => {
 		const claimed = parseNoteFile(content).id;
 		if (claimed === undefined) return newId();
@@ -437,8 +435,7 @@ export const createPullNotes = (
 		local: SyncNote | undefined,
 		removed: boolean,
 		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): Promise<PullChange[]> => {
 		const letGo =
 			local !== undefined && !removed && local.remoteId !== undefined
@@ -451,8 +448,7 @@ export const createPullNotes = (
 			batch.claimed
 		);
 		const replaced = forgetUnread(
-			batch,
-			decided,
+			{ batch, decided },
 			(remoteId, path) => path === entry.path && remoteId !== entry.remoteId
 		);
 		const already = unreadNow(batch.unread, decided).get(entry.remoteId);
@@ -482,12 +478,10 @@ export const createPullNotes = (
 	 */
 	const forgetRead = (
 		entry: RemoteEntry,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): PullChange[] =>
 		forgetUnread(
-			batch,
-			decided,
+			{ batch, decided },
 			(remoteId, path) => remoteId === entry.remoteId || path === entry.path
 		);
 
@@ -510,11 +504,10 @@ export const createPullNotes = (
 
 	const decideFile = async (
 		entry: RemoteEntry,
-		decided: readonly PullChange[],
-		batch: Batch
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): Promise<PullChange[]> => {
 		const { claimed, renaming } = batch;
-		const local = await noteForEntry(entry, batch, decided);
+		const local = await noteForEntry(entry, { batch, decided });
 		// Taken away by an earlier decision in this batch — the file was deleted
 		// and re-created at the same path, or moved out of a folder that went.
 		// Everything below that needs the row to still be there is off the table;
@@ -523,7 +516,7 @@ export const createPullNotes = (
 		const removed = local !== undefined && removedInBatch(local, decided);
 		// For every way out of here but the two where the file was not read. A
 		// version this device already holds is a file it has read.
-		const cleared = forgetRead(entry, batch, decided);
+		const cleared = forgetRead(entry, { batch, decided });
 
 		// Whatever we decide below puts a note at `entry.path`, so anything of
 		// ours already there has to move first — in that order, or the store is
@@ -586,11 +579,11 @@ export const createPullNotes = (
 		// entry is read and lists it again.
 		if (found === 'gone') {
 			return [
-				...forgetUnread(batch, decided, (remoteId) => remoteId === entry.remoteId),
+				...forgetUnread({ batch, decided }, (remoteId) => remoteId === entry.remoteId),
 				...goneBeforeRead(local, entry, decided),
 			];
 		}
-		if (found === 'unreadable') return leaveUnread(local, removed, entry, decided, batch);
+		if (found === 'unreadable') return leaveUnread(local, removed, entry, { batch, decided });
 		const { content } = found;
 		const stranger = local !== undefined && !removed && isStranger(local, content);
 		if (local === undefined || stranger) {
@@ -602,7 +595,7 @@ export const createPullNotes = (
 				...aside,
 				{
 					kind: 'upsert-note',
-					id: await idForNewNote(content, [...decided, ...aside], batch),
+					id: await idForNewNote(content, { batch, decided: [...decided, ...aside] }),
 					path: entry.path,
 					content,
 					remote: entry,

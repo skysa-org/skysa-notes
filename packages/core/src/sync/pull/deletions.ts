@@ -4,7 +4,7 @@ import { type EngineContext } from '../context.js';
 import { orIfNotFound } from '../providerOps.js';
 import { type PullChange, type SyncNote } from '../store.js';
 import { type PullAttachments } from './attachments.js';
-import { aliveElsewhere, type Batch, listedAfter, madeInBatch } from './batch.js';
+import { aliveElsewhere, listedAfter, madeInBatch, type Step } from './batch.js';
 import { reestablished } from './decided.js';
 import { type PullFolders } from './folders.js';
 import { type PullNotes } from './notes.js';
@@ -28,8 +28,7 @@ import {
 
 /** Stop listing every unreadable file `gone` is true of. */
 export const forgetUnread = (
-	batch: Batch,
-	decided: readonly PullChange[],
+	{ batch, decided }: Pick<Step, 'batch' | 'decided'>,
 	gone: (remoteId: string, path: string) => boolean
 ): PullChange[] =>
 	[...unreadNow(batch.unread, decided)].flatMap(([remoteId, file]): PullChange[] =>
@@ -74,9 +73,7 @@ export const createPullDeletions = (
 		path: string | undefined,
 		remoteId: string | undefined,
 		local: SyncNote | undefined,
-		batch: Batch,
-		at: number,
-		decided: readonly PullChange[]
+		{ batch, decided, at }: Step
 	): Promise<boolean> => {
 		const { live } = batch;
 		// A folder too, by its id: `B` renamed into `A` as `A/B`, `A` renamed
@@ -86,7 +83,7 @@ export const createPullDeletions = (
 				? whereNow(local, decided)
 				: remoteId === undefined
 					? undefined
-					: await doomedFolder(path, remoteId, decided, batch, at);
+					: await doomedFolder(path, remoteId, { batch, decided, at });
 		const here = path !== undefined && placedAt === path;
 		const alive = (id: string): boolean =>
 			here ? listedAfter(live, id, at) : aliveElsewhere(live, id, path, at);
@@ -111,15 +108,13 @@ export const createPullDeletions = (
 		path: string,
 		local: SyncNote | undefined,
 		over: Readonly<{ from: string; to: string }>,
-		decided: readonly PullChange[],
-		batch: Batch,
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		if (local !== undefined) {
 			if (removedInBatch(local, decided)) return [];
 			return (await stillThere(placement(local, decided))) ? [] : [forgetNote(local)];
 		}
-		const gone = await doomedFolder(path, undefined, decided, batch, at);
+		const gone = await doomedFolder(path, undefined, { batch, decided, at });
 		const remoteId = gone === undefined ? undefined : await folderIdAt(gone, decided);
 		if (gone === undefined || remoteId === undefined) return [];
 		const expected = rebaseThrough(gone, over);
@@ -139,7 +134,7 @@ export const createPullDeletions = (
 		const there = await Promise.all(
 			held.map(({ note }) => stillThere(placement(note, decided)))
 		);
-		if (!there.some(Boolean)) return deleteFolderAfterRescue(gone, decided, batch, at);
+		if (!there.some(Boolean)) return deleteFolderAfterRescue(gone, { batch, decided, at });
 		return held.flatMap(({ note }, index) => (there[index] === true ? [] : [forgetNote(note)]));
 	};
 
@@ -150,8 +145,7 @@ export const createPullDeletions = (
 	 */
 	const deletedNote = async (
 		entry: DeletedEntry,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): Promise<{ note?: SyncNote; byOldName?: true }> => {
 		if (entry.remoteId !== undefined) {
 			const { remoteId } = entry;
@@ -201,10 +195,9 @@ export const createPullDeletions = (
 	 */
 	const forgetDeleted = (
 		{ path, remoteId }: DeletedEntry,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): PullChange[] =>
-		forgetUnread(batch, decided, (id, at) =>
+		forgetUnread({ batch, decided }, (id, at) =>
 			remoteId === undefined ? at === path : id === remoteId
 		);
 
@@ -228,14 +221,12 @@ export const createPullDeletions = (
 	 */
 	const forgetUnderGone = (
 		path: string | undefined,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): PullChange[] =>
 		path === undefined
 			? []
 			: forgetUnread(
-					batch,
-					decided,
+					{ batch, decided },
 					(remoteId, file) =>
 						file !== path && isWithin(file, path) && !batch.live.has(remoteId)
 				);
@@ -253,23 +244,19 @@ export const createPullDeletions = (
 		path: string,
 		over: Readonly<{ from: string; to: string }>,
 		local: SyncNote | undefined,
-		batch: Batch,
-		decided: readonly PullChange[]
+		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): PullChange[] => {
 		if (local !== undefined) return [];
 		const was = rebasePath(path, over.from, over.to);
 		return forgetUnread(
-			batch,
-			decided,
+			{ batch, decided },
 			(remoteId, file) => file === was && !batch.live.has(remoteId)
 		);
 	};
 
 	const decideDeleted = async (
 		entry: DeletedEntry,
-		batch: Batch,
-		decided: readonly PullChange[],
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		// The app folder itself. An adapter that reports an empty path by mistake
 		// would otherwise wipe every note on the device, and a folder the user
@@ -277,23 +264,20 @@ export const createPullDeletions = (
 		// silently either — the connection is what is broken, not the notes.
 		if (entry.path !== undefined && normalizePath(entry.path) === ROOT) return [];
 		return [
-			...forgetDeleted(entry, batch, decided),
-			...(await decideDeletedRow(entry, batch, decided, at)),
+			...forgetDeleted(entry, { batch, decided }),
+			...(await decideDeletedRow(entry, { batch, decided, at })),
 		];
 	};
 
 	const decideDeletedRow = async (
 		entry: DeletedEntry,
-		batch: Batch,
-		decided: readonly PullChange[],
-		at: number
+		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
 		const { path, remoteId } = entry;
-		const { live } = batch;
 
 		// A file that is not a note, first: it is matched by id or by where
 		// its file is, and never takes a note or a folder with it.
-		const file = deletedFile(entry, batch, decided, at);
+		const file = deletedFile(entry, { batch, decided, at });
 		if (file !== undefined) return file;
 
 		// A deletion names a path, so unlike an entry it does have to be matched
@@ -318,16 +302,16 @@ export const createPullDeletions = (
 		// on being held. There is no need to fall back to `store.noteByPath`:
 		// `notesEndingIn` starts from the store's own rows under that folder, so
 		// a note that has not been moved is found by it too.
-		const { note: local, byOldName } = await deletedNote(entry, batch, decided);
+		const { note: local, byOldName } = await deletedNote(entry, { batch, decided });
 
-		if (await movedNotDeleted(path, remoteId, local, batch, at, decided)) return [];
-		const moved = await movedFolderOver(path, remoteId, live, at, decided);
+		if (await movedNotDeleted(path, remoteId, local, { batch, decided, at })) return [];
+		const moved = await movedFolderOver(path, remoteId, { batch, decided, at });
 		if (moved?.kind === 'itself') return [];
 		if (moved?.kind === 'under' && path !== undefined) {
 			return [
-				...forgetMovedUnder(path, moved, local, batch, decided),
-				...(local === undefined ? fileUnderMoved(path, moved, batch, decided) : []),
-				...(await decideUnderMoved(path, local, moved, decided, batch, at)),
+				...forgetMovedUnder(path, moved, local, { batch, decided }),
+				...(local === undefined ? fileUnderMoved(path, moved, { batch, decided }) : []),
+				...(await decideUnderMoved(path, local, moved, { batch, decided, at })),
 			];
 		}
 		if (local !== undefined) {
@@ -377,8 +361,8 @@ export const createPullDeletions = (
 		// including one carried off by the cascade of a `delete-folder` over its
 		// parent — because a second delete of a row that is already gone is an
 		// error the store records.
-		const gone = await doomedFolder(path, remoteId, decided, batch, at);
-		if (gone !== undefined) return deleteFolderAfterRescue(gone, decided, batch, at);
+		const gone = await doomedFolder(path, remoteId, { batch, decided, at });
+		if (gone !== undefined) return deleteFolderAfterRescue(gone, { batch, decided, at });
 		// No folder of ours, so no `delete-folder` to take the unreadable files
 		// listed under the path with it — and this deletion is the only word
 		// there will be about them, id or no id. A notebook that holds nothing
@@ -388,7 +372,7 @@ export const createPullDeletions = (
 		// What the remote deletes later is then reported with an id and a path
 		// and nothing about the child, and without this the file is listed for
 		// ever at a path that no longer exists.
-		return forgetUnderGone(path, batch, decided);
+		return forgetUnderGone(path, { batch, decided });
 	};
 
 	return { decideDeleted };
