@@ -14,6 +14,7 @@ import { previewBlocks, previewLines } from '../src/markdown/preview.js';
 import { openSecret, opensSecret, resealSecret, sealSecret } from '../src/sealing.js';
 import {
 	buildEncryptionFile,
+	hidesAsSecret,
 	isEncryptionFile,
 	isSecretBlock,
 	parseEncryptionFile,
@@ -56,6 +57,22 @@ describe('a secret block', () => {
 	it('is code when the fence says `age` and holds anything else', () => {
 		expect(isSecretBlock('age', 'age-encryption.org/v1')).toBe(false);
 		expect(isSecretBlock('age', `${SEALED_HERE}\nmore`)).toBe(false);
+	});
+
+	it.each([
+		['age', SEALED_HERE, true],
+		['age', `\n  \n${SEALED_HERE}`, true],
+		// Cut short, or damaged: not a secret, and hidden all the same.
+		['age', SEALED_HERE.slice(0, 120), true],
+		['age', `${SEALED_HERE}\nmore`, true],
+		['age', 'age-encryption.org/v1', false],
+		['text', SEALED_HERE, false],
+		[null, SEALED_HERE, false],
+	])('is hidden from previews and search for a %s fence: case %#', (language, text, hidden) => {
+		expect(hidesAsSecret(language, text)).toBe(hidden);
+		// Every secret is hidden; what is hidden and is no secret is armor that
+		// does not read.
+		if (isSecretBlock(language, text)) expect(hidden).toBe(true);
 	});
 
 	it('is code when armor is in a fence that does not say `age`', () => {

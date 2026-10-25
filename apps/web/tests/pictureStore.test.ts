@@ -4,10 +4,10 @@ import {
 	type PictureInfo,
 	type PictureVariant,
 } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { bindConnection, detachConnection, releaseConnection } from '../src/store/connection.js';
-import { createDatabase, type FileRecord, type NotesDatabase } from '../src/store/db.js';
+import { type FileRecord, type NotesDatabase } from '../src/store/db.js';
 import { TOUCH_AFTER_MS } from '../src/store/fileCache.js';
 import { deleteUnlinkedFiles } from '../src/store/fileLinks.js';
 import { addAttachment } from '../src/store/files.js';
@@ -24,6 +24,7 @@ import {
 } from '../src/store/pictures.js';
 import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * What a device keeps of the pictures beside notes (#276): what each one's
@@ -33,18 +34,6 @@ import { createDexieSyncStore } from '../src/sync/store.js';
 
 const CONNECTION = 'dropbox-1';
 const scope = { connectionId: CONNECTION };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`pictures-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const INFO: PictureInfo = {
 	format: 'jpeg',

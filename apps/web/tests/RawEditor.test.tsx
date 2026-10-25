@@ -1,7 +1,7 @@
 import { redo, undo, undoDepth } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { changeBetween, RawEditor } from '../src/editor/RawEditor.js';
 
@@ -16,8 +16,6 @@ const editorView = (container: HTMLElement): EditorView => {
 	if (view === null) throw new Error('CodeMirror did not mount');
 	return view;
 };
-
-afterEach(cleanup);
 
 describe('RawEditor', () => {
 	it('renders the body it is given', () => {

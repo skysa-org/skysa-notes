@@ -1,14 +1,6 @@
-import {
-	act,
-	cleanup,
-	fireEvent,
-	render,
-	renderHook,
-	screen,
-	waitFor,
-} from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { Component, type ReactNode, useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteSearchField } from '../src/components/SearchField.js';
 import { db } from '../src/store/db.js';
@@ -63,15 +55,11 @@ vi.mock('../src/store/search.js', async (importOriginal) => {
 	};
 });
 
-afterEach(cleanup);
-
 beforeEach(async () => {
 	made.indexes = 0;
 	made.refreshes = [];
 	made.stops = 0;
 	made.instead = [];
-	await db.notes.clear();
-	await db.folders.clear();
 	await createNote(db, { title: 'Compost', body: 'turn the heap\n', folderPath: 'garden' });
 });
 

@@ -22,6 +22,7 @@ import { createPortal } from 'react-dom';
 
 import { Icon } from '../editor/icons.js';
 import { openableLink, openLink } from '../editor/links.js';
+import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { keepRows } from '../store/kept.js';
@@ -106,10 +107,7 @@ export const FOCUS_KEEPER = 'focus-keeper';
 
 /** The note being taken closes on Escape, and on a press anywhere else. */
 const useCloseTaking = (taking: boolean, box: HTMLElement | null, onClose: () => void) => {
-	const close = useRef(onClose);
-	useEffect(() => {
-		close.current = onClose;
-	}, [onClose]);
+	const close = useLatest(onClose);
 	useEffect(() => {
 		if (!taking || box === null) return undefined;
 		const onPress = (event: PointerEvent) => {
@@ -130,7 +128,7 @@ const useCloseTaking = (taking: boolean, box: HTMLElement | null, onClose: () =>
 			document.removeEventListener('pointerdown', onPress);
 			box.removeEventListener('keydown', onKey);
 		};
-	}, [taking, box]);
+	}, [taking, box, close]);
 };
 
 /**
@@ -847,10 +845,7 @@ export const ScratchModal = ({
 	const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
 	const [backdrop, setBackdrop] = useState<HTMLDivElement | null>(null);
 	useCardMotion(backdrop, dialog, id, { dim: true });
-	const close = useRef(onClose);
-	useEffect(() => {
-		close.current = onClose;
-	}, [onClose]);
+	const close = useLatest(onClose);
 
 	useEffect(() => {
 		if (dialog === null) return;
@@ -871,7 +866,7 @@ export const ScratchModal = ({
 			dialog.removeEventListener('keydown', onKey);
 			backdrop.removeEventListener('pointerdown', onPress);
 		};
-	}, [dialog, backdrop]);
+	}, [dialog, backdrop, close]);
 
 	return createPortal(
 		<div ref={setBackdrop} className="modal-backdrop scratch-backdrop">

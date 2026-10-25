@@ -1,9 +1,9 @@
 import type { LanguageSupport } from '@codemirror/language';
-import { type Editor, editorViewCtx } from '@milkdown/kit/core';
+import { editorViewCtx } from '@milkdown/kit/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HIGHLIGHT_LIMIT, tokenize } from '../src/editor/highlight.js';
-import { createRichEditor } from '../src/editor/rich.js';
+import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Colouring the inside of a code block.
@@ -83,18 +83,13 @@ describe('tokenize', () => {
 	});
 });
 
-const editors: Editor[] = [];
-
 const mount = async (body: string, onUserEdit: (markdown: string) => void = () => undefined) => {
-	const root = document.createElement('div');
-	document.body.append(root);
-	const editor = await createRichEditor({ root, body, onUserEdit }).create();
-	editors.push(editor);
+	const { editor, root } = await mountRich({ body, onUserEdit });
 	return { root, editor };
 };
 
 afterEach(async () => {
-	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
+	await destroyRichEditors();
 	document.body.replaceChildren();
 });
 
