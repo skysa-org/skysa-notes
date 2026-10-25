@@ -1,3 +1,5 @@
+import type { FetchLike } from '@skysa/core';
+
 /**
  * What every storage provider's OAuth module offers the routes, so that
  * `connect`, `token` and `connections` never learn which provider they are
@@ -5,10 +7,11 @@
  */
 
 /**
+ * The one the storage adapters take, so a fetch made for one fits the other.
  * The deadline lives in the caller: `createApp` wraps whatever fetch it is given
  * so every provider call has one, rather than each call site remembering.
  */
-export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+export type { FetchLike };
 
 export interface TokenSet {
 	accessToken: string;
