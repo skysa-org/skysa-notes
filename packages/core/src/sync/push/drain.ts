@@ -7,7 +7,7 @@ import {
 	isUnreadableError,
 } from '../../providers/types.js';
 import { type EngineContext, type FromPull } from '../context.js';
-import { messageOf, ok, type SyncOutcome, waitFor } from '../outcome.js';
+import { messageOf, ok, paused, type SyncOutcome, waitFor } from '../outcome.js';
 import { withParent } from '../providerOps.js';
 import { type SyncOp } from '../store.js';
 import { createConflictPush, type Settled } from './conflicts.js';
@@ -23,15 +23,8 @@ import { createNotePush } from './notes.js';
  * three things it shares with the pull.
  */
 
-export const createPush = (
-	context: EngineContext,
-	{
-		fileState,
-		resolutionFor,
-		reauthorize,
-	}: FromPull & { reauthorize: (() => Promise<void>) | undefined }
-) => {
-	const { provider, store, maxAttempts, writesAtOnce, meter } = context;
+export const createPush = (context: EngineContext, { fileState, resolutionFor }: FromPull) => {
+	const { provider, store, maxAttempts, writesAtOnce, renew, meter } = context;
 
 	// The remote's folders, made and removed (`push/folders.ts`).
 	const { ensureRemoteFolder, making, runRmdir } = createFolderPush(context);
@@ -394,10 +387,7 @@ export const createPush = (
 		const reason = resolved !== undefined && 'failure' in resolved ? resolved.failure : error;
 
 		if (isAuthError(reason)) {
-			if (retriedAuth || reauthorize === undefined) {
-				return { ...drained(progress), status: 'paused', error: 'authorization required' };
-			}
-			await reauthorize();
+			if (retriedAuth || !(await renew())) return paused(drained(progress));
 			return drainOps(ops, progress, true);
 		}
 

@@ -90,6 +90,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		newId,
 		maxAttempts,
 		writesAtOnce,
+		renew: async () => {
+			if (reauthorize === undefined) return false;
+			await reauthorize();
+			return true;
+		},
 		meter,
 	};
 
@@ -212,7 +217,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	// A pull, run: a round or a scan, and what meets it on the way (`pull/run.ts`).
 	const { runPull } = createPullRun(context, {
 		letGo,
-		reauthorize,
 		decideAll,
 		deduped,
 		fileBaseOf,
@@ -236,7 +240,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	// ---------------------------------------------------------------- push
 
 	// The push, op by op, and the parts that send each kind (`push/`).
-	const { runPush } = createPush(context, { fileState, resolutionFor, reauthorize });
+	const { runPush } = createPush(context, { fileState, resolutionFor });
 
 	// Same reasoning as `pull`: reading the queue, recording a failure and
 	// completing an op are all store calls, and a store that cannot answer is

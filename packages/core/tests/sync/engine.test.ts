@@ -2991,6 +2991,7 @@ describe('authorization', () => {
 
 		expect(refreshed).toBe(1);
 		expect(result.status).toBe('paused');
+		expect(result.error).toBe('authorization required');
 	});
 
 	it('pauses immediately when there is no way to refresh', async () => {
@@ -2999,6 +3000,32 @@ describe('authorization', () => {
 		provider.setFault((call) => (call.op === 'write' ? new AuthError('expired') : undefined));
 
 		expect((await engine.push()).status).toBe('paused');
+	});
+
+	it('pauses a pull after one refresh that does not help, as it does a push', async () => {
+		let refreshed = 0;
+		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+		const withAuth = engineWith({
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.pull();
+
+		expect(refreshed).toBe(1);
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'paused', error: 'authorization required' })
+		);
+	});
+
+	it('pauses a pull at once when there is no way to refresh', async () => {
+		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+
+		expect(await engine.pull()).toEqual(
+			expect.objectContaining({ status: 'paused', error: 'authorization required' })
+		);
 	});
 });
 
