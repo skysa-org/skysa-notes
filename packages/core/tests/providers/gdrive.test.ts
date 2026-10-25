@@ -793,6 +793,29 @@ describe('the app folder', () => {
 		await expect(world.provider.write('b.md', 'x', {})).rejects.toThrow(/app folder not found/);
 		expect(world.files.some((file) => file.name === 'b.md')).toBe(false);
 	});
+
+	it('is never trashed, left or moved, named by its path or its id', async () => {
+		// Drive serves the folder by its id like any other, so without the
+		// guard each of these would reach it; the contract's stubs do not, and
+		// cannot show the difference.
+		const world = driveWorld();
+		await world.provider.ensureRoot();
+		world.seen.length = 0;
+
+		for (const named of [
+			{ remoteId: world.root.id, path: '' },
+			{ remoteId: world.root.id, path: 'Elsewhere' },
+			{ remoteId: '', path: '' },
+		]) {
+			await expect(world.provider.delete(named)).rejects.toThrow(NotFoundError);
+			await expect(world.provider.leaveFolder?.(named)).rejects.toThrow(NotFoundError);
+			await expect(world.provider.move(named, 'Archive')).rejects.toThrow(NotFoundError);
+		}
+
+		expect(world.seen).toEqual([]);
+		expect(world.find(world.root.id)).toMatchObject({ name: world.root.name });
+		expect(world.find(world.root.id)?.trashed).not.toBe(true);
+	});
 });
 
 describe('the app folder, from one sync to the next', () => {
@@ -1024,6 +1047,13 @@ describe('creating', () => {
 
 		const gone = resumableWorld(() => driveError(404, 'notFound'));
 		await expect(gone.provider.createFile('big.bin', BIG)).rejects.toThrow(NotFoundError);
+	});
+
+	it('names a PUT that answers with something other than JSON', async () => {
+		const garbled = resumableWorld(() => new Response('<html>ok</html>', { status: 200 }));
+		const failure = garbled.provider.createFile('big.bin', BIG);
+		await expect(failure).rejects.toThrow(/did not say what it made/);
+		await expect(failure).rejects.toBeInstanceOf(ProviderResponseError);
 	});
 
 	it('refuses a session it is not told the place of', async () => {

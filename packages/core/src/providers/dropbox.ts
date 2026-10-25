@@ -6,6 +6,7 @@ import {
 	isSelf,
 	outsideRoot,
 	readAsText,
+	refuseRoot,
 	rootFolderEntry,
 	writeMarkerOnce,
 } from './adapter.js';
@@ -56,6 +57,8 @@ const CONTENT = 'https://content.dropboxapi.com/2';
  * own, so its id is a constant — which docs/ARCHITECTURE.md §4 allows.
  */
 const ROOT_ID = 'app-folder';
+
+const rootId = (): Promise<string> => Promise.resolve(ROOT_ID);
 
 export type DropboxProviderOptions = HttpProviderOptions;
 
@@ -240,11 +243,14 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (failure.status === 401) throw new AuthError(failure.summary);
 		if (tagged(failure, 'reset')) throw new CursorResetError(failure.summary);
 		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
-		if (failure.status === 429) throw rateLimited('dropbox', 429, failure.retryAfterMs);
+		if (failure.status === 429) {
+			throw rateLimited('dropbox', 429, failure.retryAfterMs, failure.summary);
+		}
 		throw new Error(`dropbox ${String(failure.status)}: ${failure.summary}`);
 	};
 
 	const { send, attempt, call } = createTransport({
+		kind: 'dropbox',
 		fetch: doFetch,
 		getAccessToken,
 		failureOf,
@@ -406,6 +412,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
+		await refuseRoot(entry, rootId);
 		if (normalizePath(newPath) === ROOT) throw new NotFoundError(ROOT);
 		const result = await tryRpc<{ metadata?: Metadata }>('files/move_v2', {
 			from_path: target(entry),
@@ -472,6 +479,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const remove = async (entry: EntryRef): Promise<void> => {
+		await refuseRoot(entry, rootId);
 		const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
 		// Idempotent: something already gone is the outcome the caller wanted.
 		if (result.ok || tagged(result.failure, 'not_found')) return;

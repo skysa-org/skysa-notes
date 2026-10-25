@@ -140,6 +140,8 @@ const writePathOf = (
 	if (route === 'files/upload') return named(arg.path);
 	if (route === 'files/create_folder_v2') return named(body.path);
 	if (route === 'files/move_v2') return named(body.to_path);
+	// `DeleteArg.path` is a `WritePathOrId` as well.
+	if (route === 'files/delete_v2') return named(body.path);
 	return undefined;
 };
 
@@ -272,7 +274,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 				reason: { '.tag': 'not_found' },
 			});
 		}
-		await backing.delete(ref);
+		await backing.delete(found);
 		return json({ metadata: metadataOf(found) });
 	};
 
@@ -303,7 +305,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 				reason: { '.tag': 'conflict', conflict: { '.tag': 'file' } },
 			});
 		}
-		return json({ metadata: metadataOf(await backing.move(ref, to)) });
+		return json({ metadata: metadataOf(await backing.move(found ?? ref, to)) });
 	};
 
 	const routes: Record<

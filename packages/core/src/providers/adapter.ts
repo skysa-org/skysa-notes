@@ -64,6 +64,20 @@ export const outsideRoot = <T>(path: string, act: (target: string) => Promise<T>
 	return target === ROOT ? Promise.reject(new NotFoundError(target)) : act(target);
 };
 
+/**
+ * Refuses the app folder itself as the entry to delete, leave or move, with a
+ * `NotFoundError`, as a file written at the root is refused. By either name it
+ * goes by: its path, or its id where the ref carries one, since an adapter
+ * that goes by id would act on the folder whatever path the ref gave. Google
+ * Drive would trash the folder and everything in it.
+ */
+export const refuseRoot = async (entry: EntryRef, rootId: () => Promise<string>): Promise<void> => {
+	const named =
+		normalizePath(entry.path) === ROOT ||
+		(entry.remoteId !== '' && entry.remoteId === (await rootId()));
+	if (named) throw new NotFoundError(ROOT);
+};
+
 /** The app folder itself, as `createFolder('')` answers it: there already. */
 export const rootFolderEntry = (remoteId: string): RemoteEntry => ({
 	remoteId,
