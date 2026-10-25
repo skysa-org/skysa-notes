@@ -1,5 +1,6 @@
+import type { ProviderKind } from '../config.js';
 import { asObject, parseJson } from '../json.js';
-import { RateLimitError } from './types.js';
+import { ProviderResponseError, RateLimitError } from './types.js';
 
 /**
  * What the HTTP adapters share: the `fetch` they are given, how a request goes
@@ -120,6 +121,8 @@ export const rateLimited = (
 export type Attempt<T, F> = { ok: true; value: T } | { ok: false; failure: F };
 
 export interface TransportOptions<F> {
+	/** Which provider is answering, for an answer that cannot be read to name. */
+	kind: ProviderKind;
 	fetch: FetchLike;
 	/** Called per request, so a refreshed token is picked up without rebuilding. */
 	getAccessToken: () => Promise<string>;
@@ -139,6 +142,7 @@ export interface TransportOptions<F> {
  * for the answer or the failure thrown.
  */
 export const createTransport = <F>({
+	kind,
 	fetch: doFetch,
 	getAccessToken,
 	failureOf,
@@ -158,9 +162,16 @@ export const createTransport = <F>({
 	): Promise<Attempt<T, F>> => {
 		const response = await send(method, url, parts);
 		if (!response.ok) return { ok: false, failure: await failureOf(response) };
-		// A delete answers 204 with nothing to parse.
+		// A delete answers 204 with nothing to parse. Anything else that is not
+		// JSON — a proxy's HTML page sent as a 200, a body cut short — is the
+		// provider's answer gone wrong, not a `SyntaxError` from somewhere deep.
 		const text = await response.text();
-		return { ok: true, value: (text === '' ? {} : JSON.parse(text)) as T };
+		if (text === '') return { ok: true, value: {} as T };
+		const value = parseJson(text);
+		if (value === undefined) {
+			throw new ProviderResponseError(`${kind} sent an answer that is not JSON`);
+		}
+		return { ok: true, value: value as T };
 	};
 
 	const call = async <T>(

@@ -1,4 +1,5 @@
 import { concatBytes } from '../../age/bytes.js';
+import { asObject, parseJson } from '../../json.js';
 import { basename, parentPath } from '../../paths.js';
 import type { RequestParts } from '../http.js';
 import { ConflictError, NotFoundError, ProviderResponseError, type RemoteEntry } from '../types.js';
@@ -108,7 +109,8 @@ export const createUploads = (client: DriveClient, appFolder: AppFolder) => {
 			body: content,
 		});
 		if (!sent.ok) return raise(await failureOf(sent), path);
-		const made = JSON.parse(await sent.text()) as DriveFile;
+		// Not JSON reads as nothing made, which is what it tells us.
+		const made = asObject(parseJson(await sent.text())) as DriveFile;
 		if (made.id === undefined || made.id === '') {
 			throw new ProviderResponseError(
 				'gdrive finished a resumable upload and did not say what it made'

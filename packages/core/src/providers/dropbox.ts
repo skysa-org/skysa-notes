@@ -245,6 +245,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	const { send, attempt, call } = createTransport({
+		kind: 'dropbox',
 		fetch: doFetch,
 		getAccessToken,
 		failureOf,

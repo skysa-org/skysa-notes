@@ -311,7 +311,13 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		throw new Error(`onedrive ${String(failure.status)}: ${detail}`);
 	};
 
-	const { attempt, call } = createTransport({ fetch: doFetch, getAccessToken, failureOf, raise });
+	const { attempt, call } = createTransport({
+		kind: 'onedrive',
+		fetch: doFetch,
+		getAccessToken,
+		failureOf,
+		raise,
+	});
 
 	const rootId = async (): Promise<string> => {
 		const cached = rootBox.get('id');

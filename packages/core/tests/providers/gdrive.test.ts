@@ -1026,6 +1026,13 @@ describe('creating', () => {
 		await expect(gone.provider.createFile('big.bin', BIG)).rejects.toThrow(NotFoundError);
 	});
 
+	it('names a PUT that answers with something other than JSON', async () => {
+		const garbled = resumableWorld(() => new Response('<html>ok</html>', { status: 200 }));
+		const failure = garbled.provider.createFile('big.bin', BIG);
+		await expect(failure).rejects.toThrow(/did not say what it made/);
+		await expect(failure).rejects.toBeInstanceOf(ProviderResponseError);
+	});
+
 	it('refuses a session it is not told the place of', async () => {
 		const world = driveWorld();
 		world.hooks.intercept = (request) =>
