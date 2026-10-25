@@ -12,6 +12,7 @@ import { createSyncEngine } from '../../src/sync/engine.js';
 import { createDropboxStub } from '../providers/dropboxStub.js';
 import { createGDriveStub } from '../providers/gdriveStub.js';
 import { createOneDriveStub } from '../providers/onedriveStub.js';
+import { mulberry32 } from '../support/random.js';
 import { createMemoryStore } from './memoryStore.js';
 
 /**
@@ -144,17 +145,6 @@ const CASES = REMOTES.flatMap(([name, make]) =>
 /** Seeds CI runs. Raise it locally to look for more; 2000 passed when this was written. */
 const SEEDS = 100;
 
-/** mulberry32, as in `overProviders.test.ts`. */
-const random = (seed: number): (() => number) => {
-	const state = { value: seed >>> 0 };
-	return () => {
-		state.value = (state.value + 0x6d2b79f5) >>> 0;
-		const t1 = Math.imul(state.value ^ (state.value >>> 15), 1 | state.value);
-		const t2 = (t1 + Math.imul(t1 ^ (t1 >>> 7), 61 | t1)) ^ t1;
-		return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296;
-	};
-};
-
 const NAMES = ['A', 'B', 'C'];
 const FILES = ['a.md', 'b.md', 'c.md'];
 /** Files that are not notes: a picture and a PDF, say, beside the notes. */
@@ -185,7 +175,7 @@ const readable = (backing: FakeProvider): RemoteEntry[] =>
  * so the seeds of the run without it go on meaning what they meant.
  */
 const createRemote = (seed: number, backing: FakeProvider, encodings = false, attached = false) => {
-	const next = random(seed);
+	const next = mulberry32(seed);
 	const log: string[] = [];
 	const counter = { value: 0 };
 	const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)] as T;

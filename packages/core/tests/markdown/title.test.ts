@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toLf } from '../../src/markdown/lineEndings.js';
 import * as pipeline from '../../src/markdown/pipeline.js';
 import { deriveTitle, UNTITLED_TITLE } from '../../src/markdown/title.js';
+import { mulberry32 } from '../support/random.js';
 
 /**
  * A note's title from its first heading, read only as far as that heading
@@ -123,17 +124,6 @@ describe('the first heading, read only as far as it', () => {
  * the seed it came from.
  */
 describe('the first heading, over bodies put together at random', () => {
-	// https://gist.github.com/tommyettinger/46a874533244883189143505d203312c
-	const mulberry32 = (seed: number): (() => number) => {
-		let state = seed;
-		return () => {
-			state = (state + 0x6d2b79f5) | 0;
-			const a = Math.imul(state ^ (state >>> 15), 1 | state);
-			const b = (a + Math.imul(a ^ (a >>> 7), 61 | a)) ^ a;
-			return ((b ^ (b >>> 14)) >>> 0) / 4294967296;
-		};
-	};
-
 	const LINES = [
 		'',
 		'',

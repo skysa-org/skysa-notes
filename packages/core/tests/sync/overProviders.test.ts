@@ -21,6 +21,7 @@ import type { SyncFolder, SyncNote } from '../../src/sync/store.js';
 import { createDropboxStub } from '../providers/dropboxStub.js';
 import { createGDriveStub } from '../providers/gdriveStub.js';
 import { createOneDriveStub } from '../providers/onedriveStub.js';
+import { mulberry32 } from '../support/random.js';
 import { AT } from './kit/engine.js';
 import { entryAt } from './kit/remote.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
@@ -1239,17 +1240,6 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 
 // ---------------------------------------------------------------- the soak
 
-/** mulberry32: small, seedable, and the same on every machine. */
-const random = (seed: number): (() => number) => {
-	const state = { value: seed >>> 0 };
-	return () => {
-		state.value = (state.value + 0x6d2b79f5) >>> 0;
-		const t1 = Math.imul(state.value ^ (state.value >>> 15), 1 | state.value);
-		const t2 = (t1 + Math.imul(t1 ^ (t1 >>> 7), 61 | t1)) ^ t1;
-		return ((t2 ^ (t2 >>> 14)) >>> 0) / 4294967296;
-	};
-};
-
 const PATHS = ['a.md', 'b.md', 'c.md', 'Work/d.md', 'Work/e.md'];
 /** Where the soak adds files: beside the notes, and in each notebook. */
 const FILE_FOLDERS = ['', 'Work', 'Play', 'Work/Inner'];
@@ -1279,10 +1269,10 @@ const NOTEBOOKS = ['Work', 'Play', 'Work/Inner'];
  * device deleted, while that note still pointed at the deleted file, may go.
  */
 const createSoak = (seed: number, devices: readonly Device[], attaching = false) => {
-	const next = random(seed);
+	const next = mulberry32(seed);
 	// Files are added on a stream of their own, so the seeds without them
 	// take the same steps they always have.
-	const nextFile = random(seed ^ 0x5bd1e995);
+	const nextFile = mulberry32(seed ^ 0x5bd1e995);
 	const tokens: string[] = [];
 	const files: string[] = [];
 	const doomed = new Set<string>();

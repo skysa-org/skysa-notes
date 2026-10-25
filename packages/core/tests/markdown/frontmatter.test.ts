@@ -11,6 +11,7 @@ import {
 } from '../../src/markdown/frontmatter.js';
 import { type LineEnding, withLineEnding } from '../../src/markdown/lineEndings.js';
 import { serializeNoteFile } from '../../src/markdown/note.js';
+import { mulberry32 } from '../support/random.js';
 
 describe('splitFrontmatter', () => {
 	it('splits a fenced YAML mapping from the body', () => {
@@ -1115,17 +1116,6 @@ describe('writeFrontmatter, where lifting a pair out by line is not enough', () 
  * is the same failure on every machine, and names the seed it came from.
  */
 describe('writeFrontmatter, over blocks put together at random', () => {
-	// https://gist.github.com/tommyettinger/46a874533244883189143505d203312c
-	const mulberry32 = (seed: number): (() => number) => {
-		let state = seed;
-		return () => {
-			state = (state + 0x6d2b79f5) | 0;
-			const a = Math.imul(state ^ (state >>> 15), 1 | state);
-			const b = (a + Math.imul(a ^ (a >>> 7), 61 | a)) ^ a;
-			return ((b ^ (b >>> 14)) >>> 0) / 4294967296;
-		};
-	};
-
 	/** Ways a file spells each key; `null` is the key left out. */
 	const SPELLINGS: Readonly<Record<string, readonly (string | null)[]>> = {
 		id: [null, 'id: abc', 'id: "abc"', 'id: 0123 # mine', 'id:'],
