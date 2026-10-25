@@ -5,6 +5,7 @@ import { orIfNotFound } from '../providerOps.js';
 import { type PullChange, type SyncNote } from '../store.js';
 import { type PullAttachments } from './attachments.js';
 import { aliveElsewhere, type Batch, listedAfter, madeInBatch } from './batch.js';
+import { reestablished } from './decided.js';
 import { type PullFolders } from './folders.js';
 import { type PullNotes } from './notes.js';
 import { type Occupancy } from './occupancy.js';
@@ -35,17 +36,11 @@ export const forgetUnread = (
 		gone(remoteId, file.path) ? [{ kind: 'forget-unreadable', remoteId }] : []
 	);
 
-/** The notes and folders a batch's decisions so far write back: `reestablished` in `engine.ts`, handed in. */
-export type Reestablished = (
-	changes: readonly PullChange[]
-) => Readonly<{ notes: ReadonlySet<string>; folders: ReadonlySet<string> }>;
-
 export const createPullDeletions = (
 	{ provider, store }: EngineContext,
 	{
 		forgetNote,
 		stillThere,
-		reestablished,
 		deleteFolderAfterRescue,
 		doomedFolder,
 		folderIdAt,
@@ -54,7 +49,7 @@ export const createPullDeletions = (
 		fileUnderMoved,
 		notesEndingIn,
 		notesUnderNow,
-	}: { reestablished: Reestablished } & Pick<PullNotes, 'forgetNote' | 'stillThere'> &
+	}: Pick<PullNotes, 'forgetNote' | 'stillThere'> &
 		Pick<
 			PullFolders,
 			'deleteFolderAfterRescue' | 'doomedFolder' | 'folderIdAt' | 'movedFolderOver'
