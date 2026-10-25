@@ -4,7 +4,7 @@ import { MARKER_FILE } from '../config.js';
 import { asObject, parseJson } from '../json.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
-import type { FetchLike } from './dropbox.js';
+import { type FetchLike, parseRetryAfter } from './http.js';
 import {
 	applyItem,
 	nodeSchema,
@@ -23,7 +23,6 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
-	parseRetryAfter,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,

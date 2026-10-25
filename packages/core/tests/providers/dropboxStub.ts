@@ -1,10 +1,10 @@
 import { basename } from '../../src/paths.js';
-import type { FetchLike } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
 	type FakeProvider,
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
+import type { FetchLike } from '../../src/providers/http.js';
 import {
 	type ChangeEntry,
 	ConflictError,
