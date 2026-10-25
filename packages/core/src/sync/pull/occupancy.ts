@@ -171,3 +171,6 @@ export const createOccupancy = ({ store }: EngineContext) => {
 
 	return { notesEndingIn, notesUnderNow, takenIn };
 };
+
+/** What the pull's other parts are handed of it. */
+export type Occupancy = ReturnType<typeof createOccupancy>;
