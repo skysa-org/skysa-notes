@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { onPress, type PressedBy } from '../src/editor/press.js';
 
@@ -8,8 +8,6 @@ import { onPress, type PressedBy } from '../src/editor/press.js';
  * A toolbar control pressed by a mouse, a key or a screen reader: acted on
  * once, whichever it was.
  */
-
-afterEach(cleanup);
 
 const controls = (...names: string[]) => {
 	const acted = names.map(() => vi.fn<(by: PressedBy) => void>());

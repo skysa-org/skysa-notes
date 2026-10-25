@@ -1,12 +1,13 @@
 import { MAX_ATTACHMENT_BYTES, readClipName } from '@skysa/core';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SHARE_CACHE } from '../src/share/received.js';
 import { TakeShare, whatCame } from '../src/share/TakeShare.js';
-import { createDatabase, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
+import { type SyncStateRecord } from '../src/store/db.js';
 import { fakeCaches } from './fakeCaches.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Something shared to the app, put to the user before it goes on a clipboard
@@ -14,13 +15,6 @@ import { fakeCaches } from './fakeCaches.js';
  * site can post to `/share` as well as the share sheet can, and let go of
  * whatever the answer.
  */
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
@@ -60,8 +54,7 @@ const setup = async ({
 	kept = { text: 'Meet at 3', files: [{ name: 'q3.pdf', content: '%PDF' }] },
 	share = ID,
 }: { source?: SyncStateRecord | null; kept?: Kept | null; share?: string } = {}) => {
-	const db = createDatabase(`take-share-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	if (source !== null) await db.syncState.put(source);
 	const { storage, urls } = fakeCaches();
 	if (kept !== null) await keep(storage, kept);

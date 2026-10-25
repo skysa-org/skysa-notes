@@ -1,14 +1,14 @@
 import type * as Core from '@skysa/core';
 import type { PullChange, RemoteEntry } from '@skysa/core';
 import Dexie, { type Transaction } from 'dexie';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, finishImport } from '../src/store/connection.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { importLibrary, planImport } from '../src/store/importLibrary.js';
 import { importNoteFile } from '../src/store/notes.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 import { noteById } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A note's file is read (`parseNoteFile`) before the transaction that writes
@@ -36,21 +36,9 @@ vi.mock('@skysa/core', async (importOriginal) => {
 
 const CONNECTION = 'dropbox-1';
 
-const opened: NotesDatabase[] = [];
-
 beforeEach(() => {
 	reads.made = [];
 });
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`read-before-writing-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const remote = (path: string, id: string): RemoteEntry => ({
 	remoteId: id,

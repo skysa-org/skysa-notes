@@ -1,11 +1,10 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import { renderApp } from './support/app.js';
 
 /**
  * Making a notebook can fail — a name already in use is the everyday case — and
@@ -13,21 +12,6 @@ import { createFolder } from '../src/store/folders.js';
  * somewhere to say so the user types a name, presses Enter, and the app shows
  * nothing at all.
  */
-
-afterEach(async () => {
-	cleanup();
-	await db.notes.clear();
-	await db.folders.clear();
-});
-
-const openApp = async () => {
-	const router = createRouter({
-		routeTree,
-		history: createMemoryHistory({ initialEntries: ['/'] }),
-	});
-	render(<RouterProvider router={router} />);
-	await screen.findByRole('button', { name: 'New notebook' });
-};
 
 const nameIt = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
 	await user.click(screen.getByRole('button', { name: 'New notebook' }));
@@ -41,7 +25,7 @@ describe('making a notebook that cannot be made', () => {
 		// `Ideas` is already one.
 		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await openApp();
+		await renderApp();
 
 		await nameIt(user, 'Ideas');
 
@@ -68,7 +52,7 @@ describe('making a notebook that cannot be made', () => {
 		const user = userEvent.setup();
 		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await openApp();
+		await renderApp();
 		await nameIt(user, 'Ideas');
 		await screen.findByRole('alert');
 
@@ -84,7 +68,7 @@ describe('making a notebook that cannot be made', () => {
 		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		await createFolder(db, { parentPath: undefined, name: 'Zed' });
-		await openApp();
+		await renderApp();
 		await nameIt(user, 'Ideas');
 		await screen.findByRole('alert');
 
@@ -105,7 +89,7 @@ describe('making a notebook that cannot be made', () => {
 		try {
 			const user = userEvent.setup();
 			await createFolder(db, { parentPath: undefined, name: 'Work' });
-			await openApp();
+			await renderApp();
 			// Begun, which stores nothing and so cannot fail; it is made when it
 			// is first written in, and that is where the store refuses.
 			await screen.findByDisplayValue('Untitled');
@@ -120,7 +104,7 @@ describe('making a notebook that cannot be made', () => {
 
 	it('says nothing when the notebook is made', async () => {
 		const user = userEvent.setup();
-		await openApp();
+		await renderApp();
 
 		await nameIt(user, 'Personal');
 

@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { createDatabase, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
+import { type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import { createFileCleanup } from '../src/store/fileCleanup.js';
 import { deleteUnlinkedFilesAt } from '../src/store/fileLinks.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A file taken out of a note, deleted a little after the note is left if no
@@ -13,18 +14,6 @@ import { createNote, saveNoteBody } from '../src/store/notes.js';
 
 const CONNECTION = 'dropbox-1';
 const REF = 'note-1';
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`file-cleanup-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 const file = (db: NotesDatabase, id: string, path: string, connectionId = CONNECTION) =>
 	db.files.put({ connectionId, id, path, size: 10, remoteId: `r-${id}` });

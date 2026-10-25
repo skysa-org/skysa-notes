@@ -1,5 +1,9 @@
 # Copy to apps/api/.dev.vars and fill in. Never commit the real file.
 # In production set each of these with `wrangler secret put <KEY>`.
+#
+# The Worker's `Env` type is generated from this file's keys, not from your own
+# .dev.vars (`pnpm --filter @skysa/api run cf-typegen`), so a key added here
+# needs that run and its result committed.
 
 # Public origin of this deployment. OAuth redirect URIs are derived from it.
 APP_ORIGIN="http://localhost:5173"

@@ -9,8 +9,9 @@ import { UnlockDialog, UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
 import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { createDatabase, type NotesDatabase, type UnlockKind } from '../src/store/db.js';
+import { type NotesDatabase, type UnlockKind } from '../src/store/db.js';
 import { enrol, FREE_TRIES, MAX_TRIES, TRY_WAIT_MS, type Unlock } from '../src/store/secretKeys.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Entering an unlock (docs/ARCHITECTURE.md §7, "Secrets in a note"): a
@@ -18,12 +19,9 @@ import { enrol, FREE_TRIES, MAX_TRIES, TRY_WAIT_MS, type Unlock } from '../src/s
  * against this device's keys, with what a wrong try comes to.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	document.body.replaceChildren();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 describe('a pattern', () => {
@@ -172,8 +170,7 @@ describe('unlocking', () => {
 	const PIN: Unlock = { kind: 'pin', digits: '2468' };
 
 	const setup = async (unlock: Unlock = PIN) => {
-		const db = createDatabase(`unlock-form-${crypto.randomUUID()}`);
-		opened.push(db);
+		const db = freshDatabase();
 		await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 		const identity = new Uint8Array(32).fill(7);
 		await enrol(db, {
@@ -399,8 +396,7 @@ describe('unlocking with the device’s own lock', () => {
 		fill: number | undefined,
 		{ prepare, dialog = false }: { prepare?: Prepare; dialog?: boolean } = {}
 	) => {
-		const db = createDatabase(`unlock-device-${crypto.randomUUID()}`);
-		opened.push(db);
+		const db = freshDatabase();
 		await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 		await enrol(db, {
 			connectionId: 'c1',
@@ -679,8 +675,7 @@ describe('in a dialog', () => {
 	};
 
 	it('has Cancel and then Unlock, in one row, as the app’s other dialogs do', async () => {
-		const db = createDatabase(`unlock-dialog-${crypto.randomUUID()}`);
-		opened.push(db);
+		const db = freshDatabase();
 		await enrol(db, {
 			connectionId: 'c1',
 			recipient: 'age1…',

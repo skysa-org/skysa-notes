@@ -51,10 +51,8 @@ const Harness = ({
 	);
 };
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
-	await db.notes.clear();
-	await db.prefs.clear();
 	document.body.replaceChildren();
 });
 

@@ -1,7 +1,7 @@
 import { NotFoundError, parentPath } from '@skysa/core';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { MoveUnsent } from '../src/components/MoveUnsent.js';
 import {
@@ -15,18 +15,14 @@ import {
 	releaseConnection,
 	verifyResume,
 } from '../src/store/connection.js';
-import {
-	createDatabase,
-	type FileRecord,
-	LOCAL_CONNECTION_ID,
-	type NotesDatabase,
-} from '../src/store/db.js';
+import { type FileRecord, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { renameFolder } from '../src/store/folders.js';
 import { createNote, importNoteFile, moveNote, saveNoteBody } from '../src/store/notes.js';
 import { queueUpload } from '../src/store/queue.js';
 import { movable, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { updateNote } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * Files across sources (#187): what connecting, letting go, moving and
@@ -42,19 +38,6 @@ const ADA = { connectionId: 'c-ada', provider: 'dropbox', accountId: 'dbid:ada' 
 const ADA_AGAIN = { ...ADA, connectionId: 'c-ada-2' } as const;
 const BOB = { connectionId: 'c-bob', provider: 'onedrive', accountId: 'ms:bob' } as const;
 const ada = { connectionId: ADA.connectionId };
-
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
-	cleanup();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
-});
-
-const freshDatabase = (): NotesDatabase => {
-	const db = createDatabase(`source-files-${crypto.randomUUID()}`);
-	opened.push(db);
-	return db;
-};
 
 /** Bound, and its first import through: an ordinary source. */
 const connected = async (db: NotesDatabase, source: BindInput) => {

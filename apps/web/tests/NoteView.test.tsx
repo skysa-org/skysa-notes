@@ -51,11 +51,9 @@ const openNote = async (body = '# A note\n\nWith a body.\n') => {
 
 const richSurface = () => document.querySelector('.ProseMirror');
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
-	await db.notes.clear();
-	await db.prefs.clear();
 });
 
 describe('NoteView mode toggle', () => {

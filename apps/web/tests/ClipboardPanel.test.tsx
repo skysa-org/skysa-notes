@@ -18,8 +18,9 @@ import { type FileBrowser } from '../src/editor/fileActions.js';
 import { type ObjectUrlCache } from '../src/editor/objectUrls.js';
 import { type PictureShrinker } from '../src/pictures/shrinker.js';
 import { addClips, type ClipInput } from '../src/store/clipboard.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase } from '../src/store/db.js';
 import { type FileRead } from '../src/sync/fileReads.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * A source's clipboard on screen (docs/ARCHITECTURE.md §7, "The clipboard"):
@@ -27,13 +28,10 @@ import { type FileRead } from '../src/sync/fileReads.js';
  * an item does with it.
  */
 
-const opened: NotesDatabase[] = [];
-
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
 	// What a test put in the window beside the panel: a note's text, a dialog.
 	document.body.replaceChildren();
-	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
 const encode = (value: string): ArrayBuffer => new TextEncoder().encode(value).slice().buffer;
@@ -82,8 +80,7 @@ const setup = async ({
 	read,
 	shrinker,
 }: { read?: () => Promise<SystemRead>; shrinker?: PictureShrinker } = {}) => {
-	const db = createDatabase(`clipboard-panel-${crypto.randomUUID()}`);
-	opened.push(db);
+	const db = freshDatabase();
 	await db.syncState.put({
 		connectionId: 'c1',
 		clientId: 'install',
