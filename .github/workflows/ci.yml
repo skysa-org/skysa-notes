@@ -58,14 +58,10 @@ jobs:
             - run: pnpm install --frozen-lockfile
 
             # The same gate the README tells humans to run before every commit, so
-            # the two cannot drift: format:check + lint + typecheck + test.
+            # the two cannot drift: format:check + lint + typecheck + knip +
+            # test. knip is files, exports and dependencies nothing uses; an
+            # export kept on purpose says why and is tagged `@public` (#461).
             - run: pnpm verify
-
-            # Exports, files and dependencies nothing uses. Report-only for now
-            # (#461): the first run found 79 unused exports, which are removed
-            # in their own pull requests before this becomes a gate.
-            - run: pnpm knip
-              continue-on-error: true
 
             # A pull request that changes what ships has to say what it does
             # to the version. `pnpm run changeset --empty` is the answer for

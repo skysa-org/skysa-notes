@@ -46,7 +46,7 @@ locally and talks to nobody until a provider is connected.
 ## Before you open a pull request
 
 ```bash
-pnpm verify   # format:check + lint + typecheck + test
+pnpm verify   # format:check + lint + typecheck + knip + test
 ```
 
 CI runs the same thing plus `pnpm build` and `pnpm size` (the SPA's size
