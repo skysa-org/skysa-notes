@@ -6,6 +6,7 @@ import { bindConnection, finishImport, showConnection } from '../src/store/conne
 import { db, type NoteRecord } from '../src/store/db.js';
 import { updateLive } from '../src/store/detached.js';
 import { createFolder } from '../src/store/folders.js';
+import { getLastOpen } from '../src/store/lastOpen.js';
 import { createNote } from '../src/store/notes.js';
 import { openApp } from './support/app.js';
 import { holdCredential } from './support/connection.js';
@@ -82,6 +83,12 @@ describe('a sync run that brings nothing', () => {
 				).toHaveLength(2);
 			});
 			expect(screen.getByRole('button', { name: /^Loose notes/ })).toBeDefined();
+			// Remembering the note it opened is the last thing opening does,
+			// and the queries read again after it. Quiet before that write is
+			// only a slow machine, not the app done.
+			await waitFor(async () => {
+				expect((await getLastOpen(db, DROPBOX)).notes.Work).toBeDefined();
+			});
 			await still(read);
 			const before = read.length;
 
