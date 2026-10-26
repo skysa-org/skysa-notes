@@ -79,7 +79,7 @@ describe('which notebooks are open', () => {
 		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
 		await finishImport(db, 'dropbox-1');
 		const store = createDexieSyncStore(db, { connectionId: 'dropbox-1' });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work' },
 				{ kind: 'ensure-folder', path: 'Work/Old' },
@@ -87,10 +87,10 @@ describe('which notebooks are open', () => {
 		});
 		await setNotebooksOpen(db, 'dropbox-1', ['Work', 'Work/Old'], true);
 
-		await store.applyPull({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
+		await store.applyChanges({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
 		expect(await getOpenNotebooks(db, 'dropbox-1')).toEqual(['Job', 'Job/Old']);
 
-		await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
+		await store.applyChanges({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
 		expect(await getOpenNotebooks(db, 'dropbox-1')).toEqual([]);
 	});
 });

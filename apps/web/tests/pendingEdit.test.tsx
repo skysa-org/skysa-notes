@@ -40,7 +40,7 @@ const bound = async () => {
 /** A synced, clean note, open in raw mode. */
 const synced = async (content = 'before\n') => {
 	const store = await bound();
-	await store.applyPull({
+	await store.applyChanges({
 		changes: [
 			{
 				kind: 'upsert-note',
@@ -120,7 +120,7 @@ describe('an edit pending when a pull replaces its note', () => {
 		const editor = await open();
 
 		editor.type('mine\n');
-		await store.applyPull({ changes: [pulled('theirs\n')] });
+		await store.applyChanges({ changes: [pulled('theirs\n')] });
 		await waitFor(() => {
 			expect(editor.view().state.doc.toString()).toBe('theirs\n');
 		});
@@ -148,7 +148,7 @@ describe('an edit pending when a pull replaces its note', () => {
 		const editor = await open();
 
 		editor.type('mine\n');
-		await store.applyPull({ changes: [pulled('theirs\n')] });
+		await store.applyChanges({ changes: [pulled('theirs\n')] });
 		await waitFor(() => {
 			expect(editor.view().state.doc.toString()).toBe('theirs\n');
 		});
@@ -173,7 +173,7 @@ describe('an edit pending when a pull replaces its note', () => {
 		const editor = await open();
 
 		editor.type('mine\n');
-		await store.applyPull({ changes: [pulled('---\ntags: [work]\n---\nbefore\n')] });
+		await store.applyChanges({ changes: [pulled('---\ntags: [work]\n---\nbefore\n')] });
 		await waitFor(async () => {
 			expect((await getNote(db, 'n1'))?.tags).toEqual(['work']);
 		});
@@ -196,7 +196,7 @@ describe('an edit pending when a pull replaces its note', () => {
 			expect((await getNote(db, 'n1'))?.dirty).toBe(1);
 		});
 		editor.type('two\n');
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [{ kind: 'adopt-version', id: 'n1', remote: remote('a.md', 'v2') }],
 		});
 		flushAutosave();
@@ -214,7 +214,7 @@ describe('an edit pending when a pull deletes its note', () => {
 		const editor = await open();
 
 		editor.type('mine\n');
-		await store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }] });
+		await store.applyChanges({ changes: [{ kind: 'delete-note', id: 'n1' }] });
 
 		await waitFor(async () => {
 			expect((await getNote(db, 'n1'))?.body).toBe('before\nmine\n');
@@ -242,7 +242,9 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 		editor.type('mine\n');
 		// A file deleted and made again at the same id: the row is new, and must
 		// not look like the one the edit was typed into.
-		await store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }, pulled('theirs\n')] });
+		await store.applyChanges({
+			changes: [{ kind: 'delete-note', id: 'n1' }, pulled('theirs\n')],
+		});
 		await waitFor(() => {
 			expect(editor.view().state.doc.toString()).toBe('theirs\n');
 		});
@@ -275,11 +277,11 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 		// Pushed, then changed elsewhere, then changed back.
 		await updateNote(db, 'n1', { dirty: 0 });
 		await db.opQueue.clear();
-		await store.applyPull({ changes: [pulled('theirs\n', 'v2')] });
+		await store.applyChanges({ changes: [pulled('theirs\n', 'v2')] });
 		await waitFor(() => {
 			expect(editor.view().state.doc.toString()).toBe('theirs\n');
 		});
-		await store.applyPull({ changes: [pulled('before\n', 'v3')] });
+		await store.applyChanges({ changes: [pulled('before\n', 'v3')] });
 
 		await waitFor(() => {
 			expect(editor.view().state.doc.toString()).toBe('before\n');
@@ -310,7 +312,7 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 		await db.opQueue.clear();
 
 		editor.type('more\n');
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [pulled(pushed.replace(/\n---\n/, '\ntags:\n  - work\n---\n'), 'v3')],
 		});
 		await waitFor(async () => {
@@ -342,13 +344,13 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 		await updateNote(db, 'n1', { dirty: 0 });
 		await db.opQueue.clear();
 		const tagged = (tags: string) => pushed.replace(/\n---\n/, `\ntags:\n${tags}---\n`);
-		await store.applyPull({ changes: [pulled(tagged('  - work\n'), 'v3')] });
+		await store.applyChanges({ changes: [pulled(tagged('  - work\n'), 'v3')] });
 		await waitFor(async () => {
 			expect((await getNote(db, 'n1'))?.tags).toEqual(['work']);
 		});
 
 		editor.type('more\n');
-		await store.applyPull({ changes: [pulled(tagged('  - work\n  - home\n'), 'v4')] });
+		await store.applyChanges({ changes: [pulled(tagged('  - work\n  - home\n'), 'v4')] });
 		await waitFor(async () => {
 			expect((await getNote(db, 'n1'))?.tags).toEqual(['work', 'home']);
 		});
@@ -373,7 +375,7 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 				userEvent: 'input.type',
 			});
 		});
-		await store.applyPull({ changes: [pulled('# Theirs\n')] });
+		await store.applyChanges({ changes: [pulled('# Theirs\n')] });
 		await waitFor(() => {
 			expect(editor.view().state.doc.toString()).toBe('# Theirs\n');
 		});
@@ -398,7 +400,7 @@ describe('saveNoteBody with a base', () => {
 		const store = await synced();
 		const note = await shown();
 		const origin = await originOf();
-		await store.applyPull({ changes: [pulled('same\n')] });
+		await store.applyChanges({ changes: [pulled('same\n')] });
 
 		await saveNoteBody(db, 'n1', 'same\n', { origin, note });
 
@@ -410,7 +412,7 @@ describe('saveNoteBody with a base', () => {
 		const store = await synced();
 		const note = await shown();
 		const origin = await originOf();
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{ kind: 'delete-note', id: 'n1' },
 				{
@@ -433,10 +435,10 @@ describe('saveNoteBody with a base', () => {
 
 	it('keeps making edits against a note it brought back', async () => {
 		const store = await synced();
-		await store.applyPull({ changes: [pulled('theirs\n')] });
+		await store.applyChanges({ changes: [pulled('theirs\n')] });
 		const note = await shown();
 		const origin = await originOf();
-		await store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }] });
+		await store.applyChanges({ changes: [{ kind: 'delete-note', id: 'n1' }] });
 
 		// Shown as it was before the pull the editor has since adopted.
 		await saveNoteBody(db, 'n1', 'mine\n', { origin, note: { ...note, bodyOrigin: 'older' } });
@@ -453,7 +455,7 @@ describe('saveNoteBody with a base', () => {
 		const note = await shown();
 		const origin = await originOf();
 		await deleteNote(db, 'n1');
-		await store.applyPull({ changes: [pulled('theirs\n')] });
+		await store.applyChanges({ changes: [pulled('theirs\n')] });
 
 		await saveNoteBody(db, 'n1', 'mine\n', { origin, note });
 
@@ -479,10 +481,10 @@ describe('saveNoteBody with a base', () => {
 		const first = await originOf();
 		expect(first).not.toBe('');
 
-		await store.applyPull({ changes: [pulled('---\ntags: [x]\n---\nbefore\n')] });
+		await store.applyChanges({ changes: [pulled('---\ntags: [x]\n---\nbefore\n')] });
 		expect(await originOf()).toBe(first);
 
-		await store.applyPull({ changes: [pulled('after\n', 'v3')] });
+		await store.applyChanges({ changes: [pulled('after\n', 'v3')] });
 		const second = await originOf();
 		expect(second).not.toBe(first);
 

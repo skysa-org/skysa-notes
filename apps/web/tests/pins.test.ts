@@ -131,7 +131,7 @@ describe('pinned notebooks', () => {
 		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
 		await finishImport(db, 'dropbox-1');
 		const store = createDexieSyncStore(db, { connectionId: 'dropbox-1' });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work' },
 				{ kind: 'ensure-folder', path: 'Work/Old' },
@@ -139,10 +139,10 @@ describe('pinned notebooks', () => {
 		});
 		await setNotebookPin(db, 'dropbox-1', 'Work/Old', 'top');
 
-		await store.applyPull({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
+		await store.applyChanges({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
 		expect(await getPinnedNotebooks(db, 'dropbox-1')).toEqual(['Job/Old']);
 
-		await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
+		await store.applyChanges({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
 		expect(await getPinnedNotebooks(db, 'dropbox-1')).toEqual([]);
 	});
 });
@@ -216,7 +216,7 @@ describe('notebooks pinned to the bottom', () => {
 		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
 		await finishImport(db, 'dropbox-1');
 		const store = createDexieSyncStore(db, { connectionId: 'dropbox-1' });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work' },
 				{ kind: 'ensure-folder', path: 'Work/Old' },
@@ -224,10 +224,10 @@ describe('notebooks pinned to the bottom', () => {
 		});
 		await setNotebookPin(db, 'dropbox-1', 'Work/Old', 'bottom');
 
-		await store.applyPull({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
+		await store.applyChanges({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
 		expect(await getBottomPinnedNotebooks(db, 'dropbox-1')).toEqual(['Job/Old']);
 
-		await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
+		await store.applyChanges({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
 		expect(await getBottomPinnedNotebooks(db, 'dropbox-1')).toEqual([]);
 	});
 });

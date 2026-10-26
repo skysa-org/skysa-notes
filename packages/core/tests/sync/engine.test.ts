@@ -9235,10 +9235,10 @@ describe('a file that is not UTF-8 text', () => {
 		const typed = { done: false };
 		const typing: SyncStore = {
 			...store,
-			applyPull: (batch) => {
+			applyChanges: (batch) => {
 				if (!typed.done) editHere(store, note, 'typed just now\n');
 				typed.done = true;
-				return store.applyPull(batch);
+				return store.applyChanges(batch);
 			},
 		};
 		const racing = engineWith({ store: typing });
@@ -9582,9 +9582,9 @@ describe('a file that is not UTF-8 text', () => {
 			const batches: PullBatch[] = [];
 			const watching: SyncStore = {
 				...store,
-				applyPull: (batch) => {
+				applyChanges: (batch) => {
 					batches.push(batch);
-					return store.applyPull(batch);
+					return store.applyChanges(batch);
 				},
 			};
 			return {
@@ -9742,7 +9742,7 @@ describe('a file that is not UTF-8 text', () => {
 				// notice for a file that reads perfectly well never goes: its
 				// entries all take this branch, and only a re-scan clears it.
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				await store.applyPull({
+				await store.applyChanges({
 					changes: [
 						{ kind: 'unreadable', file: { remoteId: entry.remoteId, path: 'zzz.md' } },
 					],
@@ -10217,7 +10217,7 @@ describe('a file that is not UTF-8 text', () => {
 			// notice is missing from until the file is next named, and no more.
 			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
-			await store.applyPull({
+			await store.applyChanges({
 				changes: [{ kind: 'forget-unreadable', remoteId: file.remoteId }],
 			});
 

@@ -420,7 +420,7 @@ describe('letting a source go', () => {
 		// A run that was at the network when the source was let go, landing now:
 		// it would bring back what was just removed, and put a cursor on the row.
 		await expect(
-			store.applyPull({
+			store.applyChanges({
 				changes: [
 					{
 						kind: 'upsert-note',
