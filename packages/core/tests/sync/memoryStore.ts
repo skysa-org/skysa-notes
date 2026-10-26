@@ -900,8 +900,6 @@ export const createMemoryStore = (): MemoryStore => {
 			),
 		unreadable: () => Promise.resolve([...unreadable.values()]),
 		fileById: (id) => Promise.resolve(files.get(id)),
-		fileByPath: (path) =>
-			Promise.resolve([...files.values()].find((file) => file.path === path)),
 		fileByRemoteId: (remoteId) =>
 			Promise.resolve([...files.values()].find((file) => file.remoteId === remoteId)),
 		allFiles: () => Promise.resolve([...files.values()]),

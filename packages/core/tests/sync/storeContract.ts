@@ -1945,11 +1945,10 @@ export const describeSyncStoreContract = (
 			const opsOf = async (store: SyncStore) =>
 				(await store.pendingOps()).map(({ seq: _seq, attempts: _attempts, ...op }) => op);
 
-			it('reads a row by id, by path and by remote id, and under its folders', async () => {
+			it('reads a row by id and by remote id, and under its folders', async () => {
 				const { store, seedFile } = await harness();
 				await seedFile(bound);
 				expect(await store.fileById('x1')).toEqual(bound);
-				expect(await store.fileByPath('Trips/a.png')).toEqual(bound);
 				expect(await store.fileByRemoteId('f1')).toEqual(bound);
 				expect(await store.allFiles()).toEqual([bound]);
 				expect(await store.filesUnder('Trips')).toEqual([bound]);
