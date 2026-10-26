@@ -1,8 +1,7 @@
-import { type Document, isMap, isScalar, parseDocument } from 'yaml';
+import { type Document, isScalar } from 'yaml';
 
-import { toLf } from '../lineEndings.js';
 import { readTime } from '../time.js';
-import { recover, type Recovered, yamlOf } from './split.js';
+import { recover, type Recovered } from './split.js';
 
 /** The fields the app understands. Every other key is preserved but untouched. */
 export interface NoteFrontmatter {
@@ -192,32 +191,4 @@ export const readNoteMetadata = (
 	return recovered === undefined
 		? { fields: {}, times: {} }
 		: { fields: fieldsOf(recovered), times: timesOf(recovered) };
-};
-
-/**
- * Can this block be edited, or only read?
- *
- * `writeFrontmatter` will not rewrite YAML the parser had to recover from —
- * rewriting a guess would put words in the user's file — so it hands the block
- * back unchanged and the patch is dropped. That is the right refusal and the
- * wrong silence: the app takes the rename, the file does not, and the next pull
- * reads the old title back over it. The note ends up with a filename saying one
- * thing and a title saying another, permanently, with nothing to explain it.
- *
- * So callers that are about to write metadata can ask first, and say so.
- */
-export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
-	if (frontmatter === null || frontmatter.trim() === '') return true;
-	try {
-		const doc = parseDocument(toLf(yamlOf(frontmatter)));
-		// A mapping, and not only error-free. `writeFrontmatter` sets keys on the
-		// document, which a scalar or a sequence cannot take — those throw rather
-		// than drop the patch. `splitFrontmatter` never yields one, so this is a
-		// promise about the exported function rather than about anything the app
-		// reaches; an exported predicate that is right only for its callers is
-		// how the next caller gets caught.
-		return doc.errors.length === 0 && isMap(doc.contents);
-	} catch {
-		return false;
-	}
 };

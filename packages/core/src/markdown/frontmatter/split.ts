@@ -92,6 +92,9 @@ const KNOWN_KEYS = ['id', 'title', 'created', 'updated', 'tags'] as const;
  * scratch note's pin and colour (docs/ARCHITECTURE.md §7, "The scratchpad").
  * Those two are not in the vocabulary below: `Color: blue` can open a
  * sentence, and they are not what makes a block metadata.
+ *
+ * Here rather than in `write.ts`, which writes them, because `isAppBlock` below
+ * reads them too, and this part may not import that one.
  */
 export const WRITTEN_KEYS = [...KNOWN_KEYS, 'pinned', 'color'] as const;
 

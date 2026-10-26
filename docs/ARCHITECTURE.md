@@ -1723,7 +1723,7 @@ packages/
                               #   drain.ts (the queue drained in order, op by op, writes sent together, a failed op answered; createPush wires the parts)
       markdown/
         frontmatter/          # split.ts (the block found and taken off the body) read.ts (the fields the app understands)
-                              #   write.ts (fields written back, nothing else touched); each builds on the one before (#449)
+                              #   write.ts (fields written back, nothing else touched, or refused up front); each builds on the one before (#449)
         attachments.ts
         pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
         lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
