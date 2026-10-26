@@ -2,11 +2,12 @@ import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, finishImport } from '../src/store/connection.js';
-import { beginConnect } from '../src/store/credentials.js';
+import { beginConnect, keepCredential } from '../src/store/credentials.js';
 import { db, PENDING_CREDENTIAL_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 import { renderApp } from './support/app.js';
+import { holdCredential } from './support/connection.js';
 
 /**
  * A source's first import holds the app, the first source's and every one
@@ -84,10 +85,17 @@ describe('the first import', () => {
 	});
 });
 
-/** What `claimConnection` does with an answer: the pending credential is taken up and the source bound. */
+/**
+ * What `claimConnection` does with an answer: the pending credential is kept
+ * under the connection it reaches, and the source bound. Without the
+ * credential, the app lets the source go as revoked, as soon as it looks.
+ */
 const claimed = (connectionId: string, provider: 'dropbox' | 'gdrive') =>
 	act(async () => {
-		await db.credentials.delete(PENDING_CREDENTIAL_ID);
+		const pending = await db.credentials.get(PENDING_CREDENTIAL_ID);
+		// A claim has a flow to answer, for the provider it was begun with.
+		expect(pending?.provider).toBe(provider);
+		if (pending !== undefined) await keepCredential(db, connectionId, pending);
 		await bindConnection(db, { connectionId, provider });
 	});
 
@@ -118,6 +126,7 @@ describe('"storage connected", on the way back from the provider', () => {
 	});
 
 	it('is left to the import dialog for a later source too', async () => {
+		await holdCredential(db, 'c1');
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await finishImport(db, 'c1');
 		await beginConnect(db, 'gdrive');
@@ -132,6 +141,7 @@ describe('"storage connected", on the way back from the provider', () => {
 	});
 
 	it('is said for a source connected again, which has nothing to import', async () => {
+		await holdCredential(db, 'c1');
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await finishImport(db, 'c1');
 		await beginConnect(db, 'dropbox');

@@ -6,7 +6,9 @@ import { bindConnection, finishImport, showConnection } from '../src/store/conne
 import { db, type NoteRecord } from '../src/store/db.js';
 import { updateLive } from '../src/store/detached.js';
 import { createFolder } from '../src/store/folders.js';
+import { lastWritten } from '../src/store/lastOpen.js';
 import { createNote } from '../src/store/notes.js';
+import { getRecentKeys } from '../src/store/recentNotes.js';
 import { openApp } from './support/app.js';
 import { holdCredential } from './support/connection.js';
 
@@ -82,6 +84,15 @@ describe('a sync run that brings nothing', () => {
 				).toHaveLength(2);
 			});
 			expect(screen.getByRole('button', { name: /^Loose notes/ })).toBeDefined();
+			// Opening ends by remembering the note it opened, twice: as the
+			// one open in its notebook and as the most recent. The queries read
+			// again after each write, so quiet before both have landed is only
+			// a slow machine, not the app done.
+			await waitFor(async () => {
+				const open = lastWritten(db, DROPBOX)?.notes.Work;
+				expect(open).toBeDefined();
+				expect((await getRecentKeys(db))[0]).toEqual([DROPBOX, open]);
+			});
 			await still(read);
 			const before = read.length;
 
