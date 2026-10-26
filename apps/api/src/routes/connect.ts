@@ -1,4 +1,4 @@
-import { type ApiErrorCode, type EntitlementCode } from '@skysa/core';
+import { type ApiErrorCode, type EntitlementCode, PROVIDER_KINDS } from '@skysa/core';
 import { and, desc, eq, notInArray } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
@@ -18,7 +18,6 @@ import { closeSockets } from '../relay/hub.js';
 import {
 	clearFlowState,
 	flowExpiry,
-	type FlowState,
 	readFlowAnswer,
 	readFlowState,
 	setFlowAnswer,
@@ -67,15 +66,19 @@ const back = (returnTo: string, outcome: Outcome, code?: EntitlementCode): strin
 /**
  * A provider with no flow here, or one this deployment does not offer, is a
  * 404; one it offers without credentials is the operator's to fix, and a 501.
- * Said to `/start`; the callback sends the browser back instead (`failedBack`).
+ * Said to `/start`; the callback sends the browser back instead.
  */
 const refusal = (
 	c: Context<AppEnv>,
 	error: Extract<ApiErrorCode, 'unsupported_provider' | 'provider_not_configured'>
 ): Response => fail(c, error, error === 'unsupported_provider' ? 404 : 501);
 
-/** Where a callback that cannot go on sends the browser: back where its flow began, or home. */
-const failedBack = (flow: FlowState | undefined): string => back(flow?.returnTo ?? '/', 'failed');
+/**
+ * A provider as the log may name it: one this code knows, or none. The path is
+ * the caller's to write, and a log line is the operator's to read.
+ */
+const loggable = (param: string): string =>
+	PROVIDER_KINDS.find((kind) => kind === param) ?? 'unknown provider';
 
 const startBody = z.object({
 	/** base64url SHA-256 of the credential the device has already written down. */
@@ -215,16 +218,6 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const flow = await readFlowState(c, key, cookies);
 		clearFlowState(c);
 
-		// Like every answer below, a page a browser is on: it goes back to the
-		// app rather than showing raw JSON. A provider turned off between start
-		// and callback looks like any failure to the user, so it is logged.
-		const resolved = oauthFor(config, c.req.param('provider'));
-		if (!resolved.ok) {
-			logFailure('connect callback refused', new Error(resolved.error));
-			return c.redirect(failedBack(flow));
-		}
-		const { provider, client, credentials } = resolved;
-
 		// A callback with no flow, or one whose state does not match, did not come
 		// from a flow this browser started — or came from one that took too long,
 		// or was answered too long ago to remember. It is still a page a browser
@@ -240,6 +233,16 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			return c.redirect(location);
 		};
 
+		// Like every answer here, a page a browser is on: it goes back to the
+		// app rather than showing raw JSON. A provider turned off between start
+		// and callback looks like any failure to the user, so it is logged.
+		const resolved = oauthFor(config, c.req.param('provider'));
+		if (!resolved.ok) {
+			logFailure(`${loggable(c.req.param('provider'))} callback`, new Error(resolved.error));
+			return answer('failed');
+		}
+		const { provider, client, credentials } = resolved;
+
 		const denied = c.req.query('error');
 		if (denied !== undefined) return answer('denied');
 
@@ -254,8 +257,13 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// started a flow here — but a code exchange is still an outbound call the
 		// deployment pays for, and a replayed callback is the cheapest way to ask
 		// for one.
+		// Throttled is a failed connect to the person waiting, and only the log
+		// tells the operator why.
 		const limit = await c.get('rateLimiter').check(callerKey(c, 'callback'));
-		if (!limit.allowed) return answer('failed');
+		if (!limit.allowed) {
+			logFailure(`${provider} callback`, new Error('rate_limited'));
+			return answer('failed');
+		}
 
 		// A replayed or expired authorization code is an ordinary event, not a
 		// server fault: send the user back to the app to try again. Logged all the

@@ -648,14 +648,9 @@ describe('a callback that cannot go on (#451)', () => {
 	 * Each is a page a browser is on, so each goes back to the app as a failure,
 	 * not raw JSON, drops the flow and stores nothing.
 	 */
-	const expectFailed = async (
-		response: Response,
-		jar: Jar,
-		db: D1Database,
-		location = '/?folder=Work&connect=failed'
-	): Promise<void> => {
+	const expectFailed = async (response: Response, jar: Jar, db: D1Database): Promise<void> => {
 		expect(response.status).toBe(302);
-		expect(response.headers.get('location')).toBe(location);
+		expect(response.headers.get('location')).toBe('/?folder=Work&connect=failed');
 		expect(jar.get(cookieNames.flow)).toBeUndefined();
 		expect(await createDb(db).select().from(schema.connections)).toEqual([]);
 	};
@@ -686,33 +681,33 @@ describe('a callback that cannot go on (#451)', () => {
 
 		await expectFailed(response, jar, db);
 		expect(exchanges(stub)).toHaveLength(0);
-		expect(logged.mock.calls.flat().join('\n')).toContain('provider_not_configured');
+		expect(logged).toHaveBeenCalledWith('dropbox callback: Error: provider_not_configured');
 	});
 
 	it('goes back to the app for a provider it has never heard of', async () => {
 		const { request, db, stub } = buildApp();
-		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const jar = createJar();
 		const state = await started(jar);
+		const callback = `/api/auth/connect/nope/callback?code=c&state=${state}`;
 
-		const response = jar.absorb(
-			await request(`/api/auth/connect/nope/callback?code=c&state=${state}`, { cookies: jar })
+		await expectFailed(jar.absorb(await request(callback, { cookies: jar })), jar, db);
+		// Named as no provider at all: the path is the caller's to write.
+		expect(logged).toHaveBeenCalledWith(
+			'unknown provider callback: Error: unsupported_provider'
 		);
 
-		await expectFailed(response, jar, db);
+		const again = await request(callback, { cookies: jar });
+		expect(again.headers.get('location')).toBe('/?folder=Work&connect=failed');
 		expect(exchanges(stub)).toHaveLength(0);
 	});
 
-	it('goes back to the app without a flow, too', async () => {
-		const { request, db } = buildApp();
-		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		const jar = createJar();
+	it('is expired without a flow, as any callback is, and logs nothing', async () => {
+		const { request } = buildApp();
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-		const response = jar.absorb(
-			await request('/api/auth/connect/nope/callback?code=c&state=s', { cookies: jar })
-		);
-
-		await expectFailed(response, jar, db, '/?connect=failed');
+		expectExpired(await request('/api/auth/connect/nope/callback?code=c&state=s'));
+		expect(logged).not.toHaveBeenCalled();
 	});
 
 	it('goes back to the app with neither a code nor an error, logs it, and says so again', async () => {
@@ -723,7 +718,7 @@ describe('a callback that cannot go on (#451)', () => {
 		const callback = `/api/auth/connect/dropbox/callback?state=${state}`;
 
 		await expectFailed(jar.absorb(await request(callback, { cookies: jar })), jar, db);
-		expect(logged.mock.calls.flat().join('\n')).toContain('missing_code');
+		expect(logged).toHaveBeenCalledWith('dropbox callback: Error: missing_code');
 
 		const again = await request(callback, { cookies: jar });
 		expect(again.headers.get('location')).toBe('/?folder=Work&connect=failed');
@@ -743,6 +738,7 @@ describe('a callback that cannot go on (#451)', () => {
 			},
 		};
 		const { request, db, stub } = buildApp({ rateLimiter });
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const jar = createJar();
 		const state = await started(jar);
 
@@ -754,6 +750,7 @@ describe('a callback that cannot go on (#451)', () => {
 
 		await expectFailed(response, jar, db);
 		expect(keys.some((key) => key.startsWith('callback'))).toBe(true);
+		expect(logged).toHaveBeenCalledWith('dropbox callback: Error: rate_limited');
 		expect(exchanges(stub)).toHaveLength(0);
 	});
 });
