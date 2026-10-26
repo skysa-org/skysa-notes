@@ -6,6 +6,7 @@ import { GRANT_IDLE_DAYS } from '../credentials.js';
 import { openOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
 import type { Connection } from '../db/schema.js';
+import { fail } from '../http.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import type { FetchLike } from '../oauth/types.js';
@@ -129,7 +130,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		const target = await db.query.grants.findFirst({
 			where: and(eq(schema.grants.id, id), eq(schema.grants.connectionId, connection.id)),
 		});
-		if (target === undefined) return c.json({ error: 'not_found' }, 404);
+		if (target === undefined) return fail(c, 'not_found', 404);
 
 		// Nulled, not deleted. Deleting would free the hash, and a freed hash is
 		// re-claimable: whoever holds the credential this row was for — which is

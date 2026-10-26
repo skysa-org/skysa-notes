@@ -47,6 +47,7 @@ export {
 	type EntitlementDecision,
 	type EntitlementProvider,
 	type EntitlementSubject,
+	GATE_LIMITS,
 	MAX_CODE_HOLD_SECONDS,
 	MAX_CODE_REASON,
 	MAX_CONNECT_CODE,
@@ -54,6 +55,8 @@ export {
 	type RateLimitDecision,
 	type RateLimiter,
 } from './entitlements.js';
+
+export { API_ERROR_CODES, type ApiErrorCode, AUTH_MODES, type AuthMode } from './api.js';
 
 export {
 	AuthError,

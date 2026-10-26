@@ -1,6 +1,11 @@
 import {
+	type ApiErrorCode,
+	AUTH_MODES,
+	type ConnectCodeCheck,
+	type ConnectGate,
 	ENTITLEMENT_CODES,
 	type EntitlementCode,
+	GATE_LIMITS,
 	MAX_CODE_HOLD_SECONDS,
 	MAX_CODE_REASON,
 	MAX_CONNECT_CODE,
@@ -22,8 +27,6 @@ import { z } from 'zod';
  * body.
  */
 
-const AUTH_MODES = ['storage-first', 'account-first'] as const;
-
 /**
  * What the operator shows in place of the connect buttons (`ConnectGate` in
  * `@skysa/core`). The server checks it before it will serve it; it is checked
@@ -32,28 +35,34 @@ const AUTH_MODES = ['storage-first', 'account-first'] as const;
  * `https:` only — never `javascript:` or `data:`, which would be script in the
  * page `script-src 'self'` protects (CLAUDE.md; issue #89 asks the same of the
  * connect flow's URL).
+ *
+ * Its own schema, not the server's: the server refuses a gate that is wrong,
+ * where this drops a part it cannot use and keeps the rest (the `.catch`es).
+ * What the two must agree on is core's: the shape, which both schemas are
+ * checked against (`ConnectGate`), and the limits, which both read
+ * (`GATE_LIMITS`). The URL rule is written on both sides, as above.
  */
 const gateSchema = z.object({
-	message: z.string().min(1).max(500),
+	message: z.string().min(1).max(GATE_LIMITS.message),
 	action: z.object({
-		label: z.string().min(1).max(40),
+		label: z.string().min(1).max(GATE_LIMITS.label),
 		// Normalized for the reason `apps/api/src/gate.ts` gives: an
 		// `https:example.com` would otherwise be a link into this app.
-		url: z.url({ protocol: /^https$/, normalize: true }).max(2048),
+		url: z.url({ protocol: /^https$/, normalize: true }).max(GATE_LIMITS.url),
 	}),
 	// A field beside the gate for a code the operator's policy reads. Dropped on
 	// its own when it does not parse, leaving the gate: without the field the
 	// app is as it was before there could be one.
 	connectCode: z
 		.object({
-			label: z.string().min(1).max(40),
+			label: z.string().min(1).max(GATE_LIMITS.label),
 			// Nothing past the field without a code the policy accepted. Anything
 			// but a yes is a no, which offers the buttons as before there was one.
 			required: z.boolean().optional().catch(undefined),
 		})
 		.optional()
 		.catch(undefined),
-});
+}) satisfies z.ZodType<ConnectGate>;
 
 const configSchema = z.object({
 	authMode: z.enum(AUTH_MODES),
@@ -132,7 +141,7 @@ const codeCheckSchema = z.discriminatedUnion('accepted', [
 		accepted: z.literal(false),
 		reason: z.string().min(1).max(MAX_CODE_REASON).optional().catch(undefined),
 	}),
-]);
+]) satisfies z.ZodType<ConnectCodeCheck>;
 
 export type CodeCheck = z.infer<typeof codeCheckSchema>;
 
@@ -221,22 +230,16 @@ export interface ApiClientOptions {
  * account disconnected. Either way the credential is spent for ever and the
  * only answer is to throw it away (docs/ARCHITECTURE.md §6).
  */
-export type Refusal =
-	| 'credential_required'
-	| 'credential_revoked'
-	| 'reauthorize_required'
-	| 'not_entitled'
-	| 'not_found'
-	| 'forbidden_origin';
-
-const REFUSALS: readonly Refusal[] = [
+const REFUSALS = [
 	'credential_required',
 	'credential_revoked',
 	'reauthorize_required',
 	'not_entitled',
 	'not_found',
 	'forbidden_origin',
-];
+] as const satisfies readonly ApiErrorCode[];
+
+export type Refusal = (typeof REFUSALS)[number];
 
 export type Result<T> =
 	{ ok: true; value: T } | { ok: false; refusal: Refusal; denial?: Denial | undefined };
@@ -364,10 +367,11 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 
 		if (!response.ok) {
 			const refusal = errorSchema.safeParse(body);
-			if (refusal.success && (REFUSALS as readonly string[]).includes(refusal.data.error)) {
-				return refusal.data.error === 'not_entitled'
-					? { ok: false, refusal: 'not_entitled', denial: denialOf(refusal.data) }
-					: { ok: false, refusal: refusal.data.error as Refusal };
+			const known = REFUSALS.find((code) => code === refusal.data?.error);
+			if (refusal.success && known !== undefined) {
+				return known === 'not_entitled'
+					? { ok: false, refusal: known, denial: denialOf(refusal.data) }
+					: { ok: false, refusal: known };
 			}
 			throw new ApiError(
 				`${init.method ?? 'GET'} ${path} failed with ${String(response.status)}`,

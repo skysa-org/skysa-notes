@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
 import { liveGrant } from '../credentials.js';
-import { sameOrigin, tooMany } from '../http.js';
+import { fail, sameOrigin, tooMany } from '../http.js';
 import { RELAY_SOCKET_MS, type RelayHub } from '../relay/hub.js';
 import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
 
@@ -22,7 +22,7 @@ export const relayRoutes = (relay: RelayHub | undefined) => {
 	const app = new Hono<AppEnv>();
 
 	app.post('/connection/relay/ticket', async (c) => {
-		if (relay === undefined) return c.json({ error: 'relay_disabled' }, 404);
+		if (relay === undefined) return fail(c, 'relay_disabled', 404);
 		const { connection, grant } = c.get('bearer');
 
 		const limit = await c.get('rateLimiter').check(`relay-ticket:${connection.id}`);
@@ -37,25 +37,25 @@ export const relayRoutes = (relay: RelayHub | undefined) => {
 	});
 
 	app.get('/relay', async (c) => {
-		if (relay === undefined) return c.json({ error: 'relay_disabled' }, 404);
+		if (relay === undefined) return fail(c, 'relay_disabled', 404);
 		if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
-			return c.json({ error: 'upgrade_required' }, 426);
+			return fail(c, 'upgrade_required', 426);
 		}
 		// A page on another origin can open a WebSocket here, and the browser
 		// sends no preflight for one; `Origin` is how a server tells.
 		if (!sameOrigin(c, c.get('config').appOrigin)) {
-			return c.json({ error: 'forbidden_origin' }, 403);
+			return fail(c, 'forbidden_origin', 403);
 		}
 
 		const now = Date.now();
 		const holder = await readTicket(c.get('ticketKey'), c.req.query('ticket'), now);
-		if (holder === undefined) return c.json({ error: 'ticket_invalid' }, 401);
+		if (holder === undefined) return fail(c, 'ticket_invalid', 401);
 
 		// The ticket says who it was given to, not whether they still may: a
 		// device revoked in the seconds since, or idle past its expiry, is refused
 		// here as `requireBearer` would refuse it.
 		if (!(await liveGrant(c.get('db'), holder.grantId, holder.connectionId, now))) {
-			return c.json({ error: 'credential_revoked' }, 401);
+			return fail(c, 'credential_revoked', 401);
 		}
 
 		const limit = await c.get('rateLimiter').check(`relay:${holder.connectionId}`);
