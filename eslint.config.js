@@ -332,9 +332,11 @@ export default tseslint.config(
 	},
 
 	{
-		// Core's source holds to it now; the web's and the API's folders join as
-		// each is converted (#457), until this is every package's src.
-		files: ['packages/core/src/**/*.ts'],
+		// Core's source, the API's and the web's sync/ hold to it now; the web's
+		// other folders join as each is converted (#457), until this is every
+		// package's src. The API's env block below sets the rule again, so it
+		// spreads the list too.
+		files: ['packages/core/src/**/*.ts', 'apps/api/src/**/*.ts', 'apps/web/src/sync/**/*.ts'],
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...CELL_SYNTAX] },
 	},
 
@@ -488,6 +490,7 @@ export default tseslint.config(
 			'no-restricted-syntax': [
 				'error',
 				...RESTRICTED_SYNTAX,
+				...CELL_SYNTAX,
 				{
 					selector: "MemberExpression[object.name='globalThis'][property.name='process']",
 					message:

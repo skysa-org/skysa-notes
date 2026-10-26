@@ -1,4 +1,5 @@
 import {
+	cell,
 	createDropboxProvider,
 	createGDriveProvider,
 	createOneDriveProvider,
@@ -79,24 +80,24 @@ const eitherSignal = (...signals: AbortSignal[]): AbortSignal => {
  */
 const deadline = (ms: number, init: RequestInit) => {
 	const controller = new AbortController();
-	const credit = new Map<'ms', number>([['ms', 0]]);
-	const timer = new Map<'due', ReturnType<typeof setTimeout>>();
+	const credit = cell(0);
+	const timer = cell<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const due = (): void => {
-		const earned = credit.get('ms') ?? 0;
-		credit.set('ms', 0);
+		const earned = credit.current;
+		credit.current = 0;
 		// The timeout's words reach the storage panel, as what went wrong.
-		if (earned > 0) timer.set('due', setTimeout(due, earned));
+		if (earned > 0) timer.current = setTimeout(due, earned);
 		else controller.abort(new DOMException(t('account.status.timedOut'), 'TimeoutError'));
 	};
-	timer.set('due', setTimeout(due, ms + sending(init.body) / SLOWEST_BYTES_PER_MS));
+	timer.current = setTimeout(due, ms + sending(init.body) / SLOWEST_BYTES_PER_MS);
 	return {
 		signal: controller.signal,
 		received: (bytes: number) => {
-			credit.set('ms', (credit.get('ms') ?? 0) + bytes / SLOWEST_BYTES_PER_MS);
+			credit.current += bytes / SLOWEST_BYTES_PER_MS;
 		},
 		/** Nothing more to wait for: the request failed, or its answer has been read. */
 		done: () => {
-			clearTimeout(timer.get('due'));
+			clearTimeout(timer.current);
 		},
 	};
 };

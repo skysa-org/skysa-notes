@@ -1,4 +1,5 @@
 import {
+	cell,
 	RELAY_CHANGED,
 	RELAY_CLOSE,
 	RELAY_PING,
@@ -118,15 +119,15 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 
 	const flags = new Set<Flag>();
 	const timers = new Map<Timer, () => void>();
-	const socket = new Map<'socket', RelaySocket>();
+	const socket = cell<RelaySocket | undefined>(undefined);
 	/** Failures in a row since the server last said anything, for the backoff. */
-	const failures = new Map<'count', number>([['count', 0]]);
+	const failures = cell(0);
 	/**
 	 * Which attempt is current. A ticket that arrives, or a socket that speaks,
 	 * after the link has let its attempt go is about nothing.
 	 */
-	const attempts = new Map<'count', number>([['count', 0]]);
-	const lastTold = new Map<'at', number>();
+	const attempts = cell(0);
+	const lastTold = cell<number | undefined>(undefined);
 
 	const cancel = (timer: Timer) => {
 		timers.get(timer)?.();
@@ -152,7 +153,7 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 
 	const send = (text: string) => {
 		try {
-			socket.get('socket')?.send(text);
+			socket.current?.send(text);
 		} catch {
 			// Closing as it was sent to: its `close` is on its way.
 		}
@@ -160,13 +161,13 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 
 	/** Let go of the socket, and of anything waiting on it or on a ticket. */
 	const drop = () => {
-		attempts.set('count', (attempts.get('count') ?? 0) + 1);
+		attempts.current += 1;
 		SOCKET_TIMERS.forEach(cancel);
 		SOCKET_FLAGS.forEach((flag) => {
 			flags.delete(flag);
 		});
-		const held = socket.get('socket');
-		socket.delete('socket');
+		const held = socket.current;
+		socket.current = undefined;
 		try {
 			held?.close();
 		} catch {
@@ -181,8 +182,8 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 	};
 
 	const failed = () => {
-		const count = (failures.get('count') ?? 0) + 1;
-		failures.set('count', count);
+		const count = failures.current + 1;
+		failures.current = count;
 		const ceiling = Math.min(RELAY_RETRY_MS * 2 ** (count - 1), RELAY_MAX_RETRY_MS);
 		// Half of it at least, and the rest by chance: a deploy closes every
 		// socket at once, and they should not all come back in the same second.
@@ -194,13 +195,13 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 	/** Tell the relay of a push, as soon as there is a socket and the spacing allows. */
 	const tell = () => {
 		if (!flags.has('owed') || !flags.has('open')) return;
-		const wait = (lastTold.get('at') ?? -Infinity) + RELAY_TELL_MS - environment.now();
+		const wait = (lastTold.current ?? -Infinity) + RELAY_TELL_MS - environment.now();
 		if (wait > 0) {
 			arm('tell', wait, tell);
 			return;
 		}
 		flags.delete('owed');
-		lastTold.set('at', environment.now());
+		lastTold.current = environment.now();
 		send(RELAY_PUSHED);
 	};
 
@@ -223,7 +224,7 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 
 	const heard = (data: unknown) => {
 		flags.add('heard');
-		failures.set('count', 0);
+		failures.current = 0;
 		if (data === RELAY_PONG) {
 			cancel('pong');
 			return;
@@ -253,15 +254,20 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 	};
 
 	const connect = async (): Promise<void> => {
-		if (!wanted() || socket.has('socket') || flags.has('connecting') || timers.has('retry')) {
+		if (
+			!wanted() ||
+			socket.current !== undefined ||
+			flags.has('connecting') ||
+			timers.has('retry')
+		) {
 			return;
 		}
 		flags.add('connecting');
-		const attempt = attempts.get('count');
+		const attempt = attempts.current;
 		const answer = await ticket().catch(() => undefined);
 		// Let go of meanwhile — hidden, offline, closed — and perhaps already
 		// asked for again.
-		if (attempts.get('count') !== attempt) return;
+		if (attempts.current !== attempt) return;
 		flags.delete('connecting');
 		if (answer?.kind === 'stop') {
 			stop();
@@ -272,22 +278,19 @@ export const createRelayLink = (options: RelayLinkOptions): RelayLink => {
 			return;
 		}
 
-		const mine = (): boolean => attempts.get('count') === attempt;
+		const mine = (): boolean => attempts.current === attempt;
 		try {
-			socket.set(
-				'socket',
-				open(url(answer.ticket), {
-					opened: () => {
-						if (mine()) opened();
-					},
-					heard: (data) => {
-						if (mine()) heard(data);
-					},
-					closed: (code) => {
-						if (mine()) lost(code);
-					},
-				})
-			);
+			socket.current = open(url(answer.ticket), {
+				opened: () => {
+					if (mine()) opened();
+				},
+				heard: (data) => {
+					if (mine()) heard(data);
+				},
+				closed: (code) => {
+					if (mine()) lost(code);
+				},
+			});
 		} catch {
 			// A URL the browser would not open: tried again, like any failure.
 			failed();
@@ -386,15 +389,14 @@ const STOP: TicketAnswer = { kind: 'stop' };
  */
 export const createRelayFactory = (options: RelayFactoryOptions): RelayFactory => {
 	const { db, client } = options;
-	const enabled = new Map<'answer', Promise<boolean>>();
+	const enabled = cell<Promise<boolean> | undefined>(undefined);
 
 	const runsRelay = (): Promise<boolean> => {
-		const asked =
-			enabled.get('answer') ?? client.config().then((config) => config.relay === true);
-		enabled.set('answer', asked);
+		const asked = enabled.current ?? client.config().then((config) => config.relay === true);
+		enabled.current = asked;
 		return asked.catch((error: unknown) => {
 			// Not an answer: asked again next time.
-			enabled.delete('answer');
+			enabled.current = undefined;
 			throw error;
 		});
 	};

@@ -1,4 +1,4 @@
-import type { ApiErrorCode } from '@skysa/core';
+import { type ApiErrorCode, cell } from '@skysa/core';
 
 import { createApp } from './app.js';
 import { parseEnv } from './env.js';
@@ -19,7 +19,7 @@ type AppOrError = ReturnType<typeof createApp> | Error;
  * Built once per isolate. A Map rather than a mutable binding so the cache is an
  * explicit, single-purpose piece of state rather than ambient module mutation.
  */
-const cache = new Map<'singleton', AppOrError>();
+const cache = cell<AppOrError | undefined>(undefined);
 
 /**
  * The relay's binding is declared in wrangler.toml whether or not it is used,
@@ -50,11 +50,11 @@ const build = (env: WorkerEnv): AppOrError => {
 };
 
 const appFor = (env: WorkerEnv): AppOrError => {
-	const cached = cache.get('singleton');
+	const cached = cache.current;
 	if (cached !== undefined) return cached;
 
 	const built = build(env);
-	cache.set('singleton', built);
+	cache.current = built;
 	return built;
 };
 

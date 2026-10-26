@@ -1,4 +1,11 @@
-import { type EntryRef, isAuthError, isNotFoundError, type StorageProvider } from '@skysa/core';
+import {
+	type Cell,
+	cell,
+	type EntryRef,
+	isAuthError,
+	isNotFoundError,
+	type StorageProvider,
+} from '@skysa/core';
 
 import { type FileRecord, type NotesDatabase } from '../store/db.js';
 import { CACHE_BUDGET_BYTES, cacheBytes, evictCache, heldFile } from '../store/fileCache.js';
@@ -62,9 +69,7 @@ export interface FileReader {
 const ABORTED: FileRead = { state: 'aborted' };
 
 /** Callers still waiting for one download. At none before it starts, it does not. */
-interface Waiting {
-	current: number;
-}
+type Waiting = Cell<number>;
 
 /** One file's download, however many are waiting for it. */
 interface Download {
@@ -86,7 +91,7 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 	const concurrency = options.concurrency ?? 2;
 	const budget = options.budget ?? CACHE_BUDGET_BYTES;
 	const downloads = new Map<string, Download>();
-	const free = { current: concurrency };
+	const free = cell(concurrency);
 	// In the order they asked: a set iterates in insertion order.
 	const queued = new Set<() => void>();
 
@@ -245,7 +250,7 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 		);
 		const going = downloads.get(key);
 		if (going !== undefined) return waitFor(going, signal);
-		const waiting: Waiting = { current: 0 };
+		const waiting: Waiting = cell(0);
 		const job: Download = {
 			waiting,
 			result: download(key, file, entry, session, waiting).finally(() => {
