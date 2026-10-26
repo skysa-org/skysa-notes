@@ -17,7 +17,7 @@ export {
 	type SplitDocument,
 	type NoteFrontmatter,
 	type NoteTimes,
-} from './frontmatter.js';
+} from './frontmatter/index.js';
 export { readTime } from './time.js';
 export { decodeCharacterReferences } from './references.js';
 export { headings, type Heading } from './outline.js';

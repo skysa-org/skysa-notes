@@ -5,7 +5,7 @@ import {
 	frontmatterIsEditable,
 	splitFrontmatter,
 	writeFrontmatter,
-} from '../../src/markdown/frontmatter.js';
+} from '../../src/markdown/frontmatter/index.js';
 import { firstLineEnding, toLf, withLineEnding } from '../../src/markdown/lineEndings.js';
 import { parseNoteFile, serializeNoteFile } from '../../src/markdown/note.js';
 import { normalize, parse, serialize } from '../../src/markdown/pipeline.js';

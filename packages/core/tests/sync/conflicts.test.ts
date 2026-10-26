@@ -4,7 +4,7 @@ import {
 	frontmatterIsEditable,
 	readFrontmatter,
 	splitFrontmatter,
-} from '../../src/markdown/frontmatter.js';
+} from '../../src/markdown/frontmatter/index.js';
 import { conflictContent } from '../../src/sync/conflicts.js';
 
 /**

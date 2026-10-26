@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Node, Parent } from 'mdast';
 import { describe, expect, it } from 'vitest';
 
-import { joinFrontmatter, splitFrontmatter } from '../../src/markdown/frontmatter.js';
+import { joinFrontmatter, splitFrontmatter } from '../../src/markdown/frontmatter/index.js';
 import { normalize, parse, serialize } from '../../src/markdown/pipeline.js';
 
 /**
