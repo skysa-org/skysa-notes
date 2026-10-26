@@ -492,8 +492,8 @@ export type PullChange =
 	  }>
 	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>
 	/*
-	 * A file's changes are keyed by `fileId`, never `id`: the engine asks which
-	 * changes are about a note by whether they carry an `id`.
+	 * A file's changes are keyed by `fileId`, never `id`, and say so in
+	 * `CHANGE_KINDS`: what a change is about is read off its kind.
 	 */
 	| Readonly<{
 			/**
@@ -578,50 +578,64 @@ export type PullChange =
 	  }>;
 
 /**
- * What each kind of change is about. Named for every kind, so a new one does
- * not compile until it says, and read by `isNoteChange`, `isFileChange` and
- * `noteIdOf`, so nothing asks a change which fields it happens to have (#447).
- * A conflict is about two notes, by its resolution's ids, and every caller
- * that asks says so of its own.
+ * What each kind of change is about, and what it says of it: whether it puts
+ * it at a `path`, and whether it binds it to a `remote` file. Named for every
+ * kind, so a new one does not compile until it says, and read by the helpers
+ * below, so nothing asks a change which fields it happens to have (#447). A
+ * kind said to carry a field it does not have fails to compile where the
+ * helper reads it. A conflict is about two notes, by its resolution's ids,
+ * and every caller that asks says what it wants of those.
  */
-const CHANGE_SUBJECTS = {
-	'upsert-note': 'note',
-	'adopt-version': 'note',
-	'move-note': 'note',
-	'delete-note': 'note',
-	'detach-note': 'note',
-	'displace-note': 'note',
-	'reupload-note': 'note',
-	'ensure-folder': 'folder',
-	'move-folder': 'folder',
-	'delete-folder': 'folder',
-	'reupload-folder': 'folder',
-	unreadable: 'unreadable',
-	'forget-unreadable': 'unreadable',
-	conflict: 'conflict',
-	'upsert-file': 'file',
-	'displace-file': 'file',
-	'delete-file': 'file',
-	'reupload-file': 'file',
+const CHANGE_KINDS = {
+	'upsert-note': { about: 'note', placed: true, bound: true },
+	'adopt-version': { about: 'note', placed: false, bound: true },
+	'move-note': { about: 'note', placed: true, bound: true },
+	'delete-note': { about: 'note', placed: false, bound: false },
+	'detach-note': { about: 'note', placed: false, bound: false },
+	'displace-note': { about: 'note', placed: true, bound: false },
+	'reupload-note': { about: 'note', placed: false, bound: false },
+	'ensure-folder': { about: 'folder', placed: true, bound: false },
+	'move-folder': { about: 'folder', placed: false, bound: false },
+	'delete-folder': { about: 'folder', placed: true, bound: false },
+	'reupload-folder': { about: 'folder', placed: true, bound: false },
+	unreadable: { about: 'unreadable', placed: false, bound: false },
+	'forget-unreadable': { about: 'unreadable', placed: false, bound: false },
+	conflict: { about: 'conflict', placed: false, bound: false },
+	'upsert-file': { about: 'file', placed: true, bound: true },
+	'displace-file': { about: 'file', placed: true, bound: false },
+	'delete-file': { about: 'file', placed: false, bound: false },
+	'reupload-file': { about: 'file', placed: false, bound: false },
 } as const satisfies Record<
 	PullChange['kind'],
-	'note' | 'folder' | 'file' | 'unreadable' | 'conflict'
+	{
+		about: 'note' | 'folder' | 'file' | 'unreadable' | 'conflict';
+		placed: boolean;
+		bound: boolean;
+	}
 >;
 
-type KindsAbout<Subject> = {
-	[Kind in PullChange['kind']]: (typeof CHANGE_SUBJECTS)[Kind] extends Subject ? Kind : never;
+type Kinds = typeof CHANGE_KINDS;
+
+type KindsWhere<Key extends keyof Kinds[PullChange['kind']], Value> = {
+	[Kind in PullChange['kind']]: Kinds[Kind][Key] extends Value ? Kind : never;
 }[PullChange['kind']];
 
 /** A change about one note, named by its `id`. */
-export type NoteChange = Extract<PullChange, { kind: KindsAbout<'note'> }>;
+export type NoteChange = Extract<PullChange, { kind: KindsWhere<'about', 'note'> }>;
 /** A change about a file that is not a note, named by its `fileId`. */
-export type FileChange = Extract<PullChange, { kind: KindsAbout<'file'> }>;
+export type FileChange = Extract<PullChange, { kind: KindsWhere<'about', 'file'> }>;
+type PlacingChange = Extract<PullChange, { kind: KindsWhere<'placed', true> }>;
+type BindingChange = Extract<PullChange, { kind: KindsWhere<'bound', true> }>;
 
 export const isNoteChange = (change: PullChange): change is NoteChange =>
-	CHANGE_SUBJECTS[change.kind] === 'note';
+	CHANGE_KINDS[change.kind].about === 'note';
 
 export const isFileChange = (change: PullChange): change is FileChange =>
-	CHANGE_SUBJECTS[change.kind] === 'file';
+	CHANGE_KINDS[change.kind].about === 'file';
+
+const isPlacing = (change: PullChange): change is PlacingChange => CHANGE_KINDS[change.kind].placed;
+
+const isBinding = (change: PullChange): change is BindingChange => CHANGE_KINDS[change.kind].bound;
 
 /** The note a change is about, where it is one note's: not a conflict's two. */
 export const noteIdOf = (change: PullChange): string | undefined =>
@@ -633,7 +647,11 @@ export const noteIdOf = (change: PullChange): string | undefined =>
  * moved aside. Not a folder's move, which says `from` and `to`.
  */
 export const pathOf = (change: PullChange): string | undefined =>
-	'path' in change ? change.path : undefined;
+	isPlacing(change) ? change.path : undefined;
+
+/** The remote file a change binds what it is about to, for the kinds that do. */
+export const remoteOf = (change: PullChange): RemoteEntry | undefined =>
+	isBinding(change) ? change.remote : undefined;
 
 /**
  * Both sides changed the same note. The remote keeps the path; the local copy

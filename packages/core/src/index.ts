@@ -117,27 +117,25 @@ export {
 
 export { messageOf } from './sync/outcome.js';
 
-export type {
-	ConflictResolution,
-	OpOutcome,
-	PullBatch,
-	PullChange,
-	SyncFile,
-	SyncFolder,
-	SyncNote,
-	SyncOp,
-	SyncOperation,
-	SyncStore,
-	UnreadableFile,
-} from './sync/store.js';
-
 export {
+	type ConflictResolution,
 	type FileChange,
 	isFileChange,
 	isNoteChange,
 	type NoteChange,
 	noteIdOf,
+	type OpOutcome,
 	pathOf,
+	type PullBatch,
+	type PullChange,
+	remoteOf,
+	type SyncFile,
+	type SyncFolder,
+	type SyncNote,
+	type SyncOp,
+	type SyncOperation,
+	type SyncStore,
+	type UnreadableFile,
 } from './sync/store.js';
 
 export {

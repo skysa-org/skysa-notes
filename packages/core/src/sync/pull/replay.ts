@@ -4,6 +4,7 @@ import {
 	noteIdOf,
 	pathOf,
 	type PullChange,
+	remoteOf,
 	type SyncNote,
 	type UnreadableFile,
 } from '../store.js';
@@ -107,7 +108,8 @@ const placedBy =
 		// None of them changes `dirty`: the only kind that overwrites a
 		// note's bytes is `upsert-note`, and the engine never emits one
 		// for a note with unpushed edits — that is what `conflict` is.
-		const remoteId = 'remote' in change ? change.remote.remoteId : state.remoteId;
+		const bound = remoteOf(change);
+		const remoteId = bound === undefined ? state.remoteId : bound.remoteId;
 		const at = pathOf(change);
 		return at === undefined ? { ...state, remoteId } : { ...state, at, remoteId };
 	};

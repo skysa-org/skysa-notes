@@ -7,6 +7,7 @@ import {
 	noteIdOf,
 	pathOf,
 	type PullChange,
+	remoteOf,
 } from '../../src/sync/store.js';
 
 const remote: RemoteEntry = {
@@ -68,8 +69,27 @@ describe('what a change is about, by its kind (#447)', () => {
 			expect(isNoteChange(change)).toBe('id' in change);
 			expect(pathOf(change)).toBe('path' in change ? change.path : undefined);
 			expect(isFileChange(change)).toBe('fileId' in change);
+			expect(remoteOf(change)).toBe('remote' in change ? change.remote : undefined);
 		}
 	);
+
+	it('names the kinds that place what they are about, and those that bind it', () => {
+		expect(
+			changes.filter((change) => pathOf(change) !== undefined).map((change) => change.kind)
+		).toEqual([
+			'upsert-note',
+			'move-note',
+			'displace-note',
+			'ensure-folder',
+			'delete-folder',
+			'reupload-folder',
+			'upsert-file',
+			'displace-file',
+		]);
+		expect(
+			changes.filter((change) => remoteOf(change) !== undefined).map((change) => change.kind)
+		).toEqual(['upsert-note', 'adopt-version', 'move-note', 'upsert-file']);
+	});
 
 	it('names the kinds about one note, and those about a file', () => {
 		expect(changes.filter(isNoteChange).map((change) => change.kind)).toEqual([

@@ -37,9 +37,11 @@ export const reestablished = (
 			// id too, and counting it here would mean a file arriving with
 			// the id of a note this batch deleted was refused that id — two
 			// devices then disagreeing for ever about which note it is.
-			const writes = ['upsert-note', 'adopt-version', 'move-note'];
-			const id = noteIdOf(change);
-			return writes.includes(change.kind) && id !== undefined ? [id] : [];
+			return change.kind === 'upsert-note' ||
+				change.kind === 'adopt-version' ||
+				change.kind === 'move-note'
+				? [change.id]
+				: [];
 		})
 	),
 	folders: new Set(
