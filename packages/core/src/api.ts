@@ -21,16 +21,18 @@ export const API_ERROR_CODES = [
 	'server_misconfigured',
 	/** 429: the deployment's rate limiter said no, with `Retry-After` where it gave one. */
 	'rate_limited',
-	/** 404: a provider this deployment has no flow for, or does not offer. */
+	/**
+	 * 404: a provider this deployment has no flow for, or does not offer. The
+	 * OAuth callback sends the browser back to the app instead, as it does for
+	 * every failure.
+	 */
 	'unsupported_provider',
-	/** 501: a provider offered without the credentials to reach it. */
+	/** 501: a provider offered without the credentials to reach it; the callback, as above. */
 	'provider_not_configured',
 	/** 403: a request that did not come from a page on this deployment's origin. */
 	'forbidden_origin',
 	/** 400: a body or query that does not parse. */
 	'invalid_request',
-	/** 400: an OAuth callback with neither a code nor an error. */
-	'missing_code',
 	/** 404: this deployment runs no change relay. */
 	'relay_disabled',
 	/** 426: the relay's route asked for without a WebSocket upgrade. */

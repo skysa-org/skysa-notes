@@ -1,4 +1,4 @@
-import { type EntitlementCode, MAX_CONNECT_CODE } from '@skysa/core';
+import { type EntitlementCode, MAX_CONNECT_CODE, type RateLimiter } from '@skysa/core';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -640,6 +640,118 @@ describe('a callback asked for again', () => {
 		// Signed, as only this server could, and still only ever a path here.
 		expectExpired(await again(request, await answer('//evil.example/', true), 's'));
 		expectExpired(await again(request, await answer('https://evil.example/', true), 's'));
+	});
+});
+
+describe('a callback that cannot go on (#451)', () => {
+	/**
+	 * Each is a page a browser is on, so each goes back to the app as a failure,
+	 * not raw JSON, drops the flow and stores nothing.
+	 */
+	const expectFailed = async (response: Response, jar: Jar, db: D1Database): Promise<void> => {
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?folder=Work&connect=failed');
+		expect(jar.get(cookieNames.flow)).toBeUndefined();
+		expect(await createDb(db).select().from(schema.connections)).toEqual([]);
+	};
+
+	/** A flow started on an app that offers Dropbox, kept in `jar`. */
+	const started = async (jar: Jar): Promise<string> => {
+		jar.absorb(
+			await start(
+				buildApp().request,
+				{ credentialHash: HASH, returnTo: '/?folder=Work' },
+				{ jar }
+			)
+		);
+		return flowStateOf(jar);
+	};
+
+	it('goes back to the app for a provider turned off since the flow started, and logs it', async () => {
+		const { request, db, stub } = buildApp({ config: testConfig({ oauth: {} }) });
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const jar = createJar();
+		const state = await started(jar);
+
+		const response = jar.absorb(
+			await request(`/api/auth/connect/dropbox/callback?code=c&state=${state}`, {
+				cookies: jar,
+			})
+		);
+
+		await expectFailed(response, jar, db);
+		expect(exchanges(stub)).toHaveLength(0);
+		expect(logged).toHaveBeenCalledWith('dropbox callback: Error: provider_not_configured');
+	});
+
+	it('goes back to the app for a provider it has never heard of', async () => {
+		const { request, db, stub } = buildApp();
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const jar = createJar();
+		const state = await started(jar);
+		const callback = `/api/auth/connect/nope/callback?code=c&state=${state}`;
+
+		await expectFailed(jar.absorb(await request(callback, { cookies: jar })), jar, db);
+		// Named as no provider at all: the path is the caller's to write.
+		expect(logged).toHaveBeenCalledWith(
+			'unknown provider callback: Error: unsupported_provider'
+		);
+
+		const again = await request(callback, { cookies: jar });
+		expect(again.headers.get('location')).toBe('/?folder=Work&connect=failed');
+		expect(exchanges(stub)).toHaveLength(0);
+	});
+
+	it('is expired without a flow, as any callback is, and logs nothing', async () => {
+		const { request } = buildApp();
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+		expectExpired(await request('/api/auth/connect/nope/callback?code=c&state=s'));
+		expect(logged).not.toHaveBeenCalled();
+	});
+
+	it('goes back to the app with neither a code nor an error, logs it, and says so again', async () => {
+		const { request, db, stub } = buildApp();
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const jar = createJar();
+		const state = await started(jar);
+		const callback = `/api/auth/connect/dropbox/callback?state=${state}`;
+
+		await expectFailed(jar.absorb(await request(callback, { cookies: jar })), jar, db);
+		expect(logged).toHaveBeenCalledWith('dropbox callback: Error: missing_code');
+
+		const again = await request(callback, { cookies: jar });
+		expect(again.headers.get('location')).toBe('/?folder=Work&connect=failed');
+		expect(exchanges(stub)).toHaveLength(0);
+	});
+
+	it('goes back to the app when the callback is throttled, exchanging nothing', async () => {
+		const keys: string[] = [];
+		const rateLimiter: RateLimiter = {
+			check: (key) => {
+				keys.push(key);
+				return Promise.resolve(
+					key.startsWith('callback')
+						? { allowed: false, retryAfter: 60 }
+						: { allowed: true }
+				);
+			},
+		};
+		const { request, db, stub } = buildApp({ rateLimiter });
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const jar = createJar();
+		const state = await started(jar);
+
+		const response = jar.absorb(
+			await request(`/api/auth/connect/dropbox/callback?code=c&state=${state}`, {
+				cookies: jar,
+			})
+		);
+
+		await expectFailed(response, jar, db);
+		expect(keys.some((key) => key.startsWith('callback'))).toBe(true);
+		expect(logged).toHaveBeenCalledWith('dropbox callback: Error: rate_limited');
+		expect(exchanges(stub)).toHaveLength(0);
 	});
 });
 
