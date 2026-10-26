@@ -213,7 +213,7 @@ const place = (
  * editors waits for it (`settleAfter`), so a note moved meanwhile is moved
  * with the files its body links once they are in.
  */
-export const attachFiles = async (
+const attachFiles = async (
 	view: EditorView,
 	host: AttachmentHost,
 	files: readonly File[],
@@ -262,11 +262,7 @@ export const attachOnPaste = (
  * what is selected — a paste from a dialog. The editor may have gone while
  * the picker was open, and then they are said to be for adding again.
  */
-export const attachChosen = (
-	view: EditorView,
-	host: AttachmentHost,
-	files: readonly File[]
-): void => {
+const attachChosen = (view: EditorView, host: AttachmentHost, files: readonly File[]): void => {
 	if (view.isDestroyed) {
 		host.report(closedProblem(files.map((file) => file.name)));
 		return;

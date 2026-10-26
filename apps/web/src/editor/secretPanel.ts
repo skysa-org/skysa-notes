@@ -39,7 +39,7 @@ export interface SecretPanelOptions {
 }
 
 /** Where the caret is in the field. */
-export interface Caret {
+interface Caret {
 	readonly start: number;
 	readonly end: number;
 }

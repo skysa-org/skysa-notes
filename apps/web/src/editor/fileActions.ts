@@ -17,7 +17,7 @@ import type { AttachmentHost, AttachmentProblem, Fetched } from './attachHost.js
  */
 
 /** A tab opened for a file, before its bytes have come. */
-export interface FileTab {
+interface FileTab {
 	readonly show: (url: string) => void;
 	readonly close: () => void;
 }

@@ -160,7 +160,7 @@ const languagesIn = (doc: ProseNode): readonly string[] => {
 	return [...found];
 };
 
-export const codeHighlightKey = new PluginKey<DecorationSet>('skysa-code-highlight');
+const codeHighlightKey = new PluginKey<DecorationSet>('skysa-code-highlight');
 
 /** The meta that says a grammar has arrived and the document can be coloured now. */
 const LOADED = 'loaded';

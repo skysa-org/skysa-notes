@@ -64,7 +64,7 @@ export const ancestor = ($from: ResolvedPos, names: readonly string[]): Ancestor
 	ancestors($from, names)[0] ?? null;
 
 /** The list item the selection is in, if it is in one. */
-export const itemAround = (state: EditorState) => ancestor(state.selection.$from, [LIST_ITEM]);
+const itemAround = (state: EditorState) => ancestor(state.selection.$from, [LIST_ITEM]);
 
 /**
  * The innermost list around the selection, and which kind it is.

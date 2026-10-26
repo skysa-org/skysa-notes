@@ -18,13 +18,13 @@ import { createStore } from '../store/emitter.js';
  */
 
 /** Chromium's install event, which TypeScript's DOM types do not have. */
-export interface InstallPromptEvent extends Event {
+interface InstallPromptEvent extends Event {
 	readonly prompt: () => Promise<unknown>;
 	readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
 /** What the browser has said: nothing, that it can install now, or that it has. */
-export type InstallState =
+type InstallState =
 	| Readonly<{ kind: 'none' }>
 	| Readonly<{ kind: 'ready'; install: () => Promise<'accepted' | 'dismissed'> }>
 	| Readonly<{ kind: 'installed' }>;

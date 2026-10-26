@@ -24,8 +24,6 @@
 
 export const PLURAL_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'] as const;
 
-export type PluralCategory = (typeof PLURAL_CATEGORIES)[number];
-
 export interface Plural {
 	readonly zero?: string;
 	readonly one?: string;
@@ -47,6 +45,11 @@ export const isPlural = (node: Message | Catalog): node is Plural =>
 /**
  * A catalog in another language: every key the English one has, each a string
  * or a plural as there, with words of its own.
+ *
+ * Exported for the first such catalog, which there is not yet
+ * (docs/ARCHITECTURE.md §7, "The app's words").
+ *
+ * @public
  */
 export type Translation<C> = {
 	readonly [K in keyof C]: C[K] extends string
@@ -87,7 +90,7 @@ export type Tags<S> = S extends `${string}<${infer Name}>${infer Rest}`
 export type ParamValue = string | number;
 
 /** What a message has to be given: its placeholders, and `count` for a plural. */
-export type Params<M> = (M extends Plural ? Readonly<{ count: number }> : unknown) & {
+type Params<M> = (M extends Plural ? Readonly<{ count: number }> : unknown) & {
 	readonly [N in Placeholders<Texts<M>>]: N extends 'count' ? number : ParamValue;
 };
 

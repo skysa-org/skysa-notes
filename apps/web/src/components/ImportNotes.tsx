@@ -82,7 +82,7 @@ const WHY: Record<SkipReason, (count: number, names: string) => string> = {
 };
 
 /** One line per reason anything stays out, each naming a few of them. */
-export const leftOut = (skipped: readonly Skipped[]): string[] =>
+const leftOut = (skipped: readonly Skipped[]): string[] =>
 	(Object.keys(WHY) as SkipReason[]).flatMap((reason) => {
 		const paths = skipped.filter((each) => each.reason === reason).map((each) => each.path);
 		return paths.length === 0 ? [] : [WHY[reason](paths.length, named(paths))];
@@ -136,7 +136,7 @@ const whatComesInScratchpad = ({ notes, files }: ImportPlan): string =>
 			});
 
 /** What an import would bring, as the user is asked about it. */
-export const importQuestion = (
+const importQuestion = (
 	plan: ImportPlan,
 	label: string,
 	into: ImportInto = 'library'
@@ -166,7 +166,7 @@ const whatCameIn = ({ notes, files, folders }: ImportOutcome): string => {
 };
 
 /** What to say once an import is through. */
-export const importOutcome = (outcome: ImportOutcome, label: string, syncs: boolean): string =>
+const importOutcome = (outcome: ImportOutcome, label: string, syncs: boolean): string =>
 	[
 		whatCameIn(outcome),
 		...(syncs ? [t('importing.outcome.syncs', { label })] : []),
@@ -179,7 +179,7 @@ export const importOutcome = (outcome: ImportOutcome, label: string, syncs: bool
 	].join(' ');
 
 /** Said when what was picked holds nothing to bring in. */
-export const nothingToImport = (plan: ImportPlan, into: ImportInto = 'library'): string =>
+const nothingToImport = (plan: ImportPlan, into: ImportInto = 'library'): string =>
 	[
 		into === 'scratchpad' ? t('importing.scratchpad.nothing') : t('importing.nothing'),
 		...leftOut(plan.skipped),

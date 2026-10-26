@@ -56,7 +56,7 @@ import {
  * has nothing to format in it.
  */
 
-export const SECRET = 'secret';
+const SECRET = 'secret';
 
 const valueOf = (node: ProseNode): string => {
 	const value: unknown = node.attrs.value;

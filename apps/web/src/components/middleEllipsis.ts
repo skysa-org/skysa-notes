@@ -10,7 +10,7 @@ import { clusters } from '@skysa/core';
  * measure the caller gives.
  */
 
-export const ELLIPSIS = '…';
+const ELLIPSIS = '…';
 
 /**
  * The largest count from `low` to `high` that `fits`, or undefined when not

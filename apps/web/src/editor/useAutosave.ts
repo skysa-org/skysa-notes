@@ -39,7 +39,7 @@ import { useLatest } from '../hooks/useLatest.js';
  * neither stands for the other, and each is attempted on its own.
  */
 
-export const AUTOSAVE_DELAY_MS = 2000;
+const AUTOSAVE_DELAY_MS = 2000;
 
 /**
  * How long a failed write waits before it is tried again unasked. Slow, because

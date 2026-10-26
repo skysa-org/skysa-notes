@@ -69,7 +69,7 @@ export interface FillChannel {
 }
 
 /** How long a `hello` takes before the window says it is waiting. It goes on listening. */
-export const SLOW_MS = 3000;
+const SLOW_MS = 3000;
 
 export interface ChannelOptions {
 	readonly slowMs?: number;

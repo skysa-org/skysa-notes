@@ -96,8 +96,8 @@ const languages = createLanguageSource();
  * components, so the editor cannot build them itself — it is handed the specs by
  * the component that has the adapter.
  */
-export const slash = slashFactory('SKYSA_SLASH');
-export const tooltip = tooltipFactory('SKYSA_TOOLTIP');
+const slash = slashFactory('SKYSA_SLASH');
+const tooltip = tooltipFactory('SKYSA_TOOLTIP');
 
 export interface RichEditorSetup {
 	root: HTMLElement;

@@ -104,7 +104,7 @@ const outcomeMessage = (result: CancelImportResult, label: string): Cancelling =
 };
 
 /** What an import is shown with; the app's own unless a test says otherwise. */
-export interface ImportSeams {
+interface ImportSeams {
 	database?: NotesDatabase;
 	client?: Pick<ApiClient, 'withCredential'>;
 	sync?: Pick<SyncScheduler, 'halt' | 'status' | 'subscribe'>;

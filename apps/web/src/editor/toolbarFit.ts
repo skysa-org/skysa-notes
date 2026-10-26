@@ -12,7 +12,7 @@
  * arrangement of whatever is left.
  */
 
-export interface FitSlot {
+interface FitSlot {
 	id: string;
 	/** The group the slot is drawn in, whose separator goes when it empties. */
 	group: string;

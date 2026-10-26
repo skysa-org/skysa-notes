@@ -104,7 +104,7 @@ const numbersFor = (doc: ProseNode): readonly Decoration[] => {
 	return found.current;
 };
 
-export const codeNumbersKey = new PluginKey<DecorationSet>('skysa-code-numbers');
+const codeNumbersKey = new PluginKey<DecorationSet>('skysa-code-numbers');
 
 /** The meta that says the preference changed, so the gutter has to be drawn again. */
 const CHANGED = 'changed';
