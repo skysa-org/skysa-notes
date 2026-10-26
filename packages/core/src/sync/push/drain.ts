@@ -27,7 +27,7 @@ export const createPush = (context: EngineContext, { fileState, resolutionFor }:
 	const { provider, store, maxAttempts, writesAtOnce, renew, meter } = context;
 
 	// The remote's folders, made and removed (`push/folders.ts`).
-	const { ensureRemoteFolder, making, runRmdir } = createFolderPush(context);
+	const { ensureRemoteFolder, startTurn, runRmdir } = createFolderPush(context);
 	// The notes, written, moved and deleted (`push/notes.ts`).
 	const { write, runWrite, runMove, runDelete } = createNotePush(context, {
 		ensureRemoteFolder,
@@ -290,7 +290,7 @@ export const createPush = (context: EngineContext, { fileState, resolutionFor }:
 		progress: PushProgress,
 		retriedAuth: boolean
 	): Promise<SyncOutcome> => {
-		making.clear();
+		startTurn();
 		// Every call is handed what is left, so how far it has got is the rest:
 		// an op passed over, given up on or resolved is as done as one sent.
 		const [held, ...rest] = ops;

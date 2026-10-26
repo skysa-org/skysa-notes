@@ -41,10 +41,15 @@ export const createFolderPush = ({ provider, store }: EngineContext) => {
 	 * notebook missing — deleted on another device while they had edits — make
 	 * it once between them. Each making it, Google Drive made one apiece: its
 	 * `createFolder` asks first whether the folder is there, and none of them
-	 * was yet. Emptied at every turn (`drainOps`), so a folder removed since is
-	 * asked about again.
+	 * was yet. Emptied at every turn (`startTurn`, from `drainOps`), so a folder
+	 * removed since is asked about again.
 	 */
 	const making = new Map<string, Promise<void>>();
+
+	/** A new turn of the drain: no folder is being made for it yet. */
+	const startTurn = (): void => {
+		making.clear();
+	};
 
 	/**
 	 * Does the remote hold any file at or under this folder? Hidden ones count:
@@ -141,7 +146,7 @@ export const createFolderPush = ({ provider, store }: EngineContext) => {
 		return finish();
 	};
 
-	return { ensureRemoteFolder, making, runRmdir };
+	return { ensureRemoteFolder, startTurn, runRmdir };
 };
 
 /** What the push's other parts are handed of it. */
