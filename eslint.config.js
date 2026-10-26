@@ -25,6 +25,12 @@ const RESTRICTED_SYNTAX = [
 		message: "'else if' is not allowed, use early returns instead.",
 	},
 	{
+		// A static import is what the src rule on `@skysa/core/testing` sees;
+		// this keeps a lazy one from slipping a test double into a chunk.
+		selector: "ImportExpression[source.value='@skysa/core/testing']",
+		message: 'import the test doubles statically, from a test (#449).',
+	},
+	{
 		selector: 'AwaitExpression > ImportExpression',
 		message:
 			'Await with dynamic imports (await import()) is not allowed. Use static imports at the top of the file instead.',
@@ -566,7 +572,12 @@ export default tseslint.config(
 					paths: [
 						{ name: '@skysa/core/testing', message: 'test doubles are for tests.' },
 					],
-					patterns: [{ group: ['**/tests/**'], message: 'test doubles are for tests.' }],
+					patterns: [
+						{
+							group: ['**/tests/**', '**/providers/fake', '**/providers/fake.js'],
+							message: 'test doubles are for tests.',
+						},
+					],
 				},
 			],
 		},

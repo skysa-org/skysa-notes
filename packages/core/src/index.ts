@@ -1,9 +1,12 @@
 /**
  * What the apps may use of core, by name (#449). A name is here because
- * something in `apps/` imports it; one nothing outside core needs stays in its
- * module, so the surface is chosen rather than whatever a module happens to
- * export. `tests/exports.test.ts` lists the values, so a change to this list
- * is a change a reviewer sees. The test doubles are `@skysa/core/testing`.
+ * something in `apps/` imports it, in its source or its tests (which assert
+ * with core's real errors and functions), or, for four types, because an
+ * operator's policy is written against them. One nothing outside core needs
+ * stays in its module, so the surface is chosen rather than whatever a module
+ * happens to export. `tests/exports.test.ts` lists the values and the types,
+ * so a change to this list is a change a reviewer sees. The test doubles are
+ * `@skysa/core/testing`.
  */
 
 export { encrypt } from './age/age.js';
@@ -79,9 +82,13 @@ export {
 	sameMarkdownStructure,
 	type StructuralDifference,
 } from './markdown/fidelity.js';
-export { type NoteFrontmatter, readFrontmatter } from './markdown/frontmatter/read.js';
-export { splitFrontmatter } from './markdown/frontmatter/split.js';
-export { frontmatterIsEditable, writeFrontmatter } from './markdown/frontmatter/write.js';
+export {
+	frontmatterIsEditable,
+	type NoteFrontmatter,
+	readFrontmatter,
+	splitFrontmatter,
+	writeFrontmatter,
+} from './markdown/frontmatter/index.js';
 export { toLf } from './markdown/lineEndings.js';
 export { type ParsedNoteFile, parseNoteFile, serializeNoteFile } from './markdown/note.js';
 export { type Heading, headings } from './markdown/outline.js';

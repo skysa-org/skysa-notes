@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type * as Core from '../src/index.js';
 import * as core from '../src/index.js';
 
 /**
  * Every value core's main entry offers the apps (#449), in order. Here so a
  * name added to or taken out of `src/index.ts` shows in review as a line in
- * this list: the surface is chosen, not whatever a module exports. Types leave
- * nothing at run time to list; `pnpm typecheck` holds the apps to them.
+ * this list: the surface is chosen, not whatever a module exports.
  */
 const SURFACE = [
 	'API_ERROR_CODES',
@@ -159,12 +159,69 @@ const SURFACE = [
 	'writeFrontmatter',
 ];
 
+/** Every type the entry offers; see the last test. */
+type Types = [
+	Core.ApiErrorCode,
+	Core.AttachmentKind,
+	Core.AuthMode,
+	Core.ClipName,
+	Core.ConflictResolution,
+	Core.ConnectCodeCheck,
+	Core.ConnectGate,
+	Core.EntitlementCode,
+	Core.EntitlementContext,
+	Core.EntitlementDecision,
+	Core.EntitlementProvider,
+	Core.EntitlementSubject,
+	Core.EntryRef,
+	Core.FetchLike,
+	Core.FileKind,
+	Core.Heading,
+	Core.NewSyncOp,
+	Core.NoteFrontmatter,
+	Core.OpOutcome,
+	Core.ParsedNoteFile,
+	Core.PasswordOptions,
+	Core.PictureInfo,
+	Core.PictureVariant,
+	Core.PreviewEmbed,
+	Core.PreviewLine,
+	Core.PreviewMark,
+	Core.PreviewMarker,
+	Core.PreviewRun,
+	Core.PreviousPassword,
+	Core.ProviderKind,
+	Core.PullBatch,
+	Core.PullChange,
+	Core.RateLimitDecision,
+	Core.RateLimiter,
+	Core.RemoteEntry,
+	Core.ScratchColor,
+	Core.Site,
+	Core.StorageProvider,
+	Core.StructuralDifference,
+	Core.SyncEngine,
+	Core.SyncFile,
+	Core.SyncFolder,
+	Core.SyncNote,
+	Core.SyncOp,
+	Core.SyncOperation,
+	Core.SyncOutcome,
+	Core.SyncProgress,
+	Core.SyncStore,
+	Core.UnreadableFile,
+	Core.VaultFields,
+];
+
 describe('core’s main entry', () => {
 	it('offers these values and no others', () => {
 		expect(Object.keys(core).sort()).toEqual(SURFACE);
 	});
 
-	it('does not offer the test doubles', () => {
-		expect(Object.keys(core)).not.toContain('createFakeProvider');
+	it('offers these types', () => {
+		// Types leave nothing at run time to list, so these are named instead:
+		// one taken out of the entry fails typecheck here, whether or not an app
+		// uses it — the entitlement types are for an operator's code, not ours.
+		expectTypeOf<Types>().not.toBeNever();
 	});
 });
