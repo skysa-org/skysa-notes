@@ -10,7 +10,7 @@
  * that are not opaque, which a copy has to keep.
  */
 
-export type PictureFormat = 'png' | 'jpeg' | 'gif' | 'webp' | 'bmp';
+type PictureFormat = 'png' | 'jpeg' | 'gif' | 'webp' | 'bmp';
 
 export interface PictureInfo {
 	readonly format: PictureFormat;

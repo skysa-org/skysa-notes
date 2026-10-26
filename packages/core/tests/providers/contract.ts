@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { isHidden, MARKER_FILE, parseMarker } from '../../src/index.js';
+import { MARKER_FILE } from '../../src/config.js';
+import { parseMarker } from '../../src/marker.js';
+import { isHidden } from '../../src/paths.js';
 import {
 	type ChangeEntry,
 	ConflictError,

@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createFakeProvider, createSyncEngine, isHidden } from '@skysa/core';
+import { createSyncEngine, isHidden } from '@skysa/core';
+import { createFakeProvider } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection } from '../src/store/connection.js';

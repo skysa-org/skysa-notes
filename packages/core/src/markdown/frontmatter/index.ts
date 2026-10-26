@@ -5,11 +5,10 @@
  * they cannot be (`write.ts`). Each builds on the one before; none reaches
  * back.
  */
-export { joinFrontmatter, type SplitDocument, splitFrontmatter } from './split.js';
+export { joinFrontmatter, splitFrontmatter } from './split.js';
 export {
 	frontmatterHasDeclinedId,
 	type NoteFrontmatter,
-	type NoteTimes,
 	readFrontmatter,
 	readNoteMetadata,
 	readNoteTimes,

@@ -1,19 +1,21 @@
 import {
 	createDropboxProvider,
-	createFakeProvider,
 	createGDriveProvider,
 	createOneDriveProvider,
-	type FakeProvider,
 	type FetchLike,
 	isHidden,
 	parentPath,
 	type StorageProvider,
 } from '@skysa/core';
+import {
+	createDropboxStub,
+	createFakeProvider,
+	createGDriveStub,
+	createOneDriveStub,
+	type FakeProvider,
+} from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDropboxStub } from '../../../packages/core/tests/providers/dropboxStub.js';
-import { createGDriveStub } from '../../../packages/core/tests/providers/gdriveStub.js';
-import { createOneDriveStub } from '../../../packages/core/tests/providers/onedriveStub.js';
 import { type ApiClient } from '../src/api/client.js';
 import {
 	bindConnection,

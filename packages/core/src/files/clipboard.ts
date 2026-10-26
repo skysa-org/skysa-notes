@@ -18,7 +18,7 @@ import { showsInline } from './attachments.js';
  */
 
 /** What an item shows as: a preview, a thumbnail, or a card that saves. */
-export type ClipKind = 'text' | 'image' | 'file';
+type ClipKind = 'text' | 'image' | 'file';
 
 export interface ClipName {
 	/** When it was pasted, in milliseconds, from the stamp. */
