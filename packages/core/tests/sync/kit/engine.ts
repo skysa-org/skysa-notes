@@ -6,8 +6,9 @@ import type { SyncStore } from '../../../src/sync/store.js';
 
 /**
  * The engine as the sync tests drive it: at one moment (`AT`), over a
- * provider that reports what it is told (`reporting`, `paging`), and built
- * over a test file's own provider and store (`engineFixture`).
+ * provider that reports what it is told (`reporting`, or a page at a time
+ * through the fixture's `pullPages`), and built over a test file's own
+ * provider and store (`engineFixture`).
  */
 
 /** The moment every engine here runs at, so a conflict copy's name is known. */

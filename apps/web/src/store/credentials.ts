@@ -25,7 +25,7 @@ import { type CredentialRecord, type NotesDatabase, PENDING_CREDENTIAL_ID } from
 /** The `sk1_` version prefix, hashed along with the rest. See `apps/api/src/credentials.ts`. */
 const CREDENTIAL_PREFIX = 'sk1_';
 
-/** 32 bytes, the same as the server documents. */
+/** 32 bytes of `crypto.getRandomValues`, base64url, unpadded: 43 characters. */
 const CREDENTIAL_BYTES = 32;
 
 /**
