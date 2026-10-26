@@ -5,7 +5,8 @@ nothing here (`docs/self-hosting.md`, "Your own brand").
 
 - `brand.json`: the name ("Notes"), the colours, and where the icons are. No
   fonts, so the app keeps the system's. `brand.schema.json` is its JSON Schema,
-  for an editor; `tests/brand.test.ts` holds it to `brandSchema` in `brand.ts`.
+  for an editor; `tests/brand.test.ts` holds it to the schema in `brand.ts`
+  (`brandJsonSchema`).
 - `icons/`: the six icons, at the names and sizes in `BRAND_ICONS`. They are the
   page-with-a-curled-corner artwork the app shipped with up to v0.5.2, on the
   default brand's gray (`#4B5563`, its light `brand`) instead of that release's
