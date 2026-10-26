@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { parseRecipient, publicKeyOf } from '../src/age/curve.js';
 import { generateIdentity, parseIdentity } from '../src/age/keys.js';
-import { openSecret, resealSecret, sealSecret } from '../src/sealing.js';
-import { rewriteSecrets, withoutArmor } from '../src/secrets.js';
+import { rewriteSecrets, withoutArmor } from '../src/markdown/secretBlocks.js';
+import { openSecret, resealSecret, sealSecret } from '../src/secrets/sealing.js';
 import {
 	EMPTY_VAULT_FIELDS,
 	isEmptyVaultFields,

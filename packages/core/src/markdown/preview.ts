@@ -1,9 +1,9 @@
 import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
-import { hidesAsSecret, secretLabel } from '../secrets.js';
 import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 import { decodeCharacterReferences } from './references.js';
+import { hidesAsSecret, secretLabel } from './secretBlocks.js';
 
 /**
  * A note's body as the lines a list can show: the text the rich editor puts on
