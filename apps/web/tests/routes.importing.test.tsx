@@ -93,6 +93,8 @@ describe('the first import', () => {
 const claimed = (connectionId: string, provider: 'dropbox' | 'gdrive') =>
 	act(async () => {
 		const pending = await db.credentials.get(PENDING_CREDENTIAL_ID);
+		// A claim has a flow to answer, for the provider it was begun with.
+		expect(pending?.provider).toBe(provider);
 		if (pending !== undefined) await keepCredential(db, connectionId, pending);
 		await bindConnection(db, { connectionId, provider });
 	});

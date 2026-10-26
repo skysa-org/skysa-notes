@@ -1,7 +1,7 @@
 // Dexie needs a real IndexedDB; Node has none.
 import 'fake-indexeddb/auto';
 
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterAll, afterEach, vi } from 'vitest';
 
 import { deleteFreshDatabases, resetSharedDb } from './support/db.js';
@@ -16,6 +16,15 @@ afterEach(async () => {
 	await deleteFreshDatabases();
 	await resetSharedDb();
 });
+
+// How long `waitFor` and `findBy…` wait for what they are told will happen.
+// Testing Library's second is the time the app takes on an idle machine, and a
+// loaded one (CI, or the whole suite at once) can take longer: run shuffled
+// with every core busy, the suite failed a test a run on that alone (#459).
+// Longer costs nothing where the thing happens, only a slower failure where
+// it does not, and nothing here waits on a `waitFor` giving up. Inside the
+// five seconds vitest gives a test, so a test still fails as itself.
+configure({ asyncUtilTimeout: 4_000 });
 
 // jsdom has no layout, so it implements none of the scrolling API. A component
 // that keeps the active row in view calls this, and an undefined method is a
