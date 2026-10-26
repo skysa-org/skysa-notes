@@ -1722,7 +1722,9 @@ packages/
                               #   conflicts.ts (a write the remote would not take: set aside under a conflict name, or reconciled)
                               #   drain.ts (the queue drained in order, op by op, writes sent together, a failed op answered; createPush wires the parts)
       markdown/
-        frontmatter.ts attachments.ts
+        frontmatter/          # split.ts (the block found and taken off the body) read.ts (the fields the app understands)
+                              #   write.ts (fields written back, nothing else touched, or refused up front); each builds on the one before (#449)
+        attachments.ts
         pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
         lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
         preview.ts            # a body as the lines a list can show; the one rule the note preview and the search excerpt share
