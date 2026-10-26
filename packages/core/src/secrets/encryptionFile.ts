@@ -22,7 +22,8 @@ const encryptionFileSchema = z.object({
  * to, the public half of the source's key (docs/ARCHITECTURE.md §3). Read when
  * a source syncs, so its recipient is checked only for its shape, without the
  * curve; `parseRecipient` refuses one nothing could be encrypted to when a
- * secret is sealed.
+ * secret is sealed. Whether a path is this file is `isEncryptionFile`, in
+ * `appFolder.ts`.
  */
 export type EncryptionFile = z.infer<typeof encryptionFileSchema>;
 

@@ -5,6 +5,11 @@ import { isWithin, normalizePath } from './paths.js';
  * The app folder's own places, the ones that are not notebooks: which path is
  * the scratchpad's, the vault's, the clipboard's, or the source's key file.
  * Together, so what the app folder holds besides notebooks is listed once.
+ *
+ * One more list names two of them: the scratchpad's and the vault's folders
+ * are dot-named and still synced, which `isHidden` reads from `SYNCED_AT_ROOT`
+ * in `paths.ts`. A new place like them goes in both, and needs every source's
+ * cursor dropped once, as that list says.
  */
 
 /**

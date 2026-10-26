@@ -131,5 +131,8 @@ export const readClipName = (name: string): ClipName | undefined => {
 	return { at, hash, kind: image ? 'image' : 'file', label };
 };
 
-/** Where an item is, from the root of the app folder. */
+/**
+ * Where an item is, from the root of the app folder. Whether a path is the
+ * clipboard's is `isClipPath`, in `appFolder.ts`.
+ */
 export const clipPath = (name: string): string => joinPath(CLIPBOARD_FOLDER, name);

@@ -1727,7 +1727,7 @@ packages/
         lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
         preview.ts            # a body as the lines a list can show; the one rule the note preview and the search excerpt share
         secretBlocks.ts       # a secret's `age` fence: found, labelled, kept out of the search index, rewritten; no curve
-      secrets/                # recoveryKey.ts (the printed key, typed back) encryptionFile.ts (.encryption.json)
+      secrets/                # recoveryKey.ts (the printed key, typed back) encryptionFile.ts (.encryption.json; its path is appFolder.ts's)
                               #   sealing.ts (sealing and opening a secret: the one module here with the curve in it)
     tests/
       providers/contract.test.ts
