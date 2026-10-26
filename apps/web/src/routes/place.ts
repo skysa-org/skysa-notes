@@ -294,7 +294,7 @@ export const noteLink = (note: {
 	};
 };
 
-export const TITLE_SEPARATOR = ' > ';
+const TITLE_SEPARATOR = ' > ';
 
 /**
  * The page's title for the note open: the notebooks it is in, outermost first,

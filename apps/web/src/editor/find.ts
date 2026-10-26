@@ -48,7 +48,7 @@ export const EMPTY_QUERY: FindQuery = {
  * replacing a dollar sign — and there is nothing in the bar to say it would
  * happen.
  */
-export const asSearchQuery = (query: FindQuery): SearchQuery =>
+const asSearchQuery = (query: FindQuery): SearchQuery =>
 	new SearchQuery({
 		search: query.search,
 		replace: query.replace,

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n/t.js';
 
 /** What a frame of the camera says, where a QR code is in it. */
-export type ReadFrame = (video: HTMLVideoElement) => string | undefined;
+type ReadFrame = (video: HTMLVideoElement) => string | undefined;
 
 /** The camera, and how its frames are read. */
 export interface Scanner {

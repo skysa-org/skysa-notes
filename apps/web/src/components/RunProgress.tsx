@@ -7,7 +7,7 @@ import { type SchedulerStatus } from '../sync/scheduler.js';
  */
 
 /** How full the bar is, or nothing for a bar that cannot know. */
-export const fraction = (status: SchedulerStatus): { value: number; max: number } | undefined => {
+const fraction = (status: SchedulerStatus): { value: number; max: number } | undefined => {
 	const { progress } = status;
 	if (status.phase !== 'syncing' || progress === undefined) return undefined;
 	if (progress.stage === 'receiving' && progress.listing) return undefined;
