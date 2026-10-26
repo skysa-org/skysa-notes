@@ -1,5 +1,5 @@
 import { isWithin } from '../../paths.js';
-import { type PullChange, type SyncFile } from '../store.js';
+import { isFileChange, type PullChange, type SyncFile } from '../store.js';
 import { rebaseThrough, survives } from './replay.js';
 
 /**
@@ -109,7 +109,7 @@ export const placedFiles = (
 			})
 		);
 	}
-	if (!('fileId' in change)) return view;
+	if (!isFileChange(change)) return view;
 	const file = view.get(change.fileId);
 	if (change.kind === 'upsert-file') {
 		// A row the user has moved stays where they put it (the store's
