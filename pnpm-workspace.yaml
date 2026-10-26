@@ -6,8 +6,8 @@ packages:
 # apart. A package names it as `"catalog:"`; the range is set here.
 catalog:
     '@types/node': ^26.6.5
-    vitest: ^5.0.3
-    zod: ^4.6.5
+    vitest: ^5.0.5
+    zod: ^4.6.7
 
 # Native/postinstall builds we accept. Everything else is blocked by default.
 onlyBuiltDependencies:
