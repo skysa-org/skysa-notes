@@ -34,7 +34,7 @@ import { isLiveSource, isTombstone } from './rowStates.js';
  */
 
 /** A note that may link a file, as a list of them shows it. */
-export interface LinkingNote {
+interface LinkingNote {
 	id: string;
 	title: string;
 	/** Deleted here and not yet sent, so its delete can still be undone. */
@@ -203,7 +203,7 @@ const notesOf = (db: Pick<NotesDatabase, 'notes'>, connectionId: string): Promis
  * detached one, whose notes the remote had are gone from the device; and not
  * one with a note it cannot read as text (`unreadable`), which is no row here.
  */
-export const holdsEveryNote = (state: SyncStateRecord | undefined): boolean =>
+const holdsEveryNote = (state: SyncStateRecord | undefined): boolean =>
 	state === undefined ||
 	(state.cursor !== undefined &&
 		state.importing === undefined &&

@@ -54,7 +54,7 @@ export const browserKeeper = (): StorageKeeper | undefined => {
  * What the browser has said: nothing yet, that it will keep the store, or that
  * it may clear it. A browser that cannot say is the last.
  */
-export type Kept = 'unknown' | 'kept' | 'not-kept';
+type Kept = 'unknown' | 'kept' | 'not-kept';
 
 /**
  * Why the request is being made.
@@ -67,7 +67,7 @@ export type Kept = 'unknown' | 'kept' | 'not-kept';
  * from before is asked again: the answer it was is no longer the answer it
  * would be. It does not spend the `first-note` request.
  */
-export type Occasion = 'first-note' | 'installed';
+type Occasion = 'first-note' | 'installed';
 
 /** Set once the `first-note` request has been made on this device. */
 export const KEEP_ASKED_KEY = 'storage.keepAsked';

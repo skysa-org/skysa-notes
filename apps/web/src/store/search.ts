@@ -73,7 +73,7 @@ const fingerprint = (note: NoteRecord): string =>
 	`${note.contentHash}\u0000${note.path}\u0000${note.title}`;
 
 /** A run of the excerpt, `hit` where it is what the query matched. */
-export interface Excerpt {
+interface Excerpt {
 	readonly text: string;
 	readonly hit: boolean;
 }

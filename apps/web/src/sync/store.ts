@@ -78,7 +78,7 @@ export class UnboundConnectionError extends Error {
 }
 
 /** The connection was resumed and the remote not yet checked (`verifyResume`). */
-export class UnverifiedResumeError extends Error {
+class UnverifiedResumeError extends Error {
 	override readonly name = 'UnverifiedResumeError';
 
 	constructor(readonly connectionId: string) {

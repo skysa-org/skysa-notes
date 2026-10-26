@@ -24,7 +24,7 @@ import { type ProviderFactory } from './scheduler.js';
  * the whole request, body included. A request that carries more than a note
  * gets more (`SLOWEST_BYTES_PER_MS`).
  */
-export const PROVIDER_TIMEOUT_MS = 60_000;
+const PROVIDER_TIMEOUT_MS = 60_000;
 
 /**
  * The slowest connection a file is still expected to cross: 50 KB/s, a poor
@@ -57,7 +57,7 @@ const receiving = (response: Response): number => {
  * (it lets go of what it listens to), and by hand where it does not.
  * https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static
  */
-export const eitherSignal = (...signals: AbortSignal[]): AbortSignal => {
+const eitherSignal = (...signals: AbortSignal[]): AbortSignal => {
 	if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
 	const controller = new AbortController();
 	signals.forEach((signal) => {

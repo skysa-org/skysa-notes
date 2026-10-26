@@ -13,7 +13,7 @@ import { createSyncScheduler, type SchedulerStatus, type SyncScheduler } from '.
  */
 
 /** Written into the marker file on first connect. */
-export const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.0.0-dev';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.0.0-dev';
 
 export const syncScheduler: SyncScheduler = createSyncScheduler({
 	db,
