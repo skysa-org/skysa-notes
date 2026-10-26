@@ -267,7 +267,7 @@ const isDeadLink = (failure: GraphFailure, stored: boolean): boolean =>
 export const createOneDriveProvider = (options: OneDriveProviderOptions): StorageProvider => {
 	const { fetch: doFetch, getAccessToken } = options;
 	/** The app folder's id, which never changes once Graph has made the folder. */
-	const rootBox = cell<string | undefined>(undefined);
+	const foundRoot = cell<string | undefined>(undefined);
 
 	const failureOf = async (response: Response): Promise<GraphFailure> => {
 		const { text, body } = await readErrorBody(response);
@@ -322,13 +322,13 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	});
 
 	const rootId = async (): Promise<string> => {
-		const cached = rootBox.current;
+		const cached = foundRoot.current;
 		if (cached !== undefined) return cached;
 		const item = await call<DriveItem>('GET', APPROOT);
 		if (item.id === undefined || item.id === '') {
 			throw new ProviderResponseError('onedrive returned an app folder with no id');
 		}
-		rootBox.current = item.id;
+		foundRoot.current = item.id;
 		return item.id;
 	};
 
@@ -613,7 +613,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	 * place nothing in it.
 	 */
 	const freshRound = async (): Promise<DeltaCursor> => {
-		rootBox.current = undefined;
+		foundRoot.current = undefined;
 		return {
 			v: 1,
 			link: `${APPROOT}/delta`,
@@ -631,7 +631,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 
 		const result = await attempt<ItemPage>('GET', from.link);
 		if (!result.ok && isDeadLink(result.failure, stored)) {
-			rootBox.current = undefined;
+			foundRoot.current = undefined;
 			// Graph names two ways to recover, and they differ on one thing:
 			// whose copy may have lost something. `resyncChangesApplyDifferences`
 			// says the service is right — "Replace any local items with the
@@ -689,7 +689,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// stands it says the folder is empty, and the engine deletes every note
 		// that is not dirty.
 		if (roundEnds && from.scan && !anchored && settled.pruned > 0) {
-			rootBox.current = undefined;
+			foundRoot.current = undefined;
 			throw new Error('onedrive delta placed nothing under the app folder');
 		}
 

@@ -44,19 +44,33 @@ const RESTRICTED_SYNTAX = [
  * be learned where it was met. A React ref is a cell's shape already and is
  * not written as one of these. In source only: tests keep their own idioms.
  */
+const CELL_MESSAGE =
+	'a value that changes is a cell (#457): cell() and Cell<T>, from @skysa/core, or from src/cell.js inside core.';
+
 const CELL_SYNTAX = [
 	{
+		// Keyed by one literal, or by a union of nothing but literals: a value or
+		// two by name, not a table. A key named through a type alias is not seen;
+		// only a type-aware rule could, and review is that here.
 		selector:
-			"NewExpression[callee.name='Map'] > TSTypeParameterInstantiation > :first-child:matches(TSLiteralType, TSUnionType:has(TSLiteralType))",
-		message: 'a Map keyed by a literal is a cell: use cell() from @skysa/core (#457).',
+			"NewExpression[callee.name='Map'] > TSTypeParameterInstantiation > :first-child:matches(TSLiteralType, TSUnionType:not(:has(> :not(TSLiteralType))))",
+		message: CELL_MESSAGE,
 	},
 	{
-		selector: "ObjectExpression[properties.length=1] > Property[key.name='current']",
-		message: 'a { current } box is a cell: use cell() from @skysa/core (#457).',
+		// A set that can only ever hold one thing is a flag.
+		selector:
+			"NewExpression[callee.name='Set'] > TSTypeParameterInstantiation > TSLiteralType:first-child",
+		message: CELL_MESSAGE,
 	},
 	{
-		selector: "TSTypeLiteral[members.length=1] > TSPropertySignature[key.name='current']",
-		message: 'a { current } type is a cell: use Cell<T> from @skysa/core (#457).',
+		selector:
+			"ObjectExpression[properties.length=1] > Property:matches([key.name='current'], [key.value='current'])",
+		message: CELL_MESSAGE,
+	},
+	{
+		selector:
+			"TSTypeLiteral[members.length=1] > TSPropertySignature:matches([key.name='current'], [key.value='current'])",
+		message: CELL_MESSAGE,
 	},
 ];
 
@@ -318,7 +332,8 @@ export default tseslint.config(
 	},
 
 	{
-		// Converted folder by folder (#457); each joins this list as it is done.
+		// Core's source holds to it now; the web's and the API's folders join as
+		// each is converted (#457), until this is every package's src.
 		files: ['packages/core/src/**/*.ts'],
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...CELL_SYNTAX] },
 	},

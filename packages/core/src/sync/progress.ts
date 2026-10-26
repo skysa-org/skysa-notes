@@ -67,8 +67,8 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 		{ named: Set<string>; total: number; done: number; listing: boolean } | undefined
 	>(undefined);
 
-	/** The push under way, for `onProgress`: how long its queue was. */
-	const pushes = cell<number | undefined>(undefined);
+	/** The push under way, for `onProgress`: how long its queue was, or 0 for none. */
+	const pushes = cell(0);
 
 	const reportRound = (path?: string) => {
 		const round = rounds.current;
@@ -180,13 +180,13 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 	const push = <T>(total: number, during: () => Promise<T>): Promise<T> => {
 		pushes.current = total;
 		return during().finally(() => {
-			pushes.current = undefined;
+			pushes.current = 0;
 		});
 	};
 
 	/** The push with this many ops left, `next` the first of them. */
 	const pushLeft = (left: number, next: SyncOp | undefined): void => {
-		const total = pushes.current ?? 0;
+		const total = pushes.current;
 		if (total === 0) return;
 		onProgress({
 			stage: 'uploading',
