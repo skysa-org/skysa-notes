@@ -71,11 +71,6 @@ What is expected of a change:
   the licence. Anything that reaches the shipped bundle must be MIT, Apache-2.0
   or ISC. Build- and test-time tools are held to a looser line — `docs/ARCHITECTURE.md`
   §13 records what is already in the tree and why — but say which it is.
-- **No `let`, no loops, no mutation** outside tests; the lint rules say so.
-  Each workaround has one helper: a value that changes is a `cell()` from
-  `@skysa/core` (`packages/core/src/cell.ts`), a set of listeners is
-  `createEmitter` or `createStore` (`apps/web/src/store/emitter.ts`), and the
-  latest prop inside a callback is `useLatest` (`apps/web/src/hooks/`).
 - **Check the vendor docs** rather than assuming, for anything about a provider
   API — scopes, endpoints, conflict semantics — and put the URL in a comment.
 
