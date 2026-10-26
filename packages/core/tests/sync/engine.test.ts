@@ -2991,6 +2991,7 @@ describe('authorization', () => {
 
 		expect(refreshed).toBe(1);
 		expect(result.status).toBe('paused');
+		expect(result.error).toBe('authorization required');
 	});
 
 	it('pauses immediately when there is no way to refresh', async () => {
@@ -2999,6 +3000,168 @@ describe('authorization', () => {
 		provider.setFault((call) => (call.op === 'write' ? new AuthError('expired') : undefined));
 
 		expect((await engine.push()).status).toBe('paused');
+	});
+
+	it('pauses a pull after one refresh that does not help, as it does a push', async () => {
+		let refreshed = 0;
+		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+		const withAuth = engineWith({
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.pull();
+
+		expect(refreshed).toBe(1);
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'paused', error: 'authorization required' })
+		);
+	});
+
+	it('pauses a pull at once when there is no way to refresh', async () => {
+		let asked = 0;
+		provider.setFault((call) => {
+			if (call.op !== 'changes') return undefined;
+			asked += 1;
+			return new AuthError('expired');
+		});
+
+		expect(await engine.pull()).toEqual(
+			expect.objectContaining({ status: 'paused', error: 'authorization required' })
+		);
+		expect(asked).toBe(1);
+	});
+
+	/**
+	 * The provider, answering `changes` through `answer` first, and the cursor
+	 * each call carried: `undefined` is a scan from the top, the stored one a
+	 * round. The fake's own fault hook cannot tell those apart.
+	 */
+	const answering = (
+		answer: (cursor: string | undefined) => Error | undefined
+	): { asked: (string | undefined)[]; refreshed: () => number; engine: SyncEngine } => {
+		const asked: (string | undefined)[] = [];
+		const refreshes: number[] = [];
+		const withAuth = engineWith({
+			provider: {
+				...provider,
+				changes: (cursor?: string) => {
+					asked.push(cursor);
+					const refusal = answer(cursor);
+					return refusal === undefined
+						? provider.changes(cursor)
+						: Promise.reject(refusal);
+				},
+			},
+			reauthorize: () => {
+				refreshes.push(1);
+				return Promise.resolve();
+			},
+		});
+		return { asked, refreshed: () => refreshes.length, engine: withAuth };
+	};
+
+	it('refreshes for a token that expires in the scan that answers a dead cursor', async () => {
+		await pulledNote('a.md', 'one\n');
+		await remoteFile('b.md', 'two\n');
+		const dead = store.storedCursor();
+		const run = answering((cursor) => {
+			if (cursor === dead) return new CursorResetError('reset');
+			return cursor === undefined && run.refreshed() === 0
+				? new AuthError('expired')
+				: undefined;
+		});
+
+		const result = await run.engine.pull();
+
+		expect(run.refreshed()).toBe(1);
+		expect(result.status).toBe('ok');
+		expect(noteAt('b.md')?.content).toBe('two\n');
+		// Round, scan, and the scan again: not the refused cursor a second time.
+		expect(run.asked).toEqual([dead, undefined, undefined]);
+	});
+
+	it('scans when the cursor turns out dead on the retry after a refresh', async () => {
+		await pulledNote('a.md', 'one\n');
+		await remoteFile('b.md', 'two\n');
+		const dead = store.storedCursor();
+		const run = answering((cursor) => {
+			if (run.refreshed() === 0) return new AuthError('expired');
+			return cursor === dead ? new CursorResetError('reset') : undefined;
+		});
+
+		const result = await run.engine.pull();
+
+		expect(run.refreshed()).toBe(1);
+		expect(result.status).toBe('ok');
+		expect(noteAt('b.md')?.content).toBe('two\n');
+		expect(run.asked).toEqual([dead, dead, undefined]);
+	});
+
+	it('keeps the upload a dead cursor asked for through the retry after a refresh', async () => {
+		await pulledNote('a.md', 'one\n');
+		const kept = noteAt('a.md');
+		const file = remoteAt(provider, 'a.md');
+		if (file === undefined) throw new Error('no file');
+		await provider.delete(file);
+		const dead = store.storedCursor();
+		// Refused with the upload once only: a provider asked again may say less.
+		const run = answering((cursor) => {
+			if (cursor === dead) return new CursorResetError('reset', run.asked.length === 1);
+			return cursor === undefined && run.refreshed() === 0
+				? new AuthError('expired')
+				: undefined;
+		});
+
+		expect((await run.engine.pull()).status).toBe('ok');
+		expect(run.refreshed()).toBe(1);
+		// Sent back up, not let go of.
+		expect(noteAt('a.md')).toEqual(expect.objectContaining({ id: kept?.id, dirty: true }));
+		expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+			{ op: 'write', path: 'a.md' },
+		]);
+	});
+
+	it('pauses, after one refresh, a dead cursor whose scan keeps meeting an expired token', async () => {
+		await pulledNote('a.md', 'one\n');
+		const dead = store.storedCursor();
+		const run = answering((cursor) =>
+			cursor === dead ? new CursorResetError('reset') : new AuthError('expired')
+		);
+
+		const result = await run.engine.pull();
+
+		expect(run.refreshed()).toBe(1);
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'paused', error: 'authorization required' })
+		);
+		expect(run.asked).toEqual([dead, undefined, undefined]);
+		expect(store.storedCursor()).toBe(dead);
+	});
+
+	it('pauses a pull from a stored cursor after one refresh, and keeps the cursor', async () => {
+		await remoteFile('a.md', 'one\n');
+		expect((await engine.pull()).status).toBe('ok');
+		const cursor = await store.cursor();
+		expect(cursor).toBeDefined();
+		let refreshed = 0;
+		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+		const withAuth = engineWith({
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.pull();
+
+		expect(refreshed).toBe(1);
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'paused', error: 'authorization required' })
+		);
+		expect(await store.cursor()).toBe(cursor);
 	});
 });
 

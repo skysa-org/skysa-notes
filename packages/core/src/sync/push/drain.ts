@@ -7,7 +7,7 @@ import {
 	isUnreadableError,
 } from '../../providers/types.js';
 import { type EngineContext, type FromPull } from '../context.js';
-import { messageOf, ok, type SyncOutcome, waitFor } from '../outcome.js';
+import { messageOf, ok, paused, type SyncOutcome, waitFor } from '../outcome.js';
 import { withParent } from '../providerOps.js';
 import { type SyncOp } from '../store.js';
 import { createConflictPush, type Settled } from './conflicts.js';
@@ -23,18 +23,11 @@ import { createNotePush } from './notes.js';
  * three things it shares with the pull.
  */
 
-export const createPush = (
-	context: EngineContext,
-	{
-		fileState,
-		resolutionFor,
-		reauthorize,
-	}: FromPull & { reauthorize: (() => Promise<void>) | undefined }
-) => {
-	const { provider, store, maxAttempts, writesAtOnce, meter } = context;
+export const createPush = (context: EngineContext, { fileState, resolutionFor }: FromPull) => {
+	const { provider, store, maxAttempts, writesAtOnce, renew, meter } = context;
 
 	// The remote's folders, made and removed (`push/folders.ts`).
-	const { ensureRemoteFolder, making, runRmdir } = createFolderPush(context);
+	const { ensureRemoteFolder, startTurn, runRmdir } = createFolderPush(context);
 	// The notes, written, moved and deleted (`push/notes.ts`).
 	const { write, runWrite, runMove, runDelete } = createNotePush(context, {
 		ensureRemoteFolder,
@@ -297,7 +290,7 @@ export const createPush = (
 		progress: PushProgress,
 		retriedAuth: boolean
 	): Promise<SyncOutcome> => {
-		making.clear();
+		startTurn();
 		// Every call is handed what is left, so how far it has got is the rest:
 		// an op passed over, given up on or resolved is as done as one sent.
 		const [held, ...rest] = ops;
@@ -394,10 +387,7 @@ export const createPush = (
 		const reason = resolved !== undefined && 'failure' in resolved ? resolved.failure : error;
 
 		if (isAuthError(reason)) {
-			if (retriedAuth || reauthorize === undefined) {
-				return { ...drained(progress), status: 'paused', error: 'authorization required' };
-			}
-			await reauthorize();
+			if (retriedAuth || !(await renew())) return paused(drained(progress));
 			return drainOps(ops, progress, true);
 		}
 
