@@ -11,7 +11,7 @@ import {
 } from '@milkdown/kit/prose/view';
 import type { MarkdownNode, NodeSchema } from '@milkdown/kit/transformer';
 import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
-import { isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
+import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { barButton, selectedKeys } from './attachment.js';
@@ -191,13 +191,13 @@ const findSecret = (
 	doc: ProseNode,
 	armor: string
 ): { pos: number; node: ProseNode } | undefined => {
-	const found = new Map<'it', { pos: number; node: ProseNode }>();
+	const found = cell<{ pos: number; node: ProseNode } | undefined>(undefined);
 	doc.descendants((node, pos) => {
-		if (found.has('it')) return false;
-		if (node.type.name === SECRET && valueOf(node) === armor) found.set('it', { pos, node });
+		if (found.current !== undefined) return false;
+		if (node.type.name === SECRET && valueOf(node) === armor) found.current = { pos, node };
 		return !node.isLeaf;
 	});
-	return found.get('it');
+	return found.current;
 };
 
 /**
@@ -371,8 +371,8 @@ const secretView = (ctx: Ctx) => {
 	const panels = ctx.get(secretPanelsCtx.key);
 	return (initial: ProseNode, view: EditorView, getPos: () => number | undefined): NodeView => {
 		const doc = documentOf(view);
-		const held = { current: initial };
-		const gone = { current: false };
+		const held = cell(initial);
+		const gone = cell(false);
 
 		// What it is called: its label, or the app's word for a secret.
 		const name = document.createElement('span');
@@ -443,7 +443,7 @@ const secretView = (ctx: Ctx) => {
 		};
 
 		/** "Add its key", where the last Reveal found it made with a key the device does not have. */
-		const adding: { current: HTMLButtonElement | undefined } = { current: undefined };
+		const adding = cell<HTMLButtonElement | undefined>(undefined);
 		const open = () => {
 			said.replaceChildren();
 			adding.current?.remove();

@@ -16,7 +16,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from '@codemirror/view';
-import { armor as armorOf, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
+import { armor as armorOf, type Cell, cell, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import type { SecretHost } from './secretHost.js';
@@ -435,7 +435,7 @@ const panelsMoved = StateEffect.define<null>();
  * fence is not, so it begins a step of its own rather than joining what was
  * typed in the note just before; Cancel is an edit of its own.
  */
-const documentOf = (view: EditorView, gone: Readonly<{ current: boolean }>): SecretDocument => {
+const documentOf = (view: EditorView, gone: Readonly<Cell<boolean>>): SecretDocument => {
 	/** What each new secret's first words wrote, by its armor now, so Cancel puts the note back as it was. */
 	const written = new Map<string, Written>();
 	return {
@@ -624,7 +624,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 	const revealing = ViewPlugin.define(
 		(view) => {
 			const host = given();
-			const gone = { current: false };
+			const gone = cell(false);
 			const doc = documentOf(view, gone);
 			/** Why a secret could not be revealed, by its armor, until it is pressed again. */
 			const notes = new Map<string, NotRevealed>();
@@ -639,7 +639,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 				said();
 			};
 			/** The Reveal bars drawn last, by what each shows: the same, drawn again, is kept. */
-			const bars = { current: new Map<string, WidgetType>() };
+			const bars = cell(new Map<string, WidgetType>());
 			const draw = () => {
 				const drawn = new Map<string, WidgetType>();
 				const set = Decoration.set(
@@ -662,7 +662,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 				bars.current = drawn;
 				return set;
 			};
-			const shown = { current: draw() };
+			const shown = cell(draw());
 			const stopShowing = panels.subscribe(said);
 			const stopLock = host.locked(() => {
 				lockAll(doc, panels);

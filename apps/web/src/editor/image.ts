@@ -5,7 +5,7 @@ import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $prose, $view } from '@milkdown/kit/utils';
-import { classifyHref } from '@skysa/core';
+import { cell, classifyHref } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import {
@@ -156,18 +156,16 @@ const imageView =
 	(host: AttachmentHost, view: EditorView, getPos: () => number | undefined) =>
 	(initial: ProseNode): NodeView => {
 		const editor = view.dom;
-		const held = { current: initial };
+		const held = cell(initial);
 		// What the picture shown is, and how to let go of it: the request out
 		// for it, the URL it was drawn from, the wait for it to be on screen.
-		const showing = {
-			current: { src: '', stop: (): void => undefined },
-		};
-		const state = { current: 'loading' as State };
+		const showing = cell({ src: '', stop: (): void => undefined });
+		const state = cell<State>('loading');
 		// A large picture's size, kept for saying it again when the alt changes.
-		const size = { current: 0 };
+		const size = cell(0);
 		// The user asked for this one whatever its size (Show). Kept for asking
 		// again — Try again, a notice — until the link names another picture.
-		const wanted = { current: false };
+		const wanted = cell(false);
 
 		const img = document.createElement('img');
 		img.setAttribute('referrerpolicy', 'no-referrer');
@@ -227,7 +225,7 @@ const imageView =
 		// The picture's own size, where it is known, and the link it is known
 		// for: its box is held at it before anything is drawn in it, and the
 		// picture fills it whichever copy it is drawn from.
-		const sizedFor = { current: '' };
+		const sizedFor = cell('');
 		const hold = (size: PictureSize | undefined) => {
 			if (size === undefined) {
 				img.removeAttribute('width');
@@ -250,7 +248,7 @@ const imageView =
 		/** Ask the host for the picture, and show whatever it answers. */
 		const ask = (src: string, large: boolean): (() => void) => {
 			const asking = new AbortController();
-			const kept = { current: (): void => undefined };
+			const kept = cell((): void => undefined);
 			say('loading');
 			void host
 				.show(src, { signal: asking.signal, large, fit: fitIn(editor) })
@@ -311,7 +309,7 @@ const imageView =
 							hold(size);
 					});
 			}
-			const asked = { current: (): void => undefined };
+			const asked = cell((): void => undefined);
 			const unwatch = whenVisible(dom, editor, () => {
 				asked.current = ask(src, wanted.current);
 			});

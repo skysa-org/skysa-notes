@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { t } from '../i18n/t.js';
 
 /**
@@ -85,7 +87,7 @@ const button = (label: string, className: string, press: () => void): HTMLButton
 export const LABEL_MAX = 80;
 
 /** Ids for each panel's label and what is said of it, apart from every other panel's. */
-const panelIds = { current: 0 };
+const panelIds = cell(0);
 
 /** Lines enough for the words, and one to type on: from 2 to 12. */
 const rowsFor = (words: string): string =>
@@ -100,13 +102,13 @@ export const createSecretPanel = ({
 	onCancel,
 	onCopy,
 }: SecretPanelOptions): SecretPanel => {
-	const kept = { current: words };
+	const kept = cell(words);
 	panelIds.current += 1;
 	const hintId = `secret-label-hint-${String(panelIds.current)}`;
 
 	// The label: not secret, but the browser's helpers kept out of it all the
 	// same, as a password manager would take it for a login's name.
-	const keptLabel = { current: label };
+	const keptLabel = cell(label);
 	const name = document.createElement('input');
 	name.setAttribute('type', 'text');
 	name.setAttribute('class', 'secret-label-field');

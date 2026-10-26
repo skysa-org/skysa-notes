@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useLatest } from '../hooks/useLatest.js';
@@ -176,9 +177,9 @@ const call = <T>(entry: Attempt<T>, displaced: boolean): boolean | Promise<boole
 
 /** The edits issued and not yet known to be stored. No React in here. */
 const createHeld = <T>(options: HeldOptions<T>) => {
-	const issued = { current: 0 };
+	const issued = cell(0);
 	/** In issue order. */
-	const held = { current: [] as readonly Attempt<T>[] };
+	const held = cell<readonly Attempt<T>[]>([]);
 	/**
 	 * Written, and newer than something still held for the same note — kept only
 	 * so that one failing *after* this succeeded can be told it is covered. A
@@ -186,11 +187,11 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 	 * failing would have every later save of that note, body and all, kept behind
 	 * it for as long as the tab is open.
 	 */
-	const written = { current: [] as readonly Attempt<T>[] };
+	const written = cell<readonly Attempt<T>[]>([]);
 	const flying = new Map<Attempt<T>, Promise<void>>();
 	const failed = new Set<Attempt<T>>();
 	const forgotten = new Set<Attempt<T>>();
-	const timer: { current: ReturnType<typeof setTimeout> | null } = { current: null };
+	const timer = cell<ReturnType<typeof setTimeout> | null>(null);
 
 	const stands = (next: Attempt<T>, before: Attempt<T>): boolean =>
 		next.key === before.key &&

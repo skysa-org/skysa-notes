@@ -332,13 +332,29 @@ export default tseslint.config(
 	},
 
 	{
-		// Core's source, the API's and the web's sync/ hold to it now; the web's
-		// other folders join as each is converted (#457), until this is every
-		// package's src. The API's env block below sets the rule again, so it
-		// spreads the list too; the web's .tsx block, which sync/ has no file
-		// under, takes it when the last folder does.
-		files: ['packages/core/src/**/*.ts', 'apps/api/src/**/*.ts', 'apps/web/src/sync/**/*.ts'],
+		// Core's source, the API's and the web's sync/ and editor/ hold to it
+		// now; the web's other folders join as each is converted (#457), until
+		// this is every package's src. The API's env block below sets the rule
+		// again, so it spreads the list too, and so does the next block, for
+		// editor/'s .tsx files, which the block above sets it for.
+		files: [
+			'packages/core/src/**/*.ts',
+			'apps/api/src/**/*.ts',
+			'apps/web/src/sync/**/*.ts',
+			'apps/web/src/editor/**/*.ts',
+		],
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...CELL_SYNTAX] },
+	},
+	{
+		files: ['apps/web/src/editor/**/*.tsx'],
+		rules: {
+			'no-restricted-syntax': [
+				'error',
+				...RESTRICTED_SYNTAX,
+				...INLINE_WORDS,
+				...CELL_SYNTAX,
+			],
+		},
 	},
 
 	// ---- Boundaries ---------------------------------------------------------

@@ -1,3 +1,5 @@
+import { type Cell, cell } from '@skysa/core';
+
 /**
  * Object URLs for the files beside a note (#187), one per file however many
  * views show it, and let go of once nothing does.
@@ -52,9 +54,9 @@ const OBJECT_URL_GRACE_MS = 5000;
 interface Entry {
 	readonly url: string;
 	/** Holds on it now. */
-	readonly holds: { current: number };
+	readonly holds: Cell<number>;
 	/** The revoke waiting out the grace, while nothing holds it. */
-	readonly pending: { current: ReturnType<typeof setTimeout> | undefined };
+	readonly pending: Cell<ReturnType<typeof setTimeout> | undefined>;
 }
 
 export const createObjectUrlCache = (
@@ -74,8 +76,8 @@ export const createObjectUrlCache = (
 		if (known !== undefined) return known;
 		const made: Entry = {
 			url: factory.create(blob()),
-			holds: { current: 0 },
-			pending: { current: undefined },
+			holds: cell(0),
+			pending: cell<ReturnType<typeof setTimeout> | undefined>(undefined),
 		};
 		entries.set(key, made);
 		return made;
@@ -86,12 +88,12 @@ export const createObjectUrlCache = (
 		clearTimeout(entry.pending.current);
 		entry.pending.current = undefined;
 		entry.holds.current += 1;
-		const released = new Set<'once'>();
+		const released = cell(false);
 		return {
 			url: entry.url,
 			release: () => {
-				if (released.has('once')) return;
-				released.add('once');
+				if (released.current) return;
+				released.current = true;
 				entry.holds.current -= 1;
 				// Held again by someone else.
 				if (entry.holds.current > 0) return;

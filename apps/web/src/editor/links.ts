@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { modKeyLabel } from '../commands/chord.js';
 import { t } from '../i18n/t.js';
 import { iconElement } from './icons.js';
@@ -96,7 +98,7 @@ export interface LinkChip {
  * editor's plugin view draw the same thing.
  */
 export const linkChip = (): LinkChip => {
-	const held: { current: URL | undefined } = { current: undefined };
+	const held = cell<URL | undefined>(undefined);
 
 	const address = document.createElement('span');
 	address.setAttribute('class', 'link-chip-address');

@@ -2,6 +2,7 @@ import { codeBlockSchema } from '@milkdown/kit/preset/commonmark';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $view } from '@milkdown/kit/utils';
+import { cell } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import type { CodeDisplayStore } from './codeDisplay.js';
@@ -111,7 +112,7 @@ const codeBlockView =
 		// The node the view is currently showing. Held rather than closed over,
 		// because ProseMirror hands the view a new one whenever the block changes
 		// and the tools have to answer for the block as it is now.
-		const held = { current: initial };
+		const held = cell(initial);
 
 		const picker = document.createElement('select');
 		// Attributes rather than properties, which is how the repo's rules would

@@ -3,6 +3,7 @@ import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
+import { cell } from '@skysa/core';
 
 import type { LanguageSource } from './languages.js';
 
@@ -93,7 +94,7 @@ export const HIGHLIGHT_LIMIT = 20_000;
 export const tokenize = (code: string, language: LanguageSupport): readonly TokenRange[] => {
 	if (code.length > HIGHLIGHT_LIMIT) return [];
 
-	const found = { current: [] as TokenRange[] };
+	const found = cell<TokenRange[]>([]);
 	highlightTree(language.language.parser.parse(code), CODE_HIGHLIGHTER, (from, to, className) => {
 		found.current = [...found.current, { from, to, className }];
 	});
@@ -122,7 +123,7 @@ const tokensOf = (node: ProseNode, language: LanguageSupport): readonly TokenRan
 };
 
 const decorate = (doc: ProseNode, languages: LanguageSource): DecorationSet => {
-	const found = { current: [] as Decoration[] };
+	const found = cell<Decoration[]>([]);
 
 	doc.descendants((node, pos) => {
 		if (node.type.name !== CODE_BLOCK) return true;
@@ -189,7 +190,7 @@ export const codeHighlightPlugin = (languages: LanguageSource): Plugin<Decoratio
 			decorations: (state) => plugin.getState(state),
 		},
 		view: (view) => {
-			const alive = { current: true };
+			const alive = cell(true);
 
 			const fetch = (doc: ProseNode) => {
 				languagesIn(doc)
