@@ -5,7 +5,7 @@ import {
 	isCursorResetError,
 } from '../../providers/types.js';
 import { type EngineContext } from '../context.js';
-import { metIn, metOf, ok, type SyncOutcome } from '../outcome.js';
+import { metIn, metOf, ok, paused, type SyncOutcome } from '../outcome.js';
 import { type PullChange } from '../store.js';
 import { type PullAttachments } from './attachments.js';
 import { unreadMap } from './batch.js';
@@ -43,10 +43,9 @@ interface PullProgress {
 }
 
 export const createPullRun = (
-	{ provider, store, meter }: EngineContext,
+	{ provider, store, renew, meter }: EngineContext,
 	{
 		letGo,
-		reauthorize,
 		decideAll,
 		deduped,
 		fileBaseOf,
@@ -54,7 +53,6 @@ export const createPullRun = (
 		renamesQueued,
 	}: {
 		letGo: (entries: readonly ChangeEntry[]) => void;
-		reauthorize: (() => Promise<void>) | undefined;
 	} & Pick<PullDecide, 'decideAll' | 'deduped'> &
 		Pick<PullAttachments, 'fileBaseOf'> &
 		Pick<PullReconcile, 'reconcile'> &
@@ -215,14 +213,9 @@ export const createPullRun = (
 
 	/** One retry after a refresh, for a pull that met an expired token. */
 	const authRetry = async (again: () => Promise<SyncOutcome>): Promise<SyncOutcome> => {
-		if (reauthorize === undefined) {
-			return { ...ok(), status: 'paused', error: 'authorization required' };
-		}
-		await reauthorize();
+		if (!(await renew())) return paused();
 		return again().catch((error: unknown) => {
-			if (isAuthError(error)) {
-				return { ...ok(), status: 'paused', error: 'authorization required' };
-			}
+			if (isAuthError(error)) return paused();
 			throw error;
 		});
 	};
