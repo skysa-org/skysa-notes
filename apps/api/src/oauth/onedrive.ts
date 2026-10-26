@@ -24,12 +24,9 @@ const AUTHORITY = 'https://login.microsoftonline.com';
  * Not `profile`: it would add `oid` and a display name, and an `oid` is the
  * same for every app a user signs in to, which this app has no need to know.
  */
-export const MICROSOFT_SCOPES = [
-	'Files.ReadWrite.AppFolder',
-	'offline_access',
-	'openid',
-	'email',
-].join(' ');
+const MICROSOFT_SCOPES = ['Files.ReadWrite.AppFolder', 'offline_access', 'openid', 'email'].join(
+	' '
+);
 
 /** The tenant decides who may sign in; `common` takes personal and work accounts both. */
 const endpoint = (credentials: OAuthCredentials, leg: 'authorize' | 'token'): string =>

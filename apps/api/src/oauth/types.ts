@@ -81,20 +81,20 @@ export interface OAuthCredentials {
 	tenant?: string;
 }
 
-export interface AuthorizeInput {
+interface AuthorizeInput {
 	redirectUri: string;
 	state: string;
 	challenge: string;
 }
 
-export interface ExchangeInput {
+interface ExchangeInput {
 	redirectUri: string;
 	code: string;
 	verifier: string;
 	now?: number;
 }
 
-export interface RefreshInput {
+interface RefreshInput {
 	refreshToken: string;
 	now?: number;
 }

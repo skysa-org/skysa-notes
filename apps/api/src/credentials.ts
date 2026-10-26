@@ -25,9 +25,6 @@ import { type Database, schema } from './db/client.js';
  */
 export const CREDENTIAL_PREFIX = 'sk1_';
 
-/** 32 bytes of `crypto.getRandomValues`, base64url, unpadded. */
-export const CREDENTIAL_BYTES = 32;
-
 /** A SHA-256 digest as base64url: 32 bytes, unpadded, always 43 characters. */
 const HASH_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 

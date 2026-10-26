@@ -32,11 +32,19 @@ import {
 	type FileList,
 	FILES,
 	isFolder,
-	LISTS_AT_ONCE,
 	MAX_DEPTH,
 	PAGE_SIZE,
 	treeItemOf,
+	WRITES_AT_ONCE,
 } from './wire.js';
+
+/**
+ * Folders whose contents are asked for at once (`listArrivals`), as many as
+ * notes are sent. A list is 100 of the 325,000 quota units a user has a
+ * minute, so four at a time is nowhere near the limit.
+ * https://developers.google.com/workspace/drive/api/guides/limits
+ */
+const LISTS_AT_ONCE = WRITES_AT_ONCE;
 
 /**
  * `drive` changes are about shared drives, which `drive.file` never reaches.

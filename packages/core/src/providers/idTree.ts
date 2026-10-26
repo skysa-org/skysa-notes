@@ -41,7 +41,7 @@ export const nodeSchema = z.union([
  * would never be reported again. `was` travels with it because the tree no
  * longer knows it: the item's node already names its new parent.
  */
-export const pendingSchema = z.tuple([
+const pendingSchema = z.tuple([
 	z.string(),
 	z.string(),
 	z.string(),
@@ -81,7 +81,7 @@ export const readTreeCursor = <T>(
 };
 
 export type TreeRow = z.infer<typeof nodeSchema>;
-export type Held = z.infer<typeof pendingSchema>;
+type Held = z.infer<typeof pendingSchema>;
 
 /** What an adapter carries between pages, besides where its feed resumes. */
 export interface TreeState {

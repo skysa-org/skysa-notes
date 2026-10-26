@@ -52,7 +52,7 @@ const repathed = (op: Stored, rebase: (path: string) => string): Stored =>
  * A file's bytes as this device holds them: held until they are uploaded
  * (`pinned`), or cached under the version they were read at.
  */
-export interface HeldBytes {
+interface HeldBytes {
 	bytes: Uint8Array<ArrayBuffer>;
 	version?: string;
 	pinned?: boolean;
