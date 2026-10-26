@@ -1,3 +1,4 @@
+import { cell } from '../cell.js';
 import { decodeBase64, encodeBase64 } from './base64.js';
 import { concatBytes } from './bytes.js';
 import { AgeError } from './errors.js';
@@ -81,7 +82,7 @@ const readBody = (
 	start: number
 ): Readonly<{ body: Uint8Array; next: number }> => {
 	const parts: Uint8Array[] = [];
-	const at = { current: start };
+	const at = cell(start);
 	// A loop rather than the recursion used elsewhere: a body may run to
 	// thousands of lines, and each would be a frame. `parts` is written to as it
 	// goes, and nothing outside sees it until it is done.
@@ -106,7 +107,7 @@ export const parseHeader = (
 	const intro = lineAt(file, 0);
 	if (intro.text !== INTRO) throw failure('not an age-encryption.org/v1 file');
 	const stanzas: Stanza[] = [];
-	const at = { current: intro.next };
+	const at = cell(intro.next);
 	// A loop for the reason `readBody` gives: up to 1,024 stanzas.
 	// eslint-disable-next-line functional/no-loop-statements
 	while (!startsWith(file, at.current, FOOTER)) {

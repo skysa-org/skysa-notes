@@ -38,6 +38,43 @@ const RESTRICTED_SYNTAX = [
 ];
 
 /**
+ * The one way to hold a value that changes: `cell()` from `@skysa/core`
+ * (#457). Not a `Map` keyed by one literal, and not a `{ current }` written
+ * out — the two ways the rule against `let` used to be worked round, each to
+ * be learned where it was met. A React ref is a cell's shape already and is
+ * not written as one of these. In source only: tests keep their own idioms.
+ */
+const CELL_MESSAGE =
+	'a value that changes is a cell (#457): cell() and Cell<T>, from @skysa/core, or from src/cell.js inside core.';
+
+const CELL_SYNTAX = [
+	{
+		// Keyed by one literal, or by a union of nothing but literals: a value or
+		// two by name, not a table. A key named through a type alias is not seen;
+		// only a type-aware rule could, and review is that here.
+		selector:
+			"NewExpression[callee.name='Map'] > TSTypeParameterInstantiation > :first-child:matches(TSLiteralType, TSUnionType:not(:has(> :not(TSLiteralType))))",
+		message: CELL_MESSAGE,
+	},
+	{
+		// A set that can only ever hold one thing is a flag.
+		selector:
+			"NewExpression[callee.name='Set'] > TSTypeParameterInstantiation > TSLiteralType:first-child",
+		message: CELL_MESSAGE,
+	},
+	{
+		selector:
+			"ObjectExpression[properties.length=1] > Property:matches([key.name='current'], [key.value='current'])",
+		message: CELL_MESSAGE,
+	},
+	{
+		selector:
+			"TSTypeLiteral[members.length=1] > TSPropertySignature:matches([key.name='current'], [key.value='current'])",
+		message: CELL_MESSAGE,
+	},
+];
+
+/**
  * Every Node built-in, by bare name and by `node:` — read from Node itself, so a
  * hand-kept list cannot leave one out. Neither core nor the Worker has them:
  * core runs in the browser and Workers too, and the Worker runs without
@@ -292,6 +329,13 @@ export default tseslint.config(
 	{
 		files: ['apps/web/src/**/*.tsx'],
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...INLINE_WORDS] },
+	},
+
+	{
+		// Core's source holds to it now; the web's and the API's folders join as
+		// each is converted (#457), until this is every package's src.
+		files: ['packages/core/src/**/*.ts'],
+		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...CELL_SYNTAX] },
 	},
 
 	// ---- Boundaries ---------------------------------------------------------

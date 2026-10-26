@@ -1,3 +1,4 @@
+import { cell } from '../cell.js';
 import { destinationOf, type SyncOp } from './store.js';
 
 /**
@@ -54,7 +55,7 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 	 * the one place a note is read; a scheduler runs one pull at a time per
 	 * engine, and each engine makes its own meter.
 	 */
-	const scans = new Map<'current', ScanCount>();
+	const scans = cell<ScanCount | undefined>(undefined);
 
 	/**
 	 * The round under way, for `onProgress`, and none during a scan: the notes
@@ -62,16 +63,15 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 	 * whether it is still reading its pages. Kept for the reason the scan's
 	 * count is.
 	 */
-	const rounds = new Map<
-		'current',
-		{ named: Set<string>; total: number; done: number; listing: boolean }
-	>();
+	const rounds = cell<
+		{ named: Set<string>; total: number; done: number; listing: boolean } | undefined
+	>(undefined);
 
-	/** The push under way, for `onProgress`: how long its queue was. */
-	const pushes = new Map<'current', number>();
+	/** The push under way, for `onProgress`: how long its queue was, or 0 for none. */
+	const pushes = cell(0);
 
 	const reportRound = (path?: string) => {
-		const round = rounds.get('current');
+		const round = rounds.current;
 		if (round === undefined) return;
 		onProgress({
 			stage: 'receiving',
@@ -83,7 +83,7 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 	};
 
 	const reportScan = (path?: string) => {
-		const scanning = scans.get('current');
+		const scanning = scans.current;
 		if (scanning === undefined) return;
 		const found = scanning.notes.size;
 		onProgress({
@@ -97,17 +97,17 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 
 	/** `during`, as a scan counted from nothing, said before its first page. */
 	const scan = <T>(during: () => Promise<T>): Promise<T> => {
-		scans.set('current', { notes: new Set(), settled: 0, reading: 0, listing: true });
+		scans.current = { notes: new Set(), settled: 0, reading: 0, listing: true };
 		// Before the first page, which can be long in coming, as a round's is.
 		reportScan();
 		return during().finally(() => {
-			scans.delete('current');
+			scans.current = undefined;
 		});
 	};
 
 	/** The notes a scan's page names, by remote id. */
 	const scanListed = (ids: readonly string[]): void => {
-		const scanning = scans.get('current');
+		const scanning = scans.current;
 		if (scanning === undefined) return;
 		ids.forEach((id) => scanning.notes.add(id));
 		reportScan();
@@ -115,34 +115,34 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 
 	/** The scan has listed every page. */
 	const scanListingDone = (): void => {
-		const listed = scans.get('current');
+		const listed = scans.current;
 		if (listed === undefined) return;
-		scans.set('current', { ...listed, listing: false });
+		scans.current = { ...listed, listing: false };
 		reportScan();
 	};
 
 	/** A note the scan has read, at `path`. */
 	const scanRead = (path: string): void => {
-		const scanning = scans.get('current');
+		const scanning = scans.current;
 		if (scanning === undefined) return;
-		scans.set('current', { ...scanning, reading: scanning.reading + 1 });
+		scans.current = { ...scanning, reading: scanning.reading + 1 };
 		reportScan(path);
 	};
 
 	/** A page applied, with this many notes on it. */
 	const scanSettled = (notes: number): void => {
-		const scanning = scans.get('current');
+		const scanning = scans.current;
 		if (scanning === undefined) return;
-		scans.set('current', { ...scanning, settled: scanning.settled + notes, reading: 0 });
+		scans.current = { ...scanning, settled: scanning.settled + notes, reading: 0 };
 		reportScan();
 	};
 
 	/** `during`, as a round counted from nothing, said before its first page. */
 	const round = <T>(during: () => Promise<T>): Promise<T> => {
-		rounds.set('current', { named: new Set(), total: 0, done: 0, listing: true });
+		rounds.current = { named: new Set(), total: 0, done: 0, listing: true };
 		reportRound();
 		return during().finally(() => {
-			rounds.delete('current');
+			rounds.current = undefined;
 		});
 	};
 
@@ -151,42 +151,42 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 	 * many the pages read so far name, said where that has grown.
 	 */
 	const roundListed = (ids: readonly string[]): void => {
-		const counted = rounds.get('current');
+		const counted = rounds.current;
 		if (counted === undefined) return;
 		const before = counted.named.size;
 		ids.forEach((id) => counted.named.add(id));
 		if (counted.named.size === before) return;
-		rounds.set('current', { ...counted, total: counted.named.size });
+		rounds.current = { ...counted, total: counted.named.size };
 		reportRound();
 	};
 
 	/** Every page read: the notes the round will decide, none of them yet. */
 	const roundListingDone = (total: number): void => {
-		const counted = rounds.get('current');
+		const counted = rounds.current;
 		if (counted === undefined) return;
-		rounds.set('current', { ...counted, total, done: 0, listing: false });
+		rounds.current = { ...counted, total, done: 0, listing: false };
 		reportRound();
 	};
 
 	/** A note the round has decided, at `path`. */
 	const roundDecided = (path: string): void => {
-		const counted = rounds.get('current');
+		const counted = rounds.current;
 		if (counted === undefined) return;
-		rounds.set('current', { ...counted, done: counted.done + 1 });
+		rounds.current = { ...counted, done: counted.done + 1 };
 		reportRound(path);
 	};
 
 	/** `during`, as a push of this many ops. */
 	const push = <T>(total: number, during: () => Promise<T>): Promise<T> => {
-		pushes.set('current', total);
+		pushes.current = total;
 		return during().finally(() => {
-			pushes.delete('current');
+			pushes.current = 0;
 		});
 	};
 
 	/** The push with this many ops left, `next` the first of them. */
 	const pushLeft = (left: number, next: SyncOp | undefined): void => {
-		const total = pushes.get('current') ?? 0;
+		const total = pushes.current;
 		if (total === 0) return;
 		onProgress({
 			stage: 'uploading',

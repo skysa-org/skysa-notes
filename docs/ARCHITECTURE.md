@@ -1683,6 +1683,7 @@ packages/
     src/
       index.ts                # what the apps may use, by name; tests/exports.test.ts lists the values (#449)
       config.ts               # APP_FOLDER_NAME, MARKER_FILE
+      cell.ts                 # cell(): the one way to hold a value that changes, where `let` is not allowed (#457)
       appFolder.ts            # the app folder's places that are not notebooks: isScratchPath isVaultPath isClipPath isEncryptionFile
       files/                  # files that are not notes: mediaTypes.ts (one table of types) attachments.ts (how one is shown or opened)
                               #   pictures.ts (a picture's header, and the copies made of it) clipboard.ts (the clipboard's items)
