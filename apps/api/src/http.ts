@@ -32,8 +32,8 @@ export const fail = (
 	c: Context<AppEnv>,
 	code: ApiErrorCode,
 	status: ContentfulStatusCode,
-	beside: Readonly<Record<string, unknown>> = {}
-): Response => c.json({ error: code, ...beside }, status);
+	beside: Readonly<Record<string, unknown> & { error?: never }> = {}
+): Response => c.json({ ...beside, error: code }, status);
 
 /** The rate limiter said no: 429, with its `Retry-After` when it gave one. */
 export const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Response => {

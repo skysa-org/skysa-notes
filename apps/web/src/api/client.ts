@@ -38,8 +38,9 @@ import { z } from 'zod';
  *
  * Its own schema, not the server's: the server refuses a gate that is wrong,
  * where this drops a part it cannot use and keeps the rest (the `.catch`es).
- * What the two must agree on, the shape and the limits, is core's
- * (`ConnectGate`, `GATE_LIMITS`), and both are checked against it.
+ * What the two must agree on is core's: the shape, which both schemas are
+ * checked against (`ConnectGate`), and the limits, which both read
+ * (`GATE_LIMITS`). The URL rule is written on both sides, as above.
  */
 const gateSchema = z.object({
 	message: z.string().min(1).max(GATE_LIMITS.message),
