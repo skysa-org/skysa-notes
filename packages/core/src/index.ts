@@ -115,6 +115,8 @@ export {
 	type SyncStatus,
 } from './sync/engine.js';
 
+export { messageOf } from './sync/outcome.js';
+
 export type {
 	ConflictResolution,
 	OpOutcome,
