@@ -1,4 +1,4 @@
-import type { SyncOp } from './store.js';
+import { destinationOf, type SyncOp } from './store.js';
 
 /**
  * How far the run under way has got, for `onProgress`: a scan's count, a
@@ -192,7 +192,7 @@ export const createProgress = (onProgress: (progress: SyncProgress) => void) => 
 			stage: 'uploading',
 			done: total - left,
 			total,
-			...(next === undefined ? {} : { path: next.targetPath ?? next.path }),
+			...(next === undefined ? {} : { path: destinationOf(next) }),
 		});
 	};
 

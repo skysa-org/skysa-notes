@@ -7,6 +7,7 @@ import {
 	type ProviderKind,
 	type StorageProvider,
 	type SyncEngine,
+	type SyncOp,
 	type SyncOutcome,
 	type SyncProgress,
 } from '@skysa/core';
@@ -19,7 +20,6 @@ import {
 	activeConnectionId,
 	type NotesDatabase,
 	type OpQueueRecord,
-	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
@@ -31,7 +31,7 @@ import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
 import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
 import { type RelayFactory, type RelayLink } from './relay.js';
-import { createDexieSyncStore } from './store.js';
+import { createDexieSyncStore, toSyncOp } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 
 /**
@@ -82,7 +82,8 @@ export type SyncPhase =
  * to the note it is about, without reading the queue itself.
  */
 export interface StuckOp {
-	readonly op: QueuedOperation;
+	/** `malformed` for a row this version cannot read (`toSyncOp`). */
+	readonly op: SyncOp['op'];
 	readonly path: string;
 	/** For a `move`, where it was going. */
 	readonly targetPath?: string;
@@ -587,12 +588,17 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			.sort((a, b) => upload(a) - upload(b) || (a.seq ?? 0) - (b.seq ?? 0))
 			.at(0);
 		if (first === undefined) return undefined;
+		// As the engine read it: a row of a kind this version does not know is
+		// named as one it cannot read, not by a kind with no words for it.
+		const op = toSyncOp(first);
 		return {
-			op: first.op,
-			path: first.path,
-			attempts: first.attempts,
-			...(first.targetPath === undefined ? {} : { targetPath: first.targetPath }),
-			...(first.noteId === undefined ? {} : { noteId: first.noteId }),
+			op: op.op,
+			path: op.path,
+			attempts: op.attempts,
+			...(op.op === 'move' || op.op === 'move-file' ? { targetPath: op.targetPath } : {}),
+			...(op.op === 'write' || op.op === 'move' || op.op === 'delete'
+				? { noteId: op.noteId }
+				: {}),
 			...(first.lastError === undefined ? {} : { error: first.lastError }),
 		};
 	};

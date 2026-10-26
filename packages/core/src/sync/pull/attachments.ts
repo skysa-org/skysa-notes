@@ -20,16 +20,10 @@ export const createPullAttachments = ({ store, now, newId }: EngineContext) => {
 		rows: await store.allFiles(),
 		moves: queue.reduce<Map<string, string>>(
 			(map, op) =>
-				op.op !== 'move-file' || op.fileId === undefined || map.has(op.fileId)
-					? map
-					: map.set(op.fileId, op.path),
+				op.op !== 'move-file' || map.has(op.fileId) ? map : map.set(op.fileId, op.path),
 			new Map()
 		),
-		deleting: new Set(
-			queue.flatMap((op) =>
-				op.op === 'delete-file' && op.remoteId !== undefined ? [op.remoteId] : []
-			)
-		),
+		deleting: new Set(queue.flatMap((op) => (op.op === 'delete-file' ? [op.remoteId] : []))),
 	});
 
 	/** The rows a folder's deletion left with no file (`FilePlace.stranded`). */

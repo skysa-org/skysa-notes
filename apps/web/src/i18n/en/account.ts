@@ -207,6 +207,11 @@ export const account = {
 			one: '{provider} would not take the deletion of the file {path} after {count} try ({error}). Everything queued behind it is waiting. “Sync now” tries again.',
 			other: '{provider} would not take the deletion of the file {path} after {count} tries ({error}). Everything queued behind it is waiting. “Sync now” tries again.',
 		},
+		/** A change queued for {path} that this version of the app cannot read, such as one a newer version queued. */
+		malformed: {
+			one: 'A change to {path} could not be sent to {provider} after {count} try: this version of the app cannot read it ({error}). Everything queued behind it is waiting. Updating the app may let it through.',
+			other: 'A change to {path} could not be sent to {provider} after {count} tries: this version of the app cannot read it ({error}). Everything queued behind it is waiting. Updating the app may let it through.',
+		},
 	},
 	/** A link to the note a stuck change is about. */
 	openNote: 'Open the note',

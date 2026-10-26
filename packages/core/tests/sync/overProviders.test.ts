@@ -330,7 +330,9 @@ const removeFiles = (d: Device, path: string): void => {
 		.forEach((file) => {
 			d.store
 				.ops()
-				.filter((op) => op.fileId === file.id)
+				.filter(
+					(op) => (op.op === 'upload' || op.op === 'move-file') && op.fileId === file.id
+				)
 				.forEach((op) => {
 					d.store.unqueue(op.seq);
 				});

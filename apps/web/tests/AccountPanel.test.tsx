@@ -2925,6 +2925,21 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		).toBeTruthy();
 	});
 
+	it('says a stuck change this version cannot read is one (#447)', async () => {
+		await connected(
+			fakeSync({
+				phase: 'attention',
+				stuck: { op: 'malformed', path: 'Away.md', attempts: 5, error: 'teleport' },
+			})
+		);
+
+		expect(
+			screen.getByText(
+				'A change to Away.md could not be sent to Dropbox after 5 tries: this version of the app cannot read it (teleport). Everything queued behind it is waiting. Updating the app may let it through.'
+			)
+		).toBeTruthy();
+	});
+
 	it('offers to open the note a stuck change is about', async () => {
 		const sync = fakeSync({ phase: 'idle' });
 		const db = await connected(sync);

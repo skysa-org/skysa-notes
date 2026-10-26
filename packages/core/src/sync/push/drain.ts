@@ -9,7 +9,7 @@ import {
 import { type EngineContext, type FromPull } from '../context.js';
 import { messageOf, ok, paused, type SyncOutcome, waitFor } from '../outcome.js';
 import { withParent } from '../providerOps.js';
-import { type SyncOp } from '../store.js';
+import { copiedBy, destinationOf, type SyncOp, type SyncOpOf } from '../store.js';
 import { createConflictPush, type Settled } from './conflicts.js';
 import { createFilePush } from './files.js';
 import { createFolderPush } from './folders.js';
@@ -66,12 +66,15 @@ export const createPush = (context: EngineContext, { fileState, resolutionFor }:
 			await store.completeOp(op.seq, { kind: 'made-folder', path: op.path, remote: made });
 			return;
 		}
+		// Read back as none of the kinds above: failed, as any op that cannot
+		// be sent, until the queue stops on it and says why.
+		if (op.op === 'malformed') throw new Error(`queued op ${String(op.seq)}: ${op.problem}`);
 		if (op.op === 'rmdir') return runRmdir(op);
 		if (op.op === 'upload') return runUpload(op);
 		if (op.op === 'move-file') return runMoveFile(op);
 		if (op.op === 'delete-file') return runDeleteFile(op);
 
-		const note = op.noteId === undefined ? undefined : await store.noteById(op.noteId);
+		const note = await store.noteById(op.noteId);
 		if (op.op === 'delete') return runDelete(op, note);
 
 		// The note was purged out from under a queued op. Nothing to send.
@@ -118,10 +121,7 @@ export const createPush = (context: EngineContext, { fileState, resolutionFor }:
 			...progress.waiting,
 			...why,
 			count: (progress.waiting?.count ?? 0) + 1,
-			copying: [
-				...(progress.waiting?.copying ?? []),
-				...(op.copyOf === undefined ? [] : [op.copyOf]),
-			],
+			copying: [...(progress.waiting?.copying ?? []), ...copiedBy(op)],
 			holding: progress.waiting?.holding ?? [],
 		},
 	});
@@ -146,14 +146,10 @@ export const createPush = (context: EngineContext, { fileState, resolutionFor }:
 		if (waiting === undefined) return false;
 		if (op.op === 'rmdir') return waiting.holding.some((path) => isWithin(path, op.path));
 		if (op.op === 'upload' || op.op === 'move-file') {
-			const at = foldName(normalizePath(op.targetPath ?? op.path));
+			const at = foldName(normalizePath(destinationOf(op)));
 			return waiting.holding.some((path) => foldName(normalizePath(path)) === at);
 		}
-		return (
-			op.op === 'delete-file' &&
-			op.remoteId !== undefined &&
-			waiting.copying.includes(op.remoteId)
-		);
+		return op.op === 'delete-file' && waiting.copying.includes(op.remoteId);
 	};
 
 	/**
@@ -211,8 +207,8 @@ export const createPush = (context: EngineContext, { fileState, resolutionFor }:
 	 * other note's.
 	 */
 	const together = (ops: readonly SyncOp[]): SyncOp[] => {
-		const renamed = new Set(ops.filter((op) => op.op === 'move').map((op) => op.noteId));
-		return ops.slice(0, writesAtOnce).reduce<{ taken: SyncOp[]; open: boolean }>(
+		const renamed = new Set(ops.flatMap((op) => (op.op === 'move' ? [op.noteId] : [])));
+		return ops.slice(0, writesAtOnce).reduce<{ taken: SyncOpOf<'write'>[]; open: boolean }>(
 			(batch, op) => {
 				if (!batch.open) return batch;
 				const at = foldName(normalizePath(op.path));
