@@ -70,7 +70,8 @@ export const replaceBasename = (path: string, name: string): string =>
  *
  * Except two folders at the root, the scratchpad's and the vault's passwords':
  * what is in them is notes, synced as any are, which the scratchpad and the
- * passwords show and the notebooks do not (`isScratchPath`, `isVaultPath`).
+ * passwords show and the notebooks do not (`isScratchPath`, `isVaultPath` in
+ * `appFolder.ts`).
  * Their dot keeps them out of other tools' lists of folders. A dot-prefixed
  * name inside either is hidden as anywhere else.
  *
@@ -93,18 +94,6 @@ export const isWithin = (path: string, folder: string): boolean => {
 	if (base === ROOT) return true;
 	return target === base || target.startsWith(`${base}${SEPARATOR}`);
 };
-
-/**
- * The scratchpad's folder, or anything in it: a scratch note, a file beside
- * one. Never a notebook, a notebook's note or anything the tree counts.
- */
-export const isScratchPath = (path: string): boolean => isWithin(path, SCRATCHPAD_FOLDER);
-
-/**
- * The vault's passwords' folder, or anything in it: an item. Never a notebook,
- * a notebook's note or anything the tree counts.
- */
-export const isVaultPath = (path: string): boolean => isWithin(path, VAULT_FOLDER);
 
 /**
  * Rewrite a path that sits under `from` so it sits under `to` instead. Used when

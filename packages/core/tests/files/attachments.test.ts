@@ -8,7 +8,7 @@ import {
 	opensInTab,
 	safeOpenType,
 	showsInline,
-} from '../src/attachments.js';
+} from '../../src/files/attachments.js';
 
 describe('fileKind', () => {
 	it.each([

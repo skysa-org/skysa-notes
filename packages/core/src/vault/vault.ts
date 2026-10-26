@@ -1,5 +1,5 @@
-import { isJsonObject, parseJson } from './json.js';
-import { SECRET_LANGUAGE, secretBlocksIn } from './markdown/secretBlocks.js';
+import { isJsonObject, parseJson } from '../json.js';
+import { SECRET_LANGUAGE, secretBlocksIn } from '../markdown/secretBlocks.js';
 
 /**
  * A password in the vault (docs/ARCHITECTURE.md §7, "Passwords in the

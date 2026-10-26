@@ -3,8 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
 	basename,
 	isHidden,
-	isScratchPath,
-	isVaultPath,
 	isWithin,
 	joinPath,
 	normalizePath,
@@ -119,26 +117,6 @@ describe('isHidden', () => {
 		expect(isHidden('.Vault/a.md')).toBe(true);
 		expect(isHidden('.vaults/a.md')).toBe(true);
 		expect(isHidden('.encryption.json')).toBe(true);
-	});
-});
-
-describe('isScratchPath', () => {
-	it('is the scratchpad folder and what is in it, and nothing else', () => {
-		expect(isScratchPath('.scratchpad')).toBe(true);
-		expect(isScratchPath('.scratchpad/untitled.md')).toBe(true);
-		expect(isScratchPath('scratchpad/untitled.md')).toBe(false);
-		expect(isScratchPath('.scratchpadding/a.md')).toBe(false);
-		expect(isScratchPath('work/a.md')).toBe(false);
-	});
-});
-
-describe('isVaultPath', () => {
-	it('is the vault’s folder and what is in it, and nothing else', () => {
-		expect(isVaultPath('.vault')).toBe(true);
-		expect(isVaultPath('.vault/github.md')).toBe(true);
-		expect(isVaultPath('vault/github.md')).toBe(false);
-		expect(isVaultPath('.vaulted/a.md')).toBe(false);
-		expect(isVaultPath('.scratchpad/a.md')).toBe(false);
 	});
 });
 

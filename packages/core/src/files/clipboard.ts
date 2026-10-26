@@ -1,8 +1,8 @@
+import { CLIPBOARD_FOLDER, NOTE_EXTENSION } from '../config.js';
+import { extensionOf } from '../names/extension.js';
+import { attachmentName } from '../names/slug.js';
+import { joinPath } from '../paths.js';
 import { showsInline } from './attachments.js';
-import { CLIPBOARD_FOLDER, NOTE_EXTENSION } from './config.js';
-import { extensionOf } from './names/extension.js';
-import { attachmentName } from './names/slug.js';
-import { isWithin, joinPath } from './paths.js';
 
 /**
  * The clipboard a connection's devices share (docs/ARCHITECTURE.md §7, "The
@@ -133,10 +133,3 @@ export const readClipName = (name: string): ClipName | undefined => {
 
 /** Where an item is, from the root of the app folder. */
 export const clipPath = (name: string): string => joinPath(CLIPBOARD_FOLDER, name);
-
-/**
- * Whether a path is the clipboard's: its folder, or anything in it. The folder
- * itself counts, because a folder deleted whole is reported without what was
- * in it.
- */
-export const isClipPath = (path: string): boolean => isWithin(path, CLIPBOARD_FOLDER);

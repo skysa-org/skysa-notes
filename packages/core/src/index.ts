@@ -17,15 +17,16 @@ export {
 
 export { SCRATCH_COLORS, scratchColor, type ScratchColor } from './scratchpad.js';
 
+export { isClipPath, isEncryptionFile, isScratchPath, isVaultPath } from './appFolder.js';
+
 export {
 	clipName,
 	clipPath,
 	clipStamp,
-	isClipPath,
 	readClipName,
 	type ClipKind,
 	type ClipName,
-} from './clipboard.js';
+} from './files/clipboard.js';
 
 export {
 	buildMarker,
@@ -166,7 +167,7 @@ export {
 	opensInTab,
 	safeOpenType,
 	showsInline,
-} from './attachments.js';
+} from './files/attachments.js';
 
 export {
 	imageInfo,
@@ -178,7 +179,7 @@ export {
 	type PictureInfo,
 	type PictureVariant,
 	type PictureVariantSize,
-} from './pictures.js';
+} from './files/pictures.js';
 
 export {
 	RELAY_CHANGED,
@@ -192,10 +193,10 @@ export {
 export * from './age/index.js';
 export * from './hash.js';
 export * from './markdown/index.js';
-export * from './password.js';
 export * from './paths.js';
 export * from './secrets/encryptionFile.js';
 export * from './secrets/recoveryKey.js';
 export * from './secrets/sealing.js';
-export * from './sites.js';
-export * from './vault.js';
+export * from './vault/password.js';
+export * from './vault/sites.js';
+export * from './vault/vault.js';
