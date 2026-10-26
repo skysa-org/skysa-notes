@@ -53,3 +53,13 @@ export {
 	type ParseNoteFileOptions,
 	type SerializeNoteFileInput,
 } from './note.js';
+export {
+	hidesAsSecret,
+	isSecretBlock,
+	rewriteSecrets,
+	SECRET_LANGUAGE,
+	secretBlocksIn,
+	secretFile,
+	secretLabel,
+	withoutArmor,
+} from './secretBlocks.js';

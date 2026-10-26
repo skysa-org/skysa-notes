@@ -192,7 +192,6 @@ export {
 export * from './age/index.js';
 export * from './hash.js';
 export * from './markdown/index.js';
-export * from './markdown/secretBlocks.js';
 export * from './password.js';
 export * from './paths.js';
 export * from './secrets/encryptionFile.js';
