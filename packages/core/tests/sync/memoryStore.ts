@@ -21,7 +21,7 @@ import type {
  * relies on a convenience nobody promised fails here rather than in a browser.
  *
  * It also enforces the one promise the port makes that a lazy implementation
- * would quietly drop: `applyPull` is all-or-nothing, cursor included.
+ * would quietly drop: `applyChanges` is all-or-nothing, cursor included.
  */
 
 /**
@@ -54,7 +54,7 @@ export interface MemoryStore extends SyncStore {
 	readonly queue: (op: Omit<SyncOp, 'seq' | 'attempts'> & { attempts?: number }) => SyncOp;
 	/** Withdraw a queued op, as the web queue does when a second rename replaces a move. */
 	readonly unqueue: (seq: number) => void;
-	/** Fail the next `applyPull`, to prove the cursor does not move without it. */
+	/** Fail the next `applyChanges`, to prove the cursor does not move without it. */
 	readonly breakNextApply: () => void;
 	/**
 	 * Every no-op the contract required this store to tolerate. The contract
@@ -911,7 +911,7 @@ export const createMemoryStore = (): MemoryStore => {
 			return Promise.resolve(file === undefined ? undefined : validBytes(file)?.slice());
 		},
 
-		applyPull: (batch: PullBatch) => {
+		applyChanges: (batch: PullBatch) => {
 			const before = snapshot();
 			try {
 				if (flags.get('break') === true) {
@@ -960,7 +960,7 @@ export const createMemoryStore = (): MemoryStore => {
 			try {
 				applyConflict(resolution);
 			} catch (error) {
-				// One transaction, as `applyPull` is: a refused resolution leaves
+				// One transaction, as `applyChanges` is: a refused resolution leaves
 				// no half of itself behind.
 				restore(before);
 				return Promise.reject(error instanceof Error ? error : new Error(String(error)));

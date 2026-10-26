@@ -63,10 +63,10 @@ describe('a note’s file, brought in', () => {
 		const db = freshDatabase();
 		await db.syncState.put({ connectionId: CONNECTION, clientId: 'this-browser' });
 		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
-		await store.applyPull({ changes: [upsert('n1', 'Plan.md', '# Plan\n\nfirst\n')] });
+		await store.applyChanges({ changes: [upsert('n1', 'Plan.md', '# Plan\n\nfirst\n')] });
 		reads.made = [];
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				// One already here, with a new body: asked whether it brings the
 				// body the row has, which needs no read.

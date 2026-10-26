@@ -586,7 +586,7 @@ export type PullChange =
  * edit overwritten with no copy of it anywhere.
  *
  * Applying one discards `noteId`'s queued `write` ops, wherever it is applied
- * from — `applyPull` as well as `resolveConflict`. Those ops carry the edit
+ * from — `applyChanges` as well as `resolveConflict`. Those ops carry the edit
  * that lost, which is exactly what the copy now holds, and the note itself now
  * holds the remote's bytes and is clean. Sending them anyway writes the
  * remote's own content back to it under a new version, which every other device
@@ -782,7 +782,7 @@ export interface SyncStore {
 	readonly foldersWithRemote: () => Promise<SyncFolder[]>;
 	/**
 	 * The files this connection holds that could not be read, one per
-	 * `remoteId`, in no promised order. Written only by `applyPull`. For the
+	 * `remoteId`, in no promised order. Written only by `applyChanges`. For the
 	 * engine to tell a change from a repeat, and for the app to list: see
 	 * `UnreadableFile` for what it must never be used for.
 	 */
@@ -806,7 +806,9 @@ export interface SyncStore {
 	readonly fileBytes: (id: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 
 	/**
-	 * Apply a pull batch and its cursor atomically, **in the order given**.
+	 * Apply a batch of changes and its cursor atomically, **in the order
+	 * given**: a pull's decisions, or the push's own where it settles a
+	 * conflict (`push/conflicts.ts`), which carries no cursor.
 	 *
 	 * Both halves of that are load-bearing. Atomically, because §7 requires the
 	 * cursor to be persisted only after the batch it describes has committed: a
@@ -821,7 +823,7 @@ export interface SyncStore {
 	 * then all the puts) would turn each of those into a lost note, and would
 	 * look perfectly reasonable doing it.
 	 */
-	readonly applyPull: (batch: PullBatch) => Promise<void>;
+	readonly applyChanges: (batch: PullBatch) => Promise<void>;
 
 	/** Queued pushes in order. */
 	readonly pendingOps: () => Promise<SyncOp[]>;

@@ -202,7 +202,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		await db.syncState.put({ connectionId: 'elsewhere', clientId: 'this-browser' });
 		const before = await db.syncState.get(CONNECTION);
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'Work/old.md' } }],
 			cursor: 'c1',
 		});
@@ -214,7 +214,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		});
 		expect((await db.syncState.get('elsewhere'))?.unreadable).toBeUndefined();
 
-		await store.applyPull({ changes: [{ kind: 'forget-unreadable', remoteId: 'r1' }] });
+		await store.applyChanges({ changes: [{ kind: 'forget-unreadable', remoteId: 'r1' }] });
 
 		// Absent, not empty: the row as it was before it ever listed one.
 		expect(await db.syncState.get(CONNECTION)).toEqual({ ...before, cursor: 'c1' });
@@ -228,7 +228,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		const store = await boundStore(db, { connectionId: CONNECTION });
 		const file = '---\nupdated: 2026-01-01T00:00:00Z\n---\n# Shopping\r\n\r\nmilk\r\n';
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -254,7 +254,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// after the user edited would put the old note back on the remote.
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -331,7 +331,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// purges the row the pull wrote back.
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -345,7 +345,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		});
 		await updateNote(db, 'n1', { editorMode: 'raw', createdAt: 42, deletedLocally: 1 });
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -377,7 +377,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// in the shared contract.
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -392,7 +392,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		await deleteNote(db, 'n1');
 		const queued = await store.pendingOps();
 
-		await store.applyPull({ changes: [{ kind: 'reupload-note', id: 'n1' }] });
+		await store.applyChanges({ changes: [{ kind: 'reupload-note', id: 'n1' }] });
 
 		const row = await noteById(db, 'n1');
 		expect(row?.deletedLocally).toBe(1);
@@ -407,13 +407,13 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// first time by landing in the same millisecond.
 		let clock = 0;
 		const store = await boundStore(db, { connectionId: CONNECTION, now: () => ++clock });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' }],
 		});
 
 		const first = await db.folders.get([CONNECTION, 'Work']);
 
-		await store.applyPull({ changes: [{ kind: 'ensure-folder', path: 'Work' }] });
+		await store.applyChanges({ changes: [{ kind: 'ensure-folder', path: 'Work' }] });
 
 		expect((await store.folderByPath('Work'))?.remoteId).toBe('f1');
 		expect((await db.folders.get([CONNECTION, 'Work']))?.createdAt).toBe(first?.createdAt);
@@ -424,7 +424,9 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// folder the scan did not mention — and every path is within the root.
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({ changes: [{ kind: 'ensure-folder', path: '', remoteId: 'root' }] });
+		await store.applyChanges({
+			changes: [{ kind: 'ensure-folder', path: '', remoteId: 'root' }],
+		});
 
 		expect(await db.folders.count()).toBe(0);
 	});
@@ -446,7 +448,10 @@ describe('the Dexie sync store, beyond the contract', () => {
 			remoteId: 'r1',
 		});
 
-		await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }], cursor: 'c1' });
+		await store.applyChanges({
+			changes: [{ kind: 'delete-folder', path: 'Work' }],
+			cursor: 'c1',
+		});
 
 		expect(await store.noteById('n1')).toBeDefined();
 		expect(await store.cursor()).toBe('c1');
@@ -457,7 +462,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// it would be losing one note to save another.
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -480,7 +485,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		});
 
 		await expect(
-			store.applyPull({
+			store.applyChanges({
 				changes: [
 					{
 						kind: 'conflict',
@@ -508,7 +513,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		const db = freshDatabase();
 		const mine = await boundStore(db, { connectionId: CONNECTION });
 		const theirs = await boundStore(db, { connectionId: 'other' });
-		await theirs.applyPull({
+		await theirs.applyChanges({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' },
 				{
@@ -544,7 +549,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		await expect(mine.failOp(other, 'nope')).rejects.toThrow();
 
 		// And a change about a note it does not own leaves that note alone.
-		await mine.applyPull({
+		await mine.applyChanges({
 			changes: [
 				{ kind: 'delete-note', id: 'n1' },
 				{ kind: 'delete-folder', path: 'Work' },
@@ -554,7 +559,9 @@ describe('the Dexie sync store, beyond the contract', () => {
 		expect(await theirs.folderByPath('Work')).toBeDefined();
 
 		// Nor does a folder move of its own reach the other account's queue.
-		await mine.applyPull({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Archive' }] });
+		await mine.applyChanges({
+			changes: [{ kind: 'move-folder', from: 'Work', to: 'Archive' }],
+		});
 		expect((await theirs.pendingOps()).map((op) => op.path)).toEqual(['Work/a.md']);
 		expect((await theirs.noteById('n1'))?.path).toBe('Work/a.md');
 	});
@@ -568,7 +575,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 			rootId: 'root',
 		});
 
-		await store.applyPull({ changes: [], cursor: 'c1' });
+		await store.applyChanges({ changes: [], cursor: 'c1' });
 
 		expect(await db.syncState.get(CONNECTION)).toEqual({
 			connectionId: CONNECTION,
@@ -583,7 +590,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 const pulled = async (content = 'x\n') => {
 	const db = freshDatabase();
 	const store = await boundStore(db, { connectionId: CONNECTION });
-	await store.applyPull({
+	await store.applyChanges({
 		changes: [
 			{
 				kind: 'upsert-note',
@@ -609,7 +616,7 @@ describe('a pull that makes a note this tab deleted', () => {
 		await db.opQueue.clear();
 		await purgeNote(db, 'n1', there);
 		// Restored on another device: the file comes back under the id it names.
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -638,7 +645,7 @@ describe('a pull that lands after the user has typed', () => {
 		await saveNoteBody(db, 'n1', 'typed meanwhile\n');
 
 		await expect(
-			store.applyPull({
+			store.applyChanges({
 				changes: [
 					{
 						kind: 'upsert-note',
@@ -664,7 +671,7 @@ describe('a pull that lands after the user has typed', () => {
 		await saveNoteBody(db, 'n1', 'typed meanwhile\n');
 
 		await expect(
-			store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }] })
+			store.applyChanges({ changes: [{ kind: 'delete-note', id: 'n1' }] })
 		).rejects.toThrow();
 		expect((await noteById(db, 'n1'))?.body).toBe('typed meanwhile\n');
 	});
@@ -674,7 +681,7 @@ describe('a pull that lands after the user has typed', () => {
 		const before = (await store.noteById('n1'))?.content ?? '';
 		await saveNoteBody(db, 'n1', 'typed meanwhile\n');
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'conflict',
@@ -710,7 +717,7 @@ describe('another connection’s note under the same id', () => {
 		const theirs = await createNote(db, { connectionId: 'other', body: 'unpushed\n' });
 		const store = await boundStore(db, { connectionId: CONNECTION });
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -731,7 +738,7 @@ describe('another connection’s note under the same id', () => {
 		const db = freshDatabase();
 		const theirs = await boundStore(db, { connectionId: 'other' });
 		const mine = await boundStore(db, { connectionId: CONNECTION });
-		await theirs.applyPull({
+		await theirs.applyChanges({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' },
 				{
@@ -753,7 +760,7 @@ describe('another connection’s note under the same id', () => {
 			queuedAt: 0,
 		});
 
-		await mine.applyPull({
+		await mine.applyChanges({
 			changes: [
 				{ kind: 'detach-note', id: 'n1' },
 				{ kind: 'displace-note', id: 'n1', path: 'moved.md' },
@@ -935,7 +942,7 @@ describe('a note deleted here', () => {
 		const { db, store } = await pulled();
 		await deleteNote(db, 'n1');
 
-		await store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }], cursor: 'c2' });
+		await store.applyChanges({ changes: [{ kind: 'delete-note', id: 'n1' }], cursor: 'c2' });
 
 		expect(await noteById(db, 'n1')).toBeUndefined();
 		expect(await store.cursor()).toBe('c2');
@@ -990,7 +997,7 @@ describe('a note deleted here', () => {
 		// row for a note the user deleted, with nothing left to purge it.
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' },
 				{
@@ -1005,7 +1012,7 @@ describe('a note deleted here', () => {
 		});
 		await deleteNote(db, 'n1');
 
-		await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+		await store.applyChanges({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
 
 		expect(await noteById(db, 'n1')).toBeUndefined();
 	});
@@ -1015,7 +1022,7 @@ describe('a note deleted here', () => {
 		await deleteNote(db, 'n1');
 		expect((await store.noteById('n1'))?.dirty).toBe(false);
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -1037,7 +1044,7 @@ describe('a note deleted here', () => {
 describe('where a change puts a note', () => {
 	it('makes the folders above every path a change puts a note at', async () => {
 		const { db, store } = await pulled();
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'upsert-note',
@@ -1062,7 +1069,7 @@ describe('where a change puts a note', () => {
 		});
 		await updateNote(db, 'n3', { dirty: 1 });
 		const content = (await store.noteById('n3'))?.content ?? '';
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'conflict',
@@ -1099,7 +1106,7 @@ describe('where a change puts a note', () => {
 		await saveNoteBody(db, 'n1', 'mine\n');
 		const content = (await store.noteById('n1'))?.content ?? '';
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [
 				{
 					kind: 'conflict',
@@ -1140,10 +1147,10 @@ describe('where a change puts a note', () => {
 		});
 		expect((await store.noteById('n1'))?.path).toBe('b.md');
 
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' }],
 		});
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [{ kind: 'move-folder', from: 'Work', to: 'Archive', remoteId: 'f2' }],
 		});
 		expect((await store.folderByPath('Archive'))?.remoteId).toBe('f2');
@@ -1152,13 +1159,13 @@ describe('where a change puts a note', () => {
 	it('writes nothing for a connection the device has let go of', async () => {
 		const db = freshDatabase();
 		const store = await boundStore(db, { connectionId: CONNECTION });
-		await store.applyPull({
+		await store.applyChanges({
 			changes: [{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' }],
 		});
 		await db.syncState.clear();
 
 		await expect(
-			store.applyPull({
+			store.applyChanges({
 				changes: [
 					{
 						kind: 'upsert-note',

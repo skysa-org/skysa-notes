@@ -92,7 +92,7 @@ export const createPullRun = (
 
 	const drainRound = async (cursor: string): Promise<SyncOutcome> => {
 		const { round, changes } = await meter.round(() => countedRound(cursor));
-		await store.applyPull({ changes, cursor: round.cursor });
+		await store.applyChanges({ changes, cursor: round.cursor });
 		letGo(round.entries);
 		return ok({
 			pulled: changes.length,
@@ -168,7 +168,7 @@ export const createPullRun = (
 			? []
 			: await reconcile(seen, changes, renamesQueued(queue), upload, unread, files);
 		const batch = [...changes, ...tail];
-		await store.applyPull({ changes: batch, ...(more ? {} : { cursor: set.cursor }) });
+		await store.applyChanges({ changes: batch, ...(more ? {} : { cursor: set.cursor }) });
 		// This page's notes only: a scan retried after failing on a later page
 		// commits this one again first, and what that later page had read is
 		// still to be used.

@@ -1350,7 +1350,7 @@ export const createDexieSyncStore = (
 				return new Uint8Array(held.bytes);
 			}),
 
-		applyPull: async (batch: PullBatch) => {
+		applyChanges: async (batch: PullBatch) => {
 			// Together: the digests are made off the thread, and the reading on it.
 			const [hashes, read] = await Promise.all([
 				digestAll(contentsOf(batch.changes)),
