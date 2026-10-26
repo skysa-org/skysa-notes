@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type ApiClient } from '../src/api/client.js';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
-import { type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { heldUpOf } from '../src/store/heldUp.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -1192,6 +1192,32 @@ describe('failures', () => {
 
 				expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
 				expect(h.scheduler.status().stuck).toMatchObject({ op: 'upload', attempts: 2 });
+			});
+		});
+
+		it('names a row this version cannot read as one, not by a kind it has no words for (#447)', async () => {
+			// A kind a later version queued: the engine fails it until the push
+			// stops on it, and the panel has a sentence for `malformed`, where
+			// it had none for the row's own kind.
+			const db = await bound();
+			const h = started(db, { maxAttempts: 2 });
+			await reaches(h.scheduler, 'idle');
+			await db.opQueue.add({
+				connectionId: 'c1',
+				op: 'teleport',
+				path: 'Away.md',
+				attempts: 2,
+				lastError: 'queued op 1: teleport',
+				queuedAt: 0,
+			} as unknown as OpQueueRecord);
+			await focused(h);
+
+			expect(h.scheduler.status().phase).toBe('attention');
+			expect(h.scheduler.status().stuck).toEqual({
+				op: 'malformed',
+				path: 'Away.md',
+				attempts: 2,
+				error: 'queued op 1: teleport',
 			});
 		});
 

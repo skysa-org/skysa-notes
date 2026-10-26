@@ -165,7 +165,7 @@ const opSchema = z.discriminatedUnion('op', [
 	z.object({ ...queued, op: z.literal('delete-file'), remoteId: z.string() }),
 ]) satisfies z.ZodType<Exclude<SyncOp, { op: 'malformed' }>>;
 
-const toSyncOp = (record: OpQueueRecord): SyncOp => {
+export const toSyncOp = (record: OpQueueRecord): SyncOp => {
 	if (record.seq === undefined) throw new Error('A queued op was read back without its seq');
 	const read = opSchema.safeParse(record);
 	return read.success
@@ -174,7 +174,9 @@ const toSyncOp = (record: OpQueueRecord): SyncOp => {
 				op: 'malformed',
 				seq: record.seq,
 				path: String(record.path),
-				attempts: record.attempts,
+				// A row that lost its count too starts again from none, so
+				// that failing it counts up to the limit rather than to NaN.
+				attempts: Number.isFinite(record.attempts) ? record.attempts : 0,
 				problem: `${String(record.op)} ${z.prettifyError(read.error)}`,
 			};
 };
@@ -1406,7 +1408,9 @@ export const createDexieSyncStore = (
 				const op = await queuedOp(db, seq);
 				// Withdrawn while it was failing: there is nothing left to retry.
 				if (op === undefined) return;
-				await db.opQueue.put({ ...op, attempts: op.attempts + 1, lastError: error });
+				// From none where a damaged row has lost its count (`toSyncOp`).
+				const attempts = Number.isFinite(op.attempts) ? op.attempts : 0;
+				await db.opQueue.put({ ...op, attempts: attempts + 1, lastError: error });
 			}),
 
 		resolveConflict: async (seq, resolution) => {

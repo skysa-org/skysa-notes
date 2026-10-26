@@ -1,4 +1,9 @@
-import { type PictureInfo, type PictureVariant, type ProviderKind } from '@skysa/core';
+import {
+	type PictureInfo,
+	type PictureVariant,
+	type ProviderKind,
+	type SyncOperation,
+} from '@skysa/core';
 import Dexie, { type Table, type Transaction } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
@@ -275,8 +280,8 @@ export interface PreferenceRecord {
 	value: string;
 }
 
-export type QueuedOperation =
-	'write' | 'move' | 'delete' | 'mkdir' | 'rmdir' | 'upload' | 'move-file' | 'delete-file';
+/** The kinds of op the queue holds: core's, so a new one is a row the app can store. */
+export type QueuedOperation = SyncOperation;
 
 /**
  * A file beside a note that is not one (#187): one row for every such file the

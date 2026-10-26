@@ -41,7 +41,6 @@ import {
 	db as defaultDb,
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
-	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
 import { holdsTextFor } from '../store/detached.js';
@@ -493,7 +492,8 @@ const STUCK_MESSAGES = {
 	upload: 'account.stuck.upload',
 	'move-file': 'account.stuck.moveFile',
 	'delete-file': 'account.stuck.deleteFile',
-} as const satisfies Record<QueuedOperation, MessageKey>;
+	malformed: 'account.stuck.malformed',
+} as const satisfies Record<StuckOp['op'], MessageKey>;
 
 /**
  * Which op is stuck, by name and path, because "some changes could not be sent"

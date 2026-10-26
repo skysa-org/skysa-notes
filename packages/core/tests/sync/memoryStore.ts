@@ -27,10 +27,6 @@ import {
  * would quietly drop: `applyChanges` is all-or-nothing, cursor included.
  */
 
-/**
- * A file's bytes as this device holds them: held until they are uploaded
- * (`pinned`), or cached under the version they were read at.
- */
 /** An op to queue: any a device queues, or one read back as `malformed`. */
 type QueuedOp = (NewSyncOp | Omit<Extract<SyncOp, { op: 'malformed' }>, 'seq' | 'attempts'>) & {
 	attempts?: number;
@@ -52,6 +48,10 @@ const repathed = (op: Stored, rebase: (path: string) => string): Stored =>
 		? { ...op, path: rebase(op.path), targetPath: rebase(op.targetPath) }
 		: { ...op, path: rebase(op.path) };
 
+/**
+ * A file's bytes as this device holds them: held until they are uploaded
+ * (`pinned`), or cached under the version they were read at.
+ */
 export interface HeldBytes {
 	bytes: Uint8Array<ArrayBuffer>;
 	version?: string;
