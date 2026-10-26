@@ -1,4 +1,4 @@
-import { AuthError } from '@skysa/core';
+import { AuthError, cell } from '@skysa/core';
 
 import { type AccessToken, type ApiClient, type Denial, type Refusal } from '../api/client.js';
 import { credentialFor } from '../store/credentials.js';
@@ -43,16 +43,16 @@ export interface TokenSource {
 export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	const { db, client, connectionId } = options;
 	const now = options.now ?? Date.now;
-	const cached = new Map<'token', AccessToken>();
-	const refused = new Map<'refusal', { refusal: Refusal; denial?: Denial | undefined }>();
+	const cached = cell<AccessToken | undefined>(undefined);
+	const refused = cell<{ refusal: Refusal; denial?: Denial | undefined } | undefined>(undefined);
 
 	const usable = (token: AccessToken | undefined): token is AccessToken =>
 		token !== undefined && token.expiresAt - EXPIRY_MARGIN_MS > now();
 
 	/** A token in hand, from wherever: whatever the server said before is no longer so. */
 	const using = (token: AccessToken): string => {
-		refused.delete('refusal');
-		cached.set('token', token);
+		refused.current = undefined;
+		cached.current = token;
 		return token.accessToken;
 	};
 
@@ -62,8 +62,8 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 		// stop minting rather than go on presenting a credential that is gone.
 		const held = await credentialFor(db, connectionId);
 		if (held === undefined) {
-			refused.set('refusal', { refusal: 'credential_required' });
-			cached.delete('token');
+			refused.current = { refusal: 'credential_required' };
+			cached.current = undefined;
 			throw new AuthError('This device holds no credential for that connection');
 		}
 
@@ -73,12 +73,12 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			.catch((error: unknown) => {
 				// Not an answer: the server may since have changed its mind, and a
 				// refusal kept past this would read as one it gave just now.
-				refused.delete('refusal');
+				refused.current = undefined;
 				throw error;
 			});
 		if (!result.ok) {
-			refused.set('refusal', { refusal: result.refusal, denial: result.denial });
-			cached.delete('token');
+			refused.current = { refusal: result.refusal, denial: result.denial };
+			cached.current = undefined;
 			// An `AuthError`, so the provider call it was for fails as one.
 			throw new AuthError(`The server would not mint a token: ${result.refusal}`);
 		}
@@ -100,20 +100,20 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	 * (`StorageProvider.writesAtOnce`), and each of them finding the token
 	 * expired asked the server for one of its own.
 	 */
-	const minting = new Map<'mint', Promise<string>>();
+	const minting = cell<Promise<string> | undefined>(undefined);
 	const mintOnce = (): Promise<string> => {
-		const under = minting.get('mint');
+		const under = minting.current;
 		if (under !== undefined) return under;
 		const minted = mint().finally(() => {
-			minting.delete('mint');
+			minting.current = undefined;
 		});
-		minting.set('mint', minted);
+		minting.current = minted;
 		return minted;
 	};
 
 	return {
 		get: async () => {
-			const inMemory = cached.get('token');
+			const inMemory = cached.current;
 			if (usable(inMemory)) return using(inMemory);
 
 			const state = await db.syncState.get(connectionId);
@@ -121,8 +121,8 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			// one, so this is for a run that was already going when it was let go:
 			// it stops here rather than at the server.
 			if (state?.detached !== undefined) {
-				refused.set('refusal', { refusal: 'credential_required' });
-				cached.delete('token');
+				refused.current = { refusal: 'credential_required' };
+				cached.current = undefined;
 				throw new AuthError('This device no longer syncs that connection');
 			}
 			const stored =
@@ -137,7 +137,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 		refresh: async () => {
 			// Forgotten before the new one is asked for, row included: if it
 			// cannot be had, the refused one must not be handed out again.
-			cached.delete('token');
+			cached.current = undefined;
 			await updateLive(
 				db,
 				connectionId,
@@ -146,7 +146,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			await mint();
 		},
 
-		refusal: () => refused.get('refusal')?.refusal,
-		denial: () => refused.get('refusal')?.denial,
+		refusal: () => refused.current?.refusal,
+		denial: () => refused.current?.denial,
 	};
 };

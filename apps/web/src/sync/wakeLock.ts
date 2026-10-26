@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { isLongRun } from './progress.js';
 import { type SchedulerStatus, type SyncScheduler } from './scheduler.js';
 
@@ -68,59 +70,59 @@ export const keepAwakeWhileSyncing = (
 	const { request } = environment;
 	if (request === undefined) return () => undefined;
 
-	const held = new Map<'lock', ScreenLock>();
+	const held = cell<ScreenLock | undefined>(undefined);
 	/** A request not yet answered: one at a time. */
-	const asking = new Set<'request'>();
+	const asking = cell(false);
 	/**
 	 * Refused, and not asked again until the page is shown again or another
 	 * run starts: battery saver says no to every request, and progress
 	 * arrives several times a second.
 	 */
-	const refused = new Set<'refused'>();
-	const stopped = new Set<'stopped'>();
+	const refused = cell(false);
+	const stopped = cell(false);
 
 	const release = () => {
-		const lock = held.get('lock');
-		held.delete('lock');
+		const lock = held.current;
+		held.current = undefined;
 		void lock?.release().catch(() => undefined);
 	};
 
 	const follow = () => {
-		if (stopped.has('stopped') || !wanted(scheduler.status())) {
-			refused.clear();
+		if (stopped.current || !wanted(scheduler.status())) {
+			refused.current = false;
 			release();
 			return;
 		}
-		if (held.has('lock') || asking.has('request') || refused.has('refused')) return;
+		if (held.current !== undefined || asking.current || refused.current) return;
 		if (!environment.isVisible()) return;
-		asking.add('request');
+		asking.current = true;
 		void request().then(
 			(lock) => {
-				asking.delete('request');
-				held.set('lock', lock);
+				asking.current = false;
+				held.current = lock;
 				lock.onRelease(() => {
-					if (held.get('lock') === lock) held.delete('lock');
+					if (held.current === lock) held.current = undefined;
 				});
 				// The run may have ended, or the app stopped, while the browser
 				// answered: this lets go of it again.
 				follow();
 			},
 			() => {
-				asking.delete('request');
-				refused.add('refused');
+				asking.current = false;
+				refused.current = true;
 			}
 		);
 	};
 
 	const unsubscribe = scheduler.subscribe(follow);
 	const unlisten = environment.onVisibilityChange(() => {
-		refused.clear();
+		refused.current = false;
 		follow();
 	});
 	follow();
 
 	return () => {
-		stopped.add('stopped');
+		stopped.current = true;
 		unsubscribe();
 		unlisten();
 		release();

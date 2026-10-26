@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { type SyncScheduler } from './scheduler.js';
 
 /**
@@ -73,7 +75,7 @@ export const browserUpdateChannel = (): UpdateChannel => {
 	};
 };
 
-const shared = new Map<'channel', UpdateChannel>();
+const shared = cell<UpdateChannel | undefined>(undefined);
 
 /**
  * This tab's one channel, made on first use: the tab that announces must not
@@ -81,8 +83,8 @@ const shared = new Map<'channel', UpdateChannel>();
  * that sent it.
  */
 export const updateChannel = (): UpdateChannel => {
-	const made = shared.get('channel') ?? browserUpdateChannel();
-	shared.set('channel', made);
+	const made = shared.current ?? browserUpdateChannel();
+	shared.current = made;
 	return made;
 };
 
