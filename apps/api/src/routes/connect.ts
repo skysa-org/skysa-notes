@@ -18,6 +18,7 @@ import { closeSockets } from '../relay/hub.js';
 import {
 	clearFlowState,
 	flowExpiry,
+	type FlowState,
 	readFlowAnswer,
 	readFlowState,
 	setFlowAnswer,
@@ -66,11 +67,15 @@ const back = (returnTo: string, outcome: Outcome, code?: EntitlementCode): strin
 /**
  * A provider with no flow here, or one this deployment does not offer, is a
  * 404; one it offers without credentials is the operator's to fix, and a 501.
+ * Said to `/start`; the callback sends the browser back instead (`failedBack`).
  */
 const refusal = (
 	c: Context<AppEnv>,
 	error: Extract<ApiErrorCode, 'unsupported_provider' | 'provider_not_configured'>
 ): Response => fail(c, error, error === 'unsupported_provider' ? 404 : 501);
+
+/** Where a callback that cannot go on sends the browser: back where its flow began, or home. */
+const failedBack = (flow: FlowState | undefined): string => back(flow?.returnTo ?? '/', 'failed');
 
 const startBody = z.object({
 	/** base64url SHA-256 of the credential the device has already written down. */
@@ -210,8 +215,14 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const flow = await readFlowState(c, key, cookies);
 		clearFlowState(c);
 
+		// Like every answer below, a page a browser is on: it goes back to the
+		// app rather than showing raw JSON. A provider turned off between start
+		// and callback looks like any failure to the user, so it is logged.
 		const resolved = oauthFor(config, c.req.param('provider'));
-		if (!resolved.ok) return refusal(c, resolved.error);
+		if (!resolved.ok) {
+			logFailure('connect callback refused', new Error(resolved.error));
+			return c.redirect(failedBack(flow));
+		}
 		const { provider, client, credentials } = resolved;
 
 		// A callback with no flow, or one whose state does not match, did not come
@@ -232,15 +243,19 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const denied = c.req.query('error');
 		if (denied !== undefined) return answer('denied');
 
+		// Neither a code nor a refusal: not something a provider sends, so logged.
 		const code = c.req.query('code');
-		if (code === undefined) return fail(c, 'missing_code', 400);
+		if (code === undefined) {
+			logFailure(`${provider} callback`, new Error('missing_code'));
+			return answer('failed');
+		}
 
 		// The flow cookie got past the signature check, so this is a browser that
 		// started a flow here — but a code exchange is still an outbound call the
 		// deployment pays for, and a replayed callback is the cheapest way to ask
 		// for one.
 		const limit = await c.get('rateLimiter').check(callerKey(c, 'callback'));
-		if (!limit.allowed) return tooMany(c, limit.retryAfter);
+		if (!limit.allowed) return answer('failed');
 
 		// A replayed or expired authorization code is an ordinary event, not a
 		// server fault: send the user back to the app to try again. Logged all the
