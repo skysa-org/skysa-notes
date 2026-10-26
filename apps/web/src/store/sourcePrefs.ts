@@ -17,10 +17,12 @@ import { carryRecent, forgetRecentOf } from './recentNotes.js';
  *   given back when the account is connected again, under whatever id it has
  *   then. A source whose account nobody named has nothing to be given back
  *   to, and is forgotten. Its recent notes are not held: they leave with it.
- * - **Carried** with rows that go into another source: a detached source of
- *   the account resumed under a new id, the device's own notes going into a
- *   source (`carrySourcePrefs`), and notes moved into another source as theirs
- *   is let go of (`copySourcePrefs`).
+ * - **Carried** with rows that go into another source for good: a detached
+ *   source of the account resumed under a new id, and the device's own notes
+ *   going into a source (`carrySourcePrefs`). Not with notes moved into another
+ *   account's source (`moveUnsyncedTo`): those are some of a source's notes,
+ *   and its pins name notebooks of its own, which the other account's of the
+ *   same name are not.
  *
  * Merged, where they meet what that source remembers already (`MERGES`). Prefs
  * an earlier release left behind for a source it forgot are left alone:
@@ -36,11 +38,11 @@ import { carryRecent, forgetRecentOf } from './recentNotes.js';
 export const heldFor = (account: string): string => `account:${account}`;
 
 /**
- * How a pref carried meets the one the source holds already, its own first: a
- * list of paths or ids is both, its own last, as the newest in the order its
- * limit drops from; the place open last keeps its own notebook and takes the
- * others' notes (`mergeLastOpen`); a setting is its own, or the first carried.
- * Named for every pref, so a new one has to say.
+ * How prefs carried meet the one that comes first (`mergeInto`), which is the
+ * newest: a list of paths or ids is both, the first's last, as the newest in
+ * the order its limit drops from; the place open last keeps the first's
+ * notebook and takes the others' notes (`mergeLastOpen`); a setting is the
+ * first's, or the first carried. Named for every pref, so a new one has to say.
  */
 type Merge = (own: string | undefined, carried: readonly string[]) => string | undefined;
 
@@ -72,7 +74,7 @@ type Ends = Readonly<Record<'pinnedNotebooks' | 'bottomPinnedNotebooks', string 
 /**
  * A notebook is pinned to one end, as `setNotebookPin` keeps it. One pinned to
  * the top under one id and to the bottom under another goes to the end the
- * first of them has it at, the source's own first; the other list lets it go.
+ * first of them has it at, in `mergeInto`'s order; the other list lets it go.
  */
 const oneEnd = (
 	merged: Ends,
@@ -103,45 +105,46 @@ const oneEnd = (
 
 /**
  * Merge the prefs of `from` into `connectionId`'s: read in one go and written
- * in one. `from`'s rows go, unless they are to be `kept`.
+ * in one. `connectionId`'s own come first, unless `theirsFirst`, where what is
+ * carried is the newer. `from`'s rows go, unless they are to be `kept`, and
+ * nothing is written where nothing changes.
  */
 const mergeInto = (
 	db: Pick<NotesDatabase, 'prefs'>,
 	from: readonly string[],
 	connectionId: string,
-	kept: boolean
+	{ kept = false, theirsFirst = false }: { kept?: boolean; theirsFirst?: boolean } = {}
 ): Promise<unknown> => {
-	const ids = [connectionId, ...from];
+	const ids = theirsFirst ? [...from, connectionId] : [connectionId, ...from];
 	const keys = PREF_KEYS.flatMap((name) => ids.map((id) => sourceKey(name, id)));
-	return db.prefs
-		.bulkGet(keys)
-		.then((rows) => {
-			const stored = new Map(keys.map((key, at) => [key, rows[at]?.value]));
-			const value = (name: SourcePref, id: string) => stored.get(sourceKey(name, id));
-			const merged = Object.fromEntries(
-				PREF_KEYS.map((name) => {
-					const carried = from.flatMap((id) => value(name, id) ?? []);
-					const own = value(name, connectionId);
-					return [name, carried.length === 0 ? own : MERGES[name](own, carried)];
-				})
-			) as Record<SourcePref, string | undefined>;
-			const after = { ...merged, ...oneEnd(merged, ids, value) };
-			return db.prefs.bulkPut(
-				PREF_KEYS.flatMap((name) => {
-					const now = after[name];
-					return now === undefined || now === value(name, connectionId)
-						? []
-						: [{ key: sourceKey(name, connectionId), value: now }];
-				})
-			);
-		})
-		.then(() =>
-			kept
-				? undefined
-				: db.prefs.bulkDelete(
-						from.flatMap((id) => PREF_KEYS.map((name) => sourceKey(name, id)))
+	return db.prefs.bulkGet(keys).then((rows) => {
+		const stored = new Map(keys.map((key, at) => [key, rows[at]?.value]));
+		const value = (name: SourcePref, id: string) => stored.get(sourceKey(name, id));
+		const merged = Object.fromEntries(
+			PREF_KEYS.map((name) => {
+				const [first, ...rest] = ids.map((id) => value(name, id));
+				const carried = rest.flatMap((each) => each ?? []);
+				return [name, carried.length === 0 ? first : MERGES[name](first, carried)];
+			})
+		) as Record<SourcePref, string | undefined>;
+		const after = { ...merged, ...oneEnd(merged, ids, value) };
+		const changed = PREF_KEYS.flatMap((name) => {
+			const now = after[name];
+			return now === undefined || now === value(name, connectionId)
+				? []
+				: [{ key: sourceKey(name, connectionId), value: now }];
+		});
+		const gone = kept
+			? []
+			: from.flatMap((id) =>
+					PREF_KEYS.flatMap((name) =>
+						value(name, id) === undefined ? [] : [sourceKey(name, id)]
 					)
+				);
+		return (changed.length === 0 ? Promise.resolve() : db.prefs.bulkPut(changed)).then(() =>
+			gone.length === 0 ? undefined : db.prefs.bulkDelete(gone)
 		);
+	});
 };
 
 /** A source and its account forgotten on this device: what it remembered goes too. */
@@ -155,8 +158,9 @@ const forgetSourcePrefs = (
 
 /**
  * A source leaving the device: what it remembered waits for its `account`
- * (`accountKey`), merged into what that account holds already, and is given
- * back to it on the next bind. Forgotten where no account was named.
+ * (`accountKey`), merged into what that account holds already as the newer of
+ * the two, and is given back to it on the next bind. Forgotten where no
+ * account was named.
  */
 export const holdSourcePrefs = (
 	db: Pick<NotesDatabase, 'prefs'>,
@@ -165,7 +169,7 @@ export const holdSourcePrefs = (
 ): Promise<unknown> =>
 	account === undefined
 		? forgetSourcePrefs(db, connectionId)
-		: mergeInto(db, [connectionId], heldFor(account), false).then(() =>
+		: mergeInto(db, [connectionId], heldFor(account), { theirsFirst: true }).then(() =>
 				forgetRecentOf(db, connectionId)
 			);
 
@@ -181,15 +185,4 @@ export const carrySourcePrefs = (
 ): Promise<unknown> =>
 	from.length === 0
 		? Promise.resolve()
-		: mergeInto(db, from, connectionId, false).then(() => carryRecent(db, from, connectionId));
-
-/**
- * Notes moved from `from` into `connectionId` (`moveUnsyncedTo`): its prefs
- * go with them, merged, and `from` keeps its own, for what stays in it or is
- * held for its account when it is let go of.
- */
-export const copySourcePrefs = (
-	db: Pick<NotesDatabase, 'prefs'>,
-	from: string,
-	connectionId: string
-): Promise<unknown> => mergeInto(db, [from], connectionId, true);
+		: mergeInto(db, from, connectionId).then(() => carryRecent(db, from, connectionId));
