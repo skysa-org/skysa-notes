@@ -26,7 +26,7 @@ const REVOKE = 'https://api.dropboxapi.com/2/auth/token/revoke';
  *
  * `account_info.read` is what names the connection in the UI.
  */
-export const DROPBOX_SCOPES = [
+const DROPBOX_SCOPES = [
 	'files.metadata.read',
 	'files.metadata.write',
 	'files.content.read',

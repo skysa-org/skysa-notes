@@ -30,10 +30,10 @@ const REVOKE = 'https://oauth2.googleapis.com/revoke';
  * verification; brand verification only puts the app's name and logo on the
  * consent screen (docs/google-oauth.md).
  */
-export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 /** `openid` and `email` yield the ID token that says whose account this is. */
-export const GOOGLE_SCOPES = ['openid', 'email', DRIVE_SCOPE].join(' ');
+const GOOGLE_SCOPES = ['openid', 'email', DRIVE_SCOPE].join(' ');
 
 /**
  * Withdraws the grant — and not only this connection's: "Revocation removes all

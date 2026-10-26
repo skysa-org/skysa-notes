@@ -61,12 +61,12 @@ export const MAX_DEPTH = 100;
 export const WRITES_AT_ONCE = 4;
 
 /**
- * Folders whose contents are asked for at once (`listArrivals`), as many as
- * notes are sent. A list is 100 of the 325,000 quota units a user has a
- * minute, so four at a time is nowhere near the limit.
+ * Folders whose contents are asked for at once (`listArrivals`): four, as
+ * many as notes are sent. A list is 100 of the 325,000 quota units a user has
+ * a minute, so four at a time is nowhere near the limit.
  * https://developers.google.com/workspace/drive/api/guides/limits
  */
-export const LISTS_AT_ONCE = WRITES_AT_ONCE;
+export const LISTS_AT_ONCE = 4;
 
 /** Only the fields this adapter asks for. `size` is an int64, so Drive sends a string. */
 export interface DriveFile {

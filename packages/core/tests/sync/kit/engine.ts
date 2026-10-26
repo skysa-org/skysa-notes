@@ -28,10 +28,7 @@ export const reporting = (
 });
 
 /** The same provider, with `changes` handing out these pages one call at a time. */
-export const paging = (
-	base: StorageProvider,
-	pages: readonly (readonly ChangeEntry[] | Error)[]
-) => {
+const paging = (base: StorageProvider, pages: readonly (readonly ChangeEntry[] | Error)[]) => {
 	const served = { count: 0 };
 	return {
 		...base,

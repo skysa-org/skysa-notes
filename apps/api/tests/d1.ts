@@ -137,8 +137,6 @@ const statement = (db: DatabaseSync, sql: string, params: readonly Param[]) => {
 	return self;
 };
 
-export type FakeD1 = ReturnType<typeof createD1>;
-
 export const createD1 = (): D1Database & { close: () => void } => {
 	const db = new DatabaseSync(':memory:');
 	// D1 enforces foreign keys; the default SQLite does not, and a test that
