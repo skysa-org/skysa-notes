@@ -5,6 +5,7 @@ import {
 	contentHash,
 	isFileChange,
 	isWithin,
+	type NewSyncOp,
 	normalizePath,
 	type OpOutcome,
 	parentPath,
@@ -22,6 +23,7 @@ import {
 	type UnreadableFile,
 } from '@skysa/core';
 import Dexie from 'dexie';
+import { z } from 'zod';
 
 import {
 	type FileBytesRecord,
@@ -133,19 +135,48 @@ const toSyncFolder = (folder: FolderRecord): SyncFolder => ({
 	...(folder.remoteId === undefined ? {} : { remoteId: folder.remoteId }),
 });
 
+/**
+ * A queued row as the op it is, by its kind (#447): each kind with what it
+ * cannot be sent without. Every release since 1.0 has queued each kind with
+ * these, so a row that fits none is one a store lost a column of, or one of a
+ * kind a later version queued — read as `malformed` rather than thrown on,
+ * so the rest of the queue still reads, and kept: the engine fails it until
+ * the push stops on it and says why.
+ */
+const queued = { seq: z.number(), path: z.string(), attempts: z.number() };
+const opSchema = z.discriminatedUnion('op', [
+	z.object({ ...queued, op: z.literal('write'), noteId: z.string() }),
+	z.object({ ...queued, op: z.literal('move'), noteId: z.string(), targetPath: z.string() }),
+	z.object({ ...queued, op: z.literal('delete'), noteId: z.string() }),
+	z.object({ ...queued, op: z.literal('mkdir') }),
+	z.object({ ...queued, op: z.literal('rmdir'), remoteId: z.string().optional() }),
+	z.object({
+		...queued,
+		op: z.literal('upload'),
+		fileId: z.string(),
+		copyOf: z.string().optional(),
+	}),
+	z.object({
+		...queued,
+		op: z.literal('move-file'),
+		fileId: z.string(),
+		targetPath: z.string(),
+	}),
+	z.object({ ...queued, op: z.literal('delete-file'), remoteId: z.string() }),
+]) satisfies z.ZodType<Exclude<SyncOp, { op: 'malformed' }>>;
+
 const toSyncOp = (record: OpQueueRecord): SyncOp => {
 	if (record.seq === undefined) throw new Error('A queued op was read back without its seq');
-	return {
-		seq: record.seq,
-		op: record.op,
-		...(record.noteId === undefined ? {} : { noteId: record.noteId }),
-		...(record.fileId === undefined ? {} : { fileId: record.fileId }),
-		path: record.path,
-		...(record.targetPath === undefined ? {} : { targetPath: record.targetPath }),
-		...(record.remoteId === undefined ? {} : { remoteId: record.remoteId }),
-		...(record.copyOf === undefined ? {} : { copyOf: record.copyOf }),
-		attempts: record.attempts,
-	};
+	const read = opSchema.safeParse(record);
+	return read.success
+		? read.data
+		: {
+				op: 'malformed',
+				seq: record.seq,
+				path: String(record.path),
+				attempts: record.attempts,
+				problem: `${String(record.op)} ${z.prettifyError(read.error)}`,
+			};
 };
 
 const toSyncFile = (file: FileRecord): SyncFile => ({
@@ -435,10 +466,7 @@ export const createDexieSyncStore = (
 		await scope.folders.put({ connectionId, path, createdAt: now() });
 	};
 
-	const queue = async (
-		scope: Scope,
-		op: Pick<OpQueueRecord, 'op' | 'noteId' | 'fileId' | 'path' | 'targetPath' | 'remoteId'>
-	): Promise<void> => {
+	const queue = async (scope: Scope, op: NewSyncOp): Promise<void> => {
 		await scope.opQueue.add({ connectionId, attempts: 0, queuedAt: now(), ...op });
 	};
 

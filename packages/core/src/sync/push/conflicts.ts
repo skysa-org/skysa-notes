@@ -177,10 +177,7 @@ export const createConflictPush = (
 	 * it where it is.
 	 */
 	const setAsideForOp = async (op: SyncOp): Promise<Settled | undefined> => {
-		const note =
-			op.op === 'write' && op.noteId !== undefined
-				? await store.noteById(op.noteId)
-				: undefined;
+		const note = op.op === 'write' ? await store.noteById(op.noteId) : undefined;
 		return note === undefined ? undefined : setAside(op, note);
 	};
 
@@ -200,10 +197,7 @@ export const createConflictPush = (
 		// somebody else's file. Those are failures, and stop the queue like any
 		// other. So is a write whose note has been purged since — completing the
 		// op would step over work that never ran.
-		const note =
-			op.op === 'write' && op.noteId !== undefined
-				? await store.noteById(op.noteId)
-				: undefined;
+		const note = op.op === 'write' ? await store.noteById(op.noteId) : undefined;
 		if (note === undefined) return undefined;
 
 		/**

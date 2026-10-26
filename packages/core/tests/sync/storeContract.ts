@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemoteEntry } from '../../src/providers/types.js';
 import { conflictContent } from '../../src/sync/conflicts.js';
-import type { SyncStore } from '../../src/sync/store.js';
+import type { NewSyncOp, SyncFile, SyncFolder, SyncNote, SyncStore } from '../../src/sync/store.js';
 
 /**
  * What any `SyncStore` has to do, whatever it is built on. The engine's
@@ -19,49 +19,27 @@ import type { SyncStore } from '../../src/sync/store.js';
 export interface StoreHarness {
 	store: SyncStore;
 	/** Seed a note directly, bypassing the engine. */
-	seed: (note: {
-		id: string;
-		path: string;
-		content: string;
-		remoteId?: string;
-		remoteVersion?: string;
-		syncedHash?: string;
-		dirty?: boolean;
-	}) => void | Promise<void>;
+	seed: (
+		note: Omit<SyncNote, 'dirty'> & Partial<Pick<SyncNote, 'dirty'>>
+	) => void | Promise<void>;
 	/**
 	 * Put a note under this id where the store cannot show it to the engine:
 	 * another connection's, on a device that holds more than one.
 	 */
 	seedElsewhere: (id: string) => void | Promise<void>;
-	seedFolder: (folder: { path: string; remoteId?: string }) => void | Promise<void>;
+	seedFolder: (folder: SyncFolder) => void | Promise<void>;
 	/**
 	 * Seed a file row, and the bytes held for it: `pinned` until they are
 	 * uploaded, or cached under `version`.
 	 */
 	seedFile: (
-		file: { id: string; path: string; remoteId?: string; remoteVersion?: string; size: number },
+		file: SyncFile,
 		bytes?: { bytes: Uint8Array<ArrayBuffer>; version?: string; pinned?: boolean }
 	) => void | Promise<void>;
 	/** Take a file row away, as the user deleting it does. */
 	dropFile: (id: string) => void | Promise<void>;
 	/** Queue an op and return the seq it was given. */
-	seedOp: (op: {
-		op:
-			| 'write'
-			| 'move'
-			| 'delete'
-			| 'mkdir'
-			| 'rmdir'
-			| 'upload'
-			| 'move-file'
-			| 'delete-file';
-		path: string;
-		noteId?: string;
-		fileId?: string;
-		targetPath?: string;
-		remoteId?: string;
-		copyOf?: string;
-	}) => number | Promise<number>;
+	seedOp: (op: NewSyncOp) => number | Promise<number>;
 	/** Take a queued op back out, as a later change of the user's does. */
 	withdrawOp: (seq: number) => void | Promise<void>;
 }
@@ -432,10 +410,8 @@ export const describeSyncStoreContract = (
 				const seq = await seedOp({ op: 'rmdir', path: 'Work', remoteId: 'f1' });
 
 				const ops = await store.pendingOps();
-				expect(ops.map((op) => [op.op, op.path, op.remoteId])).toEqual([
-					['rmdir', 'Work', 'f1'],
-				]);
-				expect((await store.opBySeq(seq))?.remoteId).toBe('f1');
+				expect(ops).toMatchObject([{ op: 'rmdir', path: 'Work', remoteId: 'f1' }]);
+				expect(await store.opBySeq(seq)).toMatchObject({ remoteId: 'f1' });
 			});
 
 			it('has no cursor before the first pull', async () => {
@@ -769,7 +745,7 @@ export const describeSyncStoreContract = (
 				const op = await store.opBySeq(seq);
 				expect(op?.path).toBe('Work/a.md');
 				// The name the user chose is not what this is about.
-				expect(op?.targetPath).toBe('b.md');
+				expect(op).toMatchObject({ targetPath: 'b.md' });
 			});
 
 			it('points it there for a version the pull only adopts', async () => {
@@ -961,7 +937,7 @@ export const describeSyncStoreContract = (
 				});
 
 				const op = (await store.pendingOps()).find((each) => each.seq === seq);
-				expect(op?.targetPath).toBe('Groceries (conflict x).md');
+				expect(op).toMatchObject({ targetPath: 'Groceries (conflict x).md' });
 			});
 
 			it('leaves another note\u2019s ops alone when one is displaced', async () => {
@@ -984,7 +960,7 @@ export const describeSyncStoreContract = (
 				});
 
 				const op = (await store.pendingOps()).find((each) => each.seq === seq);
-				expect(op?.targetPath).toBe('a.md');
+				expect(op).toMatchObject({ targetPath: 'a.md' });
 			});
 
 			it('accepts a displacement of a note that is already gone', async () => {
@@ -1553,7 +1529,7 @@ export const describeSyncStoreContract = (
 
 				const moved = (await store.pendingOps()).find((op) => op.seq === seq);
 				expect(moved?.path).toBe('Archive/a.md');
-				expect(moved?.targetPath).toBe('Archive/renamed.md');
+				expect(moved).toMatchObject({ targetPath: 'Archive/renamed.md' });
 			});
 
 			it('does not clean a dirty note on the way', async () => {
@@ -2254,7 +2230,9 @@ export const describeSyncStoreContract = (
 					const { store } = await copying();
 					await store.applyChanges({ changes: [change] });
 					expect(await store.fileBytes('x2')).toEqual(BYTES);
-					expect((await opsOf(store)).find((op) => op.fileId === 'x2')).toEqual(copy);
+					expect(
+						(await opsOf(store)).find((op) => 'fileId' in op && op.fileId === 'x2')
+					).toEqual(copy);
 				});
 
 				it('hands over nothing that is not the file as it is now', async () => {

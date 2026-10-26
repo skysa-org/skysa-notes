@@ -72,9 +72,7 @@ export const createCascade = ({
 	const renamesQueued = (queue: readonly SyncOp[]): ReadonlyMap<string, string> =>
 		queue.reduce<Map<string, string>>(
 			(map, op) =>
-				op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
-					? map
-					: map.set(op.noteId, op.path),
+				op.op !== 'move' || map.has(op.noteId) ? map : map.set(op.noteId, op.path),
 			new Map()
 		);
 

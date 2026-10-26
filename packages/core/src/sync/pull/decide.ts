@@ -171,11 +171,7 @@ export const createPullDecide = (
 			claimed: new Set([...claimedPaths(entries), ...renaming.values()]),
 			doomed: doomedIn(entries),
 			renaming,
-			deleting: new Set(
-				queue.flatMap((op) =>
-					op.op === 'delete' && op.noteId !== undefined ? [op.noteId] : []
-				)
-			),
+			deleting: new Set(queue.flatMap((op) => (op.op === 'delete' ? [op.noteId] : []))),
 			removing: new Map(
 				queue.flatMap((op): [string, string][] =>
 					op.op === 'rmdir' && op.remoteId !== undefined ? [[op.remoteId, op.path]] : []

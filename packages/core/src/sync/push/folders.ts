@@ -2,7 +2,7 @@ import { foldName } from '../../markdown/slug.js';
 import { normalizePath, parentPath, ROOT } from '../../paths.js';
 import { type EngineContext } from '../context.js';
 import { orIfNotFound } from '../providerOps.js';
-import { type SyncOp } from '../store.js';
+import { type SyncOpOf } from '../store.js';
 
 /**
  * The remote's folders, as a push needs them: made, a level at a time,
@@ -115,7 +115,7 @@ export const createFolderPush = ({ provider, store }: EngineContext) => {
 	 * Known gap (docs/ARCHITECTURE.md §7): a file written between the walk and the
 	 * delete goes with the folder, into the provider's trash or recycle bin.
 	 */
-	const runRmdir = async (op: SyncOp): Promise<void> => {
+	const runRmdir = async (op: SyncOpOf<'rmdir'>): Promise<void> => {
 		const { remoteId } = op;
 		const finish = (): Promise<void> => store.completeOp(op.seq, { kind: 'done' });
 		const remove = provider.listsEverything ? provider.delete : provider.leaveFolder;

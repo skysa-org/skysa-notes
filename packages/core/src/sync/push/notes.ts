@@ -10,7 +10,7 @@ import { conflictPath } from '../conflicts.js';
 import { type EngineContext, type FromPull } from '../context.js';
 import { findFreeName } from '../names.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
-import { type SyncNote, type SyncOp } from '../store.js';
+import { type SyncNote, type SyncOpOf } from '../store.js';
 import { type FolderPush } from './folders.js';
 
 /**
@@ -154,7 +154,7 @@ export const createNotePush = (
 		return write(note, version);
 	};
 
-	const runWrite = async (op: SyncOp, note: SyncNote): Promise<void> => {
+	const runWrite = async (op: SyncOpOf<'write'>, note: SyncNote): Promise<void> => {
 		const entry = await write(note, note.remoteVersion).catch(async (error: unknown) => {
 			if (!isNotFoundError(error)) throw error;
 
@@ -226,13 +226,7 @@ export const createNotePush = (
 			exhausted: (refusal) => refusal,
 		});
 
-	const runMove = async (op: SyncOp, note: SyncNote): Promise<void> => {
-		// A move with nowhere to go is a store that lost the column, not a move
-		// with nothing to do. Completing it would drop the user's rename with
-		// nothing said anywhere; failing it stops the queue and says so.
-		if (op.targetPath === undefined) {
-			throw new Error(`move of ${op.path} has no target path`);
-		}
+	const runMove = async (op: SyncOpOf<'move'>, note: SyncNote): Promise<void> => {
 		// Never pushed, so there is nothing at the old path to move. The note's
 		// own write op will create it where it now lives.
 		if (note.remoteId === undefined) {
@@ -298,7 +292,7 @@ export const createNotePush = (
 		});
 	};
 
-	const runDelete = async (op: SyncOp, note: SyncNote | undefined): Promise<void> => {
+	const runDelete = async (op: SyncOpOf<'delete'>, note: SyncNote | undefined): Promise<void> => {
 		// The tombstone is already gone, and with it the `remoteId` this op
 		// would have needed. Nothing to send, and nothing left to purge.
 		if (note === undefined) {

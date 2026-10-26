@@ -9,7 +9,7 @@ import {
 import { conflictFilePath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
-import { type SyncFile, type SyncOp } from '../store.js';
+import { type SyncFile, type SyncOpOf } from '../store.js';
 import { type FolderPush } from './folders.js';
 
 /**
@@ -147,7 +147,7 @@ export const createFilePush = (
 	 * are neither: nothing here, and the original gone.
 	 */
 	const bytesToSend = async (
-		op: SyncOp,
+		op: SyncOpOf<'upload'>,
 		file: SyncFile
 	): Promise<Uint8Array<ArrayBuffer> | undefined> => {
 		const held = await store.fileBytes(file.id);
@@ -161,8 +161,8 @@ export const createFilePush = (
 		);
 	};
 
-	const runUpload = async (op: SyncOp): Promise<void> => {
-		const file = op.fileId === undefined ? undefined : await store.fileById(op.fileId);
+	const runUpload = async (op: SyncOpOf<'upload'>): Promise<void> => {
+		const file = await store.fileById(op.fileId);
 		// Deleted before it went, which leaves nothing to send; or bound already
 		// — a pull found it there and took it — which leaves nothing to do.
 		if (file === undefined || file.remoteId !== undefined) {
@@ -232,12 +232,8 @@ export const createFilePush = (
 			});
 	};
 
-	const runMoveFile = async (op: SyncOp): Promise<void> => {
-		// As `runMove`: a store that lost the column, not a move with nothing to do.
-		if (op.targetPath === undefined) {
-			throw new Error(`move of ${op.path} has no target path`);
-		}
-		const file = op.fileId === undefined ? undefined : await store.fileById(op.fileId);
+	const runMoveFile = async (op: SyncOpOf<'move-file'>): Promise<void> => {
+		const file = await store.fileById(op.fileId);
 		// Deleted since, and its own `delete-file` is behind this; or never sent,
 		// and its `upload` goes to wherever it is now.
 		if (file?.remoteId === undefined) {
@@ -263,13 +259,8 @@ export const createFilePush = (
 	 * By the id the queue recorded: the row is gone. Already gone is what was
 	 * wanted, as in `runDelete`.
 	 */
-	const runDeleteFile = async (op: SyncOp): Promise<void> => {
-		if (op.remoteId !== undefined) {
-			await orIfNotFound(
-				provider.delete({ remoteId: op.remoteId, path: op.path }),
-				undefined
-			);
-		}
+	const runDeleteFile = async (op: SyncOpOf<'delete-file'>): Promise<void> => {
+		await orIfNotFound(provider.delete({ remoteId: op.remoteId, path: op.path }), undefined);
 		await store.completeOp(op.seq, { kind: 'done' });
 	};
 

@@ -1,4 +1,11 @@
-import { ancestorPaths, foldName, isWithin, parentPath, pathSegments } from '@skysa/core';
+import {
+	ancestorPaths,
+	foldName,
+	isWithin,
+	type NewSyncOp,
+	parentPath,
+	pathSegments,
+} from '@skysa/core';
 import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
@@ -152,13 +159,8 @@ const atPath = (
 
 const nothing = (): Queued => Dexie.Promise.resolve();
 
-const add = (
-	db: QueueDb,
-	op: Pick<
-		OpQueueRecord,
-		'connectionId' | 'op' | 'noteId' | 'fileId' | 'path' | 'targetPath' | 'remoteId' | 'copyOf'
-	>
-): Queued => db.opQueue.add({ attempts: 0, queuedAt: Date.now(), ...op }).then(() => undefined);
+const add = (db: QueueDb, op: NewSyncOp & { connectionId: string }): Queued =>
+	db.opQueue.add({ attempts: 0, queuedAt: Date.now(), ...op }).then(() => undefined);
 
 /**
  * The note's contents have changed. One queued write is enough, however many

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 // `*.test.ts` there so that it runs only where a store registers it. `core`
 // cannot import `apps/*`, so this store registers here instead.
 import { describeSyncStoreContract } from '../../../packages/core/tests/sync/storeContract.js';
-import { type NotesDatabase } from '../src/store/db.js';
+import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
 import {
 	createNote,
 	deleteNote,
@@ -107,7 +107,7 @@ describeSyncStoreContract('Dexie', async () => {
 		seedOp: async (op) => {
 			// In the app a queued delete always comes with its tombstone:
 			// `deleteNote` makes the one and the push queue the other.
-			if (op.op === 'delete' && op.noteId !== undefined) {
+			if (op.op === 'delete') {
 				await updateNote(db, op.noteId, { deletedLocally: 1, dirty: 1 });
 			}
 			return db.opQueue.add({ connectionId: CONNECTION, attempts: 0, queuedAt: 0, ...op });
@@ -930,9 +930,7 @@ describe('a note deleted here', () => {
 		expect(row?.remoteId).toBeUndefined();
 		expect(row?.dirty).toBe(1);
 		// The file is gone, so the note is owed one: exactly one.
-		expect((await store.pendingOps()).map((op) => [op.op, op.noteId])).toEqual([
-			['write', 'n1'],
-		]);
+		expect(await store.pendingOps()).toMatchObject([{ op: 'write', noteId: 'n1' }]);
 	});
 
 	it('goes when the remote deletes it too', async () => {
@@ -1198,5 +1196,69 @@ describe('importing a file over a tombstone', () => {
 		});
 
 		expect((await noteById(db, note.id))?.deletedLocally).toBe(0);
+	});
+});
+
+describe('a queued op read back (#447)', () => {
+	/** A row as the queue stores it, written straight to the table. */
+	const queued = async (db: NotesDatabase, row: Record<string, unknown>): Promise<number> =>
+		db.opQueue.add({
+			connectionId: CONNECTION,
+			attempts: 0,
+			queuedAt: 0,
+			...row,
+		} as unknown as OpQueueRecord);
+
+	it('reads every kind as 1.0 queued it as the op it is', async () => {
+		const db = freshDatabase();
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		const rows = [
+			{ op: 'write', noteId: 'n1', path: 'a.md' },
+			{ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' },
+			{ op: 'delete', noteId: 'n2', path: 'c.md' },
+			{ op: 'mkdir', path: 'Work' },
+			{ op: 'rmdir', path: 'Old', remoteId: 'f1' },
+			{ op: 'rmdir', path: 'Never' },
+			{ op: 'upload', fileId: 'x1', path: 'a.png' },
+			{ op: 'upload', fileId: 'x2', path: 'b.png', copyOf: 'r9' },
+			{ op: 'move-file', fileId: 'x1', path: 'a.png', targetPath: 'Trips/a.png' },
+			{ op: 'delete-file', path: 'c.png', remoteId: 'r3' },
+		];
+		for (const row of rows) await queued(db, { ...row, lastError: 'kept', attempts: 2 });
+
+		const ops = await store.pendingOps();
+
+		expect(ops).toEqual(rows.map((row, at) => ({ ...row, seq: at + 1, attempts: 2 })));
+	});
+
+	it('reads a row that fits no kind as malformed, and the rest as they are', async () => {
+		const db = freshDatabase();
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		const lost = await queued(db, { op: 'move', noteId: 'n1', path: 'a.md', attempts: 1 });
+		const later = await queued(db, { op: 'teleport', path: 'b.md' });
+		await queued(db, { op: 'write', noteId: 'n1', path: 'a.md' });
+
+		const ops = await store.pendingOps();
+
+		expect(ops).toEqual([
+			{
+				op: 'malformed',
+				seq: lost,
+				path: 'a.md',
+				attempts: 1,
+				problem: expect.stringContaining('targetPath') as unknown,
+			},
+			{
+				op: 'malformed',
+				seq: later,
+				path: 'b.md',
+				attempts: 0,
+				problem: expect.stringContaining('teleport') as unknown,
+			},
+			{ op: 'write', seq: later + 1, noteId: 'n1', path: 'a.md', attempts: 0 },
+		]);
+		expect(await store.opBySeq(lost)).toMatchObject({ op: 'malformed' });
+		// Kept, for the engine to fail and the user to be told of.
+		expect(await db.opQueue.count()).toBe(3);
 	});
 });

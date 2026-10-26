@@ -119,9 +119,12 @@ export { messageOf } from './sync/outcome.js';
 
 export {
 	type ConflictResolution,
+	copiedBy,
+	destinationOf,
 	type FileChange,
 	isFileChange,
 	isNoteChange,
+	type NewSyncOp,
 	type NoteChange,
 	noteIdOf,
 	type OpOutcome,
@@ -134,6 +137,7 @@ export {
 	type SyncNote,
 	type SyncOp,
 	type SyncOperation,
+	type SyncOpOf,
 	type SyncStore,
 	type UnreadableFile,
 } from './sync/store.js';

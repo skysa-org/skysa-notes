@@ -111,50 +111,101 @@ export interface SyncFolder {
 	remoteId?: string;
 }
 
-export type SyncOperation =
-	| 'write'
-	| 'move'
-	| 'delete'
-	| 'mkdir'
-	| 'rmdir'
-	/** A pending file's bytes, sent to `path`. */
-	| 'upload'
-	/** A bound file, from `path` to `targetPath`. */
-	| 'move-file'
-	/** A file this device no longer holds a row for, by `remoteId`. */
-	| 'delete-file';
-
-/** One queued push. `seq` orders the queue and identifies the row. */
-export interface SyncOp {
+/** What every queued push has, whatever it does. `seq` orders the queue and identifies the row. */
+interface Queued {
 	seq: number;
-	op: SyncOperation;
-	/** Absent for `mkdir` and `rmdir`, which are about a folder, and for a file's ops. */
-	noteId?: string;
-	/** The file an `upload` or a `move-file` is about. */
-	fileId?: string;
+	/** Where it is about: the note's or the file's path, or the folder's. */
 	path: string;
-	/** Where a `move` is going. */
-	targetPath?: string;
-	/**
-	 * For `rmdir`, the folder's `remoteId` as the queue recorded it. The op
-	 * removes a folder this device no longer holds, so there is no row left to
-	 * read it from — and without it the engine cannot tell the folder it is
-	 * about from whatever has the name now, so it does nothing at all.
-	 *
-	 * For `delete-file`, the same, for the same reason: the row goes when the
-	 * user deletes the file, and the op is what is left of it.
-	 */
-	remoteId?: string;
-	/**
-	 * For an `upload` whose bytes this device does not hold: the `remoteId` of
-	 * a file that has them, to read them from. A note moved out of a folder
-	 * where another note links the same file takes a copy of it, and the copy
-	 * can be owed before the original was ever downloaded here.
-	 */
-	copyOf?: string;
 	/** How many times this op has already failed. */
 	attempts: number;
 }
+
+/**
+ * One queued push, by what it does: each kind carries the fields it needs, so
+ * the engine never asks at run time for one it cannot be without (#447).
+ */
+export type SyncOp = Queued &
+	(
+		| { op: 'write'; noteId: string }
+		| {
+				op: 'move';
+				noteId: string;
+				/** Where it is going; `path` is where the file is now. */
+				targetPath: string;
+		  }
+		| { op: 'delete'; noteId: string }
+		| { op: 'mkdir' }
+		| {
+				op: 'rmdir';
+				/**
+				 * The folder's `remoteId` as the queue recorded it. The op
+				 * removes a folder this device no longer holds, so there is no
+				 * row left to read it from — and without it the engine cannot
+				 * tell the folder it is about from whatever has the name now, so
+				 * it does nothing at all.
+				 */
+				remoteId?: string;
+		  }
+		| {
+				/** A pending file's bytes, sent to `path`. */
+				op: 'upload';
+				fileId: string;
+				/**
+				 * Where this device does not hold the bytes: the `remoteId` of a
+				 * file that has them, to read them from. A note moved out of a
+				 * folder where another note links the same file takes a copy of
+				 * it, and the copy can be owed before the original was ever
+				 * downloaded here.
+				 */
+				copyOf?: string;
+		  }
+		| {
+				/** A bound file, from `path` to `targetPath`. */
+				op: 'move-file';
+				fileId: string;
+				targetPath: string;
+		  }
+		| {
+				/**
+				 * A file this device no longer holds a row for, by `remoteId`,
+				 * for `rmdir`'s reason: the row goes when the user deletes the
+				 * file, and the op is what is left of it.
+				 */
+				op: 'delete-file';
+				remoteId: string;
+		  }
+		| {
+				/**
+				 * A queued row that is none of the above: one that lacks what its
+				 * kind needs, or of a kind this version does not know, written by
+				 * a later one. Read as it is rather than thrown on, so the rest of
+				 * the queue still reads, and kept: the engine fails it as any op
+				 * that cannot be sent, until it stops the push and says so.
+				 * `problem` says what was wrong with it.
+				 */
+				op: 'malformed';
+				problem: string;
+		  }
+	);
+
+/** The kinds of op a device queues. `malformed` is only ever read. */
+export type SyncOperation = Exclude<SyncOp['op'], 'malformed'>;
+
+/** One kind of queued push. */
+export type SyncOpOf<Operation extends SyncOp['op']> = Extract<SyncOp, { op: Operation }>;
+
+type QueuedAs<Op> = Op extends unknown ? Omit<Op, 'seq' | 'attempts'> : never;
+
+/** A push as it is queued, before the queue gives it a `seq`, with no attempts yet. */
+export type NewSyncOp = QueuedAs<Exclude<SyncOp, { op: 'malformed' }>>;
+
+/** Where an op leaves what it is about: a move's target, or else its own path. */
+export const destinationOf = (op: SyncOp): string =>
+	op.op === 'move' || op.op === 'move-file' ? op.targetPath : op.path;
+
+/** The file an upload reads its bytes from instead, where it has one: none, or that one. */
+export const copiedBy = (op: SyncOp): readonly string[] =>
+	op.op === 'upload' && op.copyOf !== undefined ? [op.copyOf] : [];
 
 /**
  * One decision the engine reached about one remote change. The engine works out

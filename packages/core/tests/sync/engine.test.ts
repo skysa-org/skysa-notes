@@ -4804,23 +4804,31 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		expect(seen).toEqual(['moved-by-pull.md']);
 	});
 
-	it('stops rather than dropping a move with nowhere to go', async () => {
-		// A move with no target is a store that lost the column, not a move with
-		// nothing to do. Completing it discards the user's rename with nothing
-		// said anywhere, and the note sits at a path the remote does not have.
+	it('stops rather than dropping an op it could not read (#447)', async () => {
+		// A row that is none of the kinds — a move that lost its target, a kind
+		// a later version queued — is a store that lost a column, not an op with
+		// nothing to do. Completing it would discard the user's rename with
+		// nothing said anywhere; it fails, and stops the push once it has
+		// failed too often, with the row still queued.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
-			id: 'n1',
-			path: 'b.md',
-			content: 'one\n',
-			...boundTo(entry),
-		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md' });
+		store.put({ id: 'n1', path: 'b.md', content: 'one\n', ...boundTo(entry) });
+		const op = store.queue({ op: 'malformed', path: 'a.md', problem: 'no targetPath' });
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
 
 		const result = await engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()).toHaveLength(1);
+		expect(store.ops()).toHaveLength(2);
+		expect(store.ops()[0]?.attempts).toBe(1);
+		expect(store.lastError(op.seq)).toContain('no targetPath');
+
+		// At the limit, it stops the push, and is still there.
+		store.ops().forEach((each) => {
+			store.unqueue(each.seq);
+		});
+		store.queue({ op: 'malformed', path: 'a.md', problem: 'no targetPath', attempts: 5 });
+		expect((await engine.push()).status).toBe('blocked');
+		expect(store.ops().map((each) => each.op)).toEqual(['malformed']);
 	});
 
 	it('stops rather than discarding a mkdir that found a file in the way', async () => {
