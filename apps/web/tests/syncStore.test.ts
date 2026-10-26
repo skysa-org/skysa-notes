@@ -28,6 +28,7 @@ import {
 	createDexieSyncStore,
 	type DexieSyncStoreOptions,
 	UnboundConnectionError,
+	UnverifiedResumeError,
 } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
 import { freshDatabase } from './support/db.js';
@@ -1180,6 +1181,32 @@ describe('where a change puts a note', () => {
 
 		expect(await db.syncState.count()).toBe(0);
 		expect(await db.notes.count()).toBe(0);
+	});
+
+	it('deletes nothing for a resumed connection until its remote is checked', async () => {
+		const db = freshDatabase();
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		await store.applyChanges({
+			changes: [
+				{
+					kind: 'upsert-note',
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remote: remote('a.md'),
+					syncedHash: 'hash',
+				},
+			],
+		});
+		// What a scan of an emptied app folder would say, before `verifyResume`.
+		await db.syncState.update(CONNECTION, { resumeUnverified: true });
+
+		await expect(
+			store.applyChanges({ changes: [{ kind: 'delete-note', id: 'n1' }], cursor: 'c2' })
+		).rejects.toThrow(UnverifiedResumeError);
+
+		expect(await db.notes.count()).toBe(1);
+		expect((await db.syncState.get(CONNECTION))?.cursor).toBeUndefined();
 	});
 });
 

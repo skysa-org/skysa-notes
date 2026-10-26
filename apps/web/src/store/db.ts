@@ -275,16 +275,7 @@ export interface CredentialRecord {
 /** The one flow that may be out at a time, matching the server's one flow cookie. */
 export const PENDING_CREDENTIAL_ID = 'pending';
 
-/**
- * A preference row.
- *
- * Exported though nothing imports it by name: the transaction scopes'
- * table types in `scopes.ts` are inferred through it, and an inferred type has
- * to be one TypeScript can name.
- *
- * @public
- */
-export interface PreferenceRecord {
+interface PreferenceRecord {
 	key: string;
 	value: string;
 }
@@ -353,16 +344,8 @@ export interface ClipRecord {
 	preview?: string;
 }
 
-/**
- * A clipboard item's bytes, an `ArrayBuffer` for the reason `FileBytesRecord` gives.
- *
- * Exported though nothing imports it by name: the transaction scopes'
- * table types in `scopes.ts` are inferred through it, and an inferred type has
- * to be one TypeScript can name.
- *
- * @public
- */
-export interface ClipBytesRecord {
+/** A clipboard item's bytes, an `ArrayBuffer` for the reason `FileBytesRecord` gives. */
+interface ClipBytesRecord {
 	connectionId: string;
 	name: string;
 	bytes: ArrayBuffer;
@@ -417,16 +400,8 @@ export interface PictureRecord {
 	copies: Partial<Record<PictureVariant, PictureCopyRecord>>;
 }
 
-/**
- * A copy's bytes, apart from its record, as a file's are from its row.
- *
- * Exported though nothing imports it by name: the transaction scopes'
- * table types in `scopes.ts` are inferred through it, and an inferred type has
- * to be one TypeScript can name.
- *
- * @public
- */
-export interface PictureBytesRecord {
+/** A copy's bytes, apart from its record, as a file's are from its row. */
+interface PictureBytesRecord {
 	connectionId: string;
 	fileId: string;
 	variant: PictureVariant;
