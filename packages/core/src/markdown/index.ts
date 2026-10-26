@@ -39,25 +39,12 @@ export {
 	type AttachmentKind,
 	type AttachmentWords,
 	classifyHref,
-	extensionOf,
 	type HrefKind,
 	isAttachmentHref,
 	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
 	resolveRelative,
 } from './attachments.js';
-export {
-	attachmentName,
-	clusters,
-	foldName,
-	isNoteName,
-	noteFilename,
-	normalizeTag,
-	sanitizeFolderName,
-	slugify,
-	uniqueFilename,
-	UNTITLED_SLUG,
-} from './slug.js';
 export { deriveTitle, titleFromFilename, UNTITLED_TITLE, type DeriveTitleInput } from './title.js';
 export {
 	parseNoteFile,

@@ -41,15 +41,26 @@ const RESTRICTED_SYNTAX = [
 const NODE_BUILTINS = ['node:*', ...builtinModules.filter((name) => !name.startsWith('_'))];
 
 /**
- * Restricted import patterns for a folder of the web app that sits below
- * others: it may not reach up into the folders named, so the layers stay one
- * way round. `**` either side because a file one folder deeper writes
- * `../../components/…`.
+ * Restricted import patterns for a folder that sits below others: it may not
+ * reach up into the folders named, so the layers stay one way round. `**`
+ * either side because a file one folder deeper writes `../../components/…`.
  */
 const NOT_ABOVE = (folders, message) => ({
 	group: folders.map((folder) => `**/${folder}/**`),
 	message,
 });
+
+/** What nothing in packages/core/src may import. */
+const CORE_IMPORTS = [
+	{
+		group: NODE_BUILTINS,
+		message: 'packages/core must not depend on Node built-ins.',
+	},
+	{
+		group: ['@skysa/web', '@skysa/api', '**/apps/**'],
+		message: 'packages/core must not import from apps/*.',
+	},
+];
 
 /**
  * Words the user reads, written straight into JSX: a sentence there is one no
@@ -303,18 +314,41 @@ export default tseslint.config(
 					message: 'packages/core must run in the browser, Node and Workers alike.',
 				})),
 			],
+			'no-restricted-imports': ['error', { patterns: CORE_IMPORTS }],
+		},
+	},
+	{
+		// A provider moves bytes and names for the sync engine; it knows nothing
+		// of the engine. What both need — a conflict copy's name, say — lives
+		// below them both, in names/ (#449). Repeats core's patterns, since a
+		// rule set here replaces the one above rather than adding to it.
+		files: ['packages/core/src/providers/**/*.ts'],
+		rules: {
 			'no-restricted-imports': [
 				'error',
 				{
 					patterns: [
-						{
-							group: NODE_BUILTINS,
-							message: 'packages/core must not depend on Node built-ins.',
-						},
-						{
-							group: ['@skysa/web', '@skysa/api', '**/apps/**'],
-							message: 'packages/core must not import from apps/*.',
-						},
+						...CORE_IMPORTS,
+						NOT_ABOVE(['sync'], 'a provider does not import the sync engine.'),
+					],
+				},
+			],
+		},
+	},
+	{
+		// names/ sits below providers, sync and markdown, which all name files
+		// by it; reaching up into any of them would bring the cycle back.
+		files: ['packages/core/src/names/**/*.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						...CORE_IMPORTS,
+						NOT_ABOVE(
+							['sync', 'providers', 'markdown'],
+							'names/ sits below sync, providers and markdown.'
+						),
 					],
 				},
 			],

@@ -1,7 +1,7 @@
 import { contentHash } from '../../hash.js';
+import { conflictPath } from '../../names/conflicts.js';
 import { basename } from '../../paths.js';
 import { isConflictError, isUnreadableError, type RemoteEntry } from '../../providers/types.js';
-import { conflictPath } from '../conflicts.js';
 import { type EngineContext, type FromPull } from '../context.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
 import { type SyncNote, type SyncOp, type UnreadableFile } from '../store.js';

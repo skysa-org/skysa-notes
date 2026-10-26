@@ -1,7 +1,7 @@
 import { showsInline } from './attachments.js';
 import { CLIPBOARD_FOLDER, NOTE_EXTENSION } from './config.js';
-import { extensionOf } from './markdown/attachments.js';
-import { attachmentName } from './markdown/slug.js';
+import { extensionOf } from './names/extension.js';
+import { attachmentName } from './names/slug.js';
 import { isWithin, joinPath } from './paths.js';
 
 /**

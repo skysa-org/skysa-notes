@@ -1,4 +1,4 @@
-import { foldName } from '../../markdown/slug.js';
+import { foldName } from '../../names/fold.js';
 import { isWithin, normalizePath, parentPath } from '../../paths.js';
 import {
 	isAuthError,

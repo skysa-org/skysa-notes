@@ -9,15 +9,15 @@ import {
 	attachmentLabel,
 	attachmentMarkdown,
 	classifyHref,
-	extensionOf,
 	isAttachmentHref,
 	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
 	resolveRelative,
 } from '../../src/markdown/attachments.js';
 import { parse } from '../../src/markdown/pipeline.js';
-import { attachmentName } from '../../src/markdown/slug.js';
-import { conflictNameKeepingExtension } from '../../src/sync/conflicts.js';
+import { conflictNameKeepingExtension } from '../../src/names/conflicts.js';
+import { extensionOf } from '../../src/names/extension.js';
+import { attachmentName } from '../../src/names/slug.js';
 
 const HASH = '3f9a1c2b7d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8';
 const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;

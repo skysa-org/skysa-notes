@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { isNoteName } from '../../src/markdown/slug.js';
+import { conflictFilePath } from '../../src/names/conflicts.js';
+import { isNoteName } from '../../src/names/fold.js';
 import {
 	ancestorPaths,
 	basename,
@@ -15,7 +16,6 @@ import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import { CursorResetError, type StorageProvider } from '../../src/providers/types.js';
-import { conflictFilePath } from '../../src/sync/conflicts.js';
 import { createSyncEngine, type SyncEngine, type SyncOutcome } from '../../src/sync/engine.js';
 import type { SyncFolder, SyncNote } from '../../src/sync/store.js';
 import { createDropboxStub } from '../providers/dropboxStub.js';

@@ -100,14 +100,26 @@ export {
 	type FakeProviderOptions,
 } from './providers/fake.js';
 
+export { clusters } from './names/bytes.js';
 export {
-	conflictContent,
 	conflictFilename,
 	conflictFilePath,
 	conflictFolderPath,
 	conflictPath,
 	conflictStamp,
-} from './sync/conflicts.js';
+} from './names/conflicts.js';
+export { extensionOf } from './names/extension.js';
+export { foldName, isNoteName } from './names/fold.js';
+export {
+	attachmentName,
+	noteFilename,
+	normalizeTag,
+	sanitizeFolderName,
+	slugify,
+	uniqueFilename,
+	UNTITLED_SLUG,
+} from './names/slug.js';
+export { conflictContent } from './sync/conflicts.js';
 
 export {
 	createSyncEngine,

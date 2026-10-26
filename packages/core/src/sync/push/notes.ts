@@ -1,4 +1,5 @@
 import { contentHash } from '../../hash.js';
+import { conflictPath } from '../../names/conflicts.js';
 import { parentPath } from '../../paths.js';
 import {
 	type EntryRef,
@@ -6,7 +7,6 @@ import {
 	isNotFoundError,
 	type RemoteEntry,
 } from '../../providers/types.js';
-import { conflictPath } from '../conflicts.js';
 import { type EngineContext, type FromPull } from '../context.js';
 import { findFreeName } from '../names.js';
 import { orIfNotFound, withParent } from '../providerOps.js';

@@ -1,4 +1,4 @@
-import { isNoteName } from '../../markdown/slug.js';
+import { isNoteName } from '../../names/fold.js';
 import { isHidden } from '../../paths.js';
 import { type ChangeEntry, type RemoteEntry } from '../../providers/types.js';
 import { type EngineContext } from '../context.js';

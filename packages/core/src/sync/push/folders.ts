@@ -1,4 +1,4 @@
-import { foldName } from '../../markdown/slug.js';
+import { foldName } from '../../names/fold.js';
 import { normalizePath, parentPath, ROOT } from '../../paths.js';
 import { type EngineContext } from '../context.js';
 import { orIfNotFound } from '../providerOps.js';

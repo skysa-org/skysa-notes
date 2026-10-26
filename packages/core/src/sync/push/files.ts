@@ -1,4 +1,5 @@
 import { contentTypeOf } from '../../attachments.js';
+import { conflictFilePath } from '../../names/conflicts.js';
 import { basename, normalizePath, parentPath } from '../../paths.js';
 import {
 	type EntryRef,
@@ -6,7 +7,6 @@ import {
 	isNotFoundError,
 	type RemoteEntry,
 } from '../../providers/types.js';
-import { conflictFilePath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
 import { type SyncFile, type SyncOpOf } from '../store.js';
