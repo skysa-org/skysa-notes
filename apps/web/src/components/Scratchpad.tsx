@@ -1,4 +1,5 @@
 import {
+	cell,
 	type PreviewLine,
 	previewLineText,
 	type PreviewMark,
@@ -583,7 +584,7 @@ const Wall = ({
 	const unguessed = placed !== undefined && placed.tall.length < notes.length;
 	useEffect(() => {
 		if (!unguessed) return undefined;
-		const gone = { current: false };
+		const gone = cell(false);
 		void handBack().then(() => {
 			if (!gone.current) setSlices((done) => done + 1);
 		});

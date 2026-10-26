@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { useEffect, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
@@ -93,11 +94,11 @@ export const ScanKey = ({ scanner, accept, onCancel }: ScanKeyProps) => {
 	});
 
 	useEffect(() => {
-		const gone = { current: false };
+		const gone = cell(false);
 		// Asked as a call: whether this went is not known until it is asked.
 		const ended = () => gone.current;
-		const stream: { current: MediaStream | undefined } = { current: undefined };
-		const timer: { current: number | undefined } = { current: undefined };
+		const stream = cell<MediaStream | undefined>(undefined);
+		const timer = cell<number | undefined>(undefined);
 		const letGo = () => {
 			window.clearInterval(timer.current);
 			stream.current?.getTracks().forEach((track) => {

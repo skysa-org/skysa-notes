@@ -1,5 +1,6 @@
 import {
 	basename,
+	cell,
 	type ConnectGate,
 	type EntitlementCode,
 	isScratchPath,
@@ -674,7 +675,7 @@ const useStanding = (
 		if (standing !== 'returning' || source === undefined || offered === undefined) {
 			return undefined;
 		}
-		const asking = { current: true };
+		const asking = cell(true);
 		const stale = () => {
 			setSeen((now) => (now?.index === entry.index ? { ...now, standing: 'stale' } : now));
 		};
@@ -1099,7 +1100,7 @@ const useOpenPlace = ({
 		// a note in the notebook between that read and this, and a note opened
 		// over it would hide the one that arrived. So the store is asked again,
 		// now, and nothing is opened for a question that has moved on meanwhile.
-		const asking = { current: true };
+		const asking = cell(true);
 		void pickNote(db, {
 			connectionId: activeConnection,
 			folderPath: toOpen.folder,

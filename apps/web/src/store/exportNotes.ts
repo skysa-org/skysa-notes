@@ -1,6 +1,7 @@
 import {
 	ancestorPaths,
 	basename,
+	cell,
 	normalizePath,
 	NOTE_EXTENSION,
 	parentPath,
@@ -265,7 +266,7 @@ const apart = (
 			taken.add(folded);
 			return file;
 		}
-		const n = { current: reached.get(folded) ?? 2 };
+		const n = cell(reached.get(folded) ?? 2);
 		// A loop, where the rest of the repo recurses: a name already numbered
 		// by hand — `a (2).md` beside `a.md` — is skipped one at a time, and a
 		// folder of such names, which is what importing one of these archives
@@ -393,7 +394,7 @@ export const zipParts = (
 
 	// Where the next local header goes: each entry's offset is the sum of those
 	// before it, kept as it goes rather than added up again for every file.
-	const size = { current: 0 };
+	const size = cell(0);
 	const next = (file: ZipFile, attributes?: number): Entry => {
 		const entry = entryFor(file, size.current, attributes);
 		size.current += entry.size;

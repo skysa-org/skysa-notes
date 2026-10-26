@@ -1,4 +1,4 @@
-import { withoutArmor } from '@skysa/core';
+import { cell, withoutArmor } from '@skysa/core';
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord, noteRef } from './db.js';
@@ -287,7 +287,7 @@ const excerptOf = (body: string, terms: readonly string[]): Excerpt[] => {
 
 /** A match, its excerpt made when it is first read (`NoteHit`) and kept from then. */
 const hitOf = (note: NoteRecord, terms: readonly string[]): NoteHit => {
-	const made: { current?: readonly Excerpt[] } = {};
+	const made = cell<readonly Excerpt[] | undefined>(undefined);
 	return {
 		note,
 		get excerpt() {
@@ -313,7 +313,7 @@ export const createNoteSearch = (): NoteSearch => {
 	 * would each write the index from their own notes, and the one that wrote
 	 * last would win whether or not its notes were the newer.
 	 */
-	const generation = { current: 0 };
+	const generation = cell(0);
 
 	/** One note brought up to date in the index. */
 	const take = (note: NoteRecord): void => {
@@ -336,7 +336,7 @@ export const createNoteSearch = (): NoteSearch => {
 		mine: number
 	): Promise<boolean> => {
 		const until = performance.now() + SLICE_MS;
-		const next = { current: from };
+		const next = cell(from);
 		notes.slice(from).some((note) => {
 			take(note);
 			next.current += 1;

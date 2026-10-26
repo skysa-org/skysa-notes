@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 /**
  * Smaller copies of pictures (#276), made on a worker of their own
  * (`shrink.worker.ts`): the seam the app asks through, and what answers it in
@@ -82,13 +83,13 @@ export const workerShrinker = (
 	timeoutMs: number = SHRINK_TIMEOUT_MS,
 	idleMs: number = SHRINKER_IDLE_MS
 ): PictureShrinker => {
-	const worker: { current: Worker | undefined } = { current: undefined };
-	const asked = { current: 0 };
-	const failures = { current: 0 };
+	const worker = cell<Worker | undefined>(undefined);
+	const asked = cell(0);
+	const failures = cell(0);
 	// One copy at a time: each decodes a whole picture, and two at once on a
 	// phone are two pictures at once in its memory.
-	const queue: { current: Promise<unknown> } = { current: Promise.resolve() };
-	const idle: { current: ReturnType<typeof setTimeout> | undefined } = { current: undefined };
+	const queue = cell<Promise<unknown>>(Promise.resolve());
+	const idle = cell<ReturnType<typeof setTimeout> | undefined>(undefined);
 
 	/** Let a worker go, and forget it if it is still the one asked next. */
 	const retire = (which: Worker) => {
@@ -101,9 +102,7 @@ export const workerShrinker = (
 			clearTimeout(idle.current);
 			const running = worker.current ?? start();
 			worker.current = running;
-			const timer: { current: ReturnType<typeof setTimeout> | undefined } = {
-				current: undefined,
-			};
+			const timer = cell<ReturnType<typeof setTimeout> | undefined>(undefined);
 			const done = (shrunk: Shrunk) => {
 				clearTimeout(timer.current);
 				running.removeEventListener('message', answered);
@@ -169,7 +168,7 @@ export const workerShrinker = (
 	};
 };
 
-const shared: { current: PictureShrinker | undefined } = { current: undefined };
+const shared = cell<PictureShrinker | undefined>(undefined);
 
 /**
  * The app's, one for every view that shows pictures, so that a note, the

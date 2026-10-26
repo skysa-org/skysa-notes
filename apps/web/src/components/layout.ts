@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
 /**
@@ -81,8 +82,8 @@ export const rems = (count: number): number => {
  */
 export const useElementWidth = (element: Element | null): number | undefined => {
 	const store = useMemo(() => {
-		const measured: { current: number | undefined } = { current: undefined };
-		const first = { current: true };
+		const measured = cell<number | undefined>(undefined);
+		const first = cell(true);
 		const measure = () => {
 			const width = element?.getBoundingClientRect().width ?? 0;
 			measured.current = width > 0 ? width : undefined;

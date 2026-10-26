@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import {
 	Children,
 	createContext,
@@ -238,7 +239,7 @@ const useFitViewport = (
 ): void => {
 	useEffect(() => {
 		const view = viewportOf();
-		const frame = { current: 0 };
+		const frame = cell(0);
 		const fit = () => {
 			if (view === null) return;
 			backdrop.current?.style.setProperty('--viewport-top', `${String(view.offsetTop)}px`);
@@ -319,7 +320,7 @@ const usePressOutside = (
 	useEffect(() => {
 		const element = backdrop.current;
 		if (element === null || onClose === undefined) return undefined;
-		const began = { current: false };
+		const began = cell(false);
 		const onDown = (event: PointerEvent) => {
 			began.current = event.target === element;
 		};

@@ -1,4 +1,4 @@
-import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { cell, MAX_ATTACHMENT_BYTES } from '@skysa/core';
 
 import { crc32 } from './exportNotes.js';
 
@@ -88,7 +88,7 @@ const endRecordAt = (view: DataView): number => {
 		offset + END_RECORD_SIZE + view.getUint16(offset + 20, true) === view.byteLength;
 	// A loop, where the rest of the repo recurses: up to 65,535 steps back
 	// through a comment would be a stack that deep.
-	const offset = { current: last };
+	const offset = cell(last);
 	// eslint-disable-next-line functional/no-loop-statements
 	while (offset.current >= first && !ends(offset.current)) offset.current -= 1;
 	return offset.current >= first ? offset.current : -1;
@@ -133,7 +133,7 @@ const listed = (view: DataView, bytes: Uint8Array): Listed[] => {
 	// The all-ones value of either field says "look in the ZIP64 record".
 	if (count === 0xffff || start === 0xffffffff) throw new ZipUnreadableError('zip64');
 	const entries: Listed[] = [];
-	const offset = { current: start };
+	const offset = cell(start);
 	// A loop, for the reason `endRecordAt` gives: one step per entry, and an
 	// archive of a library is thousands of them. `entries` is written to as it
 	// goes, and nothing outside sees it until it is done.
@@ -211,7 +211,7 @@ const inflate = async (data: Uint8Array, limit: number): Promise<Bytes | undefin
 	void feed(stream.writable.getWriter(), data);
 	const reader = stream.readable.getReader();
 	const chunks: Uint8Array[] = [];
-	const total = { current: 0 };
+	const total = cell(0);
 	const pump = async (): Promise<boolean> => {
 		const { done, value } = await reader.read();
 		if (done) return true;

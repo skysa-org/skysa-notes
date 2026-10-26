@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { liveQuery, type Subscription } from 'dexie';
 
 import type { NotesDatabase } from './db.js';
@@ -33,13 +34,13 @@ const watchesOf = (db: NotesDatabase): Map<string, Watch> => {
 const start = (db: NotesDatabase, connectionId: string, watches: Map<string, Watch>): Watch => {
 	const listeners = new Set<() => void>();
 	// The paths last heard, so a re-run that found the same files tells no one.
-	const heard = new Map<'paths', string>();
+	const heard = cell<string | undefined>(undefined);
 	const subscription = liveQuery(async () =>
 		(await listFilePaths(db, { connectionId })).join('\n')
 	).subscribe({
 		next: (paths) => {
-			if (heard.get('paths') === paths) return;
-			heard.set('paths', paths);
+			if (heard.current === paths) return;
+			heard.current = paths;
 			listeners.forEach((listener) => {
 				listener();
 			});

@@ -1,4 +1,4 @@
-import { type PictureInfo, type PictureVariant } from '@skysa/core';
+import { cell, type PictureInfo, type PictureVariant } from '@skysa/core';
 
 import {
 	type FileKey,
@@ -202,7 +202,7 @@ const sheltered = <T extends { variant: PictureVariant; copy: PictureCopyRecord 
 	copies: readonly T[],
 	budget: number
 ): ReadonlySet<T> => {
-	const room = { current: THUMB_SHARE * budget };
+	const room = cell(THUMB_SHARE * budget);
 	return new Set(
 		copies
 			.filter(({ variant }) => variant === 'thumb')
@@ -263,7 +263,7 @@ export const evictPictures = (
 					a.copy.lastUsedAt - b.copy.lastUsedAt
 			);
 		// Written to as it goes, in the order they are let go of.
-		const left = { current: copies.reduce((sum, { copy }) => sum + copy.size, 0) };
+		const left = cell(copies.reduce((sum, { copy }) => sum + copy.size, 0));
 		const evicted = order.filter(({ copy }) => {
 			if (left.current <= budget) return false;
 			left.current -= copy.size;

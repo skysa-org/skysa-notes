@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { type FileKey, type FileRecord, type NotesDatabase } from './db.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
 import { isLiveSource } from './rowStates.js';
@@ -162,7 +164,7 @@ export const evictCache = (
 			return row === undefined || spared.has(key[0]) ? [] : [{ key, size: row.size }];
 		});
 		// Written to as it goes, oldest first, which is the order of the index.
-		const left = { current: sized.reduce((sum, { size }) => sum + size, 0) };
+		const left = cell(sized.reduce((sum, { size }) => sum + size, 0));
 		const evicted = sized
 			.filter(({ size }) => {
 				if (left.current <= budget) return false;

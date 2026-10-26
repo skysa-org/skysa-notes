@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { cell, ROOT } from '@skysa/core';
 import {
 	memo,
 	type ReactNode,
@@ -416,7 +416,7 @@ interface Run {
 }
 
 const runsOf = (notes: readonly NoteRecord[], folderPath: string): readonly Run[] => {
-	const next = { current: 0 };
+	const next = cell(0);
 	return [...byParent(notes)].map(([path, inIt]) => {
 		const named = path !== folderPath;
 		const start = next.current;

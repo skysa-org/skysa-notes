@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import type Dexie from 'dexie';
 
 import { createStore } from './emitter.js';
@@ -99,7 +100,7 @@ export const watchForNewerTab = (db: Dexie): void => {
 		return false;
 	});
 
-	const notice: { current: ReturnType<typeof setTimeout> | null } = { current: null };
+	const notice = cell<ReturnType<typeof setTimeout> | null>(null);
 	db.on('blocked', () => {
 		notice.current ??= setTimeout(() => {
 			publish('waiting');

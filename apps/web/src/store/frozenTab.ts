@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import type Dexie from 'dexie';
 
 import { tabState } from './staleTab.js';
@@ -42,7 +43,7 @@ export const letGoWhenFrozen = (db: Dexie): (() => void) => {
 	// while an upgrade is still running in it; closed then, the open finishes
 	// with no connection, and every read and write after it fails without one
 	// being asked for again.
-	const open = { current: false };
+	const open = cell(false);
 	db.on(
 		'ready',
 		() => {

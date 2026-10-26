@@ -1,4 +1,4 @@
-import { classifyHref, drawsFromData, fileKind, type PreviewEmbed } from '@skysa/core';
+import { cell, classifyHref, drawsFromData, fileKind, type PreviewEmbed } from '@skysa/core';
 import {
 	createContext,
 	type CSSProperties,
@@ -147,7 +147,7 @@ const usePicture = (src: string, element: Element | null): CardPictureAt => {
 	useEffect(() => {
 		if (kind !== 'relative' || !seen) return undefined;
 		const asking = new AbortController();
-		const kept = { current: (): void => undefined };
+		const kept = cell((): void => undefined);
 		void host
 			.show(src, { signal: asking.signal, fit: 'thumb' })
 			.catch((): Shown => ({ state: 'failed' }))
