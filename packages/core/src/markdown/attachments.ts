@@ -1,9 +1,9 @@
 import type { Nodes, Root } from 'mdast';
 
 import { NOTE_EXTENSION } from '../config.js';
+import { extensionOf, extensionPart } from '../names/extension.js';
 import { basename, isHidden, parentPath, pathSegments, SEPARATOR } from '../paths.js';
 import { parse, serialize } from './pipeline.js';
-import { extensionAt, foldName } from './slug.js';
 
 /**
  * A file beside a note, and the markdown that points at it (#187). An image is
@@ -24,15 +24,6 @@ import { extensionAt, foldName } from './slug.js';
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export type AttachmentKind = 'image' | 'file';
-
-/** The extension with its dot, as written, or empty (`extensionAt`). */
-const extensionPart = (name: string): string => name.slice(extensionAt(name));
-
-/**
- * A file's extension, folded, without its dot: `Photo.PNG` is `png`. Empty
- * where there is none, a hidden file's leading dot included.
- */
-export const extensionOf = (name: string): string => foldName(extensionPart(name).slice(1));
 
 const NOTE = NOTE_EXTENSION.slice(1);
 

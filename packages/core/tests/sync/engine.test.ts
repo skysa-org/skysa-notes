@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../src/hash.js';
+import { conflictFilePath, conflictFolderPath, conflictPath } from '../../src/names/conflicts.js';
 import { basename, isHidden, parentPath } from '../../src/paths.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import {
@@ -13,7 +14,6 @@ import {
 	type RemoteEntry,
 	type StorageProvider,
 } from '../../src/providers/types.js';
-import { conflictFilePath, conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
 import { type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
 import { AT, engineFixture, reporting } from './kit/engine.js';

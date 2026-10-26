@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { foldName } from '../../src/markdown/slug.js';
+import { foldName } from '../../src/names/fold.js';
 import { isHidden, isWithin, joinPath, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';

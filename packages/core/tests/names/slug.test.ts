@@ -1,13 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-	isNoteName,
-	noteFilename,
-	sanitizeFolderName,
-	slugify,
-	uniqueFilename,
-} from '../../src/markdown/slug.js';
 import { deriveTitle, titleFromFilename } from '../../src/markdown/title.js';
+import { isNoteName } from '../../src/names/fold.js';
+import { noteFilename, sanitizeFolderName, slugify, uniqueFilename } from '../../src/names/slug.js';
 
 /** Both caps in `slug.ts`, and the property a provider adapter needs of a name. */
 const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;

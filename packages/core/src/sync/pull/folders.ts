@@ -1,3 +1,4 @@
+import { conflictFolderPath, conflictPath } from '../../names/conflicts.js';
 import {
 	ancestorPaths,
 	basename,
@@ -9,7 +10,6 @@ import {
 	ROOT,
 } from '../../paths.js';
 import { type ChangeEntry, type RemoteEntry } from '../../providers/types.js';
-import { conflictFolderPath, conflictPath } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
 import { type PullChange, type SyncFolder, type SyncNote } from '../store.js';

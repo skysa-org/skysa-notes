@@ -1,9 +1,9 @@
-import { isNoteName } from '../../markdown/slug.js';
 import {
 	conflictFilename,
 	conflictFolderName,
 	conflictNameKeepingExtension,
-} from '../../sync/conflicts.js';
+} from '../../names/conflicts.js';
+import { isNoteName } from '../../names/fold.js';
 import { jsonBody } from '../http.js';
 import { applyItem, type Page, pathOf } from '../idTree.js';
 import { byAge, type DriveClient, type DriveFile, isFolder, treeItemOf } from './wire.js';

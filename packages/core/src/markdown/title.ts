@@ -1,9 +1,9 @@
 import { toString as nodeToString } from 'mdast-util-to-string';
 
 import { NOTE_EXTENSION } from '../config.js';
+import { isNoteName } from '../names/fold.js';
 import { toLf } from './lineEndings.js';
 import { parse } from './pipeline.js';
-import { isNoteName } from './slug.js';
 
 /**
  * Title is frontmatter `title`, else the first heading, else the filename.

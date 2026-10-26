@@ -1,5 +1,6 @@
 import { contentHash } from '../../hash.js';
 import { parseNoteFile } from '../../markdown/note.js';
+import { conflictPath } from '../../names/conflicts.js';
 import { parentPath } from '../../paths.js';
 import {
 	type EntryRef,
@@ -7,7 +8,7 @@ import {
 	isUnreadableError,
 	type RemoteEntry,
 } from '../../providers/types.js';
-import { conflictContent, conflictPath } from '../conflicts.js';
+import { conflictContent } from '../conflicts.js';
 import { type EngineContext } from '../context.js';
 import { type ConflictResolution, type PullChange, type SyncNote } from '../store.js';
 import { madeInBatch, type Step } from './batch.js';

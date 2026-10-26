@@ -1,6 +1,7 @@
 import { type FileKind, mediaOf } from './files/mediaTypes.js';
-import { extensionOf } from './markdown/attachments.js';
-import { extensionAt, fitBytes, MAX_NAME_BYTES, utf8Length } from './markdown/slug.js';
+import { fitBytes, MAX_NAME_BYTES, utf8Length } from './names/bytes.js';
+import { extensionOf } from './names/extension.js';
+import { extensionAt } from './names/extension.js';
 
 /**
  * What the app knows about a file beside a note from its name alone: how to
