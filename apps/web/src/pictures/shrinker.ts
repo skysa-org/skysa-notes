@@ -1,4 +1,5 @@
 import { cell } from '@skysa/core';
+
 /**
  * Smaller copies of pictures (#276), made on a worker of their own
  * (`shrink.worker.ts`): the seam the app asks through, and what answers it in

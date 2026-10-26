@@ -1,4 +1,5 @@
 import { cell } from '@skysa/core';
+
 /**
  * The two halves of every store the UI reads through `useSyncExternalStore`,
  * written once (#457): being told of a change, and a value that tells of its

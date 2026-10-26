@@ -1,4 +1,5 @@
 import { cell } from '@skysa/core';
+
 /**
  * Work over a whole library, done on the main thread a slice at a time (#275):
  * search's index, and every file of an import or a pull read before the

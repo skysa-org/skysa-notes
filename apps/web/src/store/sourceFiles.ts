@@ -32,6 +32,8 @@ const watchesOf = (db: NotesDatabase): Map<string, Watch> => {
 };
 
 const start = (db: NotesDatabase, connectionId: string, watches: Map<string, Watch>): Watch => {
+	// Its own set rather than `createEmitter`: the last to stop listening ends
+	// the query (`watchSourceFiles`), so it needs to know how many there are.
 	const listeners = new Set<() => void>();
 	// The paths last heard, so a re-run that found the same files tells no one.
 	const heard = cell<string | undefined>(undefined);
