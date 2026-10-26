@@ -1,3 +1,4 @@
+import { messageOf } from '@skysa/core';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 
 import { t } from '../i18n/t.js';
@@ -20,7 +21,7 @@ import { t } from '../i18n/t.js';
 export const ErrorScreen = ({ error, reset }: ErrorComponentProps) => {
 	// `throw` takes anything, and a boundary is the one place that must not
 	// throw over what it was handed.
-	const message = error instanceof Error ? error.message : String(error);
+	const message = messageOf(error);
 
 	return (
 		<main className="error-screen" role="alert">
