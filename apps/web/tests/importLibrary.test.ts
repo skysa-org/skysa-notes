@@ -1,4 +1,5 @@
-import { createFakeProvider, createSyncEngine, isHidden, MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { createSyncEngine, isHidden, MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';

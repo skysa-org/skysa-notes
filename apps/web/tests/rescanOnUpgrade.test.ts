@@ -1,4 +1,5 @@
-import { createFakeProvider, createSyncEngine } from '@skysa/core';
+import { createSyncEngine } from '@skysa/core';
+import { createFakeProvider } from '@skysa/core/testing';
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 

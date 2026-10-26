@@ -1,9 +1,5 @@
-import {
-	createFakeProvider,
-	createSyncEngine,
-	type PictureInfo,
-	type PictureVariant,
-} from '@skysa/core';
+import { createSyncEngine, type PictureInfo, type PictureVariant } from '@skysa/core';
+import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 import { bindConnection, detachConnection, releaseConnection } from '../src/store/connection.js';

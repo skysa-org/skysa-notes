@@ -4,12 +4,11 @@ import {
 	CLIPBOARD_FOLDER,
 	CLIPBOARD_ITEMS,
 	clipName,
-	createFakeProvider,
-	type FakeProvider,
 	MAX_ATTACHMENT_BYTES,
 	readClipName,
 	type StorageProvider,
 } from '@skysa/core';
+import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {

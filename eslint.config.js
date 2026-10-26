@@ -553,6 +553,24 @@ export default tseslint.config(
 			'max-lines': ['warn', { max: 600, skipBlankLines: true, skipComments: true }],
 		},
 	},
+	{
+		// Core's test doubles are `@skysa/core/testing` (#449), for tests alone:
+		// nothing the app ships may reach them, by the entry or by a path into
+		// any tests folder. typescript-eslint's rule rather than core's, which the
+		// layer blocks above set per folder and would replace this in each.
+		files: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
+		rules: {
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: '@skysa/core/testing', message: 'test doubles are for tests.' },
+					],
+					patterns: [{ group: ['**/tests/**'], message: 'test doubles are for tests.' }],
+				},
+			],
+		},
+	},
 
 	// ---- The bookmarklet ----------------------------------------------------
 

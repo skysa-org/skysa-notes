@@ -1,12 +1,11 @@
 import {
 	bytesHash,
-	createFakeProvider,
 	createSyncEngine,
-	type FakeProvider,
 	isHidden,
 	MAX_ATTACHMENT_BYTES,
 	type StorageProvider,
 } from '@skysa/core';
+import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 import {

@@ -10,7 +10,7 @@ import { type ChangeEntry, isRateLimitError } from '../providers/types.js';
  * (`metIn`, `metOf`).
  */
 
-export type SyncStatus =
+type SyncStatus =
 	/** Everything queued reached the remote. */
 	| 'ok'
 	/** A token problem a refresh did not fix. The connection needs attention. */

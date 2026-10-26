@@ -1,4 +1,5 @@
-import { createFakeProvider, createSyncEngine } from '@skysa/core';
+import { createSyncEngine } from '@skysa/core';
+import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 import { bindConnection, verifyResume } from '../src/store/connection.js';

@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-	APP_NAME,
-	buildMarker,
-	MARKER_SCHEMA_VERSION,
-	parseMarker,
-	serializeMarker,
-} from '../src/index.js';
+import { APP_NAME, MARKER_SCHEMA_VERSION } from '../src/config.js';
+import { buildMarker, parseMarker, serializeMarker } from '../src/marker.js';
 
 const input = {
 	appVersion: '0.1.0',

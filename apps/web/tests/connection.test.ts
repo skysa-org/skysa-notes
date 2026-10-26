@@ -1,4 +1,5 @@
-import { createFakeProvider, createSyncEngine, isHidden, NotFoundError } from '@skysa/core';
+import { createSyncEngine, isHidden, NotFoundError } from '@skysa/core';
+import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {

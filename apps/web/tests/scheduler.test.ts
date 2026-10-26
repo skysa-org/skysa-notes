@@ -2,14 +2,13 @@ import {
 	AuthError,
 	buildEncryptionFile,
 	CLIPBOARD_FOLDER,
-	createFakeProvider,
 	ENCRYPTION_FILE,
-	type FakeProvider,
 	RateLimitError,
 	type RemoteEntry,
 	serializeEncryptionFile,
 	type StorageProvider,
 } from '@skysa/core';
+import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

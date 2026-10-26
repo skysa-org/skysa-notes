@@ -14,7 +14,7 @@ import { createPullRun } from './pull/run.js';
 import { createPush } from './push/drain.js';
 import type { SyncStore } from './store.js';
 
-export type { SyncOutcome, SyncStatus } from './outcome.js';
+export type { SyncOutcome } from './outcome.js';
 export type { SyncProgress } from './progress.js';
 
 /**

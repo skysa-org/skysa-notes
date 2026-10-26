@@ -1,16 +1,10 @@
-import {
-	conflictContent,
-	contentHash,
-	createFakeProvider,
-	createSyncEngine,
-	type RemoteEntry,
-} from '@skysa/core';
+import { conflictContent, contentHash, createSyncEngine, type RemoteEntry } from '@skysa/core';
+import { createFakeProvider, describeSyncStoreContract } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 // The suite lives beside the port it checks, in `packages/core`, and is not a
 // `*.test.ts` there so that it runs only where a store registers it. `core`
 // cannot import `apps/*`, so this store registers here instead.
-import { describeSyncStoreContract } from '../../../packages/core/tests/sync/storeContract.js';
 import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
 import {
 	createNote,

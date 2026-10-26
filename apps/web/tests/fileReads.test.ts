@@ -1,10 +1,5 @@
-import {
-	AuthError,
-	createFakeProvider,
-	type EntryRef,
-	type FakeProvider,
-	type StorageProvider,
-} from '@skysa/core';
+import { AuthError, type EntryRef, type StorageProvider } from '@skysa/core';
+import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type FileRecord } from '../src/store/db.js';

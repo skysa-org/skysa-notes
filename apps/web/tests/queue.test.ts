@@ -1,10 +1,5 @@
-import {
-	createFakeProvider,
-	createSyncEngine,
-	type FakeProvider,
-	isHidden,
-	type StorageProvider,
-} from '@skysa/core';
+import { createSyncEngine, isHidden, type StorageProvider } from '@skysa/core';
+import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';

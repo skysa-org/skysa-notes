@@ -258,7 +258,7 @@ Adapter contract tests: the scenario suite is `describeProviderContract(name, ha
 
 Scenarios: idempotent `ensureRoot` including write-the-marker-only-if-absent, path normalization at the adapter edge, byte fidelity on read-back, the four `write` cases above, one-level `list` including hidden entries, idempotent `createFolder`, the root (a note or file written at it, or a move onto it, is a `NotFoundError`, and `createFolder('')` answers it as a folder already there — Dropbox had no guard, and its stub now refuses a write path `files.stone` does not allow, as Dropbox does), move (file, into a folder, whole folder rebasing its descendants, onto an occupied path), idempotent recursive `delete`, and a `changes` feed that scans current state on a cold start rather than replaying history, reflects each step, survives being persisted, and is drained through its `more` loop. And a file that is not UTF-8 text: `read` is an `UnreadableError`, while `list`, `changes`, `move` and `delete` treat it as any other file and leave its bytes as they were. No adapter can rewrite a file with such bytes, so the harness may offer a way in underneath (`plant`, `bytesAt`) — the fake's `plantBytes` — and a live registration, which has none, skips these. And a file that is not a note, through the port alone so that a live account runs it too (2026-10-03): every byte value, an empty file and a 6 MB one (over Drive's multipart limit) come back byte for byte, at the version `createFile` reported; `readBytes` keeps a BOM; `read` of one is an `UnreadableError`; `createFile` over a file, a note or a folder is a `ConflictError` whose `remote` says what is there — its kind and, for a file, its size — and leaves it as it was; it is listed and in the feed with its size in bytes; and it moves with its bytes, and once deleted is `NotFoundError` to `readBytes`. The wire stubs read every request body as bytes (`tests/providers/wireBody.ts`) and refuse one they cannot read: they used to take anything but a string as empty, so an upload of bytes would have arrived as an empty file with every test passing.
 
-The in-memory fake in `src/providers/fake.ts` is deliberately the strictest provider in the repo: where this section leaves a case open it takes the least forgiving reading, because a lenient fake lets the engine grow assumptions that only fail against a real account. It never creates a missing parent, re-versions even a byte-identical write, and never reuses an id. It holds every file as bytes, whichever method wrote it, so a stub can hand any upload to it; its `createFile` is as strict as `write`'s create, and `plantBytes` — another tool saving over whatever is there, with no version check — is for tests alone. Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's drain loop, folder rebasing, and auth-retry paths be tested at all.
+The in-memory fake in `src/providers/fake.ts` — reached by the apps' tests as `@skysa/core/testing`, with the three provider stubs and the store contract, and never by anything they ship — is deliberately the strictest provider in the repo: where this section leaves a case open it takes the least forgiving reading, because a lenient fake lets the engine grow assumptions that only fail against a real account. It never creates a missing parent, re-versions even a byte-identical write, and never reuses an id. It holds every file as bytes, whichever method wrote it, so a stub can hand any upload to it; its `createFile` is as strict as `write`'s create, and `plantBytes` — another tool saving over whatever is there, with no version check — is for tests alone. Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's drain loop, folder rebasing, and auth-retry paths be tested at all.
 
 ---
 
@@ -1681,6 +1681,7 @@ apps/
 packages/
   core/                       # zero framework deps; runs in browser, Node, and Workers
     src/
+      index.ts                # what the apps may use, by name; tests/exports.test.ts lists the values (#449)
       config.ts               # APP_FOLDER_NAME, MARKER_FILE
       appFolder.ts            # the app folder's places that are not notebooks: isScratchPath isVaultPath isClipPath isEncryptionFile
       files/                  # files that are not notes: mediaTypes.ts (one table of types) attachments.ts (how one is shown or opened)
@@ -1732,13 +1733,14 @@ packages/
       secrets/                # recoveryKey.ts (the printed key, typed back) encryptionFile.ts (.encryption.json; its path is appFolder.ts's)
                               #   sealing.ts (sealing and opening a secret: the one module here with the curve in it)
     tests/
+      testing.ts              # @skysa/core/testing: the fake, the provider stubs, the store contract, for the apps' tests
       providers/contract.test.ts
       markdown/roundtrip.test.ts
       sync/*.test.ts
 docker/nextcloud-compose.yml  # WebDAV test target (WebDAV deferred, §5.4)
 ```
 
-Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may import `core`. The WebDAV adapter in `core` takes a `fetch`-like function so it can point at the proxy in the browser and at the server directly in tests.
+Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may import `core`, by its main entry, `@skysa/core`, which names what it offers rather than re-exporting whole modules (#449); their tests may also import `@skysa/core/testing`, and their source may not, nor any path into a `tests` folder (ESLint). The WebDAV adapter in `core` takes a `fetch`-like function so it can point at the proxy in the browser and at the server directly in tests.
 
 Inside `apps/web/src` the layers point one way too (2026-10-22, ESLint's `no-restricted-imports`): `store/` is the data layer and imports neither the sync layer nor the UI, bar the editor's two preference modules (`editor/mode`, `editor/codeDisplay`); `sync/` imports the store, `api/`, `errors/` and `i18n/`, and no UI; `editor/` does not import `routes/` or `sync/`. Inside `core`, nothing under `providers/` imports `sync/` (#449): what both need, a conflict copy's name say, sits below them in `names/`, which imports neither of them nor `markdown/`. Neither `core` nor the Worker may import a Node built-in, and the list is Node's own (`module.builtinModules`), not a hand-kept one.
 
