@@ -1,12 +1,12 @@
-import { decrypt, encrypt, opens } from './age/age.js';
-import { armor, dearmor } from './age/armor.js';
-import { AgeError } from './age/errors.js';
-import { SECRET_LANGUAGE, secretFile } from './secrets.js';
+import { decrypt, encrypt, opens } from '../age/age.js';
+import { armor, dearmor } from '../age/armor.js';
+import { AgeError } from '../age/errors.js';
+import { SECRET_LANGUAGE, secretFile } from '../markdown/secretBlocks.js';
 
 /**
  * What a secret needs the curve and the cipher for: sealing one, opening one,
  * and asking whether a key opens one (docs/ARCHITECTURE.md §7, "Secrets in a
- * note"). Apart from `secrets.ts`, which only reads secret blocks, as previews
+ * note"). Apart from `markdown/secretBlocks.ts`, which only reads secret blocks, as previews
  * and sync do, so that they do not bring the curve into a bundle with them.
  */
 

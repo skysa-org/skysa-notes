@@ -1,6 +1,6 @@
 import { isClipPath } from '../clipboard.js';
 import { type ChangeEntry, isRateLimitError } from '../providers/types.js';
-import { isEncryptionFile } from '../secrets.js';
+import { isEncryptionFile } from '../secrets/encryptionFile.js';
 
 /**
  * What a run of the engine comes to (`SyncOutcome`), and the pieces every

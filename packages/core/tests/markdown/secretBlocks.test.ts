@@ -1,52 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
-import { encrypt } from '../src/age/age.js';
-import { armor } from '../src/age/armor.js';
-import { parseRecipient, recipientOf } from '../src/age/curve.js';
-import { AgeError } from '../src/age/errors.js';
+import { parseRecipient } from '../../src/age/curve.js';
+import { generateIdentity, parseIdentity } from '../../src/age/keys.js';
+import { previewBlocks, previewLines } from '../../src/markdown/preview.js';
 import {
-	encodeIdentity,
-	encodeRecipient,
-	generateIdentity,
-	parseIdentity,
-} from '../src/age/keys.js';
-import { previewBlocks, previewLines } from '../src/markdown/preview.js';
-import { openSecret, opensSecret, resealSecret, sealSecret } from '../src/sealing.js';
-import {
-	buildEncryptionFile,
 	hidesAsSecret,
-	isEncryptionFile,
 	isSecretBlock,
-	parseEncryptionFile,
-	readRecoveryKey,
-	recoveryKeyGroups,
 	rewriteSecrets,
 	secretBlocksIn,
 	secretFile,
 	secretLabel,
-	serializeEncryptionFile,
 	withoutArmor,
-} from '../src/secrets.js';
-import {
-	IDENTITY,
-	RECIPIENT,
-	SEALED_BY_AGE,
-	SEALED_BY_AGE_WORDS,
-	SEALED_HERE,
-	SEALED_HERE_WORDS,
-} from './age/known.js';
+} from '../../src/markdown/secretBlocks.js';
+import { opensSecret, sealSecret } from '../../src/secrets/sealing.js';
+import { IDENTITY, RECIPIENT, SEALED_BY_AGE, SEALED_HERE } from '../age/known.js';
 
 const identity = parseIdentity(IDENTITY) ?? new Uint8Array();
-const recipient = parseRecipient(RECIPIENT) ?? new Uint8Array();
 
-const failureOf = (attempt: () => unknown): string => {
-	try {
-		attempt();
-		return 'success';
-	} catch (error) {
-		return error instanceof AgeError ? error.failure : String(error);
-	}
-};
+const recipient = parseRecipient(RECIPIENT) ?? new Uint8Array();
 
 describe('a secret block', () => {
 	it('is an `age` fence holding armor', () => {
@@ -86,63 +57,6 @@ describe('a secret block', () => {
 		expect(secretLabel('   ')).toBeUndefined();
 		expect(secretLabel(null)).toBeUndefined();
 		expect(secretLabel(undefined)).toBeUndefined();
-	});
-});
-
-describe('sealing and opening', () => {
-	it('opens a secret this made, and one the age tool made', () => {
-		expect(openSecret(SEALED_HERE, [identity])).toBe(SEALED_HERE_WORDS);
-		expect(openSecret(SEALED_BY_AGE, [identity])).toBe(SEALED_BY_AGE_WORDS);
-	});
-
-	it('round trips words in any script, and their line endings', () => {
-		const words = 'Пароль: 🔑 ключ\n\n  indented\r\nand a trailing newline\n';
-		const sealed = sealSecret(words, recipient);
-		expect(isSecretBlock('age', sealed)).toBe(true);
-		expect(openSecret(sealed, [identity])).toBe(words);
-	});
-
-	it('keeps a byte order mark, as age -d does, so sealing again changes nothing', () => {
-		const words = '\uFEFFpassword';
-		expect(openSecret(sealSecret(words, recipient), [identity])).toBe(words);
-	});
-
-	it('is the armor without a line ending after it, which the fence supplies', () => {
-		const sealed = sealSecret('x', recipient);
-		expect(sealed.startsWith('-----BEGIN AGE ENCRYPTED FILE-----\n')).toBe(true);
-		expect(sealed.endsWith('\n-----END AGE ENCRYPTED FILE-----')).toBe(true);
-	});
-
-	it('is a different block each time it is sealed', () => {
-		expect(sealSecret('x', recipient)).not.toBe(sealSecret('x', recipient));
-	});
-
-	it('says when no key it is given opens the block', () => {
-		expect(failureOf(() => openSecret(SEALED_HERE, [generateIdentity()]))).toBe('no match');
-	});
-
-	it('seals the same bytes again to another key, text or not', () => {
-		const bytes = new Uint8Array([0xff, 0xfe, 0x00, 0x41]);
-		const block = armor(encrypt(bytes, [recipient])).replace(/\n$/u, '');
-		const other = generateIdentity();
-		const to = parseRecipient(recipientOf(other)) ?? new Uint8Array();
-
-		const resealed = resealSecret(block, [identity], to);
-
-		expect(opensSecret(resealed, [identity])).toBe(false);
-		expect(failureOf(() => openSecret(resealed, [other]))).toBe('text');
-		expect(resealSecret(resealed, [other], recipient)).toMatch(
-			/^-----BEGIN AGE ENCRYPTED FILE-----\n/u
-		);
-		expect(openSecret(resealSecret(SEALED_HERE, [identity], to), [other])).toBe(
-			SEALED_HERE_WORDS
-		);
-		expect(failureOf(() => resealSecret(SEALED_HERE, [other], to))).toBe('no match');
-	});
-
-	it('says when a block opens to bytes that are not text', () => {
-		const binary = armor(encrypt(Uint8Array.of(0xff, 0xfe, 0xfd), [recipient]));
-		expect(failureOf(() => openSecret(binary, [identity]))).toBe('text');
 	});
 });
 
@@ -353,104 +267,5 @@ describe('rewriting the secrets in a note', () => {
 		const body = ['  ```age', first, ...within('  ', rest.join('\n')), '  ```', ''].join('\n');
 		expect(secretBlocksIn(body)).toEqual([SEALED_HERE]);
 		expect(rewriteSecrets(body, () => other)).toBe(body);
-	});
-});
-
-describe('the recovery key', () => {
-	it('is printed as its prefix and twelve groups, the last of three', () => {
-		const groups = recoveryKeyGroups(identity);
-		expect(groups).toHaveLength(12);
-		expect(groups.slice(0, 11).every((group) => group.length === 5)).toBe(true);
-		expect(groups[11]).toHaveLength(3);
-		expect(`AGE-SECRET-KEY-1${groups.join('')}`).toBe(IDENTITY);
-	});
-
-	it('is read however it was typed', () => {
-		const groups = recoveryKeyGroups(identity);
-		[
-			IDENTITY,
-			IDENTITY.toLowerCase(),
-			`AGE-SECRET-KEY-1 ${groups.join(' ')}`,
-			groups.join(' '),
-			groups.join('-'),
-			` ${groups.slice(0, 6).join(' ')}\n${groups.slice(6).join(' ').toLowerCase()} `,
-			`AGE SECRET KEY 1 ${groups.join(' ')}`,
-			`age-secret-key-1-${groups.join('-')}`,
-		].forEach((typed) => {
-			expect(readRecoveryKey(typed)).toEqual(identity);
-		});
-	});
-
-	it('is refused with a character mistyped, or one left out', () => {
-		const groups = recoveryKeyGroups(identity);
-		const first = groups[0] ?? '';
-		const typo = `${first.slice(0, 4)}${first[4] === 'Q' ? 'P' : 'Q'}`;
-		expect(readRecoveryKey([typo, ...groups.slice(1)].join(' '))).toBeUndefined();
-		expect(readRecoveryKey(groups.join(' ').slice(0, -1))).toBeUndefined();
-		expect(readRecoveryKey('')).toBeUndefined();
-	});
-
-	it('round trips a new one', () => {
-		const made = generateIdentity();
-		expect(readRecoveryKey(recoveryKeyGroups(made).join(' '))).toEqual(made);
-		expect(encodeIdentity(made).startsWith('AGE-SECRET-KEY-1')).toBe(true);
-	});
-});
-
-describe('the key file', () => {
-	it('round trips', () => {
-		const file = buildEncryptionFile(RECIPIENT, new Date('2026-10-14T18:02:11Z'));
-		const text = serializeEncryptionFile(file);
-		expect(text).toBe(
-			`{\n  "schemaVersion": 1,\n  "recipient": "${RECIPIENT}",\n  "setAt": "2026-10-14T18:02:11.000Z"\n}\n`
-		);
-		expect(parseEncryptionFile(text)).toEqual({ status: 'ok', file });
-	});
-
-	it('is one a newer build wrote, whatever else it says, which this one does not use or replace', () => {
-		[
-			{ schemaVersion: 2, recipient: RECIPIENT, setAt: 'later' },
-			{ schemaVersion: 2, recipients: [RECIPIENT, 'age1pq1…'] },
-			{ schemaVersion: 2 },
-		].forEach((file) => {
-			expect(parseEncryptionFile(JSON.stringify(file))).toEqual({ status: 'newer' });
-		});
-	});
-
-	it('gives its recipient in lower case, as age writes it, however it was written', () => {
-		const text = JSON.stringify({
-			schemaVersion: 1,
-			recipient: RECIPIENT.toUpperCase(),
-			setAt: 'x',
-		});
-		const read = parseEncryptionFile(text);
-		expect(read.status === 'ok' ? read.file.recipient : undefined).toBe(RECIPIENT);
-		expect(buildEncryptionFile(RECIPIENT.toUpperCase()).recipient).toBe(RECIPIENT);
-	});
-
-	it.each([
-		['not JSON', '{'],
-		['no recipient', '{"schemaVersion":1,"setAt":"x"}'],
-		['a recipient that is not one', '{"schemaVersion":1,"recipient":"age1nope","setAt":"x"}'],
-		[
-			'an identity for a recipient',
-			`{"schemaVersion":1,"recipient":"${IDENTITY}","setAt":"x"}`,
-		],
-	])('is invalid with %s', (_, text) => {
-		expect(parseEncryptionFile(text)).toEqual({ status: 'invalid' });
-	});
-
-	it('reads its recipient by shape alone, and sealing refuses one no file opens for', () => {
-		const lowOrder = encodeRecipient(new Uint8Array(32));
-		const text = JSON.stringify({ schemaVersion: 1, recipient: lowOrder, setAt: 'x' });
-		expect(parseEncryptionFile(text).status).toBe('ok');
-		expect(parseRecipient(lowOrder)).toBeUndefined();
-	});
-
-	it('is at the root and nowhere else', () => {
-		expect(isEncryptionFile('.encryption.json')).toBe(true);
-		expect(isEncryptionFile('/.encryption.json')).toBe(true);
-		expect(isEncryptionFile('notes/.encryption.json')).toBe(false);
-		expect(isEncryptionFile('.encryption.json.bak')).toBe(false);
 	});
 });

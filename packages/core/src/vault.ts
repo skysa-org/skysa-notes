@@ -1,13 +1,13 @@
 import { isJsonObject, parseJson } from './json.js';
-import { SECRET_LANGUAGE, secretBlocksIn } from './secrets.js';
+import { SECRET_LANGUAGE, secretBlocksIn } from './markdown/secretBlocks.js';
 
 /**
  * A password in the vault (docs/ARCHITECTURE.md §7, "Passwords in the
  * vault"): a note in `.vault/` whose `title` is its label, in plain text, and
  * whose body is one `age` fence. What the fence holds, once opened, is a JSON
  * object of the fields below. Reading and writing that object and the body is
- * here; sealing and opening it is a secret's (`sealing.ts`), so that nothing
- * that only lists items brings the curve into a bundle with it.
+ * here; sealing and opening it is a secret's (`secrets/sealing.ts`), so that
+ * nothing that only lists items brings the curve into a bundle with it.
  */
 
 /** What an item keeps encrypted. */
