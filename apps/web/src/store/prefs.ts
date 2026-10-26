@@ -24,8 +24,27 @@ export const readJson = <T>(value: string | undefined, schema: z.ZodType<T>): T 
 	}
 };
 
+/**
+ * Every pref kept for each source, by name. `sourceKey` takes nothing else, so
+ * a pref added for a source is added here, and `store/sourcePrefs.ts`, which
+ * forgets a source's prefs with it and carries them to it under a new id, is
+ * made to say how it merges (#452).
+ */
+export const PREF_KEYS = [
+	'lastOpen',
+	'openNotebooks',
+	'passwords',
+	'pinnedNotebooks',
+	'bottomPinnedNotebooks',
+	'pinnedNotes',
+	'scratchpad',
+] as const;
+
+export type SourcePref = (typeof PREF_KEYS)[number];
+
 /** The key of a pref kept for each source: `<name>:<connectionId>`. */
-export const sourceKey = (name: string, connectionId: string): string => `${name}:${connectionId}`;
+export const sourceKey = (name: SourcePref, connectionId: string): string =>
+	`${name}:${connectionId}`;
 
 export const DEFAULT_EDITOR_MODE_KEY = 'defaultEditorMode';
 

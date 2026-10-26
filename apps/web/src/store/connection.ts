@@ -39,6 +39,7 @@ import { queueByNotebook } from './queue.js';
 import { rowsOf } from './rows.js';
 import { isLive, isLiveSource, isTombstone } from './rowStates.js';
 import { sourceTables } from './scopes.js';
+import { carrySourcePrefs, heldFor, holdSourcePrefs } from './sourcePrefs.js';
 import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from './unsynced.js';
 
 /**
@@ -115,6 +116,7 @@ type Scope = Pick<
 	| 'pictureBytes'
 	| 'keyFiles'
 	| 'secretKeys'
+	| 'prefs'
 >;
 
 /** `accountId` on a `syncState` row, or nothing where the API did not name one. */
@@ -667,6 +669,10 @@ export const bindingMode = async (
 
 const NOTHING_MOVED: Moved = { notes: [], folders: [], files: [], linked: false };
 
+/** Whether a move took any row at all. */
+const movedAny = (moved: Moved): boolean =>
+	moved.notes.length + moved.folders.length + moved.files.length > 0;
+
 const together = (a: Moved, b: Moved): Moved => ({
 	notes: [...a.notes, ...b.notes],
 	folders: [...a.folders, ...b.folders],
@@ -716,6 +722,37 @@ const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
 export const holdsPile = (state: SyncStateRecord): boolean =>
 	state.importing !== undefined && isLiveSource(state);
 
+/**
+ * The pile copied into a source by a bind, for good, with no import to cancel
+ * back to: what was remembered of it goes with its notes. Only where some went:
+ * an empty pile's prefs name nothing the source was given. A plain function,
+ * not an `async` one, for the reason `forgetClips` gives.
+ */
+const pileCopied = (
+	db: Pick<NotesDatabase, 'prefs'>,
+	importing: boolean,
+	copied: Moved,
+	connectionId: string
+): Promise<unknown> | undefined =>
+	importing || !movedAny(copied)
+		? undefined
+		: carrySourcePrefs(db, [LOCAL_CONNECTION_ID], connectionId);
+
+/**
+ * Whose prefs come home with a bind: the detached sources resumed, and what
+ * was held for the account since a source of it last left the device.
+ */
+const prefsComingHome = (
+	from: readonly string[],
+	input: Pick<BindInput, 'provider' | 'accountId'>,
+	current: SyncStateRecord | undefined
+): string[] => {
+	// The bind's account, or the row's where the API did not name one, as the
+	// row it writes keeps it.
+	const account = accountKey(input.provider, input.accountId ?? current?.accountId);
+	return account === undefined ? [...from] : [...from, heldFor(account)];
+};
+
 /** A source with no row of its own and nothing detached to resume: new here. */
 const firstBinding = (
 	states: readonly SyncStateRecord[],
@@ -745,6 +782,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		await db.syncState.bulkDelete(from);
 		await forgetBinding(db, from);
 		await carryKeys(db, from, input.connectionId);
+		await carrySourcePrefs(db, prefsComingHome(from, input, current), input.connectionId);
 		// The same connection, back: the rows it kept never left it.
 		const waiting =
 			current?.detached === undefined
@@ -775,6 +813,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 					undefined,
 					importing !== undefined
 				);
+		await pileCopied(db, importing !== undefined, copied, input.connectionId);
 		const moved = together(together(resumed, waiting), copied);
 
 		// Every other connected source keeps its `syncState` row, and with it its
@@ -847,6 +886,10 @@ export const rememberAccount = (
 		// Nothing bound, or nothing said: no row to write, or nothing to write on it.
 		if (state === undefined || Object.keys(known).length === 0) return true;
 		await db.syncState.put({ ...state, ...known });
+		// Named only now: what was held for the account comes home here, as it
+		// would have with a bind that named it.
+		const account = accountKey(input.provider, input.accountId);
+		if (account !== undefined) await carrySourcePrefs(db, [heldFor(account)], active);
 		return true;
 	});
 
@@ -1063,8 +1106,15 @@ const keepOnly = async (
  * would answer for the wrong one now that this row is gone.
  */
 const forgetSource = async (db: NotesDatabase, connectionId: string): Promise<void> => {
+	const state = await db.syncState.get(connectionId);
 	await db.syncState.delete(connectionId);
 	await db.credentials.delete(connectionId);
+	// Kept for its account, which may come back (`store/sourcePrefs.ts`).
+	await holdSourcePrefs(
+		db,
+		connectionId,
+		state?.provider === undefined ? undefined : accountKey(state.provider, state.accountId)
+	);
 	const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
 	if (chosen === connectionId) await db.prefs.delete(ACTIVE_CONNECTION_KEY);
 };
@@ -1102,6 +1152,15 @@ export const finishImport = (db: NotesDatabase, connectionId: string): Promise<v
 				),
 			});
 			await queueOwed(db, connectionId, carried);
+		}
+		// The pile's notes are in the source now, and what was remembered of
+		// them goes there too: of an empty pile, it names nothing there.
+		if (
+			(await rowsOf(db.notes, LOCAL_CONNECTION_ID).count()) +
+				(await rowsOf(db.folders, LOCAL_CONNECTION_ID).count()) >
+			0
+		) {
+			await carrySourcePrefs(db, [LOCAL_CONNECTION_ID], connectionId);
 		}
 		await clearPile(db);
 		const { importing: _done, ...rest } = state;

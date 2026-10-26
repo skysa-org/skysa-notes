@@ -60,6 +60,35 @@ export const getLastOpen = async (db: NotesDatabase, connectionId: string): Prom
 	read((await db.prefs.get(keyFor(connectionId)))?.value);
 
 /**
+ * A source's place, with the places of the sources it is taking in (a source
+ * resumed under a new id, `store/sourcePrefs.ts`): its own notebook open last
+ * where it has one, and the note open last in each notebook from all of them,
+ * its own where two name one notebook. Its own value, as it was, where nothing
+ * carried can be read.
+ */
+export const mergeLastOpen = (
+	own: string | undefined,
+	carried: readonly string[]
+): string | undefined => {
+	const places = carried.flatMap((value) => readJson(value, stored) ?? []);
+	if (places.length === 0) return own;
+	const mine = readJson(own, stored);
+	// Theirs first and its own last, so its own are the newest in the order
+	// the limit drops from, and win where two name one notebook.
+	const entries = [...places, ...(mine === undefined ? [] : [mine])].flatMap((place) =>
+		Object.entries(place.notes)
+	);
+	const notes = entries.filter(
+		([folder], at) => entries.findLastIndex(([other]) => other === folder) === at
+	);
+	const folder = mine?.folder ?? places.find((place) => place.folder !== undefined)?.folder;
+	return JSON.stringify({
+		...(folder === undefined ? {} : { folder }),
+		notes: Object.fromEntries(notes.slice(-LIMIT)),
+	});
+};
+
+/**
  * What this tab has written, ahead of the store's answer. A live query's
  * answer follows a write by a read, and by another for each write that lands
  * while it reads, since Dexie starts it over; and a click makes a write or

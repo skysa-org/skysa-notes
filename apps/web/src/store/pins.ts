@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { type NoteKey, type NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
-import { readJson, sourceKey } from './prefs.js';
+import { readJson, sourceKey, type SourcePref } from './prefs.js';
 import { rowsOf } from './rows.js';
 import { isLive } from './rowStates.js';
 
@@ -21,6 +21,9 @@ import { isLive } from './rowStates.js';
  * pinning by hand reaches it, and a row that stays small if they do.
  */
 const LIMIT = 500;
+
+/** How many of each kind of pin a source keeps (`store/sourcePrefs.ts` merges to it). */
+export const PINS_KEPT = LIMIT;
 
 /** Which end of the notebooks beside it a notebook is pinned to. */
 export type NotebookPin = 'top' | 'bottom';
@@ -102,7 +105,7 @@ export const forgetPinnedNotebooks = async (
  * changes, rather than in every place a note can go from: one deleted here and
  * taken back keeps its pin.
  */
-const NOTES = 'pinnedNotes';
+const NOTES: SourcePref = 'pinnedNotes';
 
 const notesKey = (connectionId: string): string => sourceKey(NOTES, connectionId);
 
