@@ -307,7 +307,7 @@ interface Session {
 	readonly engine: SyncEngine | undefined;
 	readonly flags: Set<Flag>;
 	/** Failures in a row, for the backoff. */
-	readonly failures: Cell<number | undefined>;
+	readonly failures: Cell<number>;
 	/** The highest op seq seen, which is how a local edit shows itself. */
 	readonly lastSeq: Cell<number | undefined>;
 	/** The run in progress, including any it has been asked to follow with. */
@@ -603,7 +603,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	};
 
 	const backoff = (session: Session): number => {
-		const failures = (session.failures.current ?? 0) + 1;
+		const failures = session.failures.current + 1;
 		session.failures.current = failures;
 		return Math.min(backoffMs * 2 ** (failures - 1), maxBackoffMs);
 	};
@@ -752,7 +752,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			return;
 		}
 		// Nothing left failing that time will fix: the backoff starts over.
-		session.failures.current = undefined;
+		session.failures.current = 0;
 		if (outcome.status === 'blocked') await blocked(session);
 		else session.blockedSince.current = undefined;
 		// Asked for after `blocked`, which may have just given the queue its
@@ -1136,7 +1136,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 							},
 						}),
 			flags: new Set(),
-			failures: cell<number | undefined>(undefined),
+			failures: cell(0),
 			lastSeq: cell<number | undefined>(undefined),
 			inFlight: cell<Promise<void> | undefined>(undefined),
 			blockedSince: cell<number | undefined>(undefined),
@@ -1325,7 +1325,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			// The backoff and the blocked clock start over: the user asking is
 			// the help `blocked` waits for, and a re-scan that has to sit out a
 			// five-minute backoff first is not one.
-			session.failures.current = undefined;
+			session.failures.current = 0;
 			session.blockedSince.current = undefined;
 			session.stuck.current = undefined;
 			await run(session);

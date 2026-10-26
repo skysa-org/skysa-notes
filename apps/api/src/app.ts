@@ -127,8 +127,7 @@ export const createApp = (options: CreateAppOptions) => {
 	/**
 	 * Key import is async and `createApp` is not, so the promises are built once
 	 * and awaited per request — every request after the first resolves an already
-	 * settled promise. A Map rather than a mutable binding, matching the isolate
-	 * cache in `src/worker.ts`.
+	 * settled promise. A cell, as the isolate cache in `src/worker.ts` is.
 	 */
 	const keys = cell<Promise<readonly [SecretKey, CryptoKey, SecretKey]> | undefined>(undefined);
 	const keySet = (): Promise<readonly [SecretKey, CryptoKey, SecretKey]> => {

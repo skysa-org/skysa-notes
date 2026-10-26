@@ -16,8 +16,8 @@ export { ConnectionRelay } from './relay/durableObject.js';
 type AppOrError = ReturnType<typeof createApp> | Error;
 
 /**
- * Built once per isolate. A Map rather than a mutable binding so the cache is an
- * explicit, single-purpose piece of state rather than ambient module mutation.
+ * Built once per isolate. A cell (#457) so the cache is an explicit,
+ * single-purpose piece of state rather than ambient module mutation.
  */
 const cache = cell<AppOrError | undefined>(undefined);
 
