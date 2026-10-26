@@ -1,3 +1,5 @@
+import { messageOf } from '@skysa/core';
+
 import { ApiError } from '../api/client.js';
 
 /**
@@ -42,7 +44,7 @@ class Failed extends Error {
 		readonly reached: Reached,
 		cause: unknown
 	) {
-		super(cause instanceof Error ? cause.message : String(cause), { cause });
+		super(messageOf(cause), { cause });
 	}
 }
 
