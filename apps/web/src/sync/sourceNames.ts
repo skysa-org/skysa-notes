@@ -19,7 +19,7 @@ export const PROVIDER_LABELS: Record<ProviderKind, string> = {
 };
 
 /** The device's own pile, which is not a connection and so has no provider. */
-export const PILE_LABEL: string = t('account.pile');
+const PILE_LABEL: string = t('account.pile');
 
 /**
  * A source whose row no longer says which provider it was: one brought back by

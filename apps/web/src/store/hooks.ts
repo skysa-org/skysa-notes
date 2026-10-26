@@ -616,10 +616,6 @@ export const useScratchpadShown = (connectionId: string | undefined): boolean | 
 	return result?.connectionId === connectionId ? result?.shown : undefined;
 };
 
-/** Count of notes with unpushed edits, for the sync indicator in Phase 2. */
-export const useDirtyCount = (): number | undefined =>
-	useLiveQuery(() => db.notes.where('dirty').equals(1).count(), []);
-
 /**
  * A source's passwords, by label; `undefined` until read for this source
  * (docs/ARCHITECTURE.md §7, "Passwords in the vault").

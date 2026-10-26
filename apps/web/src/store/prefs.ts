@@ -69,7 +69,7 @@ export const setDefaultEditorMode = async (db: NotesDatabase, mode: EditorMode):
 	await setPreference(db, DEFAULT_EDITOR_MODE_KEY, mode);
 };
 
-export const FORMAT_TOOLBAR_KEY = 'formatToolbarShown';
+const FORMAT_TOOLBAR_KEY = 'formatToolbarShown';
 
 /**
  * Whether a compact window shows the formatting toolbar under the note, on
@@ -84,7 +84,7 @@ export const setFormatToolbarShown = async (db: NotesDatabase, shown: boolean): 
 	await setPreference(db, FORMAT_TOOLBAR_KEY, String(shown));
 };
 
-export const INSTALL_DISMISSED_KEY = 'installDismissed';
+const INSTALL_DISMISSED_KEY = 'installDismissed';
 
 /**
  * Whether the banner offering to install the app has been dismissed on this
@@ -97,8 +97,8 @@ export const getInstallDismissed = async (db: NotesDatabase): Promise<boolean> =
 export const dismissInstall = (db: NotesDatabase, now: Date = new Date()): Promise<void> =>
 	setPreference(db, INSTALL_DISMISSED_KEY, now.toISOString());
 
-export const CODE_BLOCK_WRAP_KEY = 'codeBlockWrap';
-export const CODE_BLOCK_LINE_NUMBERS_KEY = 'codeBlockLineNumbers';
+const CODE_BLOCK_WRAP_KEY = 'codeBlockWrap';
+const CODE_BLOCK_LINE_NUMBERS_KEY = 'codeBlockLineNumbers';
 
 /**
  * How code blocks are shown, for every note on this device.

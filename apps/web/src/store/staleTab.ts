@@ -35,7 +35,7 @@ export const CLOSE_GRACE_MS = 2000;
  * is finishing a write lets go within moments, and a notice that flashed up for
  * that would be noise.
  */
-export const WAITING_NOTICE_MS = 1000;
+const WAITING_NOTICE_MS = 1000;
 
 const tab = createStore<TabState>('current');
 

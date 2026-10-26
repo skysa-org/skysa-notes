@@ -28,7 +28,7 @@ import { deleteUnlinkedFilesAt } from './fileLinks.js';
  */
 
 /** How long after a note is left that the files taken out of it are looked at. */
-export const FILE_CLEANUP_DELAY_MS = 3 * 60 * 1000;
+const FILE_CLEANUP_DELAY_MS = 3 * 60 * 1000;
 
 /** How many times they are looked at while it is too soon to tell: an hour, at the delay. */
 const TRIES = 20;

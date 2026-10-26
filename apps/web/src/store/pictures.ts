@@ -43,7 +43,7 @@ export const THUMB_SHARE = 0.75;
 type Bound = Pick<FileRecord, 'remoteId' | 'remoteVersion'>;
 
 /** Whether what is kept of a picture was read from the bytes its row is bound to now. */
-export const pictureIsCurrent = (
+const pictureIsCurrent = (
 	file: Bound,
 	picture: Pick<PictureRecord, 'remoteId' | 'version'>
 ): boolean => picture.remoteId === file.remoteId && picture.version === file.remoteVersion;

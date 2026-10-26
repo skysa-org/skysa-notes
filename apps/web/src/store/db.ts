@@ -229,7 +229,7 @@ export interface SyncStateRecord {
 	importing?: Importing;
 }
 
-export interface Importing {
+interface Importing {
 	/**
 	 * The app is held while the import runs, and nothing can be written in the
 	 * source meanwhile. True for every import since 2026-10-02. It was true
@@ -275,13 +275,13 @@ export interface CredentialRecord {
 /** The one flow that may be out at a time, matching the server's one flow cookie. */
 export const PENDING_CREDENTIAL_ID = 'pending';
 
-export interface PreferenceRecord {
+interface PreferenceRecord {
 	key: string;
 	value: string;
 }
 
 /** The kinds of op the queue holds: core's, so a new one is a row the app can store. */
-export type QueuedOperation = SyncOperation;
+type QueuedOperation = SyncOperation;
 
 /**
  * A file beside a note that is not one (#187): one row for every such file the
@@ -345,7 +345,7 @@ export interface ClipRecord {
 }
 
 /** A clipboard item's bytes, an `ArrayBuffer` for the reason `FileBytesRecord` gives. */
-export interface ClipBytesRecord {
+interface ClipBytesRecord {
 	connectionId: string;
 	name: string;
 	bytes: ArrayBuffer;
@@ -401,7 +401,7 @@ export interface PictureRecord {
 }
 
 /** A copy's bytes, apart from its record, as a file's are from its row. */
-export interface PictureBytesRecord {
+interface PictureBytesRecord {
 	connectionId: string;
 	fileId: string;
 	variant: PictureVariant;
@@ -510,7 +510,7 @@ export type NotesDatabase = Dexie & {
 	secretKeys: Table<SecretKeyRecord, string>;
 };
 
-export const DATABASE_NAME = 'skysa-notes';
+const DATABASE_NAME = 'skysa-notes';
 
 /** Where the notes wait while their store is made again under a new key. */
 const NOTES_REKEYING = 'notesRekeying';

@@ -27,7 +27,7 @@ import { type NotesDatabase } from '../store/db.js';
  */
 
 /** What the link needs of a socket, so a test can stand in for the browser's. */
-export interface RelaySocket {
+interface RelaySocket {
 	readonly send: (text: string) => void;
 	readonly close: () => void;
 }
@@ -42,7 +42,7 @@ export interface RelaySocketEvents {
 export type OpenRelaySocket = (url: string, events: RelaySocketEvents) => RelaySocket;
 
 /** The scheduler's environment, as much of it as the link uses. */
-export interface RelayEnvironment {
+interface RelayEnvironment {
 	readonly now: () => number;
 	readonly isOnline: () => boolean;
 	readonly isVisible: () => boolean;
@@ -337,7 +337,7 @@ export const relayUrl = (ticket: string, page: string = location.href): string =
 };
 
 /** The browser's `WebSocket`, as the link sees one. */
-export const browserSocket: OpenRelaySocket = (url, events) => {
+const browserSocket: OpenRelaySocket = (url, events) => {
 	const ws = new WebSocket(url);
 	ws.addEventListener('open', () => {
 		events.opened();
@@ -359,7 +359,7 @@ export const browserSocket: OpenRelaySocket = (url, events) => {
 	};
 };
 
-export interface RelayInput {
+interface RelayInput {
 	readonly connectionId: string;
 	readonly environment: RelayEnvironment;
 	readonly onChanged: () => void;

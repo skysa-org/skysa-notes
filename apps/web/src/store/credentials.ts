@@ -44,7 +44,7 @@ export const toBase64Url = (bytes: Uint8Array): string =>
 		.replace(/=+$/, '');
 
 /** A fresh credential. Never reused: the server spends a hash on first use, for ever. */
-export const newCredential = (): string =>
+const newCredential = (): string =>
 	`${CREDENTIAL_PREFIX}${toBase64Url(crypto.getRandomValues(new Uint8Array(CREDENTIAL_BYTES)))}`;
 
 /** base64url SHA-256 of the whole credential string, prefix included. */
@@ -118,19 +118,6 @@ export const credentialFor = (
 	db: Pick<NotesDatabase, 'credentials'>,
 	connectionId: string
 ): PromiseExtended<CredentialRecord | undefined> => db.credentials.get(connectionId);
-
-/**
- * Every connection this device holds a credential for, newest first. The
- * pending one is not a connection and is left out.
- */
-export const heldCredentials = async (
-	db: Pick<NotesDatabase, 'credentials'>
-): Promise<CredentialRecord[]> => {
-	const rows = await db.credentials.toArray();
-	return rows
-		.filter((row) => row.id !== PENDING_CREDENTIAL_ID)
-		.sort((a, b) => b.createdAt - a.createdAt);
-};
 
 /**
  * Throw a credential away. Called when the server says it no longer reaches
