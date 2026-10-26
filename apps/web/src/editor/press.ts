@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import type { KeyboardEvent, MouseEvent } from 'react';
 
 /**
@@ -28,7 +29,7 @@ import type { KeyboardEvent, MouseEvent } from 'react';
 export type PressedBy = 'mouse' | 'other';
 
 /** The control a mousedown has just acted through, whose click is that press. */
-const pressing: { current?: EventTarget } = {};
+const pressing = cell<EventTarget | undefined>(undefined);
 
 export interface PressHandlers {
 	readonly onMouseDown: (event: MouseEvent) => void;

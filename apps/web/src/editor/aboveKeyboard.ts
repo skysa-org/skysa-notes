@@ -1,6 +1,7 @@
 import type { Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import { Plugin } from '@milkdown/kit/prose/state';
+import { cell } from '@skysa/core';
 
 import { COARSE_POINTER, mediaMatches, rems } from '../components/layout.js';
 
@@ -99,8 +100,8 @@ export const revealAbove = (caret: Span, from: Element, win: Window): void => {
 export const onKeyboardRise = (win: Window, rise: () => void): (() => void) => {
 	const view = viewportOf(win);
 	const height = () => (view === null ? win.innerHeight : view.height * view.scale);
-	const last = { current: height() };
-	const frame = { current: 0 };
+	const last = cell(height());
+	const frame = cell(0);
 
 	const resized = () => {
 		const now = height();

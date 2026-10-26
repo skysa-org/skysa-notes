@@ -1,4 +1,5 @@
 import type { Mark, Node as ProseNode } from '@milkdown/kit/prose/model';
+import { cell } from '@skysa/core';
 
 /**
  * The whole run of text around `pos` that carries `mark`, in the block `pos`
@@ -18,8 +19,8 @@ export const markRunAt = (
 ): { from: number; to: number } | undefined => {
 	const $pos = doc.resolve(pos);
 	const start = $pos.start();
-	const run: { current: { from: number; to: number } | undefined } = { current: undefined };
-	const found: { current: { from: number; to: number } | undefined } = { current: undefined };
+	const run = cell<{ from: number; to: number } | undefined>(undefined);
+	const found = cell<{ from: number; to: number } | undefined>(undefined);
 	$pos.parent.forEach((child, offset) => {
 		const from = start + offset;
 		const to = from + child.nodeSize;

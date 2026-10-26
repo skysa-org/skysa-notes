@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { createContext, type ReactNode, useContext, useState, useSyncExternalStore } from 'react';
 
 import { createEmitter } from '../store/emitter.js';
@@ -33,7 +34,7 @@ interface TargetStore {
 }
 
 const createTargetStore = (): TargetStore => {
-	const held = { current: null as FindTarget | null };
+	const held = cell<FindTarget | null>(null);
 	const changes = createEmitter();
 	const changed = () => {
 		changes.emit();

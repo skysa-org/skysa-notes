@@ -1,6 +1,7 @@
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
+import { cell } from '@skysa/core';
 
 import type { CodeDisplayStore } from './codeDisplay.js';
 import { CODE_BLOCK_NODE } from './commands.js';
@@ -79,7 +80,7 @@ const numberElement = (line: number) => (): HTMLElement => {
 };
 
 const numbersFor = (doc: ProseNode): readonly Decoration[] => {
-	const found = { current: [] as Decoration[] };
+	const found = cell<Decoration[]>([]);
 
 	doc.descendants((node, pos) => {
 		if (node.type.name !== CODE_BLOCK_NODE) return true;

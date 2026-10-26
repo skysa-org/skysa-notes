@@ -7,6 +7,7 @@ import {
 	type Transaction,
 } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
+import { cell } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { PROGRAMMATIC_META } from './dirty.js';
@@ -132,7 +133,7 @@ const checkbox =
 
 /** A box at the start of every task item's first line. */
 const checkboxes = (doc: ProseNode): DecorationSet => {
-	const found = { current: [] as Decoration[] };
+	const found = cell<Decoration[]>([]);
 
 	doc.descendants((node, pos) => {
 		if (node.type.name !== LIST_ITEM || !isTask(node)) return true;
@@ -172,7 +173,7 @@ const mapBack = (trs: readonly Transaction[], pos: number): number =>
  * asked to show.
  */
 const stoodOverUnfinished = (node: ProseNode): boolean => {
-	const found = { current: false };
+	const found = cell(false);
 	node.descendants((child) => {
 		if (found.current) return false;
 		if (child.type.name === LIST_ITEM && child.attrs.checked === false) found.current = true;

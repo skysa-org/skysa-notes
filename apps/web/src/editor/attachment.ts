@@ -4,7 +4,7 @@ import { NodeSelection } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { MarkdownNode } from '@milkdown/kit/transformer';
 import { $nodeSchema, $view } from '@milkdown/kit/utils';
-import { fileKind, isAttachmentHref } from '@skysa/core';
+import { cell, fileKind, isAttachmentHref } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
@@ -178,7 +178,7 @@ const attachmentView =
 		browser?: FileBrowser
 	) =>
 	(initial: ProseNode): NodeView => {
-		const held = { current: initial };
+		const held = cell(initial);
 
 		const icon = document.createElement('span');
 		icon.setAttribute('class', 'attachment-icon');

@@ -16,6 +16,7 @@ import { insertTableCommand, toggleStrikethroughCommand } from '@milkdown/kit/pr
 import type { Mark, MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
+import { cell } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { attachPicked } from './attachDrop.js';
@@ -100,7 +101,7 @@ const clearFormatting = (ctx: Ctx): void => {
  */
 const linkAround = (state: EditorState, type: MarkType): { from: number; to: number } | null => {
 	const { from, to } = state.selection;
-	const found: { current: { pos: number; mark: Mark } | null } = { current: null };
+	const found = cell<{ pos: number; mark: Mark } | null>(null);
 
 	state.doc.nodesBetween(from, from === to ? to + 1 : to, (node, pos) => {
 		if (found.current !== null) return false;
@@ -116,7 +117,7 @@ const linkAround = (state: EditorState, type: MarkType): { from: number; to: num
 
 /** Whether everything inline in `from`–`to` is a file's chip. */
 const onlyChips = (state: EditorState, from: number, to: number): boolean => {
-	const other = { current: false };
+	const other = cell(false);
 	state.doc.nodesBetween(from, to, (node) => {
 		if (node.isInline && node.type.name !== ATTACHMENT) other.current = true;
 	});
