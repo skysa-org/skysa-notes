@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { messageOf } from '@skysa/core';
 import { type ViteDevServer } from 'vite';
 import { describe, expect, it } from 'vitest';
 
@@ -47,7 +48,7 @@ const refusal = (file: string): string => {
 	try {
 		loadBrand(file);
 	} catch (error) {
-		return error instanceof Error ? error.message : String(error);
+		return messageOf(error);
 	}
 	return 'loaded';
 };
