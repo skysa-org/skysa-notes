@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@skysa/core';
+import type { ApiErrorCode, ProviderKind } from '@skysa/core';
 
 import type { AppConfig } from '../env.js';
 import { dropboxOAuth } from './dropbox.js';
@@ -25,7 +25,10 @@ export type ResolvedOAuth =
 			client: StorageOAuth;
 			credentials: OAuthCredentials;
 	  }
-	| { ok: false; error: 'unsupported_provider' | 'provider_not_configured' };
+	| {
+			ok: false;
+			error: Extract<ApiErrorCode, 'unsupported_provider' | 'provider_not_configured'>;
+	  };
 
 const isOAuthProvider = (provider: string): provider is OAuthProviderKind =>
 	Object.hasOwn(CLIENTS, provider);

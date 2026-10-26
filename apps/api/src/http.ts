@@ -1,4 +1,6 @@
+import type { ApiErrorCode } from '@skysa/core';
 import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { AppEnv } from './app.js';
 
@@ -20,8 +22,21 @@ import type { AppEnv } from './app.js';
 export const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
 	c.req.header('sec-fetch-site') === 'same-origin' || c.req.header('origin') === appOrigin;
 
+/**
+ * An answer that is not the thing asked for: `{ error }` with one of the codes
+ * the app reads (`API_ERROR_CODES` in `@skysa/core`), and whatever goes beside
+ * it. The only way a route says no, so a code the app has never heard of
+ * does not compile.
+ */
+export const fail = (
+	c: Context<AppEnv>,
+	code: ApiErrorCode,
+	status: ContentfulStatusCode,
+	beside: Readonly<Record<string, unknown>> = {}
+): Response => c.json({ error: code, ...beside }, status);
+
 /** The rate limiter said no: 429, with its `Retry-After` when it gave one. */
 export const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Response => {
 	if (retryAfter !== undefined) c.header('Retry-After', String(Math.ceil(retryAfter)));
-	return c.json({ error: 'rate_limited' }, 429);
+	return fail(c, 'rate_limited', 429);
 };

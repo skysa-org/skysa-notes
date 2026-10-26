@@ -73,6 +73,13 @@ export interface ConnectGate {
 }
 
 /**
+ * How long a gate's words may be: its message, a label (the action's or the
+ * code field's), and the action's URL. The server refuses a gate past them
+ * and the app drops one, so both read them from here.
+ */
+export const GATE_LIMITS = { message: 500, label: 40, url: 2048 } as const;
+
+/**
  * The policy's answer about a code as it is used in the app, before anything
  * is connected (`EntitlementProvider.checkCode`).
  *

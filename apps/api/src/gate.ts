@@ -3,6 +3,7 @@ import {
 	type ConnectGate,
 	ENTITLEMENT_CODES,
 	type EntitlementCode,
+	GATE_LIMITS,
 	MAX_CODE_HOLD_SECONDS,
 	MAX_CODE_REASON,
 	MAX_CONNECT_CODE,
@@ -37,15 +38,17 @@ const text = (max: number) =>
  * the app. Normalized, it is `https://example.com/`, which is what was meant.
  */
 const gateSchema = z.object({
-	message: text(500),
+	message: text(GATE_LIMITS.message),
 	action: z.object({
-		label: text(40),
+		label: text(GATE_LIMITS.label),
 		url: z
 			.url({ protocol: /^https$/, normalize: true, error: 'must be an absolute https: URL' })
-			.max(2048, 'must be at most 2048 characters'),
+			.max(GATE_LIMITS.url, `must be at most ${String(GATE_LIMITS.url)} characters`),
 	}),
-	connectCode: z.object({ label: text(40), required: z.boolean().optional() }).optional(),
-});
+	connectCode: z
+		.object({ label: text(GATE_LIMITS.label), required: z.boolean().optional() })
+		.optional(),
+}) satisfies z.ZodType<ConnectGate>;
 
 /**
  * The gate as it will be served, or nothing when there is none. Throws when
@@ -124,7 +127,7 @@ const codeCheckSchema = z.discriminatedUnion('accepted', [
 			.optional()
 			.catch(undefined),
 	}),
-]);
+]) satisfies z.ZodType<ConnectCodeCheck>;
 
 export const readCodeCheck = (answer: unknown): ConnectCodeCheck | undefined => {
 	const result = codeCheckSchema.safeParse(answer);

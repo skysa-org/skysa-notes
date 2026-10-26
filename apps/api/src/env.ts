@@ -1,4 +1,4 @@
-import { PROVIDER_KINDS, type ProviderKind } from '@skysa/core';
+import { AUTH_MODES, type AuthMode, PROVIDER_KINDS, type ProviderKind } from '@skysa/core';
 import { z } from 'zod';
 
 /**
@@ -31,7 +31,7 @@ const oauthCredentials = z.object({
 });
 
 const rawEnvSchema = z.object({
-	AUTH_MODE: z.enum(['storage-first', 'account-first']).default('storage-first'),
+	AUTH_MODE: z.enum(AUTH_MODES).default('storage-first'),
 	// `prefault` (not `default`): the fallback is the raw string, fed through the
 	// same split-and-validate pipeline as an operator-supplied value.
 	//
@@ -85,7 +85,7 @@ const rawEnvSchema = z.object({
 });
 
 export type AppConfig = {
-	authMode: 'storage-first' | 'account-first';
+	authMode: AuthMode;
 	enabledProviders: ProviderKind[];
 	appOrigin: string;
 	/** False only for a plain-HTTP origin, which in practice means localhost. */

@@ -5,6 +5,7 @@ import type { AppEnv } from '../app.js';
 import { openOAuthSecret, sealOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
 import { knownCode } from '../gate.js';
+import { fail, tooMany } from '../http.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import { type FetchLike, isGrantRefused } from '../oauth/types.js';
@@ -31,12 +32,7 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		// keyed on the connection, since holding a credential is already the
 		// price of asking.
 		const limit = await c.get('rateLimiter').check(`token:${connection.id}`);
-		if (!limit.allowed) {
-			if (limit.retryAfter !== undefined) {
-				c.header('Retry-After', String(Math.ceil(limit.retryAfter)));
-			}
-			return c.json({ error: 'rate_limited' }, 429);
-		}
+		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		// The entitlement seam: an operator of a shared instance decides which
 		// accounts may sync here. This repo always says yes. See docs/ARCHITECTURE.md §6.
@@ -50,20 +46,16 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 			// The code on the same terms as at the callback, so the app words a
 			// refusal the same way wherever it hears of it.
 			const code = knownCode(decision.code);
-			return c.json(
-				{
-					error: 'not_entitled',
-					reason: decision.reason,
-					...(code === undefined ? {} : { code }),
-				},
-				403
-			);
+			return fail(c, 'not_entitled', 403, {
+				reason: decision.reason,
+				...(code === undefined ? {} : { code }),
+			});
 		}
 
 		// A connection to a provider the operator has since turned off cannot be
 		// refreshed from here, whatever the reason; the operator has to act.
 		const resolved = oauthFor(config, connection.provider);
-		if (!resolved.ok) return c.json({ error: 'provider_not_configured' }, 501);
+		if (!resolved.ok) return fail(c, 'provider_not_configured', 501);
 		const { client, credentials } = resolved;
 
 		// A row sealed under a key this deployment no longer holds cannot be
@@ -74,7 +66,7 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 			iv: connection.secretIv,
 			keyId: connection.secretKeyId,
 		}).catch(() => undefined);
-		if (secret === undefined) return c.json({ error: 'reauthorize_required' }, 401);
+		if (secret === undefined) return fail(c, 'reauthorize_required', 401);
 
 		const refreshed = await client
 			.refreshAccessToken(doFetch, credentials, { refreshToken: secret.refreshToken })
@@ -85,14 +77,14 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		// can retry its way out of, so say so plainly and let the UI ask for a
 		// reconnect rather than looping.
 		if (!refreshed.ok && isGrantRefused(refreshed.error)) {
-			return c.json({ error: 'reauthorize_required' }, 401);
+			return fail(c, 'reauthorize_required', 401);
 		}
 		// Anything else is not the user's to fix: an expired client secret, a
 		// provider outage, a timeout. Logged, since otherwise nothing would say
 		// so, and answered as a failure the client retries.
 		if (!refreshed.ok) {
 			logFailure('token refresh failed', refreshed.error);
-			return c.json({ error: 'provider_unavailable' }, 502);
+			return fail(c, 'provider_unavailable', 502);
 		}
 		const { tokens } = refreshed;
 
