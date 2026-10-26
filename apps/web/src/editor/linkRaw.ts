@@ -20,7 +20,7 @@ import { linkChip, openableLink, openLink, opensOnClick } from './links.js';
 type SyntaxNode = ReturnType<ReturnType<typeof syntaxTree>['resolveInner']>;
 
 /** Where a link starts, and where it goes as written. */
-export interface RawLinkAt {
+interface RawLinkAt {
 	readonly from: number;
 	readonly href: string;
 }
@@ -67,7 +67,7 @@ const linkFrom = (state: EditorState, node: SyntaxNode | null): RawLinkAt | unde
 };
 
 /** The link at `pos`, from either end of it as well as from inside it. */
-export const rawLinkAt = (state: EditorState, pos: number): RawLinkAt | undefined => {
+const rawLinkAt = (state: EditorState, pos: number): RawLinkAt | undefined => {
 	const tree = syntaxTree(state);
 	return (
 		linkFrom(state, tree.resolveInner(pos, 1)) ?? linkFrom(state, tree.resolveInner(pos, -1))

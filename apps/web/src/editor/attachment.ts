@@ -170,7 +170,7 @@ export const selectedKeys = new WeakMap<Node, SelectedKeys>();
  */
 const WITH_BAR: ReadonlySet<string> = new Set([ATTACHMENT, 'image', 'secret']);
 
-export const attachmentView =
+const attachmentView =
 	(
 		host: AttachmentHost,
 		view: EditorView,

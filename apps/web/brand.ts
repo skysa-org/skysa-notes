@@ -32,7 +32,7 @@ export const BRAND_ICONS = [
 	{ file: 'pwa-maskable-512x512.png', size: 512 },
 ] as const;
 
-export type BrandIconFile = (typeof BRAND_ICONS)[number]['file'];
+type BrandIconFile = (typeof BRAND_ICONS)[number]['file'];
 
 // Not `new URL(…, import.meta.url)`, which Vite would read as an asset to serve.
 export const DEFAULT_BRAND = join(dirname(fileURLToPath(import.meta.url)), 'brand/brand.json');
@@ -76,7 +76,7 @@ const font = z.strictObject({
 	files: z.array(fontFile).min(1),
 });
 
-export const brandSchema = z.strictObject({
+const brandSchema = z.strictObject({
 	$schema: z.string().optional(),
 	name: z
 		.string()
@@ -109,19 +109,19 @@ export const brandSchema = z.strictObject({
 		.describe('Either, both or neither; a family left out keeps the system stack.'),
 });
 
-export interface BrandScheme {
+interface BrandScheme {
 	readonly brand: string;
 	readonly onBrand: string;
 	readonly theme: string;
 }
 
-export interface BrandIcon {
+interface BrandIcon {
 	readonly file: BrandIconFile;
 	readonly size: number;
 	readonly path: string;
 }
 
-export interface BrandFace {
+interface BrandFace {
 	/** Where the file is on disk. */
 	readonly path: string;
 	/** Where the app serves it, named by its content so it can be cached forever. */
@@ -131,7 +131,7 @@ export interface BrandFace {
 	readonly unicodeRange?: string;
 }
 
-export interface BrandFont {
+interface BrandFont {
 	readonly family: string;
 	readonly faces: readonly BrandFace[];
 }

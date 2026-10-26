@@ -602,7 +602,7 @@ const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T>
 	db.transaction('rw', sourceTables(db), work);
 
 /** Prefs key: how many binds and unbinds this device has seen. */
-export const BINDINGS_KEY = 'sync.bindings';
+const BINDINGS_KEY = 'sync.bindings';
 
 /**
  * A count rather than the connection bound, because the connection can come

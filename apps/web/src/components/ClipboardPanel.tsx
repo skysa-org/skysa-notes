@@ -74,7 +74,7 @@ export interface ClipboardPanelProps {
 }
 
 /** How long a "Copied" stays said. */
-export const SAID_MS = 2500;
+const SAID_MS = 2500;
 
 const MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
 

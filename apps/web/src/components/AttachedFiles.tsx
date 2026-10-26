@@ -53,7 +53,7 @@ export const sizeOf = (bytes: number): string => {
 };
 
 /** Where a file is linked from, in words: the notes, a deleted one said so. */
-export const linkedFrom = (file: AttachedFile): string =>
+const linkedFrom = (file: AttachedFile): string =>
 	file.linkedBy.length === 0
 		? t('attachedFiles.notLinked')
 		: t('attachedFiles.linkedIn', {

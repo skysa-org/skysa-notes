@@ -203,7 +203,7 @@ export const rearmor = (secret: RawSecret, armor: string): ChangeSpec => ({
 const afterLanguage = (label: string): string => (label === '' ? '' : ` ${label}`);
 
 /** `secret`'s label replaced by `label`, its armor as it is. */
-export const relabelled = (secret: RawSecret, label: string): ChangeSpec => ({
+const relabelled = (secret: RawSecret, label: string): ChangeSpec => ({
 	from: secret.labelFrom,
 	to: secret.labelTo,
 	insert: afterLanguage(label),

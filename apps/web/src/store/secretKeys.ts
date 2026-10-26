@@ -34,9 +34,9 @@ export type Unlock = EnteredUnlock | DeviceUnlock;
 
 export type EnteredKind = EnteredUnlock['kind'];
 
-export const MIN_PATTERN_DOTS = 4;
-export const MIN_PIN_DIGITS = 4;
-export const MIN_PASSWORD_CHARACTERS = 8;
+const MIN_PATTERN_DOTS = 4;
+const MIN_PIN_DIGITS = 4;
+const MIN_PASSWORD_CHARACTERS = 8;
 
 /** OWASP's figure for PBKDF2-HMAC-SHA-256 in 2023, which is still its figure. */
 export const PBKDF2_ROUNDS = 600_000;
@@ -307,7 +307,7 @@ export type UnlockResult =
 	| Readonly<{ status: 'otherWay'; unlock: UnlockKind }>;
 
 /** When a record's next try may be made, where it has to wait. */
-export const nextTryAt = (record: SecretKeyRecord): number | undefined =>
+const nextTryAt = (record: SecretKeyRecord): number | undefined =>
 	record.tries >= FREE_TRIES && record.triedAt !== undefined
 		? record.triedAt + TRY_WAIT_MS
 		: undefined;
@@ -496,7 +496,7 @@ export const forgetKeys = (db: NotesDatabase, connectionId: string): Promise<voi
 	db.secretKeys.delete(connectionId);
 
 /** The passkey a device's own lock answers through, and the salt it is asked. */
-export interface DevicePasskey {
+interface DevicePasskey {
 	readonly credentialId: ArrayBuffer;
 	readonly salt: ArrayBuffer;
 }
@@ -527,6 +527,3 @@ export const enrolment = (
 				: {}),
 		};
 	});
-
-/** For a test's sake: the kinds an unlock may be. */
-export const UNLOCK_KINDS: readonly UnlockKind[] = ['pattern', 'pin', 'password'];

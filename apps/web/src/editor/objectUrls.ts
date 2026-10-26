@@ -18,7 +18,7 @@ export interface ObjectUrlFactory {
 	readonly revoke: (url: string) => void;
 }
 
-export const browserObjectUrls: ObjectUrlFactory = {
+const browserObjectUrls: ObjectUrlFactory = {
 	create: (blob) => URL.createObjectURL(blob),
 	revoke: (url) => {
 		URL.revokeObjectURL(url);
@@ -47,7 +47,7 @@ export interface ObjectUrlCache {
 }
 
 /** How long a URL nothing holds is kept, for a view rebuilt in the meantime. */
-export const OBJECT_URL_GRACE_MS = 5000;
+const OBJECT_URL_GRACE_MS = 5000;
 
 interface Entry {
 	readonly url: string;

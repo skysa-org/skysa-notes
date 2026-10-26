@@ -10,13 +10,13 @@ import { type OptionsMenuItem } from './OptionsMenu.js';
  */
 
 /** What making a scratch card a note is called, wherever it is offered. */
-export const MOVE_LABEL = t('scratchpad.menu.move');
+const MOVE_LABEL = t('scratchpad.menu.move');
 
 /**
  * Each colour's name, as a menu says it. Only the name: what a note's
  * frontmatter holds is the colour's id (`color: red`), whatever the language.
  */
-export const COLOR_LABELS: Readonly<Record<ScratchColor, string>> = {
+const COLOR_LABELS: Readonly<Record<ScratchColor, string>> = {
 	red: t('scratchpad.color.red'),
 	orange: t('scratchpad.color.orange'),
 	yellow: t('scratchpad.color.yellow'),

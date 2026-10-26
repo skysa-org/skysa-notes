@@ -247,7 +247,7 @@ export const CODE_LANGUAGES: readonly CodeLanguage[] = [
  * meta — but the attr can also come from a `data-language` on pasted HTML, so
  * the first word is taken here too rather than assumed.
  */
-export const matchCodeLanguage = (
+const matchCodeLanguage = (
 	languages: readonly CodeLanguage[],
 	info: string | undefined
 ): CodeLanguage | undefined => {

@@ -125,7 +125,7 @@ const firstOf = (element: HTMLElement, wait: boolean): HTMLElement | null => {
  * is waited for, rather than the focus going on to the way out, where Enter
  * would leave. Whether it went anywhere.
  */
-export const focusFirst = (element: HTMLElement, { wait = false } = {}): boolean => {
+const focusFirst = (element: HTMLElement, { wait = false } = {}): boolean => {
 	const target = firstOf(element, wait);
 	target?.focus();
 	if (target !== null && !target.matches(`${FIELD}, ${PRIMARY}`)) parked.add(target);

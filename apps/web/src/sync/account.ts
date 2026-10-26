@@ -59,7 +59,7 @@ import { PROVIDER_LABELS } from './sourceNames.js';
  * discarded, and nothing moved into another account, on the way.
  */
 
-export { inOrder, PILE_LABEL, PROVIDER_LABELS, tabName, UNKNOWN_LABEL } from './sourceNames.js';
+export { inOrder, PROVIDER_LABELS, tabName, UNKNOWN_LABEL } from './sourceNames.js';
 
 /** Providers the app can sync with today. The rest arrive with their adapters. */
 export const CONNECTABLE: readonly ProviderKind[] = ['dropbox', 'onedrive', 'gdrive'];

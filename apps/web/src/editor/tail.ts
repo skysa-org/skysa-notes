@@ -28,13 +28,13 @@ import { PROGRAMMATIC_META } from './dirty.js';
 const PARAGRAPH = 'paragraph';
 
 /** True while the paragraph at the end is one this plugin offered, not one that was typed. */
-export const tailKey = new PluginKey<boolean>('skysa-editor-tail');
+const tailKey = new PluginKey<boolean>('skysa-editor-tail');
 
 /** The meta the offer carries, and the only thing that turns that state on. */
 const OFFERED = 'offered';
 
 /** Whether the note ends in something a cursor cannot be put after. */
-export const needsTail = (doc: ProseNode): boolean => {
+const needsTail = (doc: ProseNode): boolean => {
 	const last = doc.lastChild;
 	return last !== null && last.type.name !== PARAGRAPH;
 };
@@ -48,7 +48,7 @@ export const needsTail = (doc: ProseNode): boolean => {
  * an upload and still move its timestamp. The moment the user types, that
  * keystroke is their edit and the paragraph is saved with its words in it.
  */
-export const offerTail = (view: EditorView): void => {
+const offerTail = (view: EditorView): void => {
 	const type = view.state.schema.nodes[PARAGRAPH];
 	if (type === undefined) return;
 

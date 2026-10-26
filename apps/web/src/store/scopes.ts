@@ -1,3 +1,5 @@
+import { type Table } from 'dexie';
+
 import { type NotesDatabase } from './db.js';
 
 /**
@@ -11,12 +13,18 @@ import { type NotesDatabase } from './db.js';
  */
 
 /**
+ * Typed as plain tables: a transaction asks no more of them, and an inferred
+ * list would make every record type in it part of this module's exports.
+ */
+type Tables = Table[];
+
+/**
  * Every writer in `store/notes.ts` opens this, whether or not it touches every
  * table in it: one caller wraps several writers in a transaction of its own.
  * The files are in it because a note's move carries the files it links
  * (`carryLinkedFiles`).
  */
-export const writerTables = (db: NotesDatabase) => [
+export const writerTables = (db: NotesDatabase): Tables => [
 	db.notes,
 	db.folders,
 	db.opQueue,
@@ -27,7 +35,7 @@ export const writerTables = (db: NotesDatabase) => [
 ];
 
 /** The writers' tables, and the pictures made of a source's files. */
-export const libraryTables = (db: NotesDatabase) => [
+export const libraryTables = (db: NotesDatabase): Tables => [
 	...writerTables(db),
 	db.pictures,
 	db.pictureBytes,
@@ -38,7 +46,7 @@ export const libraryTables = (db: NotesDatabase) => [
  * with. The credential too, so that a source let go loses its rows and the
  * key to its account together.
  */
-export const sourceTables = (db: NotesDatabase) => [
+export const sourceTables = (db: NotesDatabase): Tables => [
 	...libraryTables(db),
 	db.credentials,
 	db.clips,

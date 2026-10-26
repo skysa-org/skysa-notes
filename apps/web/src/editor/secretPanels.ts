@@ -34,7 +34,7 @@ export const DRAFT = '';
  * Cancel takes out the block its words were kept in, if any were. `seal` is
  * how its words are kept.
  */
-export interface Open {
+interface Open {
 	readonly panel: SecretPanel;
 	readonly from: string | undefined;
 	readonly fromLabel: string;

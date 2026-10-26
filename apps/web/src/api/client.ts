@@ -143,12 +143,12 @@ const codeCheckSchema = z.discriminatedUnion('accepted', [
 	}),
 ]) satisfies z.ZodType<ConnectCodeCheck>;
 
-export type CodeCheck = z.infer<typeof codeCheckSchema>;
+type CodeCheck = z.infer<typeof codeCheckSchema>;
 
 /** Opaque: the server sealed it, and only the server reads it. */
 const relayTicketSchema = z.object({ ticket: z.string().min(1).max(512), expiresIn: z.number() });
 
-export type RelayTicket = z.infer<typeof relayTicketSchema>;
+type RelayTicket = z.infer<typeof relayTicketSchema>;
 
 const tokenSchema = z.object({ accessToken: z.string().min(1), expiresAt: z.number() });
 

@@ -121,7 +121,7 @@ const sameMarks = (a: readonly string[], b: readonly string[]): boolean =>
 	a.length === b.length && a.every((name, index) => name === b[index]);
 
 /** Whether two readings say the same thing, so that most keystrokes redraw nothing. */
-export const sameFormat = (a: FormatState, b: FormatState): boolean =>
+const sameFormat = (a: FormatState, b: FormatState): boolean =>
 	a.level === b.level &&
 	a.list === b.list &&
 	a.codeBlock === b.codeBlock &&

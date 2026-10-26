@@ -25,7 +25,7 @@ export const CARD_GAP = 12;
 export const columnCount = (width: number): number =>
 	Math.max(2, Math.floor((width + CARD_GAP) / (CARD_MAX + CARD_GAP)));
 
-export interface Placed {
+interface Placed {
 	readonly x: number;
 	readonly y: number;
 }

@@ -35,7 +35,7 @@ export interface WakeLockEnvironment {
 	readonly request: (() => Promise<ScreenLock>) | undefined;
 }
 
-export const browserWakeLock = (): WakeLockEnvironment => ({
+const browserWakeLock = (): WakeLockEnvironment => ({
 	isVisible: () => document.visibilityState === 'visible',
 	onVisibilityChange: (handler) => {
 		document.addEventListener('visibilitychange', handler);

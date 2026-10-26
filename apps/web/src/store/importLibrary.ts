@@ -76,7 +76,7 @@ import { eachInSlices } from './slices.js';
 type Bytes = Uint8Array<ArrayBuffer>;
 
 /** A file as it was picked or unpacked: its path as given, and its bytes. */
-export interface Incoming {
+interface Incoming {
 	path: string;
 	bytes: Bytes;
 }

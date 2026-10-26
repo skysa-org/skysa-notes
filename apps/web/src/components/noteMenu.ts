@@ -26,7 +26,7 @@ export const noteMenuItems = ({
 ];
 
 /** "Pin to top", or "Unpin" where it is pinned: a note's. */
-export const pinItem = (
+const pinItem = (
 	pinned: boolean | undefined,
 	onPin: (() => void) | undefined
 ): OptionsMenuItem[] =>

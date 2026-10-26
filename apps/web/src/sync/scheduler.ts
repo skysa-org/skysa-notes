@@ -149,7 +149,7 @@ export interface SchedulerEnvironment {
 	readonly withLock: <T>(name: string, work: () => Promise<T>) => Promise<T>;
 }
 
-export const browserEnvironment = (): SchedulerEnvironment => ({
+const browserEnvironment = (): SchedulerEnvironment => ({
 	now: Date.now,
 	isOnline: () => navigator.onLine,
 	isVisible: () => document.visibilityState === 'visible',
@@ -173,7 +173,7 @@ export const browserEnvironment = (): SchedulerEnvironment => ({
 	withLock: (name, work) => ('locks' in navigator ? navigator.locks.request(name, work) : work()),
 });
 
-export interface ProviderInput {
+interface ProviderInput {
 	readonly connectionId: string;
 	readonly provider: ProviderKind;
 	/** The install's id, which the marker file reports. */
