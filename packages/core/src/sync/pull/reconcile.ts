@@ -1,6 +1,6 @@
 import { isWithin, normalizePath, ROOT } from '../../paths.js';
 import { type EngineContext } from '../context.js';
-import { type PullChange, type SyncFolder, type UnreadableFile } from '../store.js';
+import { pathOf, type PullChange, type SyncFolder, type UnreadableFile } from '../store.js';
 import { type PullAttachments } from './attachments.js';
 import { type Cascade } from './cascade.js';
 import { decidedApartFromMoves, decidedNotes, reestablished } from './decided.js';
@@ -79,7 +79,7 @@ export const createPullReconcile = (
 		// directory was replaced at the name, an `ensure-folder` for that path
 		// is in `kept.folders`. If one is ever found, this is where it starts.
 		const holding = changes.flatMap((change) =>
-			'path' in change && change.kind !== 'delete-folder' ? [change.path] : []
+			change.kind === 'delete-folder' ? [] : (pathOf(change) ?? [])
 		);
 		const notes = await store.allNotes();
 		const folders = await store.foldersWithRemote();

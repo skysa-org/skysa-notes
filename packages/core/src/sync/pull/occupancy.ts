@@ -1,7 +1,7 @@
 import { foldName } from '../../markdown/slug.js';
 import { basename, isWithin, parentPath } from '../../paths.js';
 import { type EngineContext } from '../context.js';
-import { type PullChange, type SyncNote } from '../store.js';
+import { noteIdOf, pathOf, type PullChange, type SyncNote } from '../store.js';
 import { madeInBatch } from './batch.js';
 import { placements } from './replay.js';
 
@@ -77,8 +77,8 @@ export const createOccupancy = ({ store }: EngineContext) => {
 				const { noteId } = change.resolution;
 				return [storeRead(storeReads.noteById, change, () => store.noteById(noteId))];
 			}
-			if (!('id' in change && 'path' in change)) return [];
-			const { id } = change;
+			const id = noteIdOf(change);
+			if (id === undefined || pathOf(change) === undefined) return [];
 			return [storeRead(storeReads.noteById, change, () => store.noteById(id))];
 		});
 		const rows = await Promise.all(named);

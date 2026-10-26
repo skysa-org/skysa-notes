@@ -132,6 +132,15 @@ export type {
 } from './sync/store.js';
 
 export {
+	type FileChange,
+	isFileChange,
+	isNoteChange,
+	type NoteChange,
+	noteIdOf,
+	pathOf,
+} from './sync/store.js';
+
+export {
 	contentTypeOf,
 	downloadName,
 	drawsFromData,

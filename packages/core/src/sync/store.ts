@@ -578,6 +578,64 @@ export type PullChange =
 	  }>;
 
 /**
+ * What each kind of change is about. Named for every kind, so a new one does
+ * not compile until it says, and read by `isNoteChange`, `isFileChange` and
+ * `noteIdOf`, so nothing asks a change which fields it happens to have (#447).
+ * A conflict is about two notes, by its resolution's ids, and every caller
+ * that asks says so of its own.
+ */
+const CHANGE_SUBJECTS = {
+	'upsert-note': 'note',
+	'adopt-version': 'note',
+	'move-note': 'note',
+	'delete-note': 'note',
+	'detach-note': 'note',
+	'displace-note': 'note',
+	'reupload-note': 'note',
+	'ensure-folder': 'folder',
+	'move-folder': 'folder',
+	'delete-folder': 'folder',
+	'reupload-folder': 'folder',
+	unreadable: 'unreadable',
+	'forget-unreadable': 'unreadable',
+	conflict: 'conflict',
+	'upsert-file': 'file',
+	'displace-file': 'file',
+	'delete-file': 'file',
+	'reupload-file': 'file',
+} as const satisfies Record<
+	PullChange['kind'],
+	'note' | 'folder' | 'file' | 'unreadable' | 'conflict'
+>;
+
+type KindsAbout<Subject> = {
+	[Kind in PullChange['kind']]: (typeof CHANGE_SUBJECTS)[Kind] extends Subject ? Kind : never;
+}[PullChange['kind']];
+
+/** A change about one note, named by its `id`. */
+export type NoteChange = Extract<PullChange, { kind: KindsAbout<'note'> }>;
+/** A change about a file that is not a note, named by its `fileId`. */
+export type FileChange = Extract<PullChange, { kind: KindsAbout<'file'> }>;
+
+export const isNoteChange = (change: PullChange): change is NoteChange =>
+	CHANGE_SUBJECTS[change.kind] === 'note';
+
+export const isFileChange = (change: PullChange): change is FileChange =>
+	CHANGE_SUBJECTS[change.kind] === 'file';
+
+/** The note a change is about, where it is one note's: not a conflict's two. */
+export const noteIdOf = (change: PullChange): string | undefined =>
+	isNoteChange(change) ? change.id : undefined;
+
+/**
+ * Where a change puts what it is about, for the kinds that say: a note
+ * written or moved, a folder made, deleted or sent back up, a file written or
+ * moved aside. Not a folder's move, which says `from` and `to`.
+ */
+export const pathOf = (change: PullChange): string | undefined =>
+	'path' in change ? change.path : undefined;
+
+/**
  * Both sides changed the same note. The remote keeps the path; the local copy
  * is written beside it as a new note and queued for push.
  *

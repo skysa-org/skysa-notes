@@ -1,5 +1,12 @@
 import { isWithin, rebasePath } from '../../paths.js';
-import { type PullChange, type SyncNote, type UnreadableFile } from '../store.js';
+import {
+	isNoteChange,
+	noteIdOf,
+	pathOf,
+	type PullChange,
+	type SyncNote,
+	type UnreadableFile,
+} from '../store.js';
 
 /**
  * Where things are once a pull's decisions so far have been applied, asked
@@ -84,7 +91,7 @@ const placedBy =
 					}
 				: state;
 		}
-		if (!('id' in change) || change.id !== note.id) return state;
+		if (!isNoteChange(change) || change.id !== note.id) return state;
 		// Cut loose from the remote: it points at no file at all now. Both
 		// kinds that forget it, or the rest of the batch reads a note as
 		// still bound to a file it no longer has. No test reaches the
@@ -101,7 +108,8 @@ const placedBy =
 		// note's bytes is `upsert-note`, and the engine never emits one
 		// for a note with unpushed edits — that is what `conflict` is.
 		const remoteId = 'remote' in change ? change.remote.remoteId : state.remoteId;
-		return 'path' in change ? { ...state, at: change.path, remoteId } : { ...state, remoteId };
+		const at = pathOf(change);
+		return at === undefined ? { ...state, remoteId } : { ...state, at, remoteId };
 	};
 
 const placedAt = (note: SyncNote): Placement => ({
@@ -127,12 +135,7 @@ export const placements = (decided: readonly PullChange[]): ((note: SyncNote) =>
 		change.kind === 'move-folder' || change.kind === 'delete-folder' ? [index] : []
 	);
 	const naming = decided.reduce<Map<string, number[]>>((map, change, index) => {
-		const id =
-			change.kind === 'conflict'
-				? change.resolution.noteId
-				: 'id' in change
-					? change.id
-					: undefined;
+		const id = change.kind === 'conflict' ? change.resolution.noteId : noteIdOf(change);
 		return id === undefined ? map : map.set(id, [...(map.get(id) ?? []), index]);
 	}, new Map());
 	return (note) => {

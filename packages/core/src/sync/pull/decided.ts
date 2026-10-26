@@ -1,4 +1,4 @@
-import { type PullChange } from '../store.js';
+import { noteIdOf, type PullChange } from '../store.js';
 
 /**
  * What a pull's batch has already spoken for, read off its decisions: the
@@ -38,7 +38,8 @@ export const reestablished = (
 			// the id of a note this batch deleted was refused that id — two
 			// devices then disagreeing for ever about which note it is.
 			const writes = ['upsert-note', 'adopt-version', 'move-note'];
-			return writes.includes(change.kind) && 'id' in change ? [change.id] : [];
+			const id = noteIdOf(change);
+			return writes.includes(change.kind) && id !== undefined ? [id] : [];
 		})
 	),
 	folders: new Set(
@@ -63,7 +64,7 @@ export const decidedNotes = (changes: readonly PullChange[]): ReadonlySet<string
 			if (change.kind === 'conflict') {
 				return [change.resolution.noteId, change.resolution.copyId];
 			}
-			return 'id' in change ? [change.id] : [];
+			return noteIdOf(change) ?? [];
 		})
 	);
 

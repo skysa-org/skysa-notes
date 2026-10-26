@@ -1,17 +1,19 @@
 import { foldName } from '../../src/markdown/slug.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../src/paths.js';
 import { conflictContent } from '../../src/sync/conflicts.js';
-import type {
-	ConflictResolution,
-	OpOutcome,
-	PullBatch,
-	PullChange,
-	SyncFile,
-	SyncFolder,
-	SyncNote,
-	SyncOp,
-	SyncStore,
-	UnreadableFile,
+import {
+	type ConflictResolution,
+	type FileChange,
+	isFileChange,
+	type OpOutcome,
+	type PullBatch,
+	type PullChange,
+	type SyncFile,
+	type SyncFolder,
+	type SyncNote,
+	type SyncOp,
+	type SyncStore,
+	type UnreadableFile,
 } from '../../src/sync/store.js';
 
 /**
@@ -254,21 +256,6 @@ export const createMemoryStore = (): MemoryStore => {
 		}
 		fileOriginIsNow(change.fileId, change.remote.path);
 	};
-
-	type FileChange = Extract<
-		PullChange,
-		{ kind: 'upsert-file' | 'displace-file' | 'delete-file' | 'reupload-file' }
-	>;
-
-	const FILE_CHANGES: ReadonlySet<PullChange['kind']> = new Set([
-		'upsert-file',
-		'displace-file',
-		'delete-file',
-		'reupload-file',
-	]);
-
-	const isFileChange = (change: PullChange): change is FileChange =>
-		FILE_CHANGES.has(change.kind);
 
 	const applyFileChange = (change: FileChange): void => {
 		if (change.kind === 'upsert-file') {
