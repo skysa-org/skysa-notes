@@ -1325,14 +1325,6 @@ export const createDexieSyncStore = (
 			return file === undefined ? undefined : toSyncFile(file);
 		},
 
-		fileByPath: async (path) => {
-			const file = await db.files
-				.where('[connectionId+path]')
-				.equals([connectionId, path])
-				.first();
-			return file === undefined ? undefined : toSyncFile(file);
-		},
-
 		fileByRemoteId: async (remoteId) => {
 			const file = await db.files
 				.where('[connectionId+remoteId]')

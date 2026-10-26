@@ -192,7 +192,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	// A scan's last word, on what it never mentioned (`pull/reconcile.ts`).
 	const { reconcile } = createPullReconcile(context, {
 		cascadeOver,
-		fileBaseOf,
 		filesNow,
 		forgetNote,
 		keepNote,

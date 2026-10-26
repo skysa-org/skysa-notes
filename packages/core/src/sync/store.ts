@@ -790,8 +790,6 @@ export interface SyncStore {
 
 	/** A file row by its id, within this store's connection, as for notes. */
 	readonly fileById: (id: string) => Promise<SyncFile | undefined>;
-	/** Between batches, as `noteByPath`: one row at each path then. */
-	readonly fileByPath: (path: string) => Promise<SyncFile | undefined>;
 	readonly fileByRemoteId: (remoteId: string) => Promise<SyncFile | undefined>;
 	/** Every file row, bound and pending, for reconciling a full scan. */
 	readonly allFiles: () => Promise<SyncFile[]>;
