@@ -22,6 +22,9 @@ import { isLive } from './rowStates.js';
  */
 const LIMIT = 500;
 
+/** How many of each kind of pin a source keeps (`store/sourcePrefs.ts` merges to it). */
+export const PINS_KEPT = LIMIT;
+
 /** Which end of the notebooks beside it a notebook is pinned to. */
 export type NotebookPin = 'top' | 'bottom';
 

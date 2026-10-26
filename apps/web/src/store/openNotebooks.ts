@@ -24,6 +24,9 @@ import { notebookPaths } from './notebookPaths.js';
  */
 const LIMIT = 500;
 
+/** How many open notebooks a source keeps (`store/sourcePrefs.ts` merges to it). */
+export const OPEN_KEPT = LIMIT;
+
 const open = notebookPaths('openNotebooks', LIMIT);
 
 export const getOpenNotebooks = open.get;

@@ -7,6 +7,7 @@ import {
 	connectedSources,
 	detachConnection,
 	finishImport,
+	moveUnsyncedTo,
 	releaseConnection,
 	showConnection,
 } from '../src/store/connection.js';
@@ -40,6 +41,7 @@ import {
 } from '../src/store/prefs.js';
 import { queueWrite } from '../src/store/queue.js';
 import { getRecentKeys, rememberRecent } from '../src/store/recentNotes.js';
+import { heldFor } from '../src/store/sourcePrefs.js';
 import { countOf, isEmpty, type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.js';
 import { holdCredential } from './support/connection.js';
@@ -1098,7 +1100,10 @@ describe('what this device remembers of a source (#452)', () => {
 		return db;
 	};
 
-	it('goes with the source when its notes leave the device, and nothing else does', async () => {
+	/** Where Ada's account's prefs wait while none of its sources is here. */
+	const HELD = heldFor('dropbox:dbid:ada');
+
+	it('waits for the account when the source leaves the device, and comes back with it', async () => {
 		const db = await connected();
 		await bindConnection(db, BOB);
 		await pushed(db, 'plan.md');
@@ -1112,9 +1117,31 @@ describe('what this device remembers of a source (#452)', () => {
 
 		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
 		expect(await remembered(db, ADA.connectionId)).toEqual({});
-		expect(await remembered(db, BOB.connectionId)).toEqual(VALUES);
+		expect(await remembered(db, HELD)).toEqual(VALUES);
+		// Its notes left with it, so they leave the recent ones too.
 		expect(await getRecentKeys(db)).toEqual([[BOB.connectionId, 'n2']]);
+		expect(await remembered(db, BOB.connectionId)).toEqual(VALUES);
 		expect((await db.prefs.get(DEFAULT_EDITOR_MODE_KEY))?.value).toBe('raw');
+
+		// Connected again, under the new id a reconnect gets.
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect(await remembered(db, 'c-ada-2')).toEqual(VALUES);
+		expect(await remembered(db, HELD)).toEqual({});
+	});
+
+	it('is forgotten with a source whose account nobody named', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c-anon', provider: 'dropbox' });
+		await pushed(db, 'plan.md', 'c-anon');
+		await remembering(db, 'c-anon');
+
+		await detachConnection(db, { connectionId: 'c-anon' });
+
+		expect(await remembered(db, 'c-anon')).toEqual({});
+		expect((await db.prefs.toArray()).filter((row) => row.key.includes('account:'))).toEqual(
+			[]
+		);
 	});
 
 	it('stays while notes it was never sent do', async () => {
@@ -1123,7 +1150,7 @@ describe('what this device remembers of a source (#452)', () => {
 		expect(await remembered(db, ADA.connectionId)).toEqual(VALUES);
 	});
 
-	it('goes when those notes are discarded', async () => {
+	it('waits for the account when those notes are discarded', async () => {
 		const db = await detachedRemembering();
 
 		expect(
@@ -1134,6 +1161,31 @@ describe('what this device remembers of a source (#452)', () => {
 			})
 		).toBe('released');
 
+		expect(await remembered(db, ADA.connectionId)).toEqual({});
+		expect(await remembered(db, HELD)).toEqual(VALUES);
+	});
+
+	it('goes with notes moved into another source, and waits for the account too', async () => {
+		const db = await connected();
+		await bindConnection(db, BOB);
+		await createNote(db, { ...ada, title: 'Unsent' });
+		await remembering(db, ADA.connectionId);
+		await remembering(db, BOB.connectionId, { pinnedNotes: JSON.stringify(['b1']) });
+		await detachConnection(db, ada);
+
+		expect(
+			await moveUnsyncedTo(db, {
+				connectionId: ADA.connectionId,
+				target: BOB.connectionId,
+				seen: await shownNow(db),
+			})
+		).toBe('released');
+
+		expect(await remembered(db, BOB.connectionId)).toEqual({
+			...VALUES,
+			pinnedNotes: JSON.stringify(['n1', 'b1']),
+		});
+		expect(await remembered(db, HELD)).toEqual(VALUES);
 		expect(await remembered(db, ADA.connectionId)).toEqual({});
 	});
 
@@ -1211,19 +1263,20 @@ describe('what this device remembers of a source (#452)', () => {
 		expect(await remembered(db, ADA.connectionId)).toEqual(VALUES);
 	});
 
-	it('goes for a source whose first import is cancelled, and the pile keeps its own', async () => {
+	it('waits for the account when a first import is cancelled, and the pile keeps its own', async () => {
 		const db = freshDatabase();
 		await remembering(db, LOCAL_CONNECTION_ID);
 		await bindConnection(db, ADA);
-		await remembering(db, ADA.connectionId);
+		await remembering(db, ADA.connectionId, { scratchpad: 'true' });
 
 		expect(await abandonImport(db, ADA.connectionId)).toBe('abandoned');
 
 		expect(await remembered(db, ADA.connectionId)).toEqual({});
+		expect(await remembered(db, HELD)).toEqual({ scratchpad: 'true' });
 		expect(await remembered(db, LOCAL_CONNECTION_ID)).toEqual(VALUES);
 	});
 
-	it('goes for the pile once its import is done and the pile with it', async () => {
+	it('goes into the first source with the device’s own notes, once the import is done', async () => {
 		const db = freshDatabase();
 		await remembering(db, LOCAL_CONNECTION_ID);
 		await rememberRecent(db, LOCAL_CONNECTION_ID, 'n1');
@@ -1233,7 +1286,44 @@ describe('what this device remembers of a source (#452)', () => {
 
 		await finishImport(db, ADA.connectionId);
 
+		expect(await remembered(db, ADA.connectionId)).toEqual(VALUES);
 		expect(await remembered(db, LOCAL_CONNECTION_ID)).toEqual({});
-		expect(await getRecentKeys(db)).toEqual([]);
+		expect(await getRecentKeys(db)).toEqual([[ADA.connectionId, 'n1']]);
+	});
+
+	it('goes with the device’s own notes into a source bound with no import', async () => {
+		const db = await detachedRemembering();
+		await remembering(db, LOCAL_CONNECTION_ID, { pinnedNotes: JSON.stringify(['p1']) });
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect(JSON.parse((await remembered(db, 'c-ada-2')).pinnedNotes ?? '[]')).toEqual(
+			expect.arrayContaining(['n1', 'p1'])
+		);
+		expect(await remembered(db, LOCAL_CONNECTION_ID)).toEqual({});
+	});
+
+	it('keeps a notebook pinned to one end, the source’s own', async () => {
+		const db = await detachedRemembering();
+		await remembering(db, 'c-ada-2', { bottomPinnedNotebooks: JSON.stringify(['Work']) });
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		const home = await remembered(db, 'c-ada-2');
+		expect(JSON.parse(home.pinnedNotebooks ?? '[]')).toEqual([]);
+		expect(JSON.parse(home.bottomPinnedNotebooks ?? '[]')).toEqual(['Later', 'Work']);
+	});
+
+	it('keeps no more pins than a source keeps, its own last', async () => {
+		const db = await detachedRemembering();
+		const theirs = Array.from({ length: 500 }, (_, at) => `t${String(at)}`);
+		await remembering(db, ADA.connectionId, { pinnedNotes: JSON.stringify(theirs) });
+		await remembering(db, 'c-ada-2', { pinnedNotes: JSON.stringify(['mine']) });
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		const pins = JSON.parse((await remembered(db, 'c-ada-2')).pinnedNotes ?? '[]') as string[];
+		expect(pins).toHaveLength(500);
+		expect(pins.at(-1)).toBe('mine');
 	});
 });
