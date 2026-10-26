@@ -336,6 +336,25 @@ export default tseslint.config(
 		},
 	},
 	{
+		// names/ sits below providers, sync and markdown, which all name files
+		// by it; reaching up into any of them would bring the cycle back.
+		files: ['packages/core/src/names/**/*.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						...CORE_IMPORTS,
+						NOT_ABOVE(
+							['sync', 'providers', 'markdown'],
+							'names/ sits below sync, providers and markdown.'
+						),
+					],
+				},
+			],
+		},
+	},
+	{
 		// No Node built-ins anywhere in the Worker, `worker.ts` included: the
 		// entry module is the likeliest place for one to appear. `wrangler deploy
 		// --dry-run` bundles one without a word, and only the deployed Worker

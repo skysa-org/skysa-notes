@@ -55,10 +55,10 @@ export interface Caps {
  * Cut to both caps without cutting a character in half.
  *
  * `slice` counts UTF-16 units, and a cut landing inside a surrogate pair leaves
- * half of one at the end of the name — see `LONE_SURROGATE` for what that
- * costs. Cutting between code points avoids that and still turns a family
- * emoji into a different one, or strands an accent's letter, so the cut is made
- * between clusters.
+ * half of one at the end of the name — see `LONE_SURROGATE` in `slug.ts` for
+ * what that costs. Cutting between code points avoids that and still turns a
+ * family emoji into a different one, or strands an accent's letter, so the cut
+ * is made between clusters.
  *
  * A single cluster too big for the caps on its own — text with marks piled on
  * one letter by the hundred — is cut between code points instead, or the whole
