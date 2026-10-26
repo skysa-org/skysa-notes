@@ -8,7 +8,7 @@ import {
 	siteLabel,
 	siteName,
 	siteOf,
-} from '../src/sites.js';
+} from '../../src/vault/sites.js';
 
 /** Whether a login saved as `saved` fills a page whose origin is `origin`. */
 const fills = (saved: string, origin: string): boolean => {

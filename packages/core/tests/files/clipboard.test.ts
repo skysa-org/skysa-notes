@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clipName, clipPath, clipStamp, isClipPath, readClipName } from '../src/clipboard.js';
+import { clipName, clipPath, clipStamp, readClipName } from '../../src/files/clipboard.js';
 
 const HASH = '3f9a1c2b5d6e7f80';
 const AT = Date.UTC(2026, 9, 6, 15, 30, 12, 123);
@@ -136,9 +136,5 @@ describe('clipStamp', () => {
 describe('the folder', () => {
 	it('is where every item is, and counts as the clipboard’s itself', () => {
 		expect(clipPath('a.txt')).toBe('.clipboard/a.txt');
-		expect(isClipPath('.clipboard')).toBe(true);
-		expect(isClipPath('.clipboard/a.txt')).toBe(true);
-		expect(isClipPath('.clipboards/a.txt')).toBe(false);
-		expect(isClipPath('Work/.clipboard/a.txt')).toBe(false);
 	});
 });

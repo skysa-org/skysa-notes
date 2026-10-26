@@ -6,7 +6,7 @@ import {
 	PICTURE_WIDTHS,
 	pictureVariant,
 	THUMB_BOX,
-} from '../src/pictures.js';
+} from '../../src/files/pictures.js';
 
 /**
  * Pictures built byte by byte, as much of each as its header: enough to say

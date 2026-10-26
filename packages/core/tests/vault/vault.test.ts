@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseRecipient, publicKeyOf } from '../src/age/curve.js';
-import { generateIdentity, parseIdentity } from '../src/age/keys.js';
-import { rewriteSecrets, withoutArmor } from '../src/markdown/secretBlocks.js';
-import { openSecret, resealSecret, sealSecret } from '../src/secrets/sealing.js';
+import { parseRecipient, publicKeyOf } from '../../src/age/curve.js';
+import { generateIdentity, parseIdentity } from '../../src/age/keys.js';
+import { rewriteSecrets, withoutArmor } from '../../src/markdown/secretBlocks.js';
+import { openSecret, resealSecret, sealSecret } from '../../src/secrets/sealing.js';
 import {
 	EMPTY_VAULT_FIELDS,
 	isEmptyVaultFields,
@@ -16,8 +16,8 @@ import {
 	vaultUrls,
 	withReplacedPassword,
 	withVaultUrls,
-} from '../src/vault.js';
-import { IDENTITY, RECIPIENT } from './age/known.js';
+} from '../../src/vault/vault.js';
+import { IDENTITY, RECIPIENT } from '../age/known.js';
 
 const identity = parseIdentity(IDENTITY) ?? new Uint8Array();
 const recipient = parseRecipient(RECIPIENT) ?? new Uint8Array();

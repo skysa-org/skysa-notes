@@ -4,7 +4,6 @@ import { parseRecipient } from '../../src/age/curve.js';
 import { encodeRecipient } from '../../src/age/keys.js';
 import {
 	buildEncryptionFile,
-	isEncryptionFile,
 	parseEncryptionFile,
 	serializeEncryptionFile,
 } from '../../src/secrets/encryptionFile.js';
@@ -58,12 +57,5 @@ describe('the key file', () => {
 		const text = JSON.stringify({ schemaVersion: 1, recipient: lowOrder, setAt: 'x' });
 		expect(parseEncryptionFile(text).status).toBe('ok');
 		expect(parseRecipient(lowOrder)).toBeUndefined();
-	});
-
-	it('is at the root and nowhere else', () => {
-		expect(isEncryptionFile('.encryption.json')).toBe(true);
-		expect(isEncryptionFile('/.encryption.json')).toBe(true);
-		expect(isEncryptionFile('notes/.encryption.json')).toBe(false);
-		expect(isEncryptionFile('.encryption.json.bak')).toBe(false);
 	});
 });

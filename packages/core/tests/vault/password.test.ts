@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { generatePassword, PASSWORD_LENGTH, passwordLength } from '../src/password.js';
+import { generatePassword, PASSWORD_LENGTH, passwordLength } from '../../src/vault/password.js';
 
 const LOWER = /[a-z]/u;
 const UPPER = /[A-Z]/u;
