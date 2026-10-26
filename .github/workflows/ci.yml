@@ -59,8 +59,8 @@ jobs:
 
             # The same gate the README tells humans to run before every commit, so
             # the two cannot drift: format:check + lint + typecheck + knip +
-            # test. knip is files, exports and dependencies nothing uses; an
-            # export kept on purpose says why and is tagged `@public` (#461).
+            # test. knip reports files, exports and dependencies nothing uses;
+            # an export kept on purpose says why and is tagged `@public` (#461).
             - run: pnpm verify
 
             # A pull request that changes what ships has to say what it does
