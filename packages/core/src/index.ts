@@ -14,6 +14,7 @@ export { armor } from './age/armor.js';
 export { parseRecipient, recipientOf } from './age/curve.js';
 export { AgeError } from './age/errors.js';
 export { encodeIdentity, generateIdentity } from './age/keys.js';
+export { type Cell, cell } from './cell.js';
 export { API_ERROR_CODES, type ApiErrorCode, AUTH_MODES, type AuthMode } from './api.js';
 export { isEncryptionFile, isScratchPath, isVaultPath } from './appFolder.js';
 export {

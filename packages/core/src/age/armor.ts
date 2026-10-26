@@ -1,3 +1,4 @@
+import { cell } from '../cell.js';
 import { decodeBase64, encodeBase64 } from './base64.js';
 import { concatBytes } from './bytes.js';
 import { AgeError } from './errors.js';
@@ -42,7 +43,7 @@ export const mentionsArmor = (text: string): boolean => text.includes(BEGIN);
 
 /** The age file inside armor, or an `armor` failure. */
 export const dearmor = (text: string): Uint8Array => {
-	const at = { current: 0 };
+	const at = cell(0);
 	/** The next line, without one `\n` and then one `\r`; at the very end, a failure. */
 	const nextLine = (): string => {
 		if (at.current >= text.length) throw failure('the armor ends early');
@@ -64,8 +65,8 @@ export const dearmor = (text: string): Uint8Array => {
 		return finish(parts);
 	};
 
-	const skipped = { current: 0 };
-	const first = { current: nextLine() };
+	const skipped = cell(0);
+	const first = cell(nextLine());
 	// A loop, as in age's reader: each blank line skipped is counted against 1 KiB.
 	// eslint-disable-next-line functional/no-loop-statements
 	while (WHITESPACE.test(first.current)) {

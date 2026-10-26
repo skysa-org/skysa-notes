@@ -1,3 +1,4 @@
+import { cell } from '../../cell.js';
 import {
 	type ChangeEntry,
 	type ChangeSet,
@@ -201,9 +202,9 @@ export const createPullRun = (
 		 * asking it again costs a request, shows a round for a moment, and
 		 * leaves `uploadDifferences` to a second refusal that may say less.
 		 */
-		const rescan = new Map<'upload', boolean>();
+		const rescan = cell<boolean | undefined>(undefined);
 		const attempt = (): Promise<SyncOutcome> => {
-			const upload = rescan.get('upload');
+			const upload = rescan.current;
 			if (upload !== undefined) return scan(upload);
 			return (stored === undefined ? scan() : drainRound(stored)).catch((error: unknown) => {
 				// The cursor is dead rather than the request. Discarding it and
@@ -214,7 +215,7 @@ export const createPullRun = (
 				// interruption, since the same cursor meets the same refusal and is
 				// told the same thing.
 				if (isCursorResetError(error)) {
-					rescan.set('upload', error.uploadDifferences === true);
+					rescan.current = error.uploadDifferences === true;
 					return scan(error.uploadDifferences === true);
 				}
 				throw error;

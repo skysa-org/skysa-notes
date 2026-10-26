@@ -1,3 +1,4 @@
+import { cell } from '../cell.js';
 import { MARKER_FILE, type ProviderKind } from '../config.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../paths.js';
@@ -151,8 +152,8 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 	const log = new Map<number, ChangeEntry>();
 	const counters = new Map<CounterKey, number>();
 	const opCounts = new Map<FakeOperation, number>();
-	const rootIdBox = new Map<'rootId', string>();
-	const faults = new Map<'fault', FakeFault>();
+	const rootId = cell<string | undefined>(undefined);
+	const faults = cell<FakeFault | undefined>(undefined);
 	const calls = new Map<number, FakeCall>();
 
 	const bump = (key: CounterKey): number => {
@@ -245,7 +246,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 	const byPath = (a: FakeNode, b: FakeNode): number => a.path.localeCompare(b.path);
 
 	const rootEntry = (): RemoteEntry => ({
-		remoteId: rootIdBox.get('rootId') ?? 'id:root',
+		remoteId: rootId.current ?? 'id:root',
 		path: ROOT,
 		kind: 'folder',
 		version: 'v0',
@@ -264,7 +265,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		calls.set(bump('call'), call);
 
 		try {
-			const fault = faults.get('fault')?.(call);
+			const fault = faults.current?.(call);
 			if (fault !== undefined) throw fault;
 			return Promise.resolve(run());
 		} catch (error) {
@@ -274,8 +275,8 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	const ensureRoot = (): Promise<{ rootId: string }> =>
 		settle('ensureRoot', undefined, () => {
-			const id = rootIdBox.get('rootId') ?? 'id:root';
-			rootIdBox.set('rootId', id);
+			const id = rootId.current ?? 'id:root';
+			rootId.current = id;
 			if (nodes.has(MARKER_FILE)) return { rootId: id };
 
 			const marker = buildMarker({
@@ -547,8 +548,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		delete: remove,
 		changes,
 		setFault: (fault) => {
-			if (fault === undefined) faults.delete('fault');
-			if (fault !== undefined) faults.set('fault', fault);
+			faults.current = fault;
 		},
 		snapshot: () => [...nodes.values()].sort(byPath).map(toEntry),
 		contentAt: (path) => {

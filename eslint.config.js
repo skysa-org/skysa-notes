@@ -38,6 +38,29 @@ const RESTRICTED_SYNTAX = [
 ];
 
 /**
+ * The one way to hold a value that changes: `cell()` from `@skysa/core`
+ * (#457). Not a `Map` keyed by one literal, and not a `{ current }` written
+ * out — the two ways the rule against `let` used to be worked round, each to
+ * be learned where it was met. A React ref is a cell's shape already and is
+ * not written as one of these. In source only: tests keep their own idioms.
+ */
+const CELL_SYNTAX = [
+	{
+		selector:
+			"NewExpression[callee.name='Map'] > TSTypeParameterInstantiation > :first-child:matches(TSLiteralType, TSUnionType:has(TSLiteralType))",
+		message: 'a Map keyed by a literal is a cell: use cell() from @skysa/core (#457).',
+	},
+	{
+		selector: "ObjectExpression[properties.length=1] > Property[key.name='current']",
+		message: 'a { current } box is a cell: use cell() from @skysa/core (#457).',
+	},
+	{
+		selector: "TSTypeLiteral[members.length=1] > TSPropertySignature[key.name='current']",
+		message: 'a { current } type is a cell: use Cell<T> from @skysa/core (#457).',
+	},
+];
+
+/**
  * Every Node built-in, by bare name and by `node:` — read from Node itself, so a
  * hand-kept list cannot leave one out. Neither core nor the Worker has them:
  * core runs in the browser and Workers too, and the Worker runs without
@@ -292,6 +315,12 @@ export default tseslint.config(
 	{
 		files: ['apps/web/src/**/*.tsx'],
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...INLINE_WORDS] },
+	},
+
+	{
+		// Converted folder by folder (#457); each joins this list as it is done.
+		files: ['packages/core/src/**/*.ts'],
+		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...CELL_SYNTAX] },
 	},
 
 	// ---- Boundaries ---------------------------------------------------------

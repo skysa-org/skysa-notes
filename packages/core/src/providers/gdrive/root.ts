@@ -1,3 +1,4 @@
+import { cell } from '../../cell.js';
 import { APP_FOLDER_NAME, MARKER_FILE } from '../../config.js';
 import { pathSegments } from '../../paths.js';
 import { jsonBody } from '../http.js';
@@ -25,13 +26,14 @@ import {
  */
 export const createAppFolder = (client: DriveClient) => {
 	const { attempt, call, raise, fileUrl, search, childrenOf, named, trash } = client;
+	/** The app folder's id, found again at the start of every `changes` call. */
+	const foundRoot = cell<string | undefined>(undefined);
 	/**
-	 * `id`: the app folder's id, found again at the start of every `changes`
-	 * call. `known`: the last one this adapter — this page, in the app — made,
-	 * found or confirmed for a stored cursor, kept across that, for a search
-	 * that has not caught up with it yet (`withKnown`).
+	 * The last app folder this adapter — this page, in the app — made, found
+	 * or confirmed for a stored cursor, kept across that, for a search that
+	 * has not caught up with it yet (`withKnown`).
 	 */
-	const rootBox = new Map<'id' | 'known', string>();
+	const knownRoot = cell<string | undefined>(undefined);
 
 	/** Every folder carrying the app's tag and not in the trash, canonical first. */
 	const taggedRoots = async (): Promise<DriveFile[]> =>
@@ -45,8 +47,8 @@ export const createAppFolder = (client: DriveClient) => {
 		if (root.id === undefined || root.id === '') {
 			throw new ProviderResponseError('gdrive returned an app folder with no id');
 		}
-		rootBox.set('id', root.id);
-		rootBox.set('known', root.id);
+		foundRoot.current = root.id;
+		knownRoot.current = root.id;
 		return root.id;
 	};
 
@@ -59,7 +61,7 @@ export const createAppFolder = (client: DriveClient) => {
 	 * that pull make a second.
 	 */
 	const withKnown = async (listed: DriveFile[]): Promise<DriveFile[]> => {
-		const known = rootBox.get('known');
+		const known = knownRoot.current;
 		if (known === undefined || listed.some((root) => root.id === known)) return listed;
 		const result = await attempt<DriveFile>('GET', fileUrl(known));
 		if (!result.ok && !outOfReach(result.failure)) raise(result.failure);
@@ -75,7 +77,7 @@ export const createAppFolder = (client: DriveClient) => {
 	 * one.
 	 */
 	const rootId = async (): Promise<string> => {
-		const cached = rootBox.get('id');
+		const cached = foundRoot.current;
 		if (cached !== undefined) return cached;
 		const [found] = await taggedRoots();
 		if (found === undefined) throw new Error('gdrive app folder not found');
@@ -98,7 +100,7 @@ export const createAppFolder = (client: DriveClient) => {
 	 * does not list it yet (`withKnown`).
 	 */
 	const establishRoot = async (): Promise<string> => {
-		rootBox.delete('id');
+		foundRoot.current = undefined;
 		const found = await withKnown(await taggedRoots());
 		const made =
 			found.length > 0
@@ -167,7 +169,7 @@ export const createAppFolder = (client: DriveClient) => {
 	 * index can do — of the folder itself.
 	 */
 	const confirmRoot = async (expected: string): Promise<void> => {
-		rootBox.delete('id');
+		foundRoot.current = undefined;
 		const [canonical] = await taggedRoots();
 		if (canonical !== undefined && canonical.id !== expected) {
 			throw new CursorResetError('gdrive app folder is not the one this cursor was for');
@@ -179,8 +181,8 @@ export const createAppFolder = (client: DriveClient) => {
 				throw new CursorResetError('gdrive app folder is gone');
 			}
 		}
-		rootBox.set('id', expected);
-		rootBox.set('known', expected);
+		foundRoot.current = expected;
+		knownRoot.current = expected;
 	};
 
 	/**
@@ -207,11 +209,11 @@ export const createAppFolder = (client: DriveClient) => {
 		entry.remoteId === '' ? (await itemAt(entry.path))?.id : entry.remoteId;
 
 	/** The id last found or confirmed, unless it has been forgotten since. */
-	const foundId = (): string | undefined => rootBox.get('id');
+	const foundId = (): string | undefined => foundRoot.current;
 
 	/** So the next `rootId` searches again. */
 	const forget = (): void => {
-		rootBox.delete('id');
+		foundRoot.current = undefined;
 	};
 
 	return { rootId, establishRoot, confirmRoot, foundId, forget, itemAt, folderIdAt, idOf };

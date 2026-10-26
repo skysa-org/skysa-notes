@@ -1,3 +1,5 @@
+import { cell } from '../cell.js';
+
 /**
  * What a picture's own bytes say about it, read from its header without
  * decoding it, and which copy of it a view is shown (#276).
@@ -156,7 +158,11 @@ const standsAlone = (marker: number): boolean =>
  * before its data is not read: an EXIF it is missing might have turned it.
  */
 const jpeg = (view: DataView): PictureInfo | undefined => {
-	const marks = new Map<'width' | 'height' | 'exif' | 'orientation', number>();
+	// Where its EXIF starts, the orientation that gives, and the first frame's
+	// size: each found once, from the first segment that says it.
+	const exif = cell<number | undefined>(undefined);
+	const turn = cell<number | undefined>(undefined);
+	const frameSize = cell<{ width: number; height: number } | undefined>(undefined);
 	const reached = walk(2, (at): Step<true> => {
 		const lead = u8(view, at);
 		const marker = u8(view, at + 1);
@@ -172,25 +178,22 @@ const jpeg = (view: DataView): PictureInfo | undefined => {
 		if (length === undefined || length < 2) return undefined;
 		const end = at + 2 + length;
 		// `Exif` and a nul, and any byte after it, as Chrome takes it.
-		if (marker === 0xe1 && !marks.has('exif') && text(view, at + 4, 5) === 'Exif\0') {
-			marks.set('exif', at);
+		if (marker === 0xe1 && exif.current === undefined && text(view, at + 4, 5) === 'Exif\0') {
+			exif.current = at;
 			const orientation = exifOrientation(view, at + 10, end);
-			if (orientation !== undefined) marks.set('orientation', orientation);
+			if (orientation !== undefined) turn.current = orientation;
 		}
-		if (startsFrame(marker) && !marks.has('width')) {
+		if (startsFrame(marker) && frameSize.current === undefined) {
 			const height = u16(view, at + 5);
 			const width = u16(view, at + 7);
 			if (!sized(width, height)) return undefined;
-			marks.set('width', width ?? 0);
-			marks.set('height', height ?? 0);
+			frameSize.current = { width: width ?? 0, height: height ?? 0 };
 		}
 		return { next: end };
 	});
-	const frame = { width: marks.get('width'), height: marks.get('height') };
-	if (reached === undefined || frame.width === undefined || frame.height === undefined) {
-		return undefined;
-	}
-	const orientation = marks.get('orientation') ?? 1;
+	const frame = frameSize.current;
+	if (reached === undefined || frame === undefined) return undefined;
+	const orientation = turn.current ?? 1;
 	// 5 to 8 are a quarter turn, each with or without a mirror.
 	const turned = orientation >= 5;
 	return {
@@ -226,21 +229,27 @@ const gif = (view: DataView): PictureInfo | undefined => {
 	const screen = { width: u16(view, 6, true), height: u16(view, 8, true) };
 	const flags = u8(view, 10);
 	if (!sized(screen.width, screen.height) || flags === undefined) return undefined;
-	const marks = new Map<'frames' | 'alpha' | 'left' | 'top' | 'right' | 'bottom', number>();
+	// How many frames it has begun, whether a colour is see-through, and the
+	// first frame's edges.
+	const frameCount = cell(0);
+	const alpha = cell(false);
+	const edges = cell<{ left: number; top: number; right: number; bottom: number } | undefined>(
+		undefined
+	);
 	const reached = walk(13 + colorTable(flags), (at): Step<true> => {
 		const introducer = u8(view, at);
 		if (introducer === undefined) return undefined;
 		if (introducer === 0x21) {
 			// A graphic control block, with its transparent colour flag set.
 			if (u8(view, at + 1) === 0xf9 && ((u8(view, at + 3) ?? 0) & 0x01) === 1) {
-				marks.set('alpha', 1);
+				alpha.current = true;
 			}
 			const next = pastBlocks(view, at + 2);
 			return next === undefined ? undefined : { next };
 		}
 		if (introducer === 0x2c) {
-			const frames = (marks.get('frames') ?? 0) + 1;
-			marks.set('frames', frames);
+			const frames = frameCount.current + 1;
+			frameCount.current = frames;
 			if (frames > 1) return { found: true };
 			const left = u16(view, at + 1, true);
 			const top = u16(view, at + 3, true);
@@ -256,10 +265,7 @@ const gif = (view: DataView): PictureInfo | undefined => {
 			) {
 				return undefined;
 			}
-			marks.set('left', left);
-			marks.set('top', top);
-			marks.set('right', left + across);
-			marks.set('bottom', top + down);
+			edges.current = { left, top, right: left + across, bottom: top + down };
 			// The descriptor, its own colour table, and the code size before the data.
 			const next = pastBlocks(view, at + 10 + colorTable(local) + 1);
 			return next === undefined ? undefined : { next };
@@ -267,19 +273,18 @@ const gif = (view: DataView): PictureInfo | undefined => {
 		// Its end, or nothing a GIF holds, where a browser stops too.
 		return { found: true };
 	});
-	const right = marks.get('right');
-	const bottom = marks.get('bottom');
-	if (reached === undefined || right === undefined || bottom === undefined) return undefined;
+	const frame = edges.current;
+	if (reached === undefined || frame === undefined) return undefined;
+	const { left, top, right, bottom } = frame;
 	const width = Math.max(screen.width ?? 0, right);
 	const height = Math.max(screen.height ?? 0, bottom);
-	const covered =
-		marks.get('left') === 0 && marks.get('top') === 0 && right >= width && bottom >= height;
+	const covered = left === 0 && top === 0 && right >= width && bottom >= height;
 	return {
 		format: 'gif',
 		width,
 		height,
-		animated: (marks.get('frames') ?? 0) > 1,
-		alpha: marks.has('alpha') || !covered,
+		animated: frameCount.current > 1,
+		alpha: alpha.current || !covered,
 		orientation: 1,
 	};
 };
