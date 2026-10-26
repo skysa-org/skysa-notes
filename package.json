@@ -23,7 +23,7 @@
 		"db:migrate:remote": "pnpm --filter @skysa/api run db:migrate:remote",
 		"lint:fix": "eslint . --fix",
 		"knip": "knip",
-		"verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+		"verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm knip && pnpm test",
 		"deploy": "pnpm typecheck && pnpm build && pnpm --filter @skysa/api run deploy",
 		"changeset": "changeset",
 		"changeset:status": "changeset status",
