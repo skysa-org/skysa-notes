@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { open, seal, type SecretKey } from '../crypto.js';
+import { open, seal, type SecretKey, urlSafe } from '../crypto.js';
 import { parseJson } from '../json.js';
 
 /**
@@ -34,10 +34,6 @@ export interface TicketHolder {
 	readonly grantId: string;
 	readonly connectionId: string;
 }
-
-/** `seal` speaks base64; a query string wants it URL-safe. */
-const urlSafe = (base64: string): string =>
-	base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 export const issueTicket = async (
 	key: SecretKey,

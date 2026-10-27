@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
 import { liveGrant } from '../credentials.js';
-import { fail, sameOrigin, tooMany } from '../http.js';
+import { fail, requireSameOrigin, tooMany } from '../http.js';
 import { RELAY_SOCKET_MS, type RelayHub } from '../relay/hub.js';
 import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
 
@@ -16,7 +16,9 @@ import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
  * in an order where the cheap refusals come first and nothing reaches the hub
  * that the database has not just agreed to.
  *
- * Both answer 404 where the deployment runs no hub.
+ * Both answer 404 where the deployment runs no hub, to a page of its own. The
+ * upgrade refuses another origin first, 403, so such a page learns nothing of
+ * whether there is one.
  */
 export const relayRoutes = (relay: RelayHub | undefined) => {
 	const app = new Hono<AppEnv>();
@@ -36,17 +38,13 @@ export const relayRoutes = (relay: RelayHub | undefined) => {
 		return c.json({ ticket, expiresIn: TICKET_SECONDS });
 	});
 
-	app.get('/relay', async (c) => {
+	// A page on another origin can open a WebSocket here, and the browser sends
+	// no preflight for one; `Origin` is how a server tells.
+	app.get('/relay', requireSameOrigin, async (c) => {
 		if (relay === undefined) return fail(c, 'relay_disabled', 404);
 		if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
 			return fail(c, 'upgrade_required', 426);
 		}
-		// A page on another origin can open a WebSocket here, and the browser
-		// sends no preflight for one; `Origin` is how a server tells.
-		if (!sameOrigin(c, c.get('config').appOrigin)) {
-			return fail(c, 'forbidden_origin', 403);
-		}
-
 		const now = Date.now();
 		const holder = await readTicket(c.get('ticketKey'), c.req.query('ticket'), now);
 		if (holder === undefined) return fail(c, 'ticket_invalid', 401);

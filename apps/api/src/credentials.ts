@@ -74,9 +74,15 @@ export const bearerFrom = (header: string | undefined | null): string | undefine
 	return token;
 };
 
-/** Used within `GRANT_IDLE_DAYS`: the one test of idleness every lookup shares. */
-const notIdle = (now: number) =>
-	gt(schema.grants.lastUsedAt, new Date(now - GRANT_IDLE_DAYS * DAY_MS));
+/** The last use before which a grant is idle, at `now`. */
+const idleBefore = (now: number): Date => new Date(now - GRANT_IDLE_DAYS * DAY_MS);
+
+/** Used within `GRANT_IDLE_DAYS`: the one test of idleness every query shares. */
+export const notIdle = (now: number) => gt(schema.grants.lastUsedAt, idleBefore(now));
+
+/** The same test, of a grant already read: idle once its last use is not after the cutoff. */
+export const isIdle = (lastUsedAt: Date, now: number): boolean =>
+	lastUsedAt.getTime() <= idleBefore(now).getTime();
 
 export interface Bearer {
 	/** Its `connectionId` is known non-null: `grantHolder` only returns live ones. */
