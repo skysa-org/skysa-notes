@@ -8,13 +8,6 @@ import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
 import { deviceLabel } from '../device.js';
-import { connectCodeSchema, knownCode, readCodeCheck } from '../gate.js';
-import { fail, sameOrigin, tooMany } from '../http.js';
-import { logFailure } from '../log.js';
-import { createPkcePair, createState } from '../oauth/pkce.js';
-import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
-import { type FetchLike, ScopeNotGrantedError } from '../oauth/types.js';
-import { closeSockets } from '../relay/hub.js';
 import {
 	clearFlowState,
 	flowExpiry,
@@ -22,7 +15,14 @@ import {
 	readFlowState,
 	setFlowAnswer,
 	setFlowState,
-} from '../session.js';
+} from '../flowCookies.js';
+import { connectCodeSchema, knownCode, readCodeCheck } from '../gate.js';
+import { fail, sameOrigin, tooMany } from '../http.js';
+import { logFailure } from '../log.js';
+import { createPkcePair, createState } from '../oauth/pkce.js';
+import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
+import { type FetchLike, ScopeNotGrantedError } from '../oauth/types.js';
+import { closeSockets } from '../relay/hub.js';
 
 /**
  * Connecting a storage account. Two routes: one the device asks for an

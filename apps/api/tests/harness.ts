@@ -8,8 +8,8 @@ import {
 	toBase64Url,
 } from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
+import { answerCookieName, flowCookieName } from '../src/flowCookies.js';
 import type { RelayHub, RelayMember } from '../src/relay/hub.js';
-import { answerCookieName, flowCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
 
 /**
