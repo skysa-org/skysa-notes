@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { open, seal, type SecretKey } from '../crypto.js';
+import { parseJson } from '../json.js';
 
 /**
  * What lets a device open a relay socket without its credential in the URL.
@@ -74,16 +75,8 @@ export const readTicket = async (
 	const plaintext = await open(key, { iv, ciphertext, keyId: key.id }).catch(() => undefined);
 	if (plaintext === undefined) return undefined;
 
-	const parsed = payloadSchema.safeParse(
-		((): unknown => {
-			try {
-				return JSON.parse(plaintext);
-			} catch {
-				return undefined;
-			}
-		})()
-	);
-	if (!parsed.success || parsed.data.e <= now) return undefined;
+	const payload = parseJson(plaintext, payloadSchema);
+	if (payload === undefined || payload.e <= now) return undefined;
 
-	return { grantId: parsed.data.g, connectionId: parsed.data.c };
+	return { grantId: payload.g, connectionId: payload.c };
 };

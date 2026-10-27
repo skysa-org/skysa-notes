@@ -1,6 +1,8 @@
 import { AUTH_MODES, type AuthMode, PROVIDER_KINDS, type ProviderKind } from '@skysa/core';
 import { z } from 'zod';
 
+import { formatIssues } from './json.js';
+
 /**
  * Validation for the operator's environment. This module never reads the
  * environment itself — `src/worker.ts` is the only place that touches it and
@@ -170,9 +172,7 @@ export const parseEnv = (raw: unknown): AppConfig => {
 	const result = rawEnvSchema.safeParse(record);
 
 	const issues = [
-		...(result.success
-			? []
-			: result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)),
+		...(result.success ? [] : formatIssues(result.error.issues)),
 		...crossFieldIssues(record),
 	];
 	if (!result.success || issues.length > 0) {

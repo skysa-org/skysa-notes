@@ -1,4 +1,7 @@
+import { z } from 'zod';
+
 import { fromBase64Url } from '../crypto.js';
+import { parseJson } from '../json.js';
 import { type FetchLike, type OAuthCredentials, OAuthError, type TokenSet } from './types.js';
 
 /**
@@ -18,16 +21,42 @@ import { type FetchLike, type OAuthCredentials, OAuthError, type TokenSet } from
  */
 export const DEFAULT_EXPIRES_S = 3600;
 
-/** A token endpoint's answer, as far as anything here reads it. */
-export interface TokenResponse {
-	access_token?: string;
-	refresh_token?: string;
-	expires_in?: number;
-	id_token?: string;
-	scope?: string;
-	account_id?: unknown;
-	error?: string;
-}
+/** A field that is a string, or nothing where the provider sent something else. */
+const text = z
+	.unknown()
+	.transform((value) => (typeof value === 'string' ? value : undefined))
+	.optional();
+
+/**
+ * A token endpoint's answer, as far as anything here reads it, checked a field
+ * at a time (#450): one field of the wrong kind is dropped, not the answer. A
+ * lifetime sent as a string of digits is read as the number, as the cast this
+ * replaced came to by arithmetic; one at or below zero is taken as none.
+ */
+const tokenResponseSchema = z.object({
+	access_token: text,
+	refresh_token: text,
+	expires_in: z
+		.unknown()
+		.transform((value) => {
+			const seconds =
+				typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+			// None, or none worth having: one at or below zero is a token that
+			// arrives expired, and would send the client straight back to refresh.
+			return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+		})
+		.optional(),
+	id_token: text,
+	scope: text,
+	account_id: z.unknown().optional(),
+	error: text,
+});
+
+export type TokenResponse = z.output<typeof tokenResponseSchema>;
+
+/** An answer that is not a JSON object at all reads as one with nothing in it. */
+const tokenResponseOf = (value: unknown): TokenResponse =>
+	tokenResponseSchema.safeParse(value).data ?? {};
 
 /** The client's own half of a token request, for the providers that take it in the form. */
 export const clientForm = (credentials: OAuthCredentials): Record<string, string> => ({
@@ -55,7 +84,7 @@ export const postTokenForm = async (
 		body: new URLSearchParams(form).toString(),
 	});
 
-	const body = (await response.json().catch(() => ({}))) as TokenResponse;
+	const body = tokenResponseOf(await response.json().catch(() => undefined));
 	if (!response.ok || body.access_token === undefined) {
 		throw new OAuthError(provider, body.error ?? String(response.status));
 	}
@@ -76,6 +105,16 @@ export const postTokenForm = async (
  */
 export const nonEmpty = (value: unknown): string | undefined =>
 	typeof value === 'string' && value !== '' ? value : undefined;
+
+/** A field that is a `nonEmpty` string, or nothing in its place. */
+export const nameField = z.unknown().transform(nonEmpty).optional();
+
+/** The claims read from an ID token. The audience is compared, so any value will do. */
+const claimsSchema = z.object({
+	aud: z.unknown().optional(),
+	sub: nameField,
+	email: nameField,
+});
 
 /** Who an ID token says the account is: `sub` for its id, `email` for its name. */
 export interface IdClaims {
@@ -98,12 +137,9 @@ export const readIdClaims = (idToken: string | undefined, clientId: string): IdC
 	const [, payload] = (idToken ?? '').split('.');
 	if (payload === undefined) return {};
 	try {
-		const parsed: unknown = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
-		if (typeof parsed !== 'object' || parsed === null) return {};
-		const claims = parsed as { aud?: unknown; sub?: unknown; email?: unknown };
-		if (claims.aud !== clientId) return {};
-		const sub = nonEmpty(claims.sub);
-		const email = nonEmpty(claims.email);
+		const claims = parseJson(new TextDecoder().decode(fromBase64Url(payload)), claimsSchema);
+		if (claims?.aud !== clientId) return {};
+		const { sub, email } = claims;
 		return { ...(sub === undefined ? {} : { sub }), ...(email === undefined ? {} : { email }) };
 	} catch {
 		return {};

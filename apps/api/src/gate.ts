@@ -10,6 +10,8 @@ import {
 } from '@skysa/core';
 import { z } from 'zod';
 
+import { formatIssues } from './json.js';
+
 /**
  * What an operator's policy may say to the app, checked on the way out.
  *
@@ -67,11 +69,7 @@ export const checkGate = (
 	if (gate === undefined) return undefined;
 	const result = gateSchema.safeParse(gate);
 	const issues = [
-		...(result.success
-			? []
-			: result.error.issues.map(
-					(issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`
-				)),
+		...(result.success ? [] : formatIssues(result.error.issues)),
 		// The app asks as a code is used, and a gate that asks for one with
 		// nothing to answer would refuse every code there is.
 		...(result.success && result.data.connectCode !== undefined && !checksCodes

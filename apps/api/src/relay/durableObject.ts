@@ -2,6 +2,7 @@ import { RELAY_PING, RELAY_PONG } from '@skysa/core';
 import { DurableObject } from 'cloudflare:workers';
 import { z } from 'zod';
 
+import { parseJson } from '../json.js';
 import type { RelayHub, RelayMember } from './hub.js';
 import { onFrame, onRevoke, type RoomSocket, type Seat } from './room.js';
 
@@ -41,12 +42,7 @@ const seatSchema = z.object({
 
 const memberFrom = (header: string | null): RelayMember | undefined => {
 	if (header === null) return undefined;
-	try {
-		const parsed = memberSchema.safeParse(JSON.parse(header));
-		return parsed.success ? parsed.data : undefined;
-	} catch {
-		return undefined;
-	}
+	return parseJson(header, memberSchema);
 };
 
 /**

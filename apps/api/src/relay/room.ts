@@ -1,6 +1,8 @@
 import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PUSHED_INTERVAL_MS } from '@skysa/core';
 import { z } from 'zod';
 
+import { parseJson } from '../json.js';
+
 /**
  * What one connection's relay does with a frame, apart from the runtime that
  * carries it (docs/ARCHITECTURE.md §6, "Change relay"). The Durable Object maps
@@ -39,11 +41,7 @@ const frameSchema = z.object({ t: z.literal('pushed') }).strict();
 const isPushed = (message: string | ArrayBuffer): boolean => {
 	if (typeof message !== 'string') return false;
 	if (new TextEncoder().encode(message).length > MAX_FRAME_BYTES) return false;
-	try {
-		return frameSchema.safeParse(JSON.parse(message)).success;
-	} catch {
-		return false;
-	}
+	return parseJson(message, frameSchema) !== undefined;
 };
 
 const expired = (socket: RoomSocket, now: number): boolean => socket.seat.until <= now;

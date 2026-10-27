@@ -1676,6 +1676,7 @@ apps/
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
       flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
       crypto.ts               # AES-GCM helpers
+      json.ts                 # parseJson (JSON checked by a zod schema) and formatIssues
       oauth/                  # storage OAuth: gdrive.ts onedrive.ts dropbox.ts pkce.ts
       webdavProxy.ts
 packages/

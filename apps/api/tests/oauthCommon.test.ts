@@ -64,6 +64,67 @@ describe('postTokenForm', () => {
 	});
 });
 
+describe("postTokenForm's reading of the answer", () => {
+	// Each field is checked, not cast (#450).
+	it('reads a lifetime sent as a string of digits as the number it is', async () => {
+		const { tokens } = await postTokenForm(
+			answering(200, { access_token: 'a', expires_in: '60' }),
+			'u',
+			'p',
+			{},
+			1000
+		);
+		expect(tokens.expiresAt).toBe(61_000);
+	});
+
+	it('takes a lifetime at or below zero as none, and reads one in decimals', async () => {
+		const expiry = async (expires_in: unknown) =>
+			(
+				await postTokenForm(
+					answering(200, { access_token: 'a', expires_in }),
+					'u',
+					'p',
+					{},
+					0
+				)
+			).tokens.expiresAt;
+		expect(await expiry(0)).toBe(DEFAULT_EXPIRES_S * 1000);
+		expect(await expiry(-5)).toBe(DEFAULT_EXPIRES_S * 1000);
+		expect(await expiry('0')).toBe(DEFAULT_EXPIRES_S * 1000);
+		expect(await expiry('1.5')).toBe(1500);
+		expect(await expiry(1.5)).toBe(1500);
+	});
+
+	it('drops a field of the wrong kind rather than the answer', async () => {
+		const { tokens, body } = await postTokenForm(
+			answering(200, {
+				access_token: 'a',
+				refresh_token: 7,
+				expires_in: 'soon',
+				scope: ['s'],
+			}),
+			'u',
+			'p',
+			{},
+			0
+		);
+		expect(tokens).toEqual({ accessToken: 'a', expiresAt: DEFAULT_EXPIRES_S * 1000 });
+		expect(body.scope).toBeUndefined();
+	});
+
+	it('fails on an access token that is not a string, or an answer that is not an object', async () => {
+		await expect(
+			postTokenForm(answering(200, { access_token: 5 }), 'u', 'p', {}, 0)
+		).rejects.toBeInstanceOf(OAuthError);
+		await expect(postTokenForm(answering(200, ['a']), 'u', 'p', {}, 0)).rejects.toBeInstanceOf(
+			OAuthError
+		);
+		await expect(postTokenForm(answering(200, null), 'u', 'p', {}, 0)).rejects.toBeInstanceOf(
+			OAuthError
+		);
+	});
+});
+
 describe('readIdClaims', () => {
 	it('reads `sub` and `email` from a token meant for this client', () => {
 		expect(readIdClaims(unsigned({ aud: 'me', sub: 's', email: 'e@x' }), 'me')).toEqual({
