@@ -67,6 +67,22 @@ describe('seal / open', () => {
 		const sealed = await sealOAuthSecret(k, { refreshToken: 'r' });
 		expect(await openOAuthSecret(k, sealed)).toEqual({ refreshToken: 'r' });
 	});
+
+	// Checked, not cast (#450): a row that opens but holds something else is
+	// refused, as one a key cannot open is, and its callers ask for a reconnect.
+	it('refuses a sealed value that is not an OAuth secret', async () => {
+		const k = await key();
+		const notOne = ['not json', '[]', '{"refreshToken":1}', '{}'];
+		const refused = await Promise.all(
+			notOne.map(async (text) =>
+				openOAuthSecret(k, await seal(k, text)).then(
+					() => false,
+					() => true
+				)
+			)
+		);
+		expect(refused).toEqual([true, true, true, true]);
+	});
 });
 
 describe('signing', () => {

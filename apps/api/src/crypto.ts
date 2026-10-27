@@ -1,3 +1,7 @@
+import { z } from 'zod';
+
+import { parseJson } from './json.js';
+
 /**
  * AES-256-GCM over the secrets in D1: an OAuth refresh token, or a set of
  * WebDAV credentials. Web Crypto only — the Worker runs without `nodejs_compat`
@@ -96,10 +100,18 @@ export interface OAuthSecret {
 export const sealOAuthSecret = (secret: SecretKey, value: OAuthSecret): Promise<SealedSecret> =>
 	seal(secret, JSON.stringify(value));
 
+/** Every OAuth connection stored since the first release holds this and nothing else. */
+const oauthSecretSchema = z.object({ refreshToken: z.string() }) satisfies z.ZodType<OAuthSecret>;
+
+/** The secret a row seals; a throw, as a key that cannot open it is, where it is not one. */
 export const openOAuthSecret = async (
 	secret: SecretKey,
 	sealed: SealedSecret
-): Promise<OAuthSecret> => JSON.parse(await open(secret, sealed)) as OAuthSecret;
+): Promise<OAuthSecret> => {
+	const value = parseJson(await open(secret, sealed), oauthSecretSchema);
+	if (value === undefined) throw new Error('The sealed secret is not an OAuth secret');
+	return value;
+};
 
 /** URL-safe base64 without padding, which is what OAuth and cookies both want. */
 export const toBase64Url = (bytes: Uint8Array): string =>

@@ -1,7 +1,9 @@
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { z } from 'zod';
 
 import { fromBase64Url, sign, toBase64Url, verify } from './crypto.js';
+import { parseJson } from './json.js';
 
 /**
  * The short-lived state that carries an OAuth flow from its start to its
@@ -142,17 +144,38 @@ const writeSigned = async (
 	});
 };
 
+/** What `FlowState` is, checked as a signed cookie is read back. */
+const flowStateSchema = z.object({
+	state: z.string(),
+	verifier: z.string(),
+	returnTo: z.string(),
+	expiresAt: z.number(),
+	credentialHash: z.string(),
+	connectCode: z.string().optional(),
+	device: z.string().optional(),
+}) satisfies z.ZodType<FlowState>;
+
+const flowAnswerSchema = z.object({
+	state: z.string(),
+	location: z.string(),
+	expiresAt: z.number(),
+}) satisfies z.ZodType<FlowAnswer>;
+
 /**
- * A cookie's payload, if it is one this server signed and it has not passed
- * its `expiresAt`. A signed cookie can still be a replayed one, so the payload
- * carries its own expiry rather than trusting the browser to have dropped it.
+ * A cookie's payload, if it is one this server signed, in the shape `schema`
+ * says, and it has not passed its `expiresAt`. A signed cookie can still be a
+ * replayed one, so the payload carries its own expiry rather than trusting the
+ * browser to have dropped it. The signature says this server wrote it; the
+ * schema says it is the shape this code reads, which a cast never checked
+ * (#450).
  */
-const readSigned = async (
+const readSigned = async <T extends { expiresAt: number }>(
 	c: Context,
 	key: CryptoKey,
 	name: string,
-	now: number
-): Promise<Record<string, unknown> | undefined> => {
+	now: number,
+	schema: z.ZodType<T>
+): Promise<T | undefined> => {
 	const cookie = getCookie(c, name);
 	if (cookie === undefined) return undefined;
 
@@ -160,17 +183,16 @@ const readSigned = async (
 	if (encoded === undefined || signature === undefined) return undefined;
 	if (!(await verify(key, encoded, signature))) return undefined;
 
-	const payload = ((): unknown => {
+	const text = ((): string | undefined => {
 		try {
-			return JSON.parse(new TextDecoder().decode(fromBase64Url(encoded)));
+			return new TextDecoder().decode(fromBase64Url(encoded));
 		} catch {
 			return undefined;
 		}
 	})();
-	if (typeof payload !== 'object' || payload === null) return undefined;
-	const { expiresAt } = payload as Record<string, unknown>;
-	if (typeof expiresAt !== 'number' || expiresAt < now) return undefined;
-	return payload as Record<string, unknown>;
+	const payload = text === undefined ? undefined : parseJson(text, schema);
+	if (payload === undefined || payload.expiresAt < now) return undefined;
+	return payload;
 };
 
 export const setFlowState = (
@@ -184,13 +206,13 @@ export const setFlowState = (
 		maxAge: FLOW_SECONDS,
 	});
 
-export const readFlowState = async (
+export const readFlowState = (
 	c: Context,
 	key: CryptoKey,
 	options: FlowCookieOptions,
 	now = Date.now()
 ): Promise<FlowState | undefined> =>
-	(await readSigned(c, key, flowCookieName(options.secure), now)) as FlowState | undefined;
+	readSigned(c, key, flowCookieName(options.secure), now, flowStateSchema);
 
 /** Kept over any earlier answer: there is one flow at a time, and so one answer. */
 export const setFlowAnswer = (
@@ -221,12 +243,16 @@ export const readFlowAnswer = async (
 	now = Date.now()
 ): Promise<string | undefined> => {
 	if (state === undefined) return undefined;
-	const answer = await readSigned(c, key, answerCookieName(options.secure), now);
+	const answer = await readSigned(
+		c,
+		key,
+		answerCookieName(options.secure),
+		now,
+		flowAnswerSchema
+	);
 	if (answer === undefined || answer.state !== state) return undefined;
 	const { location } = answer;
-	return typeof location === 'string' && location.startsWith('/') && !location.startsWith('//')
-		? location
-		: undefined;
+	return location.startsWith('/') && !location.startsWith('//') ? location : undefined;
 };
 
 export const clearFlowState = (c: Context): void => {
