@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createApp, parseEnv } from '../src/app.js';
+import { createApp, envWarnings, parseEnv } from '../src/app.js';
 
 /**
  * `@skysa/api` resolves to `src/app.ts` and nothing else, so what a second
@@ -9,8 +9,9 @@ import { createApp, parseEnv } from '../src/app.js';
  * true if they can also build a config the way `src/worker.ts` does.
  */
 describe('the package entry', () => {
-	it('exports parseEnv beside createApp', () => {
+	it('exports parseEnv and envWarnings beside createApp', () => {
 		expect(typeof createApp).toBe('function');
 		expect(typeof parseEnv).toBe('function');
+		expect(typeof envWarnings).toBe('function');
 	});
 });

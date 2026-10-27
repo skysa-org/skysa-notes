@@ -1,7 +1,7 @@
 import { type ApiErrorCode, cell } from '@skysa/core';
 
 import { createApp } from './app.js';
-import { parseEnv } from './env.js';
+import { envWarnings, parseEnv } from './env.js';
 import { durableObjectRelay } from './relay/durableObject.js';
 
 /** The change relay's Durable Object, which the runtime finds by this export. */
@@ -29,6 +29,12 @@ type WorkerEnv = Omit<Env, 'RELAY_HUB'> & { RELAY_HUB?: Env['RELAY_HUB'] };
 
 const build = (env: WorkerEnv): AppOrError => {
 	try {
+		// Once per isolate, as the app is built: settings that boot but do nothing.
+		// Before the parse, so an environment refused for another reason says
+		// these in the same deploy.
+		envWarnings(env).forEach((warning) => {
+			console.warn(`Environment: ${warning}`);
+		});
 		const config = parseEnv(env);
 		if (config.relay && env.RELAY_HUB === undefined) {
 			// The same shape as `parseEnv`'s refusals, so the operator reads one kind

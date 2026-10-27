@@ -64,8 +64,14 @@ const rawEnvSchema = z.object({
 	/** Names the current key so rows encrypted with an older one stay readable. */
 	SECRETS_KEY_ID: z.string().min(1).default('k1'),
 
-	/** Allow the WebDAV proxy to reach private/LAN addresses. Off by default. */
-	WEBDAV_ALLOW_PRIVATE: booleanish.default(false),
+	/**
+	 * Deprecated, and does nothing: it was for a WebDAV proxy that is not built
+	 * (docs/ARCHITECTURE.md §5.4). Still read, and warned of at boot
+	 * (`envWarnings`), so a deployment that sets it keeps booting; it goes in
+	 * #118's breaking change. Any value boots: one this would once have refused
+	 * reads as false, since nothing reads it either way.
+	 */
+	WEBDAV_ALLOW_PRIVATE: booleanish.default(false).catch(false),
 
 	/**
 	 * Run the change relay (docs/ARCHITECTURE.md §6, "Change relay"). Off by
@@ -92,6 +98,7 @@ export type AppConfig = {
 	cookiesSecure: boolean;
 	secretsKey: string;
 	secretsKeyId: string;
+	/** Deprecated, and does nothing; see `WEBDAV_ALLOW_PRIVATE`. */
 	webdavAllowPrivate: boolean;
 	/** Whether the operator turned the change relay on. The entry decides what carries it. */
 	relay: boolean;
@@ -154,8 +161,12 @@ const crossFieldIssues = (raw: Record<string, unknown>): string[] => [
 	...unbuiltAuthModeIssues(raw),
 ];
 
+/** The environment as a record, whatever the runtime handed over. */
+const recordOf = (raw: unknown): Record<string, unknown> =>
+	(typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+
 export const parseEnv = (raw: unknown): AppConfig => {
-	const record = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+	const record = recordOf(raw);
 	const result = rawEnvSchema.safeParse(record);
 
 	const issues = [
@@ -196,7 +207,9 @@ export const parseEnv = (raw: unknown): AppConfig => {
 
 	return {
 		authMode: env.AUTH_MODE,
-		enabledProviders: env.ENABLED_PROVIDERS,
+		// Accepted, so a deployment that lists it keeps booting, but not offered:
+		// its connect answers 404 (`envWarnings` says so at boot).
+		enabledProviders: env.ENABLED_PROVIDERS.filter((provider) => provider !== 'webdav'),
 		appOrigin: env.APP_ORIGIN.replace(/\/$/, ''),
 		cookiesSecure: env.APP_ORIGIN.startsWith('https://'),
 		secretsKey: env.SECRETS_KEY,
@@ -205,4 +218,31 @@ export const parseEnv = (raw: unknown): AppConfig => {
 		relay: env.RELAY,
 		oauth,
 	};
+};
+
+/**
+ * Settings that are accepted and do nothing, each said in a line for the
+ * Worker's log at boot (#450). Refusing them would break anyone who has them
+ * set, so they warn until #118's breaking change removes them.
+ */
+export const envWarnings = (raw: unknown): string[] => {
+	const record = recordOf(raw);
+	const providers = rawEnvSchema.shape.ENABLED_PROVIDERS.safeParse(record.ENABLED_PROVIDERS);
+	const listed = providers.success ? providers.data : [];
+	return [
+		...(listed.includes('webdav')
+			? [
+					'ENABLED_PROVIDERS: webdav is not built (docs/ARCHITECTURE.md §5.4), so it is not ' +
+						'offered and its connect answers 404. Remove it.' +
+						(listed.every((provider) => provider === 'webdav')
+							? ' Nothing else is listed, so this instance offers no provider to connect.'
+							: ''),
+				]
+			: []),
+		...(record.WEBDAV_ALLOW_PRIVATE === undefined
+			? []
+			: [
+					'WEBDAV_ALLOW_PRIVATE: deprecated, and does nothing, since WebDAV is not built. Remove it.',
+				]),
+	];
 };

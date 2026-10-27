@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { importSecretKey, signingKey } from '../src/crypto.js';
-import { parseEnv } from '../src/env.js';
+import { envWarnings, parseEnv } from '../src/env.js';
 
 const base = {
 	APP_ORIGIN: 'https://notes.example.com',
@@ -35,7 +35,16 @@ describe('parseEnv', () => {
 			DROPBOX_CLIENT_ID: 'd',
 			DROPBOX_CLIENT_SECRET: 'ds',
 		});
-		expect(config.enabledProviders).toEqual(['webdav', 'dropbox']);
+		expect(config.enabledProviders).toEqual(['dropbox']);
+	});
+
+	/**
+	 * Decided 2026-10-25 (#450): `webdav` still boots, since refusing it would
+	 * break a deployment that lists it, but its connect answers 404, so the app
+	 * is not told it can connect one.
+	 */
+	it('accepts webdav but does not offer it', () => {
+		expect(parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav' }).enabledProviders).toEqual([]);
 	});
 
 	it('only builds OAuth credentials for enabled providers', () => {
@@ -208,5 +217,35 @@ describe('what the first draft got wrong', () => {
 
 		await expect(importSecretKey(config.secretsKey, 'k1')).resolves.toBeDefined();
 		await expect(signingKey(config.secretsKey)).resolves.toBeDefined();
+	});
+});
+
+describe('envWarnings', () => {
+	it('says nothing for a deployment that sets neither inert setting', () => {
+		expect(envWarnings({ ...base, ENABLED_PROVIDERS: 'dropbox' })).toEqual([]);
+		expect(envWarnings(undefined)).toEqual([]);
+	});
+
+	it('names webdav in ENABLED_PROVIDERS, which is accepted but not offered', () => {
+		const warnings = envWarnings({ ...base, ENABLED_PROVIDERS: 'dropbox, webdav' });
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toMatch(/^ENABLED_PROVIDERS: webdav is not built/);
+		expect(warnings[0]).not.toMatch(/offers no provider/);
+	});
+
+	it('says so when webdav was all there was, so nothing can be connected', () => {
+		expect(envWarnings({ ...base, ENABLED_PROVIDERS: 'webdav' })[0]).toMatch(
+			/this instance offers no provider to connect/
+		);
+	});
+
+	it('names WEBDAV_ALLOW_PRIVATE whatever it is set to, and boots with it', () => {
+		['true', 'false', '', 'yes'].forEach((value) => {
+			const env = { ...base, ENABLED_PROVIDERS: 'webdav', WEBDAV_ALLOW_PRIVATE: value };
+			const warnings = envWarnings(env);
+			expect(warnings).toHaveLength(2);
+			expect(warnings[1]).toMatch(/^WEBDAV_ALLOW_PRIVATE: deprecated, and does nothing/);
+			expect(() => parseEnv(env)).not.toThrow();
+		});
 	});
 });
