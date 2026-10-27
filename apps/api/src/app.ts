@@ -277,7 +277,7 @@ export type App = ReturnType<typeof createApp>;
  *
  * Logging the error object itself is not: drizzle's `DrizzleQueryError` builds
  * its message from the failing SQL *and its bound parameters*, and keeps them on
- * an own property besides. Those parameters are session ids, secret ciphertext
+ * an own property besides. Those parameters are credential hashes, secret ciphertext
  * and IVs. A transient D1 error would be enough to write them all to the log,
  * which `CLAUDE.md` and docs/ARCHITECTURE.md §6 both forbid.
  */
