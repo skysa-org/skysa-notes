@@ -4,7 +4,7 @@ import { createMiddleware } from 'hono/factory';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
 
-import type { AppEnv } from './app.js';
+import type { AppEnv } from './context.js';
 import { parseJson } from './json.js';
 
 /**

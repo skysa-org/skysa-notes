@@ -1673,6 +1673,7 @@ apps/
         token.ts              # /token
         webdav.ts             # /webdav/:connectionId/*
       db/                     # drizzle schema, client, migrations
+      context.ts              # AppEnv: the request context's bindings and variables
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
       flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
       crypto.ts               # AES-GCM helpers
