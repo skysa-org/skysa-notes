@@ -1,9 +1,9 @@
-import { and, eq, gt, notExists } from 'drizzle-orm';
+import { and, eq, notExists } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
-import { GRANT_IDLE_DAYS } from '../credentials.js';
-import { openOAuthSecret } from '../crypto.js';
+import { isIdle, notIdle } from '../credentials.js';
+import { openOAuthSecret, sealedOf } from '../crypto.js';
 import { schema } from '../db/client.js';
 import type { Connection } from '../db/schema.js';
 import { fail } from '../http.js';
@@ -25,8 +25,6 @@ import { closeSockets } from '../relay/hub.js';
  * key id, and not another device's credential hash.
  */
 
-const IDLE_MS = GRANT_IDLE_DAYS * 24 * 60 * 60 * 1000;
-
 export const connectionRoutes = (doFetch: FetchLike) => {
 	const app = new Hono<AppEnv>();
 
@@ -44,11 +42,9 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		const { client, credentials } = resolved;
 		if (client.revokeToken === undefined) return false;
 
-		const secret = await openOAuthSecret(c.get('secretKey'), {
-			ciphertext: connection.secretCiphertext,
-			iv: connection.secretIv,
-			keyId: connection.secretKeyId,
-		}).catch(() => undefined);
+		const secret = await openOAuthSecret(c.get('secretKey'), sealedOf(connection)).catch(
+			() => undefined
+		);
 		if (secret === undefined) return false;
 
 		// Logged: an expired client secret would otherwise make every
@@ -101,14 +97,14 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		// still attached, the credential no longer works, and a device list that
 		// showed it as live would be telling the user something untrue about who
 		// can reach their notes.
-		const idleBefore = Date.now() - GRANT_IDLE_DAYS * 24 * 60 * 60 * 1000;
+		const now = Date.now();
 
 		return c.json({
 			grants: rows.map((row) => ({
 				id: row.id,
 				createdAt: row.createdAt.getTime(),
 				lastUsedAt: row.lastUsedAt.getTime(),
-				expired: row.lastUsedAt.getTime() <= idleBefore,
+				expired: isIdle(row.lastUsedAt, now),
 				current: row.id === grant.id,
 				// Absent for a grant made before it was kept (0006), or by a
 				// browser `deviceLabel` could not name.
@@ -177,7 +173,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 							.where(
 								and(
 									eq(schema.grants.connectionId, connection.id),
-									gt(schema.grants.lastUsedAt, new Date(Date.now() - IDLE_MS))
+									notIdle(Date.now())
 								)
 							)
 					)

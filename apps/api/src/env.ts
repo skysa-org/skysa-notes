@@ -1,6 +1,7 @@
 import { AUTH_MODES, type AuthMode, PROVIDER_KINDS, type ProviderKind } from '@skysa/core';
 import { z } from 'zod';
 
+import { fromBase64Url } from './crypto.js';
 import { formatIssues } from './json.js';
 
 /**
@@ -58,7 +59,8 @@ const rawEnvSchema = z.object({
 		.min(1)
 		.refine((value) => {
 			try {
-				return atob(value.replace(/-/g, '+').replace(/_/g, '/')).length === 32;
+				// The decoder `importSecretKey` uses, so the two agree on every key.
+				return fromBase64Url(value).length === 32;
 			} catch {
 				return false;
 			}

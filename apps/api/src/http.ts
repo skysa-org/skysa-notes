@@ -1,6 +1,8 @@
 import type { ApiErrorCode } from '@skysa/core';
 import type { Context } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { z } from 'zod';
 
 import type { AppEnv } from './app.js';
 
@@ -19,7 +21,7 @@ import type { AppEnv } from './app.js';
  * handshake, and is what older browsers have. A request with neither is not a
  * browser on this origin.
  */
-export const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
+const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
 	c.req.header('sec-fetch-site') === 'same-origin' || c.req.header('origin') === appOrigin;
 
 /**
@@ -40,3 +42,18 @@ export const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Res
 	if (retryAfter !== undefined) c.header('Retry-After', String(Math.ceil(retryAfter)));
 	return fail(c, 'rate_limited', 429);
 };
+
+/**
+ * A route only this deployment's own pages may ask (`sameOrigin`), refused 403
+ * before anything else is looked at.
+ */
+export const requireSameOrigin = createMiddleware<AppEnv>(async (c, next) => {
+	if (!sameOrigin(c, c.get('config').appOrigin)) return fail(c, 'forbidden_origin', 403);
+	await next();
+});
+
+/** The request's JSON body as `schema` says it is, or nothing: none, not JSON, or not that shape. */
+export const jsonBody = async <T>(
+	c: Context<AppEnv>,
+	schema: z.ZodType<T>
+): Promise<T | undefined> => schema.safeParse(await c.req.json().catch(() => undefined)).data;

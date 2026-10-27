@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
 	bearerFrom,
 	CREDENTIAL_PREFIX,
+	GRANT_IDLE_DAYS,
 	hashCredential,
 	isCredentialHash,
+	isIdle,
 } from '../src/credentials.js';
 import { newCredential } from './harness.js';
 
@@ -82,5 +84,17 @@ describe('bearerFrom', () => {
 		['not one of ours at all', 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.x'],
 	])('refuses a header that is %s', (_name, header) => {
 		expect(bearerFrom(header)).toBeUndefined();
+	});
+});
+
+describe('isIdle', () => {
+	// The one cutoff the device list and the orphan check share with every
+	// lookup (#450): a grant last used exactly at it is idle.
+	it('is idle from the cutoff on, and live until it', () => {
+		const now = 1_000_000_000_000;
+		const cutoff = now - GRANT_IDLE_DAYS * 24 * 60 * 60 * 1000;
+		expect(isIdle(new Date(cutoff + 1), now)).toBe(false);
+		expect(isIdle(new Date(cutoff), now)).toBe(true);
+		expect(isIdle(new Date(cutoff - 1), now)).toBe(true);
 	});
 });

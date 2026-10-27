@@ -6,10 +6,13 @@ import {
 	openOAuthSecret,
 	randomBase64Url,
 	seal,
+	sealedOf,
 	sealOAuthSecret,
+	secretColumns,
 	sign,
 	signingKey,
 	toBase64Url,
+	urlSafe,
 	verify,
 } from '../src/crypto.js';
 import { SECRETS_KEY } from './harness.js';
@@ -165,5 +168,18 @@ describe('what the first draft got wrong', () => {
 		const b = await importSecretKey(standard, 'k1');
 		// The same 32 bytes either way, so one can open what the other sealed.
 		expect(await open(b, await seal(a, 'secret'))).toBe('secret');
+	});
+});
+
+describe('a sealed secret in a connection row', () => {
+	it('goes into the three columns and comes back out the same', async () => {
+		const sealed = await seal(await key(), 'r');
+		expect(sealedOf(secretColumns(sealed))).toEqual(sealed);
+	});
+});
+
+describe('urlSafe', () => {
+	it('swaps the two characters a URL reserves and drops the padding', () => {
+		expect(urlSafe('a+b/c==')).toBe('a-b_c');
 	});
 });

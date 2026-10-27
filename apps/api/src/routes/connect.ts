@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import type { AppEnv } from '../app.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
-import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
+import { randomBase64Url, type SealedSecret, sealOAuthSecret, secretColumns } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
 import { deviceLabel } from '../device.js';
 import {
@@ -17,7 +17,7 @@ import {
 	setFlowState,
 } from '../flowCookies.js';
 import { connectCodeSchema, knownCode, readCodeCheck } from '../gate.js';
-import { fail, sameOrigin, tooMany } from '../http.js';
+import { fail, jsonBody, requireSameOrigin, tooMany } from '../http.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
@@ -99,10 +99,9 @@ const callerKey = (c: Context<AppEnv>, what: string): string =>
 export const connectRoutes = (doFetch: FetchLike) => {
 	const app = new Hono<AppEnv>();
 
-	app.post('/auth/connect/:provider/start', async (c) => {
+	app.post('/auth/connect/:provider/start', requireSameOrigin, async (c) => {
 		const config = c.get('config');
 		const cookies = { secure: config.cookiesSecure };
-		if (!sameOrigin(c, config.appOrigin)) return fail(c, 'forbidden_origin', 403);
 
 		const resolved = oauthFor(config, c.req.param('provider'));
 		if (!resolved.ok) return refusal(c, resolved.error);
@@ -114,8 +113,8 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const limit = await c.get('rateLimiter').check(callerKey(c, 'connect'));
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
-		const parsed = startBody.safeParse(await c.req.json().catch(() => undefined));
-		if (!parsed.success) return fail(c, 'invalid_request', 400);
+		const body = await jsonBody(c, startBody);
+		if (body === undefined) return fail(c, 'invalid_request', 400);
 
 		const { verifier, challenge } = await createPkcePair();
 		const state = createState();
@@ -126,12 +125,10 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			{
 				state,
 				verifier,
-				returnTo: safeReturnTo(parsed.data.returnTo, config.appOrigin),
+				returnTo: safeReturnTo(body.returnTo, config.appOrigin),
 				expiresAt: flowExpiry(),
-				credentialHash: parsed.data.credentialHash,
-				...(parsed.data.connectCode === undefined
-					? {}
-					: { connectCode: parsed.data.connectCode }),
+				credentialHash: body.credentialHash,
+				...(body.connectCode === undefined ? {} : { connectCode: body.connectCode }),
 				...(device === undefined ? {} : { device }),
 			},
 			cookies
@@ -160,10 +157,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 	 * code is never logged. A policy that throws, or says something that is not
 	 * an answer, is the operator's fault and a 500, never passed on.
 	 */
-	app.post('/connect-code', async (c) => {
-		const config = c.get('config');
-		if (!sameOrigin(c, config.appOrigin)) return fail(c, 'forbidden_origin', 403);
-
+	app.post('/connect-code', requireSameOrigin, async (c) => {
 		const entitlements = c.get('entitlements');
 		const checkCode = entitlements.checkCode;
 		if (entitlements.gate?.connectCode === undefined || checkCode === undefined) {
@@ -173,12 +167,10 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const limit = await c.get('rateLimiter').check(callerKey(c, 'connect-code'));
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
-		const parsed = codeBody.safeParse(await c.req.json().catch(() => undefined));
-		if (!parsed.success || parsed.data.code === undefined) {
-			return fail(c, 'invalid_request', 400);
-		}
+		const code = (await jsonBody(c, codeBody))?.code;
+		if (code === undefined) return fail(c, 'invalid_request', 400);
 
-		const answer = await checkCode(parsed.data.code).then(
+		const answer = await checkCode(code).then(
 			(said: unknown) => {
 				const check = readCodeCheck(said);
 				if (check === undefined) {
@@ -482,11 +474,7 @@ const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
 	});
 	if (held !== undefined && held.connectionId !== connectionId) return 'claimed';
 
-	const secret = {
-		secretCiphertext: sealed.ciphertext,
-		secretIv: sealed.iv,
-		secretKeyId: sealed.keyId,
-	};
+	const secret = secretColumns(sealed);
 
 	const [, , pruned] = await db.batch([
 		db
