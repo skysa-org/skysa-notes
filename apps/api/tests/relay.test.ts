@@ -149,6 +149,12 @@ describe('GET /api/relay', () => {
 		expect(await errorOf(response)).toBe('relay_disabled');
 	});
 
+	it('refuses a page on another origin before saying whether it runs one', async () => {
+		const response = await upgrade(buildApp(), 'anything', { origin: 'https://evil.example' });
+		expect(response.status).toBe(403);
+		expect(await errorOf(response)).toBe('forbidden_origin');
+	});
+
 	it('is for WebSockets only', async () => {
 		const app = relayApp();
 		const { credential } = await app.connect();

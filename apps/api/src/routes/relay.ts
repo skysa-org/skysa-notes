@@ -16,7 +16,9 @@ import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
  * in an order where the cheap refusals come first and nothing reaches the hub
  * that the database has not just agreed to.
  *
- * Both answer 404 where the deployment runs no hub.
+ * Both answer 404 where the deployment runs no hub, to a page of its own. The
+ * upgrade refuses another origin first, 403, so such a page learns nothing of
+ * whether there is one.
  */
 export const relayRoutes = (relay: RelayHub | undefined) => {
 	const app = new Hono<AppEnv>();

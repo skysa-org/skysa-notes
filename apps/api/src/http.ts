@@ -5,6 +5,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
 
 import type { AppEnv } from './app.js';
+import { parseJson } from './json.js';
 
 /**
  * Was this request made by a page on this deployment's own origin?
@@ -52,8 +53,12 @@ export const requireSameOrigin = createMiddleware<AppEnv>(async (c, next) => {
 	await next();
 });
 
-/** The request's JSON body as `schema` says it is, or nothing: none, not JSON, or not that shape. */
+/**
+ * The request's JSON body as `schema` says it is, or nothing: none, not JSON,
+ * or not that shape (`parseJson`, whose caveat about a schema that can say
+ * `undefined` holds here too).
+ */
 export const jsonBody = async <T>(
 	c: Context<AppEnv>,
 	schema: z.ZodType<T>
-): Promise<T | undefined> => schema.safeParse(await c.req.json().catch(() => undefined)).data;
+): Promise<T | undefined> => parseJson(await c.req.text().catch(() => ''), schema);

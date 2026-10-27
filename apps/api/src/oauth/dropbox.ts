@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { parseJson } from '../json.js';
 import { clientForm, nameField, nonEmpty, postTokenForm, revokeByBearer } from './common.js';
 import { type FetchLike, type StorageOAuth, type TokenSet } from './types.js';
 
@@ -110,7 +111,7 @@ export const dropboxOAuth: StorageOAuth = {
 		}).catch(() => undefined);
 
 		if (response === undefined || !response.ok) return 'Dropbox';
-		const body = accountSchema.safeParse(await response.json().catch(() => undefined)).data;
+		const body = parseJson(await response.text().catch(() => ''), accountSchema);
 		return body?.email ?? body?.name?.display_name ?? 'Dropbox';
 	},
 };
