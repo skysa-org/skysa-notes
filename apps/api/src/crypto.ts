@@ -88,7 +88,7 @@ export const open = async (secret: SecretKey, sealed: SealedSecret): Promise<str
 	return new TextDecoder().decode(plaintext);
 };
 
-/** What a Dropbox connection stores. WebDAV, deferred, would add its own shape. */
+/** What an OAuth connection stores. WebDAV, deferred, would add its own shape. */
 export interface OAuthSecret {
 	refreshToken: string;
 }

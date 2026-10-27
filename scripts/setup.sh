@@ -240,8 +240,6 @@ ENABLED_PROVIDERS="$providers"
 SECRETS_KEY="$(escaped "$secrets_key")"
 SECRETS_KEY_ID="k1"
 
-WEBDAV_ALLOW_PRIVATE="false"
-
 DROPBOX_CLIENT_ID="$(escaped "$dropbox_id")"
 DROPBOX_CLIENT_SECRET="$(escaped "$dropbox_secret")"
 

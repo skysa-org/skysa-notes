@@ -127,8 +127,11 @@ w secret put DROPBOX_CLIENT_SECRET
 deliberate: every OAuth redirect URI is derived from it, and a wrong guess sends
 users' consent to somewhere that is not you.
 
-`AUTH_MODE`, `ENABLED_PROVIDERS` and `WEBDAV_ALLOW_PRIVATE` are not secrets and
-live in `[vars]` in `wrangler.toml`. Edit them there.
+`AUTH_MODE` and `ENABLED_PROVIDERS` are not secrets and live in `[vars]` in
+`wrangler.toml`. Edit them there. `WEBDAV_ALLOW_PRIVATE` is deprecated and does
+nothing — WebDAV is not built — so remove it if you have it; the Worker logs a
+warning at boot while it is set, and likewise for `webdav` in
+`ENABLED_PROVIDERS`, which is accepted but not offered.
 
 `SECRETS_KEY_ID` defaults to `k1` and only needs setting when you rotate
 `SECRETS_KEY`, which is what it exists for. `MICROSOFT_TENANT` defaults to

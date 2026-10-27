@@ -6,7 +6,7 @@ main = "src/worker.ts"
 compatibility_date = "2026-09-14"
 
 # The SPA is served from this same Worker so /api/* and the app share an origin
-# and session cookies stay first-party.
+# and the connect flow's cookies stay first-party.
 # https://developers.cloudflare.com/workers/static-assets/routing/worker-script/
 [assets]
 directory = "../web/dist"
@@ -47,7 +47,6 @@ AUTH_MODE = "storage-first"
 # operator who had set it up, and `/auth/connect/dropbox/start` would answer
 # 404 `unsupported_provider` with nothing to say why.
 ENABLED_PROVIDERS = "dropbox"
-WEBDAV_ALLOW_PRIVATE = "false"
 # Off by default: it tells the server when each connection is edited, and on
 # Workers Free it spends the request cap token refresh shares. Read
 # docs/self-hosting.md, "Instant updates between devices", before turning it on.

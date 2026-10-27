@@ -61,7 +61,7 @@ export type AppEnv = { Bindings: Bindings; Variables: Variables };
 export interface CreateAppOptions {
 	config: AppConfig;
 	/**
-	 * Who may mint tokens or use the WebDAV proxy. Defaults to `alwaysAllowed`;
+	 * Who may connect and mint tokens. Defaults to `alwaysAllowed`;
 	 * operators of a shared instance substitute their own here instead of forking.
 	 * Its `gate`, when it has one, is what `/config` tells the app to show in
 	 * place of the connect buttons, and it is checked here: a gate that is not
@@ -92,8 +92,7 @@ export interface CreateAppOptions {
 	/**
 	 * How long a provider gets to answer. Every call here is one a user is
 	 * waiting on, and `DELETE /api/connections/:id` promises the row goes either
-	 * way — which only holds if the revoke can give up. docs/ARCHITECTURE.md §6 asks the
-	 * same of the WebDAV proxy.
+	 * way — which only holds if the revoke can give up.
 	 */
 	providerTimeoutMs?: number;
 }
