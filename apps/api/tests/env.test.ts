@@ -230,13 +230,22 @@ describe('envWarnings', () => {
 		const warnings = envWarnings({ ...base, ENABLED_PROVIDERS: 'dropbox, webdav' });
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toMatch(/^ENABLED_PROVIDERS: webdav is not built/);
+		expect(warnings[0]).not.toMatch(/offers no provider/);
 	});
 
-	it('names WEBDAV_ALLOW_PRIVATE whatever it is set to, since it does nothing', () => {
-		['true', 'false', ''].forEach((value) => {
-			const warnings = envWarnings({ ...base, WEBDAV_ALLOW_PRIVATE: value });
-			expect(warnings).toHaveLength(1);
-			expect(warnings[0]).toMatch(/^WEBDAV_ALLOW_PRIVATE: deprecated, and does nothing/);
+	it('says so when webdav was all there was, so nothing can be connected', () => {
+		expect(envWarnings({ ...base, ENABLED_PROVIDERS: 'webdav' })[0]).toMatch(
+			/this instance offers no provider to connect/
+		);
+	});
+
+	it('names WEBDAV_ALLOW_PRIVATE whatever it is set to, and boots with it', () => {
+		['true', 'false', '', 'yes'].forEach((value) => {
+			const env = { ...base, ENABLED_PROVIDERS: 'webdav', WEBDAV_ALLOW_PRIVATE: value };
+			const warnings = envWarnings(env);
+			expect(warnings).toHaveLength(2);
+			expect(warnings[1]).toMatch(/^WEBDAV_ALLOW_PRIVATE: deprecated, and does nothing/);
+			expect(() => parseEnv(env)).not.toThrow();
 		});
 	});
 });
