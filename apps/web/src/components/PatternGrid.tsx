@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { useEffect, useRef } from 'react';
 
 import { t } from '../i18n/t.js';
@@ -69,10 +70,10 @@ export const PatternGrid = ({ dots, onChange, onDrawn, disabled = false }: Patte
 	useEffect(() => {
 		const element = grid.current;
 		if (element === null) return undefined;
-		const drawing = new Map<'dots', number[]>();
+		const drawing = cell<number[] | undefined>(undefined);
 		const add = (dot: number) => {
-			const next = drawTo(drawing.get('dots') ?? latest.current.dots, dot);
-			if (drawing.has('dots')) drawing.set('dots', next);
+			const next = drawTo(drawing.current ?? latest.current.dots, dot);
+			if (drawing.current !== undefined) drawing.current = next;
 			latest.current.onChange(next);
 		};
 		const onDown = (event: PointerEvent) => {
@@ -82,22 +83,22 @@ export const PatternGrid = ({ dots, onChange, onDrawn, disabled = false }: Patte
 			// Held, so the drag goes on outside the grid and its end is heard.
 			// Not every pointer can be (jsdom's cannot).
 			if ('setPointerCapture' in element) element.setPointerCapture(event.pointerId);
-			drawing.set('dots', [dot]);
+			drawing.current = [dot];
 			latest.current.onChange([dot]);
 		};
 		const onMove = (event: PointerEvent) => {
-			const drawn = drawing.get('dots');
+			const drawn = drawing.current;
 			if (drawn === undefined) return;
 			const dot = dotAt(event);
 			if (dot !== undefined && !drawn.includes(dot)) add(dot);
 		};
 		const onUp = () => {
-			const drawn = drawing.get('dots');
-			drawing.delete('dots');
+			const drawn = drawing.current;
+			drawing.current = undefined;
 			if (drawn !== undefined) latest.current.onDrawn?.(drawn);
 		};
 		const onCancel = () => {
-			drawing.delete('dots');
+			drawing.current = undefined;
 		};
 		const onKey = (event: KeyboardEvent) => {
 			const number = Number(event.key);

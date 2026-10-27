@@ -1,5 +1,6 @@
 import {
 	AgeError,
+	cell,
 	generateIdentity,
 	openSecret,
 	opensSecret,
@@ -55,7 +56,7 @@ export const eachNote = <T>(
 	start: T,
 	step: (sofar: T, note: NoteRecord) => T | Promise<T>
 ): Promise<T> => {
-	const drawn = { current: Date.now() };
+	const drawn = cell(Date.now());
 	return notes.reduce<Promise<T>>(async (before, note) => {
 		const sofar = await before;
 		if (Date.now() - drawn.current > BREATH_MS) {
@@ -181,7 +182,7 @@ export const resealSecrets = async (
 		{ secrets: 0, notes: 0, stopped: false },
 		async (done, note) => {
 			if (done.stopped || !going()) return { ...done, stopped: true };
-			const count = { current: 0 };
+			const count = cell(0);
 			const rewritten = await rewriteNoteBody(db, noteKey(note), (body) =>
 				rewriteSecrets(body, (armor) => {
 					if (!isResealed(armor, fresh, old)) return undefined;

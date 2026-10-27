@@ -1,4 +1,4 @@
-import { encodeIdentity, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
+import { cell, encodeIdentity, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type ReactNode,
@@ -142,7 +142,7 @@ const useDeviceLock = (given: DeviceLock | undefined) => {
 	const deviceLock = given ?? BROWSER_DEVICE_LOCK;
 	const [deviceOffered, setDeviceOffered] = useState(false);
 	useEffect(() => {
-		const open = { current: true };
+		const open = cell(true);
 		void deviceLock.offered().then((offered) => {
 			if (open.current) setDeviceOffered(offered);
 		});
@@ -163,7 +163,7 @@ const useDeviceLock = (given: DeviceLock | undefined) => {
  */
 const usePrintTitle = (title: string): void => {
 	useEffect(() => {
-		const was = { current: document.title };
+		const was = cell(document.title);
 		document.title = title;
 		const printing = () => {
 			if (document.title === title) return;

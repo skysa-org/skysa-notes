@@ -1,4 +1,5 @@
 import {
+	cell,
 	type ClipName,
 	contentTypeOf,
 	fileKind,
@@ -308,7 +309,7 @@ const ClipPicture = ({
 	useEffect(() => {
 		if (here !== true) return undefined;
 		const asking = new AbortController();
-		const kept = { current: (): void => undefined };
+		const kept = cell((): void => undefined);
 		void clipPicture(database, shrinker, { connectionId, name, version }, asking.signal)
 			.catch(() => undefined)
 			.then((drawable) => {

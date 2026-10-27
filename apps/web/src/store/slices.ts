@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 /**
  * Work over a whole library, done on the main thread a slice at a time (#275):
  * search's index, and every file of an import or a pull read before the
@@ -51,7 +53,7 @@ export const eachInSlices = async <T>(
 	from = 0
 ): Promise<void> => {
 	const until = performance.now() + SLICE_MS;
-	const next = { current: from };
+	const next = cell(from);
 	items.slice(from, from + SLICE_ITEMS).some((item) => {
 		work(item);
 		next.current += 1;

@@ -1,6 +1,7 @@
 import {
 	ancestorPaths,
 	basename,
+	cell,
 	conflictFilePath,
 	conflictFolderPath,
 	contentHash,
@@ -424,7 +425,7 @@ export const readPicked = async (
 		.filter((file) => readable(file, how) && !later(file))
 		.reduce((total, file) => total + file.size, 0);
 	if (size > MAX_IMPORT_BYTES) throw new ImportTooLargeError('Too much to import');
-	const read = { current: 0 };
+	const read = cell(0);
 	const readEach = (some: readonly File[], into: Picked): Promise<Picked> =>
 		some.reduce<Promise<Picked>>(async (sofar, file) => {
 			const done = await sofar;
@@ -804,7 +805,7 @@ const placeFiles = (
 	// Written to as files are placed, so two from this import cannot take one name.
 	const at = new Map(existing.map((file) => [foldPath(file.path), file.size]));
 	const notebooks = new Set([...spellings.values()].map(foldPath));
-	const present = { current: 0 };
+	const present = cell(0);
 	const rows = plan.files.flatMap((file) => {
 		const wanted = joinPath(respell(spellings, parentPath(file.path)), basename(file.path));
 		const there = at.get(foldPath(wanted));
@@ -895,7 +896,7 @@ const placeNotes = (
 		take(note.path);
 	});
 	const ids = new Set(existing.map((note) => note.id));
-	const numbered = { current: 0 };
+	const numbered = cell(0);
 	const rows = plan.notes.map((note, index) => {
 		const wanted = joinPath(respell(spellings, parentPath(note.path)), basename(note.path));
 		const free = !taken.has(foldPath(wanted));

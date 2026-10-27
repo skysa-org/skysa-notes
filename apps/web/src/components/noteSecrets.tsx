@@ -1,4 +1,4 @@
-import { AgeError } from '@skysa/core';
+import { AgeError, cell } from '@skysa/core';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AttachmentProblem } from '../editor/attachHost.js';
@@ -277,7 +277,7 @@ export const useNoteSecrets = (
 			},
 			locked: (listener) => {
 				const { connectionId, lock: held } = latest.current;
-				const was = { current: held.isUnlocked(connectionId) };
+				const was = cell(held.isUnlocked(connectionId));
 				return held.subscribe(() => {
 					const now = held.isUnlocked(connectionId);
 					if (was.current && !now) listener();

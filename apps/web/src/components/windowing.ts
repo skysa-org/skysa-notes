@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 /**
@@ -26,7 +27,7 @@ export interface Span {
  * where the last ends: one more than there are items.
  */
 export const topsOf = (heights: readonly number[]): readonly number[] => {
-	const sum = { current: 0 };
+	const sum = cell(0);
 	return [
 		0,
 		...heights.map((height) => {
@@ -94,7 +95,7 @@ export const useScrollSpan = (
 	content: HTMLElement | null
 ): Span | undefined => {
 	const store = useMemo(() => {
-		const said: { current: Span | undefined } = { current: NO_SPAN };
+		const said = cell<Span | undefined>(NO_SPAN);
 		const read = (): Span | undefined => {
 			if (scroller === null || content === null) return firstScreens();
 			if (!laidOut()) return NO_SPAN;
@@ -111,7 +112,7 @@ export const useScrollSpan = (
 				? last
 				: span;
 		};
-		const first = { current: true };
+		const first = cell(true);
 		return {
 			subscribe: (changed: () => void) => {
 				if (scroller === null || content === null) return () => undefined;

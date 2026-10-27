@@ -1,5 +1,6 @@
 import {
 	basename,
+	cell,
 	drawsFromData,
 	imageInfo,
 	type PictureInfo,
@@ -677,7 +678,7 @@ export const useNoteAttachments = (
 	}, [host]);
 
 	useEffect(() => {
-		const synced: { current?: number } = {};
+		const synced = cell<number | undefined>(undefined);
 		return subscribe(({ lastSyncAt }) => {
 			if (lastSyncAt === synced.current) return;
 			synced.current = lastSyncAt;

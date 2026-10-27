@@ -1,4 +1,5 @@
 import {
+	cell,
 	EMPTY_VAULT_FIELDS,
 	isEmptyVaultFields,
 	type PreviousPassword,
@@ -506,7 +507,7 @@ export const PasswordItem = ({
 	// and not unlocked. Where it cannot be made, the host has said why.
 	useEffect(() => {
 		if (!fresh) return undefined;
-		const live = { current: true };
+		const live = cell(true);
 		void host.begin().then((seal) => {
 			if (!live.current) return;
 			if (seal === undefined) {
@@ -548,7 +549,7 @@ export const PasswordItem = ({
 	const settled = known && shown.attempt === attempt;
 	useEffect(() => {
 		if (fresh || inForm || armor === undefined || settled) return undefined;
-		const live = { current: true };
+		const live = cell(true);
 		void host.open(armor).then((opened) => {
 			if (!live.current) return;
 			const is = shownOf(opened);

@@ -1,4 +1,4 @@
-import { MAX_CONNECT_CODE } from '@skysa/core';
+import { cell, MAX_CONNECT_CODE } from '@skysa/core';
 
 import { createEmitter } from './emitter.js';
 
@@ -54,7 +54,7 @@ interface Held {
 const watchers = createEmitter();
 
 /** Where the code is when storage is refused, and never read otherwise. */
-const memory: { current: Held | undefined } = { current: undefined };
+const memory = cell<Held | undefined>(undefined);
 
 /** What was stored, if it is something this app stored: anything else is nothing. */
 const parse = (raw: string | null): Held | undefined => {

@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { createEmitter } from '../store/emitter.js';
 import { type UnlockedKeys } from '../store/secretKeys.js';
 
@@ -72,19 +74,19 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 	const now = options.now ?? (() => Date.now());
 	const held = new Map<string, UnlockedKeys>();
 	const changes = createEmitter();
-	const prompts = new Map<'open', number>();
-	const last = new Map<'activity', number>();
-	const timer = new Map<'idle', ReturnType<typeof setTimeout>>();
+	const prompts = cell(0);
+	const last = cell<number | undefined>(undefined);
+	const timer = cell<ReturnType<typeof setTimeout> | undefined>(undefined);
 
 	const notify = () => {
 		changes.emit();
 	};
 
-	const isPrompting = () => (prompts.get('open') ?? 0) > 0;
+	const isPrompting = () => prompts.current > 0;
 
 	const stopTimer = () => {
-		clearTimeout(timer.get('idle'));
-		timer.delete('idle');
+		clearTimeout(timer.current);
+		timer.current = undefined;
 	};
 
 	const lock = (connectionId?: string): void => {
@@ -106,14 +108,14 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 	};
 
 	const onActivity = () => {
-		last.set('activity', now());
+		last.current = now();
 	};
 
 	/** Locked once the page has been idle `idleMs`, and otherwise looked at again when it would be. */
 	const check = () => {
-		timer.delete('idle');
+		timer.current = undefined;
 		if (held.size === 0) return;
-		const idle = now() - (last.get('activity') ?? now());
+		const idle = now() - (last.current ?? now());
 		if (idle >= idleMs && !isPrompting()) {
 			lock();
 			return;
@@ -123,7 +125,7 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 
 	const schedule = (ms: number) => {
 		stopTimer();
-		timer.set('idle', setTimeout(check, ms));
+		timer.current = setTimeout(check, ms);
 	};
 
 	const startListening = () => {
@@ -157,11 +159,11 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 	};
 
 	const prompting = async <T>(work: () => Promise<T>): Promise<T> => {
-		prompts.set('open', (prompts.get('open') ?? 0) + 1);
+		prompts.current += 1;
 		try {
 			return await work();
 		} finally {
-			prompts.set('open', (prompts.get('open') ?? 1) - 1);
+			prompts.current -= 1;
 			// Answering it was something done in the page; and a page left
 			// hidden once it closed is hidden by the user, not the app.
 			onActivity();

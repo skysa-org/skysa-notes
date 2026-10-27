@@ -1,4 +1,5 @@
 import {
+	cell,
 	readVaultPayload,
 	type Site,
 	siteName,
@@ -141,7 +142,7 @@ export const updateLogin = async (
 ): Promise<Wrote> => {
 	const seal = await sealerIn(db, age, match.connectionId);
 	if (typeof seal !== 'function') return { state: 'refused', why: seal };
-	const came = { current: 'changed' as 'written' | 'changed' | 'unknown' };
+	const came = cell<'written' | 'changed' | 'unknown'>('changed');
 	await rewriteNoteBody(
 		db,
 		noteKey({ connectionId: match.connectionId, id: match.noteId }),

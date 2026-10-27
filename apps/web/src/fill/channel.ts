@@ -1,4 +1,4 @@
-import { pageSite, type Site } from '@skysa/core';
+import { cell, pageSite, type Site } from '@skysa/core';
 
 import { createEmitter } from '../store/emitter.js';
 import {
@@ -79,9 +79,9 @@ export interface ChannelOptions {
 export const openChannel = (win: ChannelWindow, options: ChannelOptions = {}): FillChannel => {
 	const { slowMs = SLOW_MS, setTimer = setTimeout } = options;
 	const changes = createEmitter();
-	const at: { current: ChannelState } = {
-		current: win.opener === null ? { state: 'alone' } : { state: 'waiting', slow: false },
-	};
+	const at = cell<ChannelState>(
+		win.opener === null ? { state: 'alone' } : { state: 'waiting', slow: false }
+	);
 
 	const set = (next: ChannelState) => {
 		at.current = next;

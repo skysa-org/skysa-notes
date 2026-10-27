@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useRef } from 'react';
 
 /**
  * A ref that holds the last `value` rendered, for a callback or a value read
@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'react';
  * Read `.current` where it is used, never once at render: what a render reads
  * is the value before it.
  */
-export const useLatest = <T>(value: T): Readonly<{ current: T }> => {
+export const useLatest = <T>(value: T): Readonly<RefObject<T>> => {
 	const latest = useRef(value);
 	useEffect(() => {
 		latest.current = value;

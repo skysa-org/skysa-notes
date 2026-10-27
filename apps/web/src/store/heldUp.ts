@@ -1,3 +1,4 @@
+import { cell } from '@skysa/core';
 import type Dexie from 'dexie';
 import {
 	type DBCore,
@@ -84,9 +85,9 @@ const writesNothing = (req: DBCoreMutateRequest): boolean =>
 export const watchForHeldUp = (db: Dexie): void => {
 	/** This tab's transactions still going, oldest first, and whether each has had an answer. */
 	const going = new Map<DBCoreTransaction, { answered: boolean }>();
-	const wait: { current: DBCoreTransaction | undefined } = { current: undefined };
+	const wait = cell<DBCoreTransaction | undefined>(undefined);
 	const listeners = new Set<() => void>();
-	const told = { current: false };
+	const told = cell(false);
 
 	/**
 	 * Listeners are told in a task of their own, once for however many changes

@@ -1,4 +1,4 @@
-import type { PictureVariant } from '@skysa/core';
+import { type Cell, cell, type PictureVariant } from '@skysa/core';
 
 import type { PictureRecord } from '../store/db.js';
 import type { PictureShrinker } from './shrinker.js';
@@ -27,13 +27,10 @@ export type Turns<T> = (
 ) => Promise<T | undefined>;
 
 export const oneAtATime = <T>(): Turns<T> => {
-	const queue: { current: Promise<unknown> } = { current: Promise.resolve() };
-	const waiting = new Map<
-		string,
-		{ askers: { current: number }; done: Promise<T | undefined> }
-	>();
+	const queue = cell<Promise<unknown>>(Promise.resolve());
+	const waiting = new Map<string, { askers: Cell<number>; done: Promise<T | undefined> }>();
 	const start = (key: string, work: () => Promise<T>) => {
-		const askers = { current: 0 };
+		const askers = cell(0);
 		const over = () => {
 			if (waiting.get(key)?.askers === askers) waiting.delete(key);
 		};
