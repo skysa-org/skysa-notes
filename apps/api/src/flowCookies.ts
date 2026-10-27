@@ -43,7 +43,7 @@ const FLOW_SECONDS = 600;
  */
 const ANSWER_SECONDS = 300;
 
-export interface SessionCookieOptions {
+export interface FlowCookieOptions {
 	/** Off only for plain-HTTP local development. */
 	secure: boolean;
 }
@@ -133,7 +133,7 @@ const writeSigned = async (
 	key: CryptoKey,
 	name: string,
 	payload: FlowState | FlowAnswer,
-	options: SessionCookieOptions & { maxAge: number }
+	options: FlowCookieOptions & { maxAge: number }
 ): Promise<void> => {
 	const encoded = toBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
 	setCookie(c, name, `${encoded}.${await sign(key, encoded)}`, {
@@ -177,7 +177,7 @@ export const setFlowState = (
 	c: Context,
 	key: CryptoKey,
 	flow: FlowState,
-	options: SessionCookieOptions
+	options: FlowCookieOptions
 ): Promise<void> =>
 	writeSigned(c, key, flowCookieName(options.secure), flow, {
 		...options,
@@ -187,7 +187,7 @@ export const setFlowState = (
 export const readFlowState = async (
 	c: Context,
 	key: CryptoKey,
-	options: SessionCookieOptions,
+	options: FlowCookieOptions,
 	now = Date.now()
 ): Promise<FlowState | undefined> =>
 	(await readSigned(c, key, flowCookieName(options.secure), now)) as FlowState | undefined;
@@ -197,7 +197,7 @@ export const setFlowAnswer = (
 	c: Context,
 	key: CryptoKey,
 	answer: Omit<FlowAnswer, 'expiresAt'>,
-	options: SessionCookieOptions,
+	options: FlowCookieOptions,
 	now = Date.now()
 ): Promise<void> =>
 	writeSigned(
@@ -217,7 +217,7 @@ export const readFlowAnswer = async (
 	c: Context,
 	key: CryptoKey,
 	state: string | undefined,
-	options: SessionCookieOptions,
+	options: FlowCookieOptions,
 	now = Date.now()
 ): Promise<string | undefined> => {
 	if (state === undefined) return undefined;

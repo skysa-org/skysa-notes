@@ -1674,7 +1674,7 @@ apps/
         webdav.ts             # /webdav/:connectionId/*
       db/                     # drizzle schema, client, migrations
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
-      session.ts              # the signed OAuth flow cookie (there are no sessions)
+      flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
       crypto.ts               # AES-GCM helpers
       oauth/                  # storage OAuth: gdrive.ts onedrive.ts dropbox.ts pkce.ts
       webdavProxy.ts
