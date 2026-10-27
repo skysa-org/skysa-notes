@@ -1667,19 +1667,24 @@ apps/
     src/
       app.ts                  # createApp(options) — library export, no env access
       worker.ts               # default Worker entry: createApp with self-host defaults from env
+      env.ts                  # parseEnv, envWarnings: the environment checked at boot
       routes/
-        connect.ts            # /auth/connect/:provider/* (storage)
+        connect.ts            # /auth/connect/:provider/* (storage), /connect-code
         connections.ts        # /connection, /connection/grants[/:id]
         token.ts              # /token
-        webdav.ts             # /webdav/:connectionId/*
+        relay.ts              # /connection/relay/ticket, /relay (the change relay)
+      relay/                  # the relay's hub seam, Durable Object, rooms and tickets
       db/                     # drizzle schema, client, migrations
       context.ts              # AppEnv: the request context's bindings and variables
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
       flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
       crypto.ts               # AES-GCM helpers
       json.ts                 # parseJson (JSON checked by a zod schema) and formatIssues
-      oauth/                  # storage OAuth: gdrive.ts onedrive.ts dropbox.ts pkce.ts
-      webdavProxy.ts
+      http.ts                 # fail(), tooMany, requireSameOrigin, jsonBody
+      gate.ts                 # the connect gate and code check an EntitlementProvider offers
+      device.ts               # deviceLabel: a grant's device, named from the User-Agent
+      log.ts                  # logFailure: an error's name and first line, nothing more
+      oauth/                  # storage OAuth: gdrive.ts onedrive.ts dropbox.ts pkce.ts common.ts
 packages/
   core/                       # zero framework deps; runs in browser, Node, and Workers
     src/

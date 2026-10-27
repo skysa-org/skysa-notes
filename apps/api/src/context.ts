@@ -6,7 +6,6 @@ import type { Database } from './db/client.js';
 import type { AppConfig } from './env.js';
 import type { RelayHub } from './relay/hub.js';
 
-/** What a request is handed, as Hono types it: its bindings and what middleware has set. */
 export type Bindings = {
 	DB: D1Database;
 };
@@ -33,4 +32,5 @@ export type Variables = {
 	relay: RelayHub | undefined;
 };
 
+/** What a request is handed, as Hono types it: its bindings and what middleware has set. */
 export type AppEnv = { Bindings: Bindings; Variables: Variables };
