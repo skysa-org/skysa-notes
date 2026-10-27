@@ -1,4 +1,6 @@
-import { clientForm, nonEmpty, postTokenForm, revokeByBearer } from './common.js';
+import { z } from 'zod';
+
+import { clientForm, nameField, nonEmpty, postTokenForm, revokeByBearer } from './common.js';
 import { type FetchLike, type StorageOAuth, type TokenSet } from './types.js';
 
 /**
@@ -48,10 +50,11 @@ const tokensFrom = async (
 	return { ...tokens, ...(accountId === undefined ? {} : { accountId }) };
 };
 
-interface AccountResponse {
-	name?: { display_name?: string };
-	email?: string;
-}
+/** What of `get_current_account`'s answer names the account, a field at a time. */
+const accountSchema = z.object({
+	name: z.object({ display_name: nameField }).optional().catch(undefined),
+	email: nameField,
+});
 
 export const dropboxOAuth: StorageOAuth = {
 	authorizeUrl: (credentials, input) =>
@@ -107,7 +110,7 @@ export const dropboxOAuth: StorageOAuth = {
 		}).catch(() => undefined);
 
 		if (response === undefined || !response.ok) return 'Dropbox';
-		const body = (await response.json().catch(() => ({}))) as AccountResponse;
-		return body.email ?? body.name?.display_name ?? 'Dropbox';
+		const body = accountSchema.safeParse(await response.json().catch(() => undefined)).data;
+		return body?.email ?? body?.name?.display_name ?? 'Dropbox';
 	},
 };

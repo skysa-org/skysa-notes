@@ -4,7 +4,9 @@ import type { z } from 'zod';
  * JSON from outside this module's own code — a provider's answer, a cookie, a
  * relay frame, a stored secret — read and checked in one step (#450): `text`
  * as `schema` says it is, or nothing when it is not JSON or not that shape.
- * Never a cast, so nothing downstream reads a field that was never there.
+ * Never a cast, so nothing downstream reads a field that was never there. A
+ * schema whose output can itself be `undefined` cannot be told from a refusal
+ * here, so none is passed one.
  */
 export const parseJson = <T>(text: string, schema: z.ZodType<T>): T | undefined => {
 	try {

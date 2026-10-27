@@ -31,20 +31,20 @@ const text = z
  * A token endpoint's answer, as far as anything here reads it, checked a field
  * at a time (#450): one field of the wrong kind is dropped, not the answer. A
  * lifetime sent as a string of digits is read as the number, as the cast this
- * replaced came to by arithmetic.
+ * replaced came to by arithmetic; one at or below zero is taken as none.
  */
 const tokenResponseSchema = z.object({
 	access_token: text,
 	refresh_token: text,
 	expires_in: z
 		.unknown()
-		.transform((value) =>
-			typeof value === 'number' && Number.isFinite(value)
-				? value
-				: typeof value === 'string' && /^\d+$/.test(value)
-					? Number(value)
-					: undefined
-		)
+		.transform((value) => {
+			const seconds =
+				typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+			// None, or none worth having: one at or below zero is a token that
+			// arrives expired, and would send the client straight back to refresh.
+			return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+		})
 		.optional(),
 	id_token: text,
 	scope: text,
@@ -106,11 +106,14 @@ export const postTokenForm = async (
 export const nonEmpty = (value: unknown): string | undefined =>
 	typeof value === 'string' && value !== '' ? value : undefined;
 
-/** The claims read from an ID token, each checked where it is used. */
+/** A field that is a `nonEmpty` string, or nothing in its place. */
+export const nameField = z.unknown().transform(nonEmpty).optional();
+
+/** The claims read from an ID token. The audience is compared, so any value will do. */
 const claimsSchema = z.object({
 	aud: z.unknown().optional(),
-	sub: z.unknown().optional(),
-	email: z.unknown().optional(),
+	sub: nameField,
+	email: nameField,
 });
 
 /** Who an ID token says the account is: `sub` for its id, `email` for its name. */
@@ -136,8 +139,7 @@ export const readIdClaims = (idToken: string | undefined, clientId: string): IdC
 	try {
 		const claims = parseJson(new TextDecoder().decode(fromBase64Url(payload)), claimsSchema);
 		if (claims?.aud !== clientId) return {};
-		const sub = nonEmpty(claims.sub);
-		const email = nonEmpty(claims.email);
+		const { sub, email } = claims;
 		return { ...(sub === undefined ? {} : { sub }), ...(email === undefined ? {} : { email }) };
 	} catch {
 		return {};

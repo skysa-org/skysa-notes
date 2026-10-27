@@ -77,6 +77,24 @@ describe("postTokenForm's reading of the answer", () => {
 		expect(tokens.expiresAt).toBe(61_000);
 	});
 
+	it('takes a lifetime at or below zero as none, and reads one in decimals', async () => {
+		const expiry = async (expires_in: unknown) =>
+			(
+				await postTokenForm(
+					answering(200, { access_token: 'a', expires_in }),
+					'u',
+					'p',
+					{},
+					0
+				)
+			).tokens.expiresAt;
+		expect(await expiry(0)).toBe(DEFAULT_EXPIRES_S * 1000);
+		expect(await expiry(-5)).toBe(DEFAULT_EXPIRES_S * 1000);
+		expect(await expiry('0')).toBe(DEFAULT_EXPIRES_S * 1000);
+		expect(await expiry('1.5')).toBe(1500);
+		expect(await expiry(1.5)).toBe(1500);
+	});
+
 	it('drops a field of the wrong kind rather than the answer', async () => {
 		const { tokens, body } = await postTokenForm(
 			answering(200, {

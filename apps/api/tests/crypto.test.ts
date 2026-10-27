@@ -72,7 +72,7 @@ describe('seal / open', () => {
 	// refused, as one a key cannot open is, and its callers ask for a reconnect.
 	it('refuses a sealed value that is not an OAuth secret', async () => {
 		const k = await key();
-		const notOne = ['not json', '[]', '{"refreshToken":1}', '{}'];
+		const notOne = ['not json', '[]', '{"refreshToken":1}', '{}', '{"refreshToken":""}'];
 		const refused = await Promise.all(
 			notOne.map(async (text) =>
 				openOAuthSecret(k, await seal(k, text)).then(
@@ -81,7 +81,7 @@ describe('seal / open', () => {
 				)
 			)
 		);
-		expect(refused).toEqual([true, true, true, true]);
+		expect(refused).toEqual([true, true, true, true, true]);
 	});
 });
 

@@ -100,8 +100,15 @@ export interface OAuthSecret {
 export const sealOAuthSecret = (secret: SecretKey, value: OAuthSecret): Promise<SealedSecret> =>
 	seal(secret, JSON.stringify(value));
 
-/** Every OAuth connection stored since the first release holds this and nothing else. */
-const oauthSecretSchema = z.object({ refreshToken: z.string() }) satisfies z.ZodType<OAuthSecret>;
+/**
+ * Every OAuth connection stored since the first release holds this and nothing
+ * else. An empty token would only be refused at the provider, as something
+ * other than a lapsed grant, and asked again: refused here, it asks for a
+ * reconnect.
+ */
+const oauthSecretSchema = z.object({
+	refreshToken: z.string().min(1),
+}) satisfies z.ZodType<OAuthSecret>;
 
 /** The secret a row seals; a throw, as a key that cannot open it is, where it is not one. */
 export const openOAuthSecret = async (
