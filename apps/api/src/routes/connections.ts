@@ -1,7 +1,7 @@
 import { and, eq, notExists } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 
-import type { AppEnv } from '../app.js';
+import type { AppEnv } from '../context.js';
 import { isIdle, notIdle } from '../credentials.js';
 import { openOAuthSecret, sealedOf } from '../crypto.js';
 import { schema } from '../db/client.js';

@@ -3,7 +3,7 @@ import { and, desc, eq, notInArray } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 
-import type { AppEnv } from '../app.js';
+import type { AppEnv } from '../context.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret, secretColumns } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';

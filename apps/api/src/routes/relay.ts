@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import type { AppEnv } from '../app.js';
+import type { AppEnv } from '../context.js';
 import { liveGrant } from '../credentials.js';
 import { fail, requireSameOrigin, tooMany } from '../http.js';
 import { RELAY_SOCKET_MS, type RelayHub } from '../relay/hub.js';

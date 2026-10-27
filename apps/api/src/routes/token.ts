@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
-import type { AppEnv } from '../app.js';
+import type { AppEnv } from '../context.js';
 import { openOAuthSecret, sealedOf, sealOAuthSecret, secretColumns } from '../crypto.js';
 import { schema } from '../db/client.js';
 import { knownCode } from '../gate.js';

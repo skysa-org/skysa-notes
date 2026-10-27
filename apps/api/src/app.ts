@@ -10,9 +10,10 @@ import { csrf } from 'hono/csrf';
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 
-import { type Bearer, bearerFrom, grantHolder } from './credentials.js';
+import type { AppEnv } from './context.js';
+import { bearerFrom, grantHolder } from './credentials.js';
 import { importSecretKey, type SecretKey, signingKey, ticketKey } from './crypto.js';
-import { createDb, type Database } from './db/client.js';
+import { createDb } from './db/client.js';
 import type { AppConfig } from './env.js';
 import { checkGate } from './gate.js';
 import { fail } from './http.js';
@@ -31,33 +32,8 @@ import { connectionRoutes } from './routes/connections.js';
 import { relayRoutes } from './routes/relay.js';
 import { tokenRoutes } from './routes/token.js';
 
-export type Bindings = {
-	DB: D1Database;
-};
-
-export type Variables = {
-	db: Database;
-	config: AppConfig;
-	entitlements: EntitlementProvider;
-	rateLimiter: RateLimiter;
-	/**
-	 * The connection the caller's credential reaches, on the routes that require
-	 * one. `requireBearer` is the only writer, and it answers 401 rather than
-	 * calling `next()` when there is nothing to put here — so a handler behind it
-	 * always finds one.
-	 */
-	bearer: Bearer;
-	/** AES-256-GCM key for the `connections` secret columns. */
-	secretKey: SecretKey;
-	/** HMAC key for the short-lived OAuth flow cookie. Derived, not the same key. */
-	signingKey: CryptoKey;
-	/** AES-GCM key for the relay's tickets. Derived too, and a third key. */
-	ticketKey: SecretKey;
-	/** The change relay, where the deployment runs one. */
-	relay: RelayHub | undefined;
-};
-
-export type AppEnv = { Bindings: Bindings; Variables: Variables };
+/** The request context's types, in `context.ts`; kept on the package entry. */
+export type { AppEnv, Bindings, Variables } from './context.js';
 
 export interface CreateAppOptions {
 	config: AppConfig;
