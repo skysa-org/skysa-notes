@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../src/hash.js';
 import { conflictFilePath, conflictFolderPath, conflictPath } from '../../src/names/conflicts.js';
@@ -16,12 +16,13 @@ import {
 } from '../../src/providers/types.js';
 import { type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
-import { AT, engineFixture, reporting } from './kit/engine.js';
+import { AT, reporting } from './kit/engine.js';
 import { expectSoundStore } from './kit/invariants.js';
 import { entryAt, remoteAt } from './kit/remote.js';
 import { boundTo } from './kit/seed.js';
 import { editHere, renameHere } from './kit/userActions.js';
-import { createMemoryStore, type MemoryStore } from './memoryStore.js';
+import { syncWorld } from './kit/world.js';
+import { createMemoryStore } from './memoryStore.js';
 
 /**
  * docs/ARCHITECTURE.md §7's branch table, one test per branch, plus the cases §7 leaves
@@ -31,64 +32,23 @@ import { createMemoryStore, type MemoryStore } from './memoryStore.js';
  * the timid answer.
  */
 
-let provider: FakeProvider;
-let store: MemoryStore;
-let engine: SyncEngine;
-let ids = 0;
-
-beforeEach(async () => {
-	ids = 0;
-	provider = createFakeProvider({ startAt: new Date('2026-01-01T00:00:00Z') });
-	await provider.ensureRoot();
-	store = createMemoryStore();
-	engine = engineWith({
-		newId: () => {
-			ids += 1;
-			return `copy-${String(ids)}`;
-		},
-	});
-});
-
-const { engineWith, pullNow, pullPages } = engineFixture(() => ({ provider, store }));
-
-afterEach(() => {
-	expectSoundStore(store);
-});
-
-/** Puts a file on the remote and returns what the provider called it. */
-const remoteFile = async (path: string, content: string) => provider.write(path, content, {});
-
-/**
- * Kills the stored cursor once, so the next pull is a full rescan. The
- * assertion is the point: without a cursor to lose the test is really about a
- * first sync, which takes the same path by accident and would stay green with
- * the reset handling deleted entirely.
- */
-const killTheCursor = (uploadDifferences?: boolean): void => {
-	expect(store.storedCursor()).toBeDefined();
-	let thrown = false;
-	provider.setFault((call) => {
-		if (call.op !== 'changes' || thrown) return undefined;
-		thrown = true;
-		return new CursorResetError('reset', uploadDifferences);
-	});
-};
-
-const noteAt = (path: string) => store.notes().find((note) => note.path === path);
-
-/** A note pulled from the remote the ordinary way, with a cursor stored. */
-const pulledNote = async (path: string, content: string) => {
-	const entry = await remoteFile(path, content);
-	await engine.pull();
-	const note = noteAt(path);
-	if (note === undefined) throw new Error(`no note at ${path}`);
-	return { entry, note };
-};
+const {
+	world,
+	engineWith,
+	pullNow,
+	pullPages,
+	remoteFile,
+	killTheCursor,
+	noteAt,
+	pulledNote,
+	folderPaths,
+	notePaths,
+} = syncWorld();
 
 describe('pull', () => {
 	it('brings a new remote note into the store', async () => {
 		await remoteFile('a.md', '# Hello\n');
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('# Hello\n');
@@ -96,19 +56,19 @@ describe('pull', () => {
 	});
 
 	it('creates the folder a note arrives in', async () => {
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'x\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.folders().map((folder) => folder.path)).toContain('Work');
+		expect(world.store.folders().map((folder) => folder.path)).toContain('Work');
 	});
 
 	it('ignores the marker file', async () => {
 		// `ensureRoot` already wrote `.notesapp.json`. Importing it as a note
 		// would put the app's own bookkeeping in the user's note list, and push
 		// it back mangled.
-		await engine.pull();
-		expect(store.notes()).toEqual([]);
+		await world.engine.pull();
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('ignores a hidden note, extension or not', async () => {
@@ -117,22 +77,22 @@ describe('pull', () => {
 		// with nothing watching hidden paths at all. Anything under a dot
 		// segment is somebody's bookkeeping — a provider's, another tool's —
 		// and the UI could not show it even if we imported it.
-		await provider.createFolder('.trash');
+		await world.provider.createFolder('.trash');
 		await remoteFile('.trash/deleted.md', 'x\n');
 		await remoteFile('.backup.md', 'y\n');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('ignores a file that is not a note', async () => {
 		// The app owns the folder but not everything in it. Treating a PDF the
 		// user dropped beside their notes as markdown would corrupt it on push.
 		await remoteFile('photo.png', 'not really a png');
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('takes a note whose extension is shouted', async () => {
@@ -141,58 +101,58 @@ describe('pull', () => {
 		// the fold in `conflictFilename` could never be reached by anything the
 		// engine actually pulls, because no note could ever carry `.MD`.
 		await remoteFile('Report.MD', '# Report\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes().map((note) => note.path)).toEqual(['Report.MD']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['Report.MD']);
 	});
 
 	it('overwrites a clean local note that changed remotely', async () => {
 		const first = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(first),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.write('a.md', 'two\n', { expectedVersion: first.version });
-		await engine.pull();
+		await world.provider.write('a.md', 'two\n', { expectedVersion: first.version });
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.content).toBe('two\n');
 	});
 
 	it('does nothing at all for a version it already has', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		const before = provider.callLog().filter((call) => call.op === 'read').length;
-		await engine.pull();
+		const before = world.provider.callLog().filter((call) => call.op === 'read').length;
+		await world.engine.pull();
 
 		// Not even a read: the version is the whole answer, and fetching content
 		// to discover nothing changed is the difference between a sync that
 		// costs one request and one that costs a thousand.
-		expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(before);
+		expect(world.provider.callLog().filter((call) => call.op === 'read')).toHaveLength(before);
 	});
 
 	it('follows a remote rename', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		const moved = await provider.move(entry, 'b.md');
-		await engine.pull();
+		const moved = await world.provider.move(entry, 'b.md');
+		await world.engine.pull();
 
 		// Whether a move changes the version is a provider's own business —
 		// Dropbox's `rev` survives one, OneDrive's `eTag` does not — so the path
@@ -202,27 +162,27 @@ describe('pull', () => {
 		expect(noteAt('b.md')?.id).toBe('n1');
 		expect(noteAt('b.md')?.remoteVersion).toBe(moved.version);
 		expect(noteAt('a.md')).toBeUndefined();
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 	});
 
 	it('follows a rename that did not change the version, without re-reading', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
 		// The other half of the provider split above. A rename moves no bytes,
 		// so a provider that keeps its version gives us nothing to fetch.
 		const renamed = { ...entry, path: 'b.md' };
-		const reads = provider.callLog().filter((call) => call.op === 'read').length;
-		await engineWith({ provider: reporting(provider, [renamed]) }).pull();
+		const reads = world.provider.callLog().filter((call) => call.op === 'read').length;
+		await engineWith({ provider: reporting(world.provider, [renamed]) }).pull();
 
 		expect(noteAt('b.md')?.id).toBe('n1');
-		expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
+		expect(world.provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
 	});
 
 	it('does not delete a note a move reported twice', async () => {
@@ -231,38 +191,38 @@ describe('pull', () => {
 		// when it is applied after the move — which is whichever order the
 		// provider happened to list them in.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		const split = reporting(provider, [
+		const split = reporting(world.provider, [
 			{ ...entry, path: 'b.md' },
 			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
 		]);
 		await engineWith({ provider: split }).pull();
 
 		expect(noteAt('b.md')?.content).toBe('one\n');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 	});
 
 	it('deletes a clean local note that went away remotely', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(entry);
-		await engine.pull();
+		await world.provider.delete(entry);
+		await world.engine.pull();
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('keeps a dirty local note that went away remotely', async () => {
@@ -270,17 +230,17 @@ describe('pull', () => {
 		// the next push re-creates it. Deleting it here would throw away an edit
 		// the user made and never saw land.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(entry);
-		await engine.pull();
+		await world.provider.delete(entry);
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.content).toBe('mine\n');
 		expect(noteAt('a.md')?.remoteId).toBeUndefined();
@@ -293,19 +253,21 @@ describe('pull', () => {
 		// `expectedVersion` the remote has moved past, and manufacture a
 		// conflict over a file that already agrees with us.
 		const first = await remoteFile('a.md', 'same\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'same\n',
 			...boundTo(first),
 			dirty: true,
 		});
-		await engine.pull();
-		const second = await provider.write('a.md', 'same\n', { expectedVersion: first.version });
-		await engine.pull();
+		await world.engine.pull();
+		const second = await world.provider.write('a.md', 'same\n', {
+			expectedVersion: first.version,
+		});
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.remoteVersion).toBe(second.version);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		// Adopting a version is bookkeeping and nothing more. Treating it as an
 		// update would call the note clean, and the local edit it still has
 		// queued would never be pushed.
@@ -314,23 +276,23 @@ describe('pull', () => {
 
 	it('persists the cursor only after the batch commits', async () => {
 		await remoteFile('a.md', 'one\n');
-		await engine.pull();
-		const cursor = store.storedCursor();
+		await world.engine.pull();
+		const cursor = world.store.storedCursor();
 
 		await remoteFile('b.md', 'two\n');
-		store.breakNextApply();
+		world.store.breakNextApply();
 		// Reported, not thrown: a caller that forgot a `try` would otherwise take
 		// the app down because a write failed once.
-		const failed = await engine.pull();
+		const failed = await world.engine.pull();
 		expect(failed.status).toBe('retry');
 		expect(failed.error).toContain('store write failed');
 
 		// The cursor must not have moved past work that was rolled back, or the
 		// next pull would never hear about `b.md` again.
-		expect(store.storedCursor()).toBe(cursor);
+		expect(world.store.storedCursor()).toBe(cursor);
 		expect(noteAt('b.md')).toBeUndefined();
 
-		await engine.pull();
+		await world.engine.pull();
 		expect(noteAt('b.md')?.content).toBe('two\n');
 	});
 
@@ -338,62 +300,62 @@ describe('pull', () => {
 		// A scan is one logical batch. A cursor stored after its first page
 		// claims a scan that never finished, and the pages after it — and every
 		// deletion the scan would have proved — are never looked at again.
-		provider = createFakeProvider({ pageSize: 1 });
-		await provider.ensureRoot();
-		store = createMemoryStore();
-		engine = engineWith();
-		await provider.write('a.md', '1\n', {});
-		await provider.write('b.md', '2\n', {});
+		world.provider = createFakeProvider({ pageSize: 1 });
+		await world.provider.ensureRoot();
+		world.store = createMemoryStore();
+		world.engine = engineWith();
+		await world.provider.write('a.md', '1\n', {});
+		await world.provider.write('b.md', '2\n', {});
 
 		let pages = 0;
 		const counted = {
-			...provider,
+			...world.provider,
 			changes: async (cursor?: string) => {
 				pages += 1;
-				if (pages === 2) store.breakNextApply();
-				return provider.changes(cursor);
+				if (pages === 2) world.store.breakNextApply();
+				return world.provider.changes(cursor);
 			},
 		};
 		const failed = await engineWith({ provider: counted }).pull();
 		expect(failed.status).toBe('retry');
 
-		expect(store.storedCursor()).toBeUndefined();
+		expect(world.store.storedCursor()).toBeUndefined();
 
-		await engine.pull();
-		expect(store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md']);
+		await world.engine.pull();
+		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md']);
 	});
 
 	it('drains every page before it finishes', async () => {
-		provider = createFakeProvider({ pageSize: 1 });
-		await provider.ensureRoot();
-		store = createMemoryStore();
-		engine = engineWith();
-		await provider.write('a.md', '1\n', {});
-		await provider.write('b.md', '2\n', {});
-		await provider.write('c.md', '3\n', {});
+		world.provider = createFakeProvider({ pageSize: 1 });
+		await world.provider.ensureRoot();
+		world.store = createMemoryStore();
+		world.engine = engineWith();
+		await world.provider.write('a.md', '1\n', {});
+		await world.provider.write('b.md', '2\n', {});
+		await world.provider.write('c.md', '3\n', {});
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md', 'c.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md', 'c.md']);
 	});
 });
 
 describe('a conflict', () => {
 	const bothChanged = async () => {
 		const first = await remoteFile('a.md', 'original\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(first),
 			dirty: true,
 		});
-		await provider.write('a.md', 'theirs\n', { expectedVersion: first.version });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: first.version });
 	};
 
 	it('gives the remote the path and the local edit a copy beside it', async () => {
 		await bothChanged();
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
 		expect(result.conflicts).toEqual(['a (conflict 2026-09-15T14-32).md']);
@@ -401,7 +363,7 @@ describe('a conflict', () => {
 
 	it('keeps every byte the user wrote', async () => {
 		await bothChanged();
-		await engine.pull();
+		await world.engine.pull();
 
 		const copy = noteAt('a (conflict 2026-09-15T14-32).md');
 		expect(copy?.content).toContain('mine\n');
@@ -412,7 +374,7 @@ describe('a conflict', () => {
 		// Two files claiming one id is the state the whole identity scheme
 		// exists to avoid, and the pair would fight over the same note forever.
 		await bothChanged();
-		await engine.pull();
+		await world.engine.pull();
 
 		const copy = noteAt('a (conflict 2026-09-15T14-32).md');
 		expect(copy?.id).toBe('copy-1');
@@ -421,30 +383,32 @@ describe('a conflict', () => {
 
 	it('queues the copy for push, so it reaches the other devices too', async () => {
 		await bothChanged();
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.ops().map((op) => op.path)).toEqual(['a (conflict 2026-09-15T14-32).md']);
+		expect(world.store.ops().map((op) => op.path)).toEqual([
+			'a (conflict 2026-09-15T14-32).md',
+		]);
 	});
 
 	it('does not let a second conflict overwrite the first', async () => {
 		await bothChanged();
-		await engine.pull();
-		const first = await provider.changes();
+		await world.engine.pull();
+		const first = await world.provider.changes();
 		const entry = first.entries.find((e) => e.path === 'a.md');
 		if (entry === undefined || entry.deleted === true) throw new Error('missing');
 
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine again\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		await provider.write('a.md', 'theirs again\n', { expectedVersion: entry.version });
-		await engine.pull();
+		await world.provider.write('a.md', 'theirs again\n', { expectedVersion: entry.version });
+		await world.engine.pull();
 
 		// Same note, same minute: the stamp alone is not unique enough.
-		expect(store.notes().map((note) => note.path)).toContain(
+		expect(world.store.notes().map((note) => note.path)).toContain(
 			'a (conflict 2026-09-15T14-32)-2.md'
 		);
 		expect(noteAt('a (conflict 2026-09-15T14-32).md')?.content).toContain('mine\n');
@@ -462,20 +426,20 @@ describe('a conflict', () => {
 	it('does not overwrite a copy another device left under a decomposed folder name', async () => {
 		const nfc = 'Caf\u00e9';
 		const nfd = 'Cafe\u0301';
-		await provider.createFolder(nfc);
-		await provider.createFolder(nfd);
+		await world.provider.createFolder(nfc);
+		await world.provider.createFolder(nfd);
 		const first = await remoteFile(`${nfc}/a.md`, 'original\n');
 		await remoteFile(`${nfd}/a (conflict 2026-09-15T14-32).md`, 'theirs, saved\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: `${nfc}/a.md`,
 			content: 'mine\n',
 			...boundTo(first),
 			dirty: true,
 		});
-		await provider.write(`${nfc}/a.md`, 'theirs\n', { expectedVersion: first.version });
+		await world.provider.write(`${nfc}/a.md`, 'theirs\n', { expectedVersion: first.version });
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt(`${nfd}/a (conflict 2026-09-15T14-32).md`)?.content).toContain(
 			'theirs, saved\n'
@@ -486,43 +450,48 @@ describe('a conflict', () => {
 
 describe('push', () => {
 	it('creates a note that has never been pushed', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
 		expect(noteAt('a.md')?.dirty).toBe(false);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('sends the version it expects, so a racing write is caught', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'two\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 
-		await engine.push();
-		expect(provider.contentAt('a.md')).toBe('two\n');
+		await world.engine.push();
+		expect(world.provider.contentAt('a.md')).toBe('two\n');
 	});
 
 	it('leaves a note dirty when the user typed again mid-flight', async () => {
 		// The bytes that landed are not the bytes on the device. Calling the note
 		// clean here is exactly how a save disappears.
-		store.put({ id: 'n1', path: 'a.md', content: 'first\n', dirty: true });
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		const original = store.completeOp;
+		world.store.put({ id: 'n1', path: 'a.md', content: 'first\n', dirty: true });
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		const original = world.store.completeOp;
 		const engineWithEdit = engineWith({
 			store: {
-				...store,
+				...world.store,
 				completeOp: async (seq, outcome) => {
-					store.put({ id: 'n1', path: 'a.md', content: 'first and more\n', dirty: true });
+					world.store.put({
+						id: 'n1',
+						path: 'a.md',
+						content: 'first and more\n',
+						dirty: true,
+					});
 					await original(seq, outcome);
 				},
 			},
@@ -539,37 +508,37 @@ describe('push', () => {
 		// §7's "remote deleted, local dirty" arriving the other way round: the
 		// push finds nothing there. The retry is a create, not an overwrite.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.delete(entry);
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.delete(entry);
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
 		expect(noteAt('a.md')?.dirty).toBe(false);
 	});
 
 	it('writes the local edit aside when the push loses a race', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(world.provider.contentAt('a.md')).toBe('theirs\n');
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
 		expect(result.conflicts).toEqual(['a (conflict 2026-09-15T14-32).md']);
 		expect(noteAt('a (conflict 2026-09-15T14-32).md')?.content).toContain('mine\n');
@@ -579,125 +548,127 @@ describe('push', () => {
 		// Its content is safe in the copy; sending it again would overwrite the
 		// remote with the very bytes the user has just been given a copy of.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(store.ops().map((op) => op.path)).toEqual(['a (conflict 2026-09-15T14-32).md']);
+		expect(world.store.ops().map((op) => op.path)).toEqual([
+			'a (conflict 2026-09-15T14-32).md',
+		]);
 	});
 
 	it('makes the folder before the note that goes in it', async () => {
-		store.put({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'mkdir', path: 'Work' });
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
+		world.store.put({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('Work/a.md')).toBe('mine\n');
+		expect(world.provider.contentAt('Work/a.md')).toBe('mine\n');
 	});
 
 	it('moves a note that already exists remotely', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(provider.contentAt('b.md')).toBe('one\n');
-		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(world.provider.contentAt('b.md')).toBe('one\n');
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
 	});
 
 	it('holds the version a move hands back only over bytes it has seen under it', async () => {
 		// The fake gives a moved file a new version, as OneDrive does. It
 		// is the version of whatever the move found, which nobody here has read.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
 			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		await engine.push();
+		await world.engine.push();
 
 		// Read, found to be the bytes last synced, and held under the version
 		// they were read under.
-		const read = await provider.read({ remoteId: entry.remoteId, path: 'b.md' });
+		const read = await world.provider.read({ remoteId: entry.remoteId, path: 'b.md' });
 		expect(noteAt('b.md')?.remoteVersion).toBe(read.version);
 		expect(read.version).not.toBe(entry.version);
 	});
 
 	it('goes on holding the version it had when the moved file is not the one it synced', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
 			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		await engine.push();
+		await world.engine.push();
 
 		// Moved all the same: the rename is the user's, and takes no bytes.
-		expect(provider.contentAt('b.md')).toBe('theirs\n');
+		expect(world.provider.contentAt('b.md')).toBe('theirs\n');
 		expect(noteAt('b.md')?.remoteVersion).toBe(entry.version);
 		// So the pull does not take the file for one it has already seen.
-		await engine.pull();
+		await world.engine.pull();
 		expect(noteAt('b.md')?.content).toBe('theirs\n');
 	});
 
 	it('does the same when the moved file cannot be read, rather than failing a rename that landed', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'one\n',
 			...boundTo(entry),
 			syncedHash: await contentHash('one\n'),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
-		provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		expect(noteAt('b.md')?.remoteVersion).toBe(entry.version);
 	});
 
 	it('deletes remotely and then drops the tombstone', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(provider.contentAt('a.md')).toBeUndefined();
-		expect(store.notes()).toEqual([]);
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('treats a delete of something already gone as done', async () => {
@@ -706,41 +677,41 @@ describe('push', () => {
 		// that reports the missing file instead is the case that matters, and
 		// it is the one Dropbox produces (`path_lookup/not_found`).
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
 		const strict = engineWith({
 			provider: {
-				...provider,
+				...world.provider,
 				delete: () => Promise.reject(new NotFoundError('a.md')),
 			},
 		});
 		const result = await strict.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('stops at the op that failed rather than stepping over it', async () => {
 		// The queue is ordered because later ops depend on earlier ones. Pushing
 		// past a failure would write a note into a folder that was never made.
-		store.put({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'mkdir', path: 'Work' });
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
-		provider.setFault((call) =>
+		world.store.put({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
+		world.provider.setFault((call) =>
 			call.op === 'createFolder' ? new Error('offline') : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()).toHaveLength(2);
-		expect(provider.contentAt('Work/a.md')).toBeUndefined();
+		expect(world.store.ops()).toHaveLength(2);
+		expect(world.provider.contentAt('Work/a.md')).toBeUndefined();
 	});
 
 	describe('writing notes at once', () => {
@@ -782,8 +753,8 @@ describe('push', () => {
 
 		const queueNotes = (paths: readonly string[]) => {
 			paths.forEach((path, at) => {
-				store.put({ id: `n${String(at)}`, path, content: `${path}\n`, dirty: true });
-				store.queue({ op: 'write', noteId: `n${String(at)}`, path });
+				world.store.put({ id: `n${String(at)}`, path, content: `${path}\n`, dirty: true });
+				world.store.queue({ op: 'write', noteId: `n${String(at)}`, path });
 			});
 		};
 
@@ -791,12 +762,12 @@ describe('push', () => {
 
 		/** A provider that takes four at once, as Google Drive does. */
 		beforeEach(async () => {
-			provider = createFakeProvider({
+			world.provider = createFakeProvider({
 				startAt: new Date('2026-01-01T00:00:00Z'),
 				writesAtOnce: 4,
 			});
-			await provider.ensureRoot();
-			engine = engineWith();
+			await world.provider.ensureRoot();
+			world.engine = engineWith();
 		});
 
 		it('writes one at a time to a provider that does not say it takes more', async () => {
@@ -817,13 +788,13 @@ describe('push', () => {
 			// Each finds it missing — deleted on another device while they had
 			// edits — and on Drive, each making it made one apiece.
 			queueNotes(['Work/a.md', 'Work/b.md', 'Work/c.md', 'Work/d.md']);
-			const { events, provider: counted } = logged(provider);
+			const { events, provider: counted } = logged(world.provider);
 
 			const result = await pushing(counted);
 
 			expect(result.status).toBe('ok');
 			expect(events.filter((event) => event === '+mkdir')).toHaveLength(1);
-			expect(provider.contentAt('Work/d.md')).toBe('Work/d.md\n');
+			expect(world.provider.contentAt('Work/d.md')).toBe('Work/d.md\n');
 		});
 
 		it('sends a note with a rename queued alone, so a name another gives up is free', async () => {
@@ -832,7 +803,7 @@ describe('push', () => {
 			// it as a conflict, and the user's rename was lost.
 			const first = await remoteFile('a.md', 'a\n');
 			const second = await remoteFile('b.md', 'b\n');
-			store.put({
+			world.store.put({
 				id: 'n1',
 				path: 'b.md',
 				content: 'a, edited\n',
@@ -840,7 +811,7 @@ describe('push', () => {
 				...boundTo(first),
 				syncedHash: await contentHash('a\n'),
 			});
-			store.put({
+			world.store.put({
 				id: 'n2',
 				path: 'c.md',
 				content: 'b, edited\n',
@@ -848,18 +819,18 @@ describe('push', () => {
 				...boundTo(second),
 				syncedHash: await contentHash('b\n'),
 			});
-			store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
-			store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-			store.queue({ op: 'move', noteId: 'n2', path: 'b.md', targetPath: 'c.md' });
-			store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+			world.store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
+			world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+			world.store.queue({ op: 'move', noteId: 'n2', path: 'b.md', targetPath: 'c.md' });
+			world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
 			expect(result.conflicts).toEqual([]);
-			expect(provider.contentAt('b.md')).toBe('a, edited\n');
-			expect(provider.contentAt('c.md')).toBe('b, edited\n');
-			expect(store.notes().find((note) => note.id === 'n1')?.path).toBe('b.md');
+			expect(world.provider.contentAt('b.md')).toBe('a, edited\n');
+			expect(world.provider.contentAt('c.md')).toBe('b, edited\n');
+			expect(world.store.notes().find((note) => note.id === 'n1')?.path).toBe('b.md');
 		});
 
 		it('writes up to four notes at once, and every one of them', async () => {
@@ -868,101 +839,101 @@ describe('push', () => {
 			// another.
 			const paths = ['a.md', 'b.md', 'c.md', 'd.md', 'e.md', 'f.md'];
 			queueNotes(paths);
-			const { events, provider: counted } = logged(provider);
+			const { events, provider: counted } = logged(world.provider);
 
 			const result = await pushing(counted);
 
 			expect(result.status).toBe('ok');
 			expect(result.pushed).toBe(6);
 			expect(most(events)).toBe(4);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 			paths.forEach((path) => {
-				expect(provider.contentAt(path)).toBe(`${path}\n`);
+				expect(world.provider.contentAt(path)).toBe(`${path}\n`);
 			});
 		});
 
 		it('makes a notebook alone, before the notes behind it', async () => {
 			// What a later op can depend on goes in its turn, by itself: a note
 			// sent beside its notebook's `mkdir` could reach the remote first.
-			store.put({ id: 'n1', path: 'a.md', content: 'a\n', dirty: true });
-			store.put({ id: 'n2', path: 'Work/b.md', content: 'b\n', dirty: true });
-			store.put({ id: 'n3', path: 'Work/c.md', content: 'c\n', dirty: true });
-			store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-			store.queue({ op: 'mkdir', path: 'Work' });
-			store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
-			store.queue({ op: 'write', noteId: 'n3', path: 'Work/c.md' });
-			const { events, provider: counted } = logged(provider);
+			world.store.put({ id: 'n1', path: 'a.md', content: 'a\n', dirty: true });
+			world.store.put({ id: 'n2', path: 'Work/b.md', content: 'b\n', dirty: true });
+			world.store.put({ id: 'n3', path: 'Work/c.md', content: 'c\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+			world.store.queue({ op: 'mkdir', path: 'Work' });
+			world.store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
+			world.store.queue({ op: 'write', noteId: 'n3', path: 'Work/c.md' });
+			const { events, provider: counted } = logged(world.provider);
 
 			const result = await pushing(counted);
 
 			expect(result.status).toBe('ok');
 			expect(events.slice(0, 4)).toEqual(['+write', '-write', '+mkdir', '-mkdir']);
 			expect(most(events.slice(4))).toBe(2);
-			expect(provider.contentAt('Work/c.md')).toBe('c\n');
+			expect(world.provider.contentAt('Work/c.md')).toBe('c\n');
 		});
 
 		it('stops where a write failed, and keeps what landed beside it', async () => {
 			queueNotes(['a.md', 'b.md', 'c.md', 'd.md', 'e.md']);
-			provider.setFault((call) =>
+			world.provider.setFault((call) =>
 				call.op === 'write' && call.path === 'b.md' ? new Error('offline') : undefined
 			);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('retry');
 			// The three sent with it are done. The one behind them was never
 			// sent: the drain stopped at the failure, as it would have alone.
-			expect(store.ops().map((op) => op.path)).toEqual(['b.md', 'e.md']);
-			expect(store.ops()[0]?.attempts).toBe(1);
-			expect(provider.contentAt('d.md')).toBe('d.md\n');
-			expect(provider.contentAt('e.md')).toBeUndefined();
+			expect(world.store.ops().map((op) => op.path)).toEqual(['b.md', 'e.md']);
+			expect(world.store.ops()[0]?.attempts).toBe(1);
+			expect(world.provider.contentAt('d.md')).toBe('d.md\n');
+			expect(world.provider.contentAt('e.md')).toBeUndefined();
 		});
 
 		it('waits out a rate limit one of them met, without counting it', async () => {
 			queueNotes(['a.md', 'b.md', 'c.md', 'd.md', 'e.md']);
-			provider.setFault((call) =>
+			world.provider.setFault((call) =>
 				call.op === 'write' && call.path === 'c.md'
 					? new RateLimitError('slow down', 4000)
 					: undefined
 			);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('retry');
 			expect(result.retryAfterMs).toBe(4000);
-			expect(store.ops().map((op) => op.path)).toEqual(['c.md', 'e.md']);
-			expect(store.ops()[0]?.attempts).toBe(0);
+			expect(world.store.ops().map((op) => op.path)).toEqual(['c.md', 'e.md']);
+			expect(world.store.ops()[0]?.attempts).toBe(0);
 		});
 
 		it('waits out a rate limit met beside a conflict, rather than sending through it', async () => {
 			// The conflict, handled first, let the drain go on, and the write
 			// the provider had just told to wait went again at once.
 			const entry = await remoteFile('a.md', 'one\n');
-			store.put({
+			world.store.put({
 				id: 'n0',
 				path: 'a.md',
 				content: 'mine\n',
 				dirty: true,
 				...boundTo(entry),
 			});
-			store.put({ id: 'n1', path: 'b.md', content: 'b\n', dirty: true });
-			store.queue({ op: 'write', noteId: 'n0', path: 'a.md' });
-			store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-			await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+			world.store.put({ id: 'n1', path: 'b.md', content: 'b\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: 'n0', path: 'a.md' });
+			world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+			await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 			const sent: string[] = [];
-			provider.setFault((call) => {
+			world.provider.setFault((call) => {
 				if (call.op !== 'write' || call.path === undefined) return undefined;
 				sent.push(call.path);
 				return call.path === 'b.md' ? new RateLimitError('slow down', 4000) : undefined;
 			});
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('retry');
 			expect(result.retryAfterMs).toBe(4000);
 			expect(sent.filter((path) => path === 'b.md')).toHaveLength(1);
 			// Neither counted: the conflict is met again, and settled, next time.
-			expect(store.ops().map((op) => [op.path, op.attempts])).toEqual([
+			expect(world.store.ops().map((op) => [op.path, op.attempts])).toEqual([
 				['a.md', 0],
 				['b.md', 0],
 			]);
@@ -972,7 +943,7 @@ describe('push', () => {
 			queueNotes(['a.md', 'b.md', 'c.md', 'd.md']);
 			const sent = new Map<string, number>();
 			let refreshed = 0;
-			provider.setFault((call) => {
+			world.provider.setFault((call) => {
 				if (call.op !== 'write' || call.path === undefined) return undefined;
 				sent.set(call.path, (sent.get(call.path) ?? 0) + 1);
 				return refreshed === 0 && (call.path === 'b.md' || call.path === 'c.md')
@@ -1000,28 +971,28 @@ describe('push', () => {
 
 		it('resolves a conflict one of them met, and goes on', async () => {
 			const entry = await remoteFile('b.md', 'one\n');
-			store.put({ id: 'n0', path: 'a.md', content: 'a\n', dirty: true });
-			store.put({
+			world.store.put({ id: 'n0', path: 'a.md', content: 'a\n', dirty: true });
+			world.store.put({
 				id: 'n1',
 				path: 'b.md',
 				content: 'mine\n',
 				dirty: true,
 				...boundTo(entry),
 			});
-			store.put({ id: 'n2', path: 'c.md', content: 'c\n', dirty: true });
-			store.put({ id: 'n3', path: 'd.md', content: 'd\n', dirty: true });
-			store.put({ id: 'n4', path: 'e.md', content: 'e\n', dirty: true });
+			world.store.put({ id: 'n2', path: 'c.md', content: 'c\n', dirty: true });
+			world.store.put({ id: 'n3', path: 'd.md', content: 'd\n', dirty: true });
+			world.store.put({ id: 'n4', path: 'e.md', content: 'e\n', dirty: true });
 			['a.md', 'b.md', 'c.md', 'd.md', 'e.md'].forEach((path, at) => {
-				store.queue({ op: 'write', noteId: `n${String(at)}`, path });
+				world.store.queue({ op: 'write', noteId: `n${String(at)}`, path });
 			});
-			await provider.write('b.md', 'theirs\n', { expectedVersion: entry.version });
+			await world.provider.write('b.md', 'theirs\n', { expectedVersion: entry.version });
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
 			expect(result.conflicts).toHaveLength(1);
-			expect(provider.contentAt('b.md')).toBe('theirs\n');
-			expect(provider.contentAt('e.md')).toBe('e\n');
+			expect(world.provider.contentAt('b.md')).toBe('theirs\n');
+			expect(world.provider.contentAt('e.md')).toBe('e\n');
 		});
 	});
 
@@ -1042,50 +1013,50 @@ describe('push', () => {
 		// Only `read` faults, and not with a not-found: the provider is failing to
 		// answer rather than answering. Taken for a no, the re-create runs and
 		// succeeds, and the user has two notes where they had one.
-		const seeded = await provider.write('moved.md', 'mine\n', {});
-		store.put({
+		const seeded = await world.provider.write('moved.md', 'mine\n', {});
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
 			...boundTo(seeded),
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) =>
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) =>
 			call.op === 'read' ? new Error('service unavailable') : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		// (`isHidden` drops the marker file, which `ensureRoot` writes and which
 		// is a file like any other.)
-		const notes = provider.snapshot().filter((entry) => !isHidden(entry.path));
+		const notes = world.provider.snapshot().filter((entry) => !isHidden(entry.path));
 		expect(notes.map((entry) => entry.path)).toEqual(['moved.md']);
 		expect(result.status).toBe('retry');
-		expect(store.ops()).toHaveLength(1);
+		expect(world.store.ops()).toHaveLength(1);
 	});
 
 	it('does not discard a rename because the provider would not say', async () => {
 		// Worse than the last one: `runMove` completes the op as done when it
 		// decides the source is gone, so the user's rename goes with nothing
 		// reported and nothing left to retry.
-		const seeded = await provider.write('a.md', 'mine\n', {});
-		store.put({
+		const seeded = await world.provider.write('a.md', 'mine\n', {});
+		world.store.put({
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'mine\n',
 			...boundTo(seeded),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
-		provider.setFault((call) => {
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
+		world.provider.setFault((call) => {
 			if (call.op === 'move') return new NotFoundError('Work/a.md');
 			return call.op === 'read' ? new Error('service unavailable') : undefined;
 		});
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()).toHaveLength(1);
+		expect(world.store.ops()).toHaveLength(1);
 	});
 
 	/**
@@ -1095,17 +1066,17 @@ describe('push', () => {
 	 * their note cannot be sent.
 	 */
 	it('does not count a rate limit against the op', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) =>
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) =>
 			call.op === 'write' ? new RateLimitError('slow down', 4000) : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()[0]?.attempts).toBe(0);
-		expect(store.lastError(op.seq)).toBeUndefined();
+		expect(world.store.ops()[0]?.attempts).toBe(0);
+		expect(world.store.lastError(op.seq)).toBeUndefined();
 		// And the wait the provider asked for reaches the caller, which is the
 		// only thing that knows when to come back.
 		expect(result.retryAfterMs).toBe(4000);
@@ -1113,13 +1084,13 @@ describe('push', () => {
 	});
 
 	it('says nothing about a wait when the provider named none', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) =>
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) =>
 			call.op === 'write' ? new RateLimitError('slow down') : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
 		// Absent, not zero: the caller's own backoff is what applies.
@@ -1133,29 +1104,29 @@ describe('push', () => {
 		// write's attempts on a file it never looked at — and the wait it asked
 		// for would be thrown away with it.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
 			...boundTo(entry),
 		});
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
-		provider.setFault((call) =>
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.provider.setFault((call) =>
 			call.op === 'read' ? new RateLimitError('slow down', 6000) : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()[0]?.attempts).toBe(0);
-		expect(store.lastError(op.seq)).toBeUndefined();
+		expect(world.store.ops()[0]?.attempts).toBe(0);
+		expect(world.store.lastError(op.seq)).toBeUndefined();
 		expect(result.retryAfterMs).toBe(6000);
 		expect(result.error).toContain('slow down');
 		// And nothing was decided: no conflict copy over a read that never came.
 		expect(result.conflicts).toEqual([]);
-		expect(store.notes().map((note) => note.path)).toEqual(['a.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md']);
 	});
 
 	it('counts an ordinary failure met while resolving a push conflict', async () => {
@@ -1163,73 +1134,75 @@ describe('push', () => {
 		// that is not a rate limit must still move the op's attempts, or it can
 		// never reach `blocked` however long it goes on failing.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
 			...boundTo(entry),
 		});
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
-		provider.setFault((call) => (call.op === 'read' ? new Error('read failed') : undefined));
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.provider.setFault((call) =>
+			call.op === 'read' ? new Error('read failed') : undefined
+		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()[0]?.attempts).toBe(1);
-		expect(store.lastError(op.seq)).toContain('read failed');
+		expect(world.store.ops()[0]?.attempts).toBe(1);
+		expect(world.store.lastError(op.seq)).toContain('read failed');
 	});
 
 	it('still blocks an op that has already failed too often, rate limit or not', async () => {
 		// The attempts rule is about what has happened, not about today's
 		// failure: an op at the limit is surfaced before the provider is asked.
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
-		provider.setFault(() => new RateLimitError('slow down', 1000));
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
+		world.provider.setFault(() => new RateLimitError('slow down', 1000));
 
-		expect((await engine.push()).status).toBe('blocked');
+		expect((await world.engine.push()).status).toBe('blocked');
 	});
 
 	it('carries the wait out of a pull that was rate limited', async () => {
-		provider.setFault((call) =>
+		world.provider.setFault((call) =>
 			call.op === 'changes' ? new RateLimitError('slow down', 9000) : undefined
 		);
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('retry');
 		expect(result.retryAfterMs).toBe(9000);
 	});
 
 	it('records the failure against the op it belongs to', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) => (call.op === 'write' ? new Error('offline') : undefined));
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) => (call.op === 'write' ? new Error('offline') : undefined));
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(store.ops()[0]?.attempts).toBe(1);
-		expect(store.lastError(op.seq)).toBe('offline');
+		expect(world.store.ops()[0]?.attempts).toBe(1);
+		expect(world.store.lastError(op.seq)).toBe('offline');
 	});
 
 	it('gives up on an op that has failed too many times', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('blocked');
 		expect(result.error).toContain('a.md');
 	});
 
 	it('skips an op whose note has been purged', async () => {
-		store.queue({ op: 'write', noteId: 'gone', path: 'a.md' });
+		world.store.queue({ op: 'write', noteId: 'gone', path: 'a.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 });
 
@@ -1239,30 +1212,31 @@ describe('pushing a file', () => {
 
 	/** A file added here: its row, its bytes held until they go, and its upload. */
 	const added = (path: string, attempts = 0) => {
-		store.putFile(
+		world.store.putFile(
 			{ id: 'x1', path, size: PNG.byteLength },
 			{ bytes: PNG.slice(), pinned: true }
 		);
-		return store.queue({ op: 'upload', fileId: 'x1', path, attempts });
+		return world.store.queue({ op: 'upload', fileId: 'x1', path, attempts });
 	};
 
 	/** A note behind the upload in the queue, to see whether it waited. */
 	const noteBehind = () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 	};
 
-	const creates = () => provider.callLog().filter((call) => call.op === 'createFile').length;
+	const creates = () =>
+		world.provider.callLog().filter((call) => call.op === 'createFile').length;
 
 	it('sends the bytes held here, and binds the row to what they made', async () => {
 		added('a-1234abcd.png');
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual({ status: 'ok', pulled: 0, pushed: 1, conflicts: [] });
-		expect(provider.bytesAt('a-1234abcd.png')).toEqual(PNG);
-		const made = remoteAt(provider, 'a-1234abcd.png');
-		expect(store.files()).toEqual([
+		expect(world.provider.bytesAt('a-1234abcd.png')).toEqual(PNG);
+		const made = remoteAt(world.provider, 'a-1234abcd.png');
+		expect(world.store.files()).toEqual([
 			{
 				id: 'x1',
 				path: 'a-1234abcd.png',
@@ -1272,29 +1246,32 @@ describe('pushing a file', () => {
 			},
 		]);
 		// Up now: kept as that version's, and no longer held for an upload.
-		expect(store.heldBytes('x1')).toEqual({ bytes: PNG, version: made?.version });
-		expect(store.ops()).toEqual([]);
+		expect(world.store.heldBytes('x1')).toEqual({ bytes: PNG, version: made?.version });
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('makes the folders a file needs, from the top', async () => {
 		added('Trips/2026/a.png');
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.bytesAt('Trips/2026/a.png')).toEqual(PNG);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.bytesAt('Trips/2026/a.png')).toEqual(PNG);
 	});
 
 	it('tells the provider what kind of file it is, where it knows', async () => {
 		const asked: (string | undefined)[] = [];
 		const telling: StorageProvider = {
-			...provider,
+			...world.provider,
 			createFile: (path, bytes, opts) => {
 				asked.push(opts?.contentType);
-				return provider.createFile(path, bytes, opts);
+				return world.provider.createFile(path, bytes, opts);
 			},
 		};
 		added('a.png');
-		store.putFile({ id: 'x2', path: 'b.qqq', size: 3 }, { bytes: OTHER.slice(), pinned: true });
-		store.queue({ op: 'upload', fileId: 'x2', path: 'b.qqq' });
+		world.store.putFile(
+			{ id: 'x2', path: 'b.qqq', size: 3 },
+			{ bytes: OTHER.slice(), pinned: true }
+		);
+		world.store.queue({ op: 'upload', fileId: 'x2', path: 'b.qqq' });
 
 		await engineWith({ provider: telling }).push();
 
@@ -1302,12 +1279,12 @@ describe('pushing a file', () => {
 	});
 
 	it('takes the same file at its name for its own: a run that never heard back', async () => {
-		const sent = await provider.createFile('a.png', PNG.slice());
+		const sent = await world.provider.createFile('a.png', PNG.slice());
 		added('a.png');
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(2);
-		expect(store.files()).toEqual([
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(2);
+		expect(world.store.files()).toEqual([
 			{
 				id: 'x1',
 				path: 'a.png',
@@ -1318,88 +1295,96 @@ describe('pushing a file', () => {
 	});
 
 	it.each([
-		['a different file', () => provider.createFile('a.png', OTHER.slice())],
-		['a folder', () => provider.createFolder('a.png')],
+		['a different file', () => world.provider.createFile('a.png', OTHER.slice())],
+		['a folder', () => world.provider.createFolder('a.png')],
 	])('goes beside %s at its name, keeping its extension', async (_what, occupy) => {
 		// The remote keeps the path. The note that links the file is not
 		// rewritten: it goes on naming what another device put there first.
 		const there = await occupy();
 		added('a.png');
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('a.png', AT);
 		expect(beside).toMatch(/\.png$/u);
-		expect(provider.bytesAt(beside)).toEqual(PNG);
-		expect(remoteAt(provider, 'a.png')?.remoteId).toBe(there.remoteId);
-		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
+		expect(world.provider.bytesAt(beside)).toEqual(PNG);
+		expect(remoteAt(world.provider, 'a.png')?.remoteId).toBe(there.remoteId);
+		expect(world.store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
 	});
 
 	it('goes beside the same file where another row holds it', async () => {
 		// Two rows on one file is a link the store cannot keep: the other one
 		// is on its way out of that name, or not yet told it moved there.
-		const theirs = await provider.createFile('a.png', PNG.slice());
+		const theirs = await world.provider.createFile('a.png', PNG.slice());
 		const other = {
 			id: 'x0',
 			path: 'Old/a.png',
 			...boundTo(theirs),
 			size: PNG.byteLength,
 		};
-		store.putFile(other);
+		world.store.putFile(other);
 		added('a.png');
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(store.files()).toEqual([
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ id: 'x1', path: conflictFilePath('a.png', AT) }),
 			other,
 		]);
 	});
 
 	it('copies a file it does not hold from the remote file it copies', async () => {
-		await provider.createFolder('Trips');
-		const original = await provider.createFile('Trips/a.png', PNG.slice());
-		store.putFile({
+		await world.provider.createFolder('Trips');
+		const original = await world.provider.createFile('Trips/a.png', PNG.slice());
+		world.store.putFile({
 			id: 'x0',
 			path: 'Trips/a.png',
 			...boundTo(original),
 			size: PNG.byteLength,
 		});
-		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
-		store.queue({
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
+		world.store.queue({
 			op: 'upload',
 			fileId: 'x1',
 			path: 'Work/a.png',
 			copyOf: original.remoteId,
 		});
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
-		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
-		expect(store.files().map((file) => file.remoteId)).toEqual([
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.bytesAt('Work/a.png')).toEqual(PNG);
+		expect(world.provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(world.store.files().map((file) => file.remoteId)).toEqual([
 			original.remoteId,
-			remoteAt(provider, 'Work/a.png')?.remoteId,
+			remoteAt(world.provider, 'Work/a.png')?.remoteId,
 		]);
 	});
 
 	it('lets a copy go that has nothing left to copy', async () => {
-		store.putFile({ id: 'x1', path: 'Work/a.png', size: 8 });
-		store.queue({ op: 'upload', fileId: 'x1', path: 'Work/a.png', copyOf: 'id:gone' });
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: 8 });
+		world.store.queue({ op: 'upload', fileId: 'x1', path: 'Work/a.png', copyOf: 'id:gone' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.files()).toEqual([]);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		expect(creates()).toBe(0);
 	});
 
 	it('sends nothing for a file deleted before it went, or one already up', async () => {
-		store.queue({ op: 'upload', fileId: 'nope', path: 'a.png' });
-		store.putFile({ id: 'x2', path: 'b.png', remoteId: 'id:b', remoteVersion: 'v1', size: 3 });
-		store.queue({ op: 'upload', fileId: 'x2', path: 'b.png' });
+		world.store.queue({ op: 'upload', fileId: 'nope', path: 'a.png' });
+		world.store.putFile({
+			id: 'x2',
+			path: 'b.png',
+			remoteId: 'id:b',
+			remoteVersion: 'v1',
+			size: 3,
+		});
+		world.store.queue({ op: 'upload', fileId: 'x2', path: 'b.png' });
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(store.ops()).toEqual([]);
-		expect(store.files()).toEqual([expect.objectContaining({ id: 'x2', remoteId: 'id:b' })]);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.ops()).toEqual([]);
+		expect(world.store.files()).toEqual([
+			expect.objectContaining({ id: 'x2', remoteId: 'id:b' }),
+		]);
 		expect(creates()).toBe(0);
 	});
 
@@ -1407,9 +1392,11 @@ describe('pushing a file', () => {
 		// 25 MB on a poor connection is no reason for a note's edit to wait.
 		added('a.png');
 		noteBehind();
-		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'createFile' ? new Error('offline') : undefined
+		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(
 			expect.objectContaining({
@@ -1419,8 +1406,8 @@ describe('pushing a file', () => {
 				waitingUploads: 1,
 			})
 		);
-		expect(provider.contentAt('a.md')).toBe('mine\n');
-		expect(store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 1 })]);
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 1 })]);
 	});
 
 	it('steps over an upload out of attempts, keeps it, and says it is stuck', async () => {
@@ -1428,15 +1415,15 @@ describe('pushing a file', () => {
 		added('a.png', 5);
 		noteBehind();
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(
 			expect.objectContaining({ status: 'blocked', pushed: 1, waitingUploads: 1 })
 		);
 		expect(result.error).toContain('upload a.png');
-		expect(provider.contentAt('a.md')).toBe('mine\n');
-		expect(store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 5 })]);
-		expect(store.heldBytes('x1')?.pinned).toBe(true);
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 5 })]);
+		expect(world.store.heldBytes('x1')?.pinned).toBe(true);
 		expect(creates()).toBe(0);
 	});
 
@@ -1444,11 +1431,16 @@ describe('pushing a file', () => {
 		// One stuck says wait for help; one failing says try again soon, which
 		// is the sooner of the two.
 		added('a.png', 5);
-		store.putFile({ id: 'x2', path: 'b.png', size: 3 }, { bytes: OTHER.slice(), pinned: true });
-		store.queue({ op: 'upload', fileId: 'x2', path: 'b.png' });
-		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+		world.store.putFile(
+			{ id: 'x2', path: 'b.png', size: 3 },
+			{ bytes: OTHER.slice(), pinned: true }
+		);
+		world.store.queue({ op: 'upload', fileId: 'x2', path: 'b.png' });
+		world.provider.setFault((call) =>
+			call.op === 'createFile' ? new Error('offline') : undefined
+		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(
 			expect.objectContaining({ status: 'retry', error: 'offline', waitingUploads: 2 })
@@ -1458,16 +1450,16 @@ describe('pushing a file', () => {
 	it('still stops for a rate limit on an upload, which is no fault of the upload', async () => {
 		added('a.png');
 		noteBehind();
-		provider.setFault((call) =>
+		world.provider.setFault((call) =>
 			call.op === 'createFile' ? new RateLimitError('slow down', 9000) : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(
 			expect.objectContaining({ status: 'retry', pushed: 0, retryAfterMs: 9000 })
 		);
-		expect(store.ops().map((op) => [op.op, op.attempts])).toEqual([
+		expect(world.store.ops().map((op) => [op.op, op.attempts])).toEqual([
 			['upload', 0],
 			['write', 0],
 		]);
@@ -1478,48 +1470,52 @@ describe('pushing a file', () => {
 		// notebook it came from was deleted. Sent first, the delete would leave
 		// the copy nothing to read — OneDrive and Dropbox cannot read a deleted
 		// file back by its id.
-		await provider.createFolder('Trips');
-		const original = await provider.createFile('Trips/a.png', PNG.slice());
-		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
-		store.queue({
+		await world.provider.createFolder('Trips');
+		const original = await world.provider.createFile('Trips/a.png', PNG.slice());
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
+		world.store.queue({
 			op: 'upload',
 			fileId: 'x1',
 			path: 'Work/a.png',
 			copyOf: original.remoteId,
 		});
-		store.queue({ op: 'delete-file', path: 'Trips/a.png', remoteId: original.remoteId });
-		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+		world.store.queue({ op: 'delete-file', path: 'Trips/a.png', remoteId: original.remoteId });
+		world.provider.setFault((call) =>
+			call.op === 'createFile' ? new Error('offline') : undefined
+		);
 
-		expect((await engine.push()).status).toBe('retry');
-		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
-		expect(store.ops().map((op) => [op.op, op.attempts])).toEqual([
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(world.provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(world.store.ops().map((op) => [op.op, op.attempts])).toEqual([
 			['upload', 1],
 			['delete-file', 0],
 		]);
 
-		provider.setFault(undefined);
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
-		expect(remoteAt(provider, 'Trips/a.png')).toBeUndefined();
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.bytesAt('Work/a.png')).toEqual(PNG);
+		expect(remoteAt(world.provider, 'Trips/a.png')).toBeUndefined();
 	});
 
 	/** A copy of `Trips/a.png` the user made in `Work`, and the delete of the original. */
 	const copiedThenDeleted = async () => {
-		await provider.createFolder('Trips');
-		const original = await provider.createFile('Trips/a.png', PNG.slice());
-		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
-		store.queue({
+		await world.provider.createFolder('Trips');
+		const original = await world.provider.createFile('Trips/a.png', PNG.slice());
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
+		world.store.queue({
 			op: 'upload',
 			fileId: 'x1',
 			path: 'Work/a.png',
 			copyOf: original.remoteId,
 		});
-		store.queue({ op: 'delete-file', path: 'Trips/a.png', remoteId: original.remoteId });
+		world.store.queue({ op: 'delete-file', path: 'Trips/a.png', remoteId: original.remoteId });
 		return original;
 	};
 
 	const offline = () =>
-		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'createFile' ? new Error('offline') : undefined
+		);
 
 	it('still holds back the delete of what it copies through a conflict met in between', async () => {
 		// A conflict resolved behind a stepped-over upload is an ordinary day.
@@ -1527,28 +1523,28 @@ describe('pushing a file', () => {
 		// copy would find nothing to read on its next try.
 		await copiedThenDeleted();
 		await remoteFile('n.md', 'theirs\n');
-		store.put({ id: 'n1', path: 'n.md', content: 'mine\n', dirty: true });
-		const write = store.queue({ op: 'write', noteId: 'n1', path: 'n.md' });
-		const del = store.ops().find((op) => op.op === 'delete-file');
+		world.store.put({ id: 'n1', path: 'n.md', content: 'mine\n', dirty: true });
+		const write = world.store.queue({ op: 'write', noteId: 'n1', path: 'n.md' });
+		const del = world.store.ops().find((op) => op.op === 'delete-file');
 		if (del === undefined) throw new Error('no delete');
 		// The write between the copy and the delete, as the user made them.
-		store.unqueue(del.seq);
-		store.queue({ op: 'delete-file', path: del.path, remoteId: del.remoteId });
+		world.store.unqueue(del.seq);
+		world.store.queue({ op: 'delete-file', path: del.path, remoteId: del.remoteId });
 		offline();
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
-		expect(write.seq).toBeLessThan(store.ops().at(-1)?.seq ?? 0);
+		expect(write.seq).toBeLessThan(world.store.ops().at(-1)?.seq ?? 0);
 		expect(result).toEqual(
 			expect.objectContaining({ status: 'retry', error: 'offline', waitingUploads: 1 })
 		);
 		expect(result.conflicts).toHaveLength(1);
-		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(world.provider.bytesAt('Trips/a.png')).toEqual(PNG);
 
-		provider.setFault(undefined);
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
-		expect(remoteAt(provider, 'Trips/a.png')).toBeUndefined();
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.bytesAt('Work/a.png')).toEqual(PNG);
+		expect(remoteAt(world.provider, 'Trips/a.png')).toBeUndefined();
 	});
 
 	it.each([
@@ -1560,7 +1556,7 @@ describe('pushing a file', () => {
 		async (_what, fault, status) => {
 			added('a.png');
 			noteBehind();
-			provider.setFault((call) =>
+			world.provider.setFault((call) =>
 				call.op === 'createFile'
 					? new Error('offline')
 					: call.op === 'write'
@@ -1568,7 +1564,7 @@ describe('pushing a file', () => {
 						: undefined
 			);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result).toEqual(expect.objectContaining({ status, waitingUploads: 1 }));
 		}
@@ -1576,11 +1572,11 @@ describe('pushing a file', () => {
 
 	it('still says an upload is waiting when a write behind it is out of attempts', async () => {
 		added('a.png');
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
 		offline();
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(expect.objectContaining({ status: 'blocked', waitingUploads: 1 }));
 		expect(result.error).toContain('write a.md');
@@ -1593,9 +1589,9 @@ describe('pushing a file', () => {
 		added('a.png', 1);
 		noteBehind();
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		expect(
-			provider
+			world.provider
 				.callLog()
 				.filter((call) => call.op === 'createFile' || call.op === 'write')
 				.map((call) => call.op)
@@ -1606,25 +1602,27 @@ describe('pushing a file', () => {
 		// Only "not found" says there is nothing left to copy. Anything else
 		// is tried again, and the row is the only thing that says to.
 		await copiedThenDeleted();
-		provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
+		world.provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 1 }));
-		expect(store.files()).toEqual([{ id: 'x1', path: 'Work/a.png', size: PNG.byteLength }]);
-		expect(store.ops().map((op) => [op.op, op.attempts])).toEqual([
+		expect(world.store.files()).toEqual([
+			{ id: 'x1', path: 'Work/a.png', size: PNG.byteLength },
+		]);
+		expect(world.store.ops().map((op) => [op.op, op.attempts])).toEqual([
 			['upload', 1],
 			['delete-file', 0],
 		]);
 	});
 
 	it('lets a file go that has nothing here and copies nothing', async () => {
-		store.putFile({ id: 'x1', path: 'a.png', size: 8 });
-		store.queue({ op: 'upload', fileId: 'x1', path: 'a.png' });
+		world.store.putFile({ id: 'x1', path: 'a.png', size: 8 });
+		world.store.queue({ op: 'upload', fileId: 'x1', path: 'a.png' });
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(store.files()).toEqual([]);
-		expect(store.ops()).toEqual([]);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.files()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		expect(creates()).toBe(0);
 	});
 
@@ -1632,34 +1630,37 @@ describe('pushing a file', () => {
 		// Dropbox and OneDrive take the whole body before they say a name is
 		// taken: trying each conflict name in turn would send 25 MB a try.
 		const first = conflictFilePath('a.png', AT);
-		await provider.createFile('a.png', OTHER.slice());
-		await provider.createFile(first, OTHER.slice());
+		await world.provider.createFile('a.png', OTHER.slice());
+		await world.provider.createFile(first, OTHER.slice());
 		added('a.png');
 		const before = creates();
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('a.png', AT, [basename(first)]);
 		expect(beside).not.toBe(first);
-		expect(provider.bytesAt(beside)).toEqual(PNG);
+		expect(world.provider.bytesAt(beside)).toEqual(PNG);
 		expect(creates() - before).toBe(2);
-		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
+		expect(world.store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
 	});
 
 	it('does not go beside at a name a file here still holds, sent or not', async () => {
 		const first = conflictFilePath('a.png', AT);
-		store.putFile({ id: 'x0', path: first, size: 3 }, { bytes: OTHER.slice(), pinned: true });
-		await provider.createFile('a.png', OTHER.slice());
+		world.store.putFile(
+			{ id: 'x0', path: first, size: 3 },
+			{ bytes: OTHER.slice(), pinned: true }
+		);
+		await world.provider.createFile('a.png', OTHER.slice());
 		added('a.png');
-		store.queue({ op: 'upload', fileId: 'x0', path: first });
+		world.store.queue({ op: 'upload', fileId: 'x0', path: first });
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('a.png', AT, [basename(first)]);
-		expect(store.files().map((file) => [file.id, file.path])).toEqual([
+		expect(world.store.files().map((file) => [file.id, file.path])).toEqual([
 			['x1', beside],
 			['x0', first],
 		]);
-		expect(provider.bytesAt(first)).toEqual(OTHER);
-		expect(provider.bytesAt(beside)).toEqual(PNG);
+		expect(world.provider.bytesAt(first)).toEqual(OTHER);
+		expect(world.provider.bytesAt(beside)).toEqual(PNG);
 	});
 
 	it('gives up on a name after so many, and tries again later', async () => {
@@ -1667,9 +1668,9 @@ describe('pushing a file', () => {
 		// up to 25 MB, a turn.
 		added('a.png');
 		const always: StorageProvider = {
-			...provider,
+			...world.provider,
 			createFile: async (path) => {
-				const there = await provider.createFile(`${path}.x`, OTHER.slice());
+				const there = await world.provider.createFile(`${path}.x`, OTHER.slice());
 				return Promise.reject(new ConflictError({ ...there, path }));
 			},
 		};
@@ -1677,26 +1678,28 @@ describe('pushing a file', () => {
 		const result = await engineWith({ provider: always }).push();
 
 		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 1 }));
-		expect(provider.snapshot().filter((entry) => entry.path.endsWith('.x'))).toHaveLength(9);
-		expect(store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 1 })]);
+		expect(world.provider.snapshot().filter((entry) => entry.path.endsWith('.x'))).toHaveLength(
+			9
+		);
+		expect(world.store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 1 })]);
 	});
 
 	it('does not take a file for its own that a queued delete is to take', async () => {
 		// Its row gone, its delete still owed: the row that took it would be
 		// bound to nothing once the delete went, and its bytes let go.
-		const there = await provider.createFile('a.png', PNG.slice());
+		const there = await world.provider.createFile('a.png', PNG.slice());
 		added('a.png');
-		store.queue({ op: 'delete-file', path: 'a.png', remoteId: there.remoteId });
+		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: there.remoteId });
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('a.png', AT);
-		expect(remoteAt(provider, 'a.png')).toBeUndefined();
-		expect(provider.bytesAt(beside)).toEqual(PNG);
-		expect(store.files()).toEqual([
+		expect(remoteAt(world.provider, 'a.png')).toBeUndefined();
+		expect(world.provider.bytesAt(beside)).toEqual(PNG);
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({
 				id: 'x1',
 				path: beside,
-				remoteId: remoteAt(provider, beside)?.remoteId,
+				remoteId: remoteAt(world.provider, beside)?.remoteId,
 			}),
 		]);
 	});
@@ -1706,78 +1709,78 @@ describe('pushing a file', () => {
 		// now, it would meet the file on its way out and go beside it, away
 		// from the name the note links.
 		const original = await copiedThenDeleted();
-		store.putFile(
+		world.store.putFile(
 			{ id: 'x2', path: 'Trips/a.png', size: PNG.byteLength },
 			{ bytes: PNG.slice(), pinned: true }
 		);
-		store.queue({ op: 'upload', fileId: 'x2', path: 'Trips/a.png' });
+		world.store.queue({ op: 'upload', fileId: 'x2', path: 'Trips/a.png' });
 		// Only the copy fails: the upload behind it would go, if let.
-		provider.setFault((call) =>
+		world.provider.setFault((call) =>
 			call.op === 'createFile' && call.path === 'Work/a.png'
 				? new Error('offline')
 				: undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 2 }));
-		expect(provider.snapshot().filter((entry) => entry.path.endsWith('.png'))).toEqual([
+		expect(world.provider.snapshot().filter((entry) => entry.path.endsWith('.png'))).toEqual([
 			expect.objectContaining({ path: 'Trips/a.png', remoteId: original.remoteId }),
 		]);
 
-		provider.setFault(undefined);
-		expect((await engine.push()).status).toBe('ok');
-		const made = remoteAt(provider, 'Trips/a.png');
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).status).toBe('ok');
+		const made = remoteAt(world.provider, 'Trips/a.png');
 		expect(made?.remoteId).not.toBe(original.remoteId);
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ id: 'x2', path: 'Trips/a.png', remoteId: made?.remoteId }),
 			expect.objectContaining({ id: 'x1', path: 'Work/a.png' }),
 		]);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('holds back the delete of what a held copy is still to copy', async () => {
 		// Held, a copy is as owed as one stepped over, and what it copies must
 		// stay readable until it goes.
 		await copiedThenDeleted();
-		await provider.createFolder('Home');
-		const other = await provider.createFile('Home/a.png', PNG.slice());
-		store.putFile({ id: 'x2', path: 'Trips/a.png', size: PNG.byteLength });
-		store.queue({
+		await world.provider.createFolder('Home');
+		const other = await world.provider.createFile('Home/a.png', PNG.slice());
+		world.store.putFile({ id: 'x2', path: 'Trips/a.png', size: PNG.byteLength });
+		world.store.queue({
 			op: 'upload',
 			fileId: 'x2',
 			path: 'Trips/a.png',
 			copyOf: other.remoteId,
 		});
-		store.queue({ op: 'delete-file', path: 'Home/a.png', remoteId: other.remoteId });
+		world.store.queue({ op: 'delete-file', path: 'Home/a.png', remoteId: other.remoteId });
 		offline();
 
-		expect((await engine.push()).status).toBe('retry');
-		expect(provider.bytesAt('Home/a.png')).toEqual(PNG);
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(world.provider.bytesAt('Home/a.png')).toEqual(PNG);
 
-		provider.setFault(undefined);
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
-		expect(remoteAt(provider, 'Home/a.png')).toBeUndefined();
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(remoteAt(world.provider, 'Home/a.png')).toBeUndefined();
 	});
 
 	it('knows the same file by the size of what it sends', async () => {
 		// A copy reads its bytes from the remote; the row's size is only what
 		// it was told.
-		await provider.createFolder('Trips');
-		const original = await provider.createFile('Trips/a.png', PNG.slice());
-		await provider.createFolder('Work');
-		const there = await provider.createFile('Work/a.png', PNG.slice());
-		store.putFile({ id: 'x1', path: 'Work/a.png', size: 999 });
-		store.queue({
+		await world.provider.createFolder('Trips');
+		const original = await world.provider.createFile('Trips/a.png', PNG.slice());
+		await world.provider.createFolder('Work');
+		const there = await world.provider.createFile('Work/a.png', PNG.slice());
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: 999 });
+		world.store.queue({
 			op: 'upload',
 			fileId: 'x1',
 			path: 'Work/a.png',
 			copyOf: original.remoteId,
 		});
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(store.files()).toEqual([
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ id: 'x1', path: 'Work/a.png', remoteId: there.remoteId }),
 		]);
 	});
@@ -1786,16 +1789,16 @@ describe('pushing a file', () => {
 		// Sent now, it would find the file and leave the directory for good:
 		// an empty notebook, once the delete lands.
 		await copiedThenDeleted();
-		const trips = remoteAt(provider, 'Trips');
-		store.queue({ op: 'rmdir', path: 'Trips', remoteId: trips?.remoteId });
+		const trips = remoteAt(world.provider, 'Trips');
+		world.store.queue({ op: 'rmdir', path: 'Trips', remoteId: trips?.remoteId });
 		offline();
 
-		expect((await engine.push()).status).toBe('retry');
-		expect(store.ops().map((op) => op.op)).toEqual(['upload', 'delete-file', 'rmdir']);
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(world.store.ops().map((op) => op.op)).toEqual(['upload', 'delete-file', 'rmdir']);
 
-		provider.setFault(undefined);
-		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt(provider, 'Trips')).toBeUndefined();
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(remoteAt(world.provider, 'Trips')).toBeUndefined();
 	});
 });
 
@@ -1804,15 +1807,15 @@ describe('moving a file', () => {
 
 	/** A file in `Trips` the user has moved to `Work/a.png`, the move queued. */
 	const movedHere = async () => {
-		await provider.createFolder('Trips');
-		const file = await provider.createFile('Trips/a.png', PNG.slice());
-		store.putFile({
+		await world.provider.createFolder('Trips');
+		const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+		world.store.putFile({
 			id: 'x1',
 			path: 'Work/a.png',
 			...boundTo(file),
 			size: PNG.byteLength,
 		});
-		store.queue({
+		world.store.queue({
 			op: 'move-file',
 			fileId: 'x1',
 			path: 'Trips/a.png',
@@ -1824,11 +1827,11 @@ describe('moving a file', () => {
 	it('moves it, into a folder it makes, and records where it landed', async () => {
 		const file = await movedHere();
 
-		expect((await engine.push()).status).toBe('ok');
-		const landed = remoteAt(provider, 'Work/a.png');
+		expect((await world.engine.push()).status).toBe('ok');
+		const landed = remoteAt(world.provider, 'Work/a.png');
 		expect(landed?.remoteId).toBe(file.remoteId);
-		expect(remoteAt(provider, 'Trips/a.png')).toBeUndefined();
-		expect(store.files()).toEqual([
+		expect(remoteAt(world.provider, 'Trips/a.png')).toBeUndefined();
+		expect(world.store.files()).toEqual([
 			{
 				id: 'x1',
 				path: 'Work/a.png',
@@ -1837,7 +1840,7 @@ describe('moving a file', () => {
 				size: PNG.byteLength,
 			},
 		]);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('asks the folder, not the file, whether it is still there', async () => {
@@ -1845,59 +1848,59 @@ describe('moving a file', () => {
 		// yes or a no.
 		await movedHere();
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(provider.callLog().filter((call) => call.op === 'read')).toEqual([]);
+		expect(world.provider.callLog().filter((call) => call.op === 'read')).toEqual([]);
 	});
 
 	it('lets a move go whose file is gone from where it was', async () => {
 		const file = await movedHere();
-		await provider.delete(file);
+		await world.provider.delete(file);
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt(provider, 'Work')).toBeUndefined();
-		expect(store.ops()).toEqual([]);
-		expect(store.files()[0]?.remoteId).toBe(file.remoteId);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(remoteAt(world.provider, 'Work')).toBeUndefined();
+		expect(world.store.ops()).toEqual([]);
+		expect(world.store.files()[0]?.remoteId).toBe(file.remoteId);
 	});
 
 	it('takes the same file at the name for its own, and leaves the one it moved', async () => {
 		// Copied there on another device, which kept a note linking the one in
 		// `Trips`: taking that one would take the note's picture.
 		const file = await movedHere();
-		await provider.createFolder('Work');
-		const there = await provider.createFile('Work/a.png', PNG.slice());
+		await world.provider.createFolder('Work');
+		const there = await world.provider.createFile('Work/a.png', PNG.slice());
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt(provider, 'Trips/a.png')?.remoteId).toBe(file.remoteId);
-		expect(store.files()).toEqual([
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(remoteAt(world.provider, 'Trips/a.png')?.remoteId).toBe(file.remoteId);
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
 		]);
 	});
 
 	it('goes beside a different file at the name, keeping its extension', async () => {
 		const file = await movedHere();
-		await provider.createFolder('Work');
-		const there = await provider.createFile('Work/a.png', new Uint8Array([1]));
+		await world.provider.createFolder('Work');
+		const there = await world.provider.createFile('Work/a.png', new Uint8Array([1]));
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('Work/a.png', AT);
-		expect(remoteAt(provider, beside)?.remoteId).toBe(file.remoteId);
-		expect(remoteAt(provider, 'Work/a.png')?.remoteId).toBe(there.remoteId);
-		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
+		expect(remoteAt(world.provider, beside)?.remoteId).toBe(file.remoteId);
+		expect(remoteAt(world.provider, 'Work/a.png')?.remoteId).toBe(there.remoteId);
+		expect(world.store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
 	});
 
 	it('takes its own file at the name for a move that landed unheard', async () => {
 		// A provider that answers a move to where the file already is with a
 		// conflict naming the file itself.
 		const file = await movedHere();
-		await provider.createFolder('Work');
-		await provider.move(file, 'Work/a.png');
+		await world.provider.createFolder('Work');
+		await world.provider.move(file, 'Work/a.png');
 		const strict: StorageProvider = {
-			...provider,
+			...world.provider,
 			move: (ref, path) => {
-				const there = remoteAt(provider, path);
+				const there = remoteAt(world.provider, path);
 				return there === undefined
-					? provider.move(ref, path)
+					? world.provider.move(ref, path)
 					: Promise.reject(new ConflictError(there));
 			},
 		};
@@ -1905,85 +1908,90 @@ describe('moving a file', () => {
 		const result = await engineWith({ provider: strict }).push();
 
 		expect(result.status).toBe('ok');
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ path: 'Work/a.png', remoteId: file.remoteId }),
 		]);
-		expect(provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(2);
+		expect(world.provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(2);
 	});
 
 	it('goes beside the same file where another row holds it', async () => {
 		// Two rows on one file is a link the store cannot keep.
 		const file = await movedHere();
-		await provider.createFolder('Work');
-		const there = await provider.createFile('Work/a.png', PNG.slice());
+		await world.provider.createFolder('Work');
+		const there = await world.provider.createFile('Work/a.png', PNG.slice());
 		const other = {
 			id: 'x0',
 			path: 'Old/a.png',
 			...boundTo(there),
 			size: PNG.byteLength,
 		};
-		store.putFile(other);
+		world.store.putFile(other);
 
-		expect((await engine.push()).status).toBe('ok');
+		expect((await world.engine.push()).status).toBe('ok');
 		const beside = conflictFilePath('Work/a.png', AT);
-		expect(remoteAt(provider, beside)?.remoteId).toBe(file.remoteId);
-		expect(store.files()).toEqual([other, expect.objectContaining({ id: 'x1', path: beside })]);
+		expect(remoteAt(world.provider, beside)?.remoteId).toBe(file.remoteId);
+		expect(world.store.files()).toEqual([
+			other,
+			expect.objectContaining({ id: 'x1', path: beside }),
+		]);
 	});
 
 	it('holds a move to where a held-back delete is still to clear the way', async () => {
 		// The same picture moved into a notebook made again where one was
 		// deleted: sent now, it would meet the file on its way out.
 		const file = await movedHere();
-		await provider.createFolder('Work');
-		const old = await provider.createFile('Work/a.png', PNG.slice());
-		store.putFile({ id: 'x0', path: 'Home/a.png', size: PNG.byteLength });
-		store.unqueue(store.ops()[0]?.seq ?? 0);
-		store.queue({ op: 'upload', fileId: 'x0', path: 'Home/a.png', copyOf: old.remoteId });
-		store.queue({ op: 'delete-file', path: 'Work/a.png', remoteId: old.remoteId });
-		store.queue({
+		await world.provider.createFolder('Work');
+		const old = await world.provider.createFile('Work/a.png', PNG.slice());
+		world.store.putFile({ id: 'x0', path: 'Home/a.png', size: PNG.byteLength });
+		world.store.unqueue(world.store.ops()[0]?.seq ?? 0);
+		world.store.queue({ op: 'upload', fileId: 'x0', path: 'Home/a.png', copyOf: old.remoteId });
+		world.store.queue({ op: 'delete-file', path: 'Work/a.png', remoteId: old.remoteId });
+		world.store.queue({
 			op: 'move-file',
 			fileId: 'x1',
 			path: 'Trips/a.png',
 			targetPath: 'Work/a.png',
 		});
-		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'createFile' ? new Error('offline') : undefined
+		);
 
-		expect((await engine.push()).status).toBe('retry');
-		expect(remoteAt(provider, 'Trips/a.png')?.remoteId).toBe(file.remoteId);
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(remoteAt(world.provider, 'Trips/a.png')?.remoteId).toBe(file.remoteId);
 
-		provider.setFault(undefined);
-		expect((await engine.push()).status).toBe('ok');
-		expect(remoteAt(provider, 'Work/a.png')?.remoteId).toBe(file.remoteId);
-		expect(store.files()).toEqual([
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(remoteAt(world.provider, 'Work/a.png')?.remoteId).toBe(file.remoteId);
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ id: 'x0', path: 'Home/a.png' }),
 			expect.objectContaining({ id: 'x1', path: 'Work/a.png', remoteId: file.remoteId }),
 		]);
 	});
 
 	it('moves nothing for a file deleted here, or one never sent', async () => {
-		store.queue({ op: 'move-file', fileId: 'nope', path: 'a.png', targetPath: 'b.png' });
-		store.putFile({ id: 'x2', path: 'd.png', size: 3 });
-		store.queue({ op: 'move-file', fileId: 'x2', path: 'c.png', targetPath: 'd.png' });
+		world.store.queue({ op: 'move-file', fileId: 'nope', path: 'a.png', targetPath: 'b.png' });
+		world.store.putFile({ id: 'x2', path: 'd.png', size: 3 });
+		world.store.queue({ op: 'move-file', fileId: 'x2', path: 'c.png', targetPath: 'd.png' });
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(store.ops()).toEqual([]);
-		expect(provider.callLog().filter((call) => call.op === 'move')).toEqual([]);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.ops()).toEqual([]);
+		expect(world.provider.callLog().filter((call) => call.op === 'move')).toEqual([]);
 	});
 });
 
 describe('pulling a file that is not a note', () => {
 	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 10, 13]);
 	const OTHER = new Uint8Array([1, 2, 3]);
-	const opsNow = () => store.ops().map(({ seq: _seq, attempts: _attempts, ...op }) => op);
+	const opsNow = () => world.store.ops().map(({ seq: _seq, attempts: _attempts, ...op }) => op);
 
 	it('mirrors it as a row, bound, of its size, without reading a byte', async () => {
-		await provider.createFolder('Trips');
-		const file = await provider.createFile('Trips/a.png', PNG.slice());
+		await world.provider.createFolder('Trips');
+		const file = await world.provider.createFile('Trips/a.png', PNG.slice());
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result).toMatchObject({ status: 'ok', pulled: 2 });
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			{
 				id: 'copy-1',
 				path: 'Trips/a.png',
@@ -1991,20 +1999,20 @@ describe('pulling a file that is not a note', () => {
 				size: PNG.byteLength,
 			},
 		]);
-		expect(store.heldBytes('copy-1')).toBeUndefined();
-		expect(provider.callLog().filter((call) => call.op === 'read')).toEqual([]);
+		expect(world.store.heldBytes('copy-1')).toBeUndefined();
+		expect(world.provider.callLog().filter((call) => call.op === 'read')).toEqual([]);
 	});
 
 	it('follows it where it is moved, and as it is replaced, and says nothing of an echo', async () => {
-		const file = await provider.createFile('a.png', PNG.slice());
-		await engine.pull();
-		await provider.createFolder('Trips');
-		await provider.move(file, 'Trips/a.png');
-		provider.plantBytes('Trips/a.png', OTHER);
+		const file = await world.provider.createFile('a.png', PNG.slice());
+		await world.engine.pull();
+		await world.provider.createFolder('Trips');
+		await world.provider.move(file, 'Trips/a.png');
+		world.provider.plantBytes('Trips/a.png', OTHER);
 
-		await engine.pull();
-		const now = entryAt(provider, 'Trips/a.png');
-		expect(store.files()).toEqual([
+		await world.engine.pull();
+		const now = entryAt(world.provider, 'Trips/a.png');
+		expect(world.store.files()).toEqual([
 			{
 				id: 'copy-1',
 				path: 'Trips/a.png',
@@ -2021,118 +2029,121 @@ describe('pulling a file that is not a note', () => {
 		['by its id', (id: string) => ({ deleted: true as const, remoteId: id, path: 'a.png' })],
 		['by its path alone', () => ({ deleted: true as const, path: 'a.png' })],
 	])('lets go of it when it is deleted %s', async (_how, deletion) => {
-		const file = await provider.createFile('a.png', PNG.slice());
-		await engine.pull();
+		const file = await world.provider.createFile('a.png', PNG.slice());
+		await world.engine.pull();
 
 		await pullNow([deletion(file.remoteId)]);
 
-		expect(store.files()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
 	});
 
 	it('takes a deletion followed by the file somewhere else for a move', async () => {
 		// Dropbox's way of telling a move: the old path, and the new place.
-		const file = await provider.createFile('a.png', PNG.slice());
-		await engine.pull();
+		const file = await world.provider.createFile('a.png', PNG.slice());
+		await world.engine.pull();
 
 		await pullNow([
 			{ deleted: true, path: 'a.png' },
 			{ ...file, path: 'b.png' },
 		]);
 
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ id: 'copy-1', path: 'b.png', remoteId: file.remoteId }),
 		]);
 	});
 
 	it('lets go of a row whose file is no longer at its path, for the one that is', async () => {
 		// Replaced while the cursor slept, its deletion never told.
-		const old = await provider.createFile('a.png', PNG.slice());
-		await engine.pull();
-		await provider.delete(old);
-		const replaced = await provider.createFile('a.png', OTHER.slice());
+		const old = await world.provider.createFile('a.png', PNG.slice());
+		await world.engine.pull();
+		await world.provider.delete(old);
+		const replaced = await world.provider.createFile('a.png', OTHER.slice());
 
 		await pullNow([replaced]);
 
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ path: 'a.png', remoteId: replaced.remoteId }),
 		]);
 	});
 
 	it('keeps the row, and its bytes, of a file the round moves on after another took its place', async () => {
-		const file = await provider.createFile('a.png', PNG.slice());
-		await engine.pull();
-		store.putFile(store.files()[0] ?? { id: '', path: '', size: 0 }, {
+		const file = await world.provider.createFile('a.png', PNG.slice());
+		await world.engine.pull();
+		world.store.putFile(world.store.files()[0] ?? { id: '', path: '', size: 0 }, {
 			bytes: PNG.slice(),
 			version: file.version,
 		});
-		await provider.move(file, 'b.png');
-		const other = await provider.createFile('a.png', OTHER.slice());
+		await world.provider.move(file, 'b.png');
+		const other = await world.provider.createFile('a.png', OTHER.slice());
 
-		await pullNow([other, entryAt(provider, 'b.png')]);
+		await pullNow([other, entryAt(world.provider, 'b.png')]);
 
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ path: 'a.png', remoteId: other.remoteId }),
 			expect.objectContaining({ id: 'copy-1', path: 'b.png', remoteId: file.remoteId }),
 		]);
-		expect(store.heldBytes('copy-1')?.bytes).toEqual(PNG);
+		expect(world.store.heldBytes('copy-1')?.bytes).toEqual(PNG);
 	});
 
 	it('keeps the row, and its bytes, of a file moved out of a notebook deleted in the same round', async () => {
 		// As the subfolders a deletion rescues: taken by the cascade, it would
 		// come back as a new row with nothing held.
-		const folder = await provider.createFolder('Trips');
-		const file = await provider.createFile('Trips/a.png', PNG.slice());
-		await engine.pull();
-		store.putFile(store.files()[0] ?? { id: '', path: '', size: 0 }, {
+		const folder = await world.provider.createFolder('Trips');
+		const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+		await world.engine.pull();
+		world.store.putFile(world.store.files()[0] ?? { id: '', path: '', size: 0 }, {
 			bytes: PNG.slice(),
 			version: file.version,
 		});
-		await provider.move(file, 'a.png');
-		await provider.delete(folder);
+		await world.provider.move(file, 'a.png');
+		await world.provider.delete(folder);
 
 		await pullNow([
 			{ deleted: true, remoteId: folder.remoteId, path: 'Trips' },
-			entryAt(provider, 'a.png'),
+			entryAt(world.provider, 'a.png'),
 		]);
 
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ id: 'copy-1', path: 'a.png', remoteId: file.remoteId }),
 		]);
-		expect(store.heldBytes('copy-1')?.bytes).toEqual(PNG);
+		expect(world.store.heldBytes('copy-1')?.bytes).toEqual(PNG);
 	});
 
 	it('lets go of a row whose file was deleted out of a folder the same round moves', async () => {
 		// Dropbox's way: the folder's new place, and the old path of the file.
-		const folder = await provider.createFolder('Trips');
-		const file = await provider.createFile('Trips/a.png', PNG.slice());
-		await engine.pull();
-		await provider.delete(file);
-		await provider.move(folder, 'Holidays');
+		const folder = await world.provider.createFolder('Trips');
+		const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+		await world.engine.pull();
+		await world.provider.delete(file);
+		await world.provider.move(folder, 'Holidays');
 
-		await pullNow([entryAt(provider, 'Holidays'), { deleted: true, path: 'Trips/a.png' }]);
+		await pullNow([
+			entryAt(world.provider, 'Holidays'),
+			{ deleted: true, path: 'Trips/a.png' },
+		]);
 
-		expect(store.files()).toEqual([]);
-		expect(store.folders().map((each) => each.path)).toEqual(['Holidays']);
+		expect(world.store.files()).toEqual([]);
+		expect(world.store.folders().map((each) => each.path)).toEqual(['Holidays']);
 	});
 
 	describe('beside a file added here', () => {
 		const added = (path = 'a.png') => {
-			store.putFile(
+			world.store.putFile(
 				{ id: 'x1', path, size: PNG.byteLength },
 				{ bytes: PNG.slice(), pinned: true }
 			);
-			store.queue({ op: 'upload', fileId: 'x1', path });
+			world.store.queue({ op: 'upload', fileId: 'x1', path });
 		};
 
 		it('takes the same file at its path for the one it is uploading, and owes nothing', async () => {
 			// The upload landed and its answer never came back; or the same
 			// picture was added on another device.
 			added();
-			const there = await provider.createFile('a.png', PNG.slice());
+			const there = await world.provider.createFile('a.png', PNG.slice());
 
-			await engine.pull();
+			await world.engine.pull();
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				{
 					id: 'x1',
 					path: 'a.png',
@@ -2140,39 +2151,39 @@ describe('pulling a file that is not a note', () => {
 					size: PNG.byteLength,
 				},
 			]);
-			expect(store.heldBytes('x1')).toEqual({ bytes: PNG, version: there.version });
-			expect(store.ops()).toEqual([]);
+			expect(world.store.heldBytes('x1')).toEqual({ bytes: PNG, version: there.version });
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it('moves it aside for a different file at its path, and its upload with it', async () => {
 			added();
-			const there = await provider.createFile('a.png', OTHER.slice());
+			const there = await world.provider.createFile('a.png', OTHER.slice());
 
-			await engine.pull();
+			await world.engine.pull();
 
 			const aside = conflictFilePath('a.png', AT);
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				{ id: 'x1', path: aside, size: PNG.byteLength },
 				expect.objectContaining({ path: 'a.png', remoteId: there.remoteId }),
 			]);
 			expect(opsNow()).toEqual([{ op: 'upload', fileId: 'x1', path: aside }]);
 
-			expect((await engine.push()).status).toBe('ok');
-			expect(provider.bytesAt(aside)).toEqual(PNG);
-			expect(provider.bytesAt('a.png')).toEqual(OTHER);
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(world.provider.bytesAt(aside)).toEqual(PNG);
+			expect(world.provider.bytesAt('a.png')).toEqual(OTHER);
 		});
 
 		it('steps aside to a name the round is not bringing in', async () => {
 			// The name it would have taken is the next entry's.
 			added();
-			const there = await provider.createFile('a.png', OTHER.slice());
+			const there = await world.provider.createFile('a.png', OTHER.slice());
 			const first = conflictFilePath('a.png', AT);
-			const theirs = await provider.createFile(first, OTHER.slice());
+			const theirs = await world.provider.createFile(first, OTHER.slice());
 
 			await pullNow([there, theirs]);
 
 			const aside = conflictFilePath('a.png', AT, [basename(first)]);
-			expect(store.files().map((file) => [file.path, file.remoteId])).toEqual([
+			expect(world.store.files().map((file) => [file.path, file.remoteId])).toEqual([
 				[aside, undefined],
 				[first, theirs.remoteId],
 				['a.png', there.remoteId],
@@ -2181,19 +2192,21 @@ describe('pulling a file that is not a note', () => {
 
 		it('is not moved aside for a file the user is deleting there', async () => {
 			// The delete goes first, and then the upload, to the name it has.
-			const file = await provider.createFile('a.png', PNG.slice());
-			await engine.pull();
-			store.dropFile('copy-1');
-			store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
-			store.putFile(
+			const file = await world.provider.createFile('a.png', PNG.slice());
+			await world.engine.pull();
+			world.store.dropFile('copy-1');
+			world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+			world.store.putFile(
 				{ id: 'x1', path: 'a.png', size: OTHER.byteLength },
 				{ bytes: OTHER.slice(), pinned: true }
 			);
-			store.queue({ op: 'upload', fileId: 'x1', path: 'a.png' });
+			world.store.queue({ op: 'upload', fileId: 'x1', path: 'a.png' });
 
 			await pullNow([file]);
 
-			expect(store.files()).toEqual([{ id: 'x1', path: 'a.png', size: OTHER.byteLength }]);
+			expect(world.store.files()).toEqual([
+				{ id: 'x1', path: 'a.png', size: OTHER.byteLength },
+			]);
 			expect(opsNow()).toEqual([
 				{ op: 'delete-file', path: 'a.png', remoteId: file.remoteId },
 				{ op: 'upload', fileId: 'x1', path: 'a.png' },
@@ -2202,31 +2215,31 @@ describe('pulling a file that is not a note', () => {
 
 		it('keeps it, and the notebook above it, when the notebook is deleted there', async () => {
 			// It exists nowhere else.
-			await provider.createFolder('Trips');
-			await provider.createFile('Trips/b.png', OTHER.slice());
-			await engine.pull();
+			await world.provider.createFolder('Trips');
+			await world.provider.createFile('Trips/b.png', OTHER.slice());
+			await world.engine.pull();
 			added('Trips/a.png');
-			await provider.delete(entryAt(provider, 'Trips'));
+			await world.provider.delete(entryAt(world.provider, 'Trips'));
 
-			expect((await engine.pull()).status).toBe('ok');
-			expect(store.files()).toEqual([{ id: 'x1', path: 'Trips/a.png', size: 8 }]);
-			expect(store.folders().map((folder) => folder.path)).toEqual(['Trips']);
+			expect((await world.engine.pull()).status).toBe('ok');
+			expect(world.store.files()).toEqual([{ id: 'x1', path: 'Trips/a.png', size: 8 }]);
+			expect(world.store.folders().map((folder) => folder.path)).toEqual(['Trips']);
 
-			expect((await engine.push()).status).toBe('ok');
-			expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(world.provider.bytesAt('Trips/a.png')).toEqual(PNG);
 		});
 	});
 
 	describe('that the user has moved here, and not yet there', () => {
 		/** Pulled into `Trips`, and moved to `Work` here. */
 		const moved = async () => {
-			await provider.createFolder('Trips');
-			const file = await provider.createFile('Trips/a.png', PNG.slice());
-			await engine.pull();
-			const row = store.files()[0];
+			await world.provider.createFolder('Trips');
+			const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+			await world.engine.pull();
+			const row = world.store.files()[0];
 			if (row === undefined) throw new Error('no row');
-			store.putFile({ ...row, path: 'Work/a.png' });
-			store.queue({
+			world.store.putFile({ ...row, path: 'Work/a.png' });
+			world.store.queue({
 				op: 'move-file',
 				fileId: row.id,
 				path: 'Trips/a.png',
@@ -2240,16 +2253,16 @@ describe('pulling a file that is not a note', () => {
 			// what the store does too; dropped by the store and adopted by the
 			// engine, it rejected the batch on every pull for good (#194).
 			const file = await moved();
-			await provider.delete(file);
-			await provider.createFolder('Work');
-			const arrived = await provider.createFile('Work/a.png', PNG.slice());
+			await world.provider.delete(file);
+			await world.provider.createFolder('Work');
+			const arrived = await world.provider.createFile('Work/a.png', PNG.slice());
 
-			expect((await engine.pull()).status).toBe('ok');
+			expect((await world.engine.pull()).status).toBe('ok');
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ path: 'Work/a.png', remoteId: arrived.remoteId }),
 			]);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it('and the connection syncs on, a note edited meanwhile sent with it', async () => {
@@ -2257,48 +2270,48 @@ describe('pulling a file that is not a note', () => {
 			const file = await moved();
 			const note = noteAt('n.md');
 			if (note === undefined) throw new Error('no note');
-			store.put({ ...note, content: 'edited\n', dirty: true });
-			store.queue({ op: 'write', noteId: note.id, path: 'n.md' });
-			await provider.delete(file);
-			await provider.createFolder('Work');
-			await provider.createFile('Work/a.png', PNG.slice());
+			world.store.put({ ...note, content: 'edited\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: note.id, path: 'n.md' });
+			await world.provider.delete(file);
+			await world.provider.createFolder('Work');
+			await world.provider.createFile('Work/a.png', PNG.slice());
 
-			const outcomes = [await engine.sync(), await engine.sync()];
+			const outcomes = [await world.engine.sync(), await world.engine.sync()];
 
 			expect(outcomes.map((outcome) => outcome.status)).toEqual(['ok', 'ok']);
-			expect(provider.contentAt('n.md')).toBe('edited\n');
+			expect(world.provider.contentAt('n.md')).toBe('edited\n');
 		});
 
 		it('goes once its upload finds nothing, when its notebook and its file both go there', async () => {
-			const work = await provider.createFolder('Work');
+			const work = await world.provider.createFolder('Work');
 			const file = await moved();
-			await provider.delete(work);
-			await provider.delete(file);
+			await world.provider.delete(work);
+			await world.provider.delete(file);
 
-			expect((await engine.pull()).status).toBe('ok');
-			expect((await engine.push()).status).toBe('ok');
+			expect((await world.engine.pull()).status).toBe('ok');
+			expect((await world.engine.push()).status).toBe('ok');
 
-			expect(store.files()).toEqual([]);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.files()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it('is sent again from the bytes held here when another file takes its place there', async () => {
 			// The feed says the new file is there, and never that the old one
 			// went: the move would find nothing to move.
 			const file = await moved();
-			const [row] = store.files();
+			const [row] = world.store.files();
 			if (row === undefined) throw new Error('no row');
-			store.putFile(row, { bytes: PNG.slice(), version: file.version });
-			await provider.delete(file);
-			const replaced = await provider.createFile('Trips/a.png', OTHER.slice());
+			world.store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			await world.provider.delete(file);
+			const replaced = await world.provider.createFile('Trips/a.png', OTHER.slice());
 
 			await pullNow([replaced]);
-			expect((await engine.push()).status).toBe('ok');
+			expect((await world.engine.push()).status).toBe('ok');
 
-			expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
-			expect(provider.bytesAt('Trips/a.png')).toEqual(OTHER);
+			expect(world.provider.bytesAt('Work/a.png')).toEqual(PNG);
+			expect(world.provider.bytesAt('Trips/a.png')).toEqual(OTHER);
 			expect(
-				store
+				world.store
 					.files()
 					.map((each) => each.path)
 					.sort()
@@ -2307,17 +2320,17 @@ describe('pulling a file that is not a note', () => {
 
 		it('is sent again when another file takes its place there, and its own goes out of sight', async () => {
 			const file = await moved();
-			const [row] = store.files();
+			const [row] = world.store.files();
 			if (row === undefined) throw new Error('no row');
-			store.putFile(row, { bytes: PNG.slice(), version: file.version });
-			const other = await provider.createFile('b.png', OTHER.slice());
+			world.store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			const other = await world.provider.createFile('b.png', OTHER.slice());
 
 			await pullNow([
 				{ ...other, path: 'Trips/a.png' },
 				{ ...file, path: '.trash/a.png' },
 			]);
 
-			expect(store.files()).toContainEqual({
+			expect(world.store.files()).toContainEqual({
 				id: row.id,
 				path: 'Work/a.png',
 				size: PNG.byteLength,
@@ -2327,13 +2340,13 @@ describe('pulling a file that is not a note', () => {
 
 		it('keeps its move through a rescan that finds its file where it was', async () => {
 			const file = await moved();
-			const [row] = store.files();
+			const [row] = world.store.files();
 			if (row === undefined) throw new Error('no row');
 			killTheCursor();
 
-			expect((await engine.pull()).status).toBe('ok');
+			expect((await world.engine.pull()).status).toBe('ok');
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({
 					id: row.id,
 					path: 'Work/a.png',
@@ -2347,17 +2360,17 @@ describe('pulling a file that is not a note', () => {
 
 		it('is not taken for gone when its own file is listed again later in the round', async () => {
 			const file = await moved();
-			const [row] = store.files();
+			const [row] = world.store.files();
 			if (row === undefined) throw new Error('no row');
-			const other = await provider.createFile('b.png', OTHER.slice());
-			await provider.createFolder('Other');
+			const other = await world.provider.createFile('b.png', OTHER.slice());
+			await world.provider.createFolder('Other');
 
 			await pullNow([
 				{ ...other, path: 'Trips/a.png' },
 				{ ...file, path: 'Other/a.png' },
 			]);
 
-			expect(store.files()).toEqual(
+			expect(world.store.files()).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
 						id: row.id,
@@ -2376,10 +2389,10 @@ describe('pulling a file that is not a note', () => {
 
 		it('is sent again when its file moves on into a folder the round then deletes', async () => {
 			const file = await moved();
-			const [row] = store.files();
+			const [row] = world.store.files();
 			if (row === undefined) throw new Error('no row');
-			store.putFile(row, { bytes: PNG.slice(), version: file.version });
-			const other = await provider.createFolder('Other');
+			world.store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			const other = await world.provider.createFolder('Other');
 
 			await pullNow([
 				other,
@@ -2387,7 +2400,7 @@ describe('pulling a file that is not a note', () => {
 				{ deleted: true, remoteId: other.remoteId, path: 'Other' },
 			]);
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				{ id: row.id, path: 'Work/a.png', size: PNG.byteLength },
 			]);
 			expect(opsNow()).toEqual([{ op: 'upload', fileId: row.id, path: 'Work/a.png' }]);
@@ -2395,12 +2408,12 @@ describe('pulling a file that is not a note', () => {
 
 		it('stays where the user put it, and its move starts from where the file went', async () => {
 			const file = await moved();
-			await provider.createFolder('Other');
-			await provider.move(file, 'Other/a.png');
+			await world.provider.createFolder('Other');
+			await world.provider.move(file, 'Other/a.png');
 
-			await engine.pull();
+			await world.engine.pull();
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ path: 'Work/a.png', remoteId: file.remoteId }),
 			]);
 			expect(opsNow()).toEqual([
@@ -2411,19 +2424,19 @@ describe('pulling a file that is not a note', () => {
 					targetPath: 'Work/a.png',
 				},
 			]);
-			expect((await engine.push()).status).toBe('ok');
-			expect(entryAt(provider, 'Work/a.png').remoteId).toBe(file.remoteId);
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(entryAt(world.provider, 'Work/a.png').remoteId).toBe(file.remoteId);
 		});
 
 		it('steps aside for a different file arriving at the name it is moving to', async () => {
 			const file = await moved();
-			await provider.createFolder('Work');
-			const there = await provider.createFile('Work/a.png', OTHER.slice());
+			await world.provider.createFolder('Work');
+			const there = await world.provider.createFile('Work/a.png', OTHER.slice());
 
-			await engine.pull();
+			await world.engine.pull();
 
 			const aside = conflictFilePath('Work/a.png', AT);
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ id: 'copy-1', path: aside, remoteId: file.remoteId }),
 				expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
 			]);
@@ -2433,30 +2446,30 @@ describe('pulling a file that is not a note', () => {
 		});
 
 		it('keeps the notebook it is moving into when that is deleted there', async () => {
-			await provider.createFolder('Work');
+			await world.provider.createFolder('Work');
 			const file = await moved();
-			await provider.delete(entryAt(provider, 'Work'));
+			await world.provider.delete(entryAt(world.provider, 'Work'));
 
-			await engine.pull();
+			await world.engine.pull();
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ path: 'Work/a.png', remoteId: file.remoteId }),
 			]);
-			expect(store.folders().map((folder) => folder.path)).toContain('Work');
-			expect((await engine.push()).status).toBe('ok');
-			expect(entryAt(provider, 'Work/a.png').remoteId).toBe(file.remoteId);
+			expect(world.store.folders().map((folder) => folder.path)).toContain('Work');
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(entryAt(world.provider, 'Work/a.png').remoteId).toBe(file.remoteId);
 		});
 
 		it('steps aside for a file arriving where it is going, though its own news came first', async () => {
 			const file = await moved();
-			await provider.move(file, 'Trips/b.png');
-			await provider.createFolder('Work');
-			const there = await provider.createFile('Work/a.png', OTHER.slice());
+			await world.provider.move(file, 'Trips/b.png');
+			await world.provider.createFolder('Work');
+			const there = await world.provider.createFile('Work/a.png', OTHER.slice());
 
-			await pullNow([entryAt(provider, 'Trips/b.png'), there]);
+			await pullNow([entryAt(world.provider, 'Trips/b.png'), there]);
 
 			const aside = conflictFilePath('Work/a.png', AT);
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ id: 'copy-1', path: aside, remoteId: file.remoteId }),
 				expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
 			]);
@@ -2469,51 +2482,54 @@ describe('pulling a file that is not a note', () => {
 			// Aside, its file is where it was: in the notebook that went. Held
 			// nowhere here, so its upload finds nothing to send.
 			await moved();
-			await provider.createFolder('Work');
-			const there = await provider.createFile('Work/a.png', OTHER.slice());
-			const trips = entryAt(provider, 'Trips');
-			await provider.delete(trips);
+			await world.provider.createFolder('Work');
+			const there = await world.provider.createFile('Work/a.png', OTHER.slice());
+			const trips = entryAt(world.provider, 'Trips');
+			await world.provider.delete(trips);
 
 			await pullNow([there, { deleted: true, remoteId: trips.remoteId, path: 'Trips' }]);
-			expect((await engine.push()).status).toBe('ok');
+			expect((await world.engine.push()).status).toBe('ok');
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
 			]);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it('is where its first queued move says, through a second', async () => {
 			// The second starts where the first was going, which the file never
 			// reached: its file was in `Trips`, and went with it.
 			await moved();
-			const row = store.files()[0];
+			const row = world.store.files()[0];
 			if (row === undefined) throw new Error('no row');
-			store.putFile({ ...row, path: 'Home/a.png' });
-			store.queue({
+			world.store.putFile({ ...row, path: 'Home/a.png' });
+			world.store.queue({
 				op: 'move-file',
 				fileId: row.id,
 				path: 'Work/a.png',
 				targetPath: 'Home/a.png',
 			});
-			const trips = entryAt(provider, 'Trips');
-			await provider.delete(trips);
+			const trips = entryAt(world.provider, 'Trips');
+			await world.provider.delete(trips);
 
 			await pullNow([{ deleted: true, remoteId: trips.remoteId, path: 'Trips' }]);
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				{ id: row.id, path: 'Home/a.png', size: PNG.byteLength },
 			]);
-			await engine.push();
+			await world.engine.push();
 
-			expect(store.files()).toEqual([]);
+			expect(world.store.files()).toEqual([]);
 		});
 
 		it.each([
 			[
 				'by its notebook being deleted there',
-				() => provider.delete(entryAt(provider, 'Trips')),
+				() => world.provider.delete(entryAt(world.provider, 'Trips')),
 			],
-			['by its own deletion there', () => provider.delete(entryAt(provider, 'Trips/a.png'))],
+			[
+				'by its own deletion there',
+				() => world.provider.delete(entryAt(world.provider, 'Trips/a.png')),
+			],
 		])('is let go of when its file is taken %s, held nowhere here', async (_how, take) => {
 			// Pending after the pull whatever is held, so that what the engine
 			// decides next about the row is about a row the store has (#194);
@@ -2521,49 +2537,55 @@ describe('pulling a file that is not a note', () => {
 			await moved();
 			await take();
 
-			await engine.pull();
-			const [row] = store.files();
+			await world.engine.pull();
+			const [row] = world.store.files();
 			expect(row?.remoteId).toBeUndefined();
 			expect(opsNow()).toEqual([{ op: 'upload', fileId: row?.id, path: row?.path }]);
-			expect((await engine.push()).status).toBe('ok');
+			expect((await world.engine.push()).status).toBe('ok');
 
-			expect(store.files()).toEqual([]);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.files()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it.each([
 			[
 				'by its notebook being deleted there',
-				() => provider.delete(entryAt(provider, 'Trips')),
+				() => world.provider.delete(entryAt(world.provider, 'Trips')),
 			],
-			['by its own deletion there', () => provider.delete(entryAt(provider, 'Trips/a.png'))],
-			['out of sight of a rescan', () => provider.delete(entryAt(provider, 'Trips/a.png'))],
+			[
+				'by its own deletion there',
+				() => world.provider.delete(entryAt(world.provider, 'Trips/a.png')),
+			],
+			[
+				'out of sight of a rescan',
+				() => world.provider.delete(entryAt(world.provider, 'Trips/a.png')),
+			],
 		])('is sent again where the user put it when its file is taken %s', async (how, take) => {
 			// The move is the user's, as an edit is: kept as far as this
 			// device can keep it.
 			const file = await moved();
-			const row = store.files()[0];
+			const row = world.store.files()[0];
 			if (row === undefined) throw new Error('no row');
-			store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			world.store.putFile(row, { bytes: PNG.slice(), version: file.version });
 			await take();
 			if (how.includes('rescan')) killTheCursor();
 
-			await engine.pull();
+			await world.engine.pull();
 
-			expect(store.files()).toEqual([{ id: 'copy-1', path: 'Work/a.png', size: 8 }]);
+			expect(world.store.files()).toEqual([{ id: 'copy-1', path: 'Work/a.png', size: 8 }]);
 			expect(opsNow()).toEqual([{ op: 'upload', fileId: 'copy-1', path: 'Work/a.png' }]);
-			expect((await engine.push()).status).toBe('ok');
-			expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(world.provider.bytesAt('Work/a.png')).toEqual(PNG);
 		});
 	});
 
 	it('passes over a file the user has deleted here, whose delete has not run', async () => {
-		const file = await provider.createFile('a.png', PNG.slice());
-		store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+		const file = await world.provider.createFile('a.png', PNG.slice());
+		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.files()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
 	});
 
 	it.each([
@@ -2573,96 +2595,96 @@ describe('pulling a file that is not a note', () => {
 		'lets go of %s whose file is renamed to a file that is not a note',
 		async (_what, edited, kept) => {
 			const file = await remoteFile('a.md', 'a\n');
-			await engine.pull();
+			await world.engine.pull();
 			const note = noteAt('a.md');
 			if (note === undefined) throw new Error('no note');
-			if (edited) store.put({ ...note, content: 'mine\n', dirty: true });
-			await provider.move(file, 'a.txt');
+			if (edited) world.store.put({ ...note, content: 'mine\n', dirty: true });
+			await world.provider.move(file, 'a.txt');
 
-			await engine.pull();
+			await world.engine.pull();
 
-			expect(store.notes().map((each) => each.path)).toEqual(kept);
-			expect(store.notes().every((each) => each.remoteId === undefined)).toBe(true);
-			expect(store.files()).toEqual([
+			expect(world.store.notes().map((each) => each.path)).toEqual(kept);
+			expect(world.store.notes().every((each) => each.remoteId === undefined)).toBe(true);
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ path: 'a.txt', remoteId: file.remoteId }),
 			]);
 		}
 	);
 
 	it('lets go of the row of a file renamed to a note, which is read as one', async () => {
-		const file = await provider.createFile('a.txt', new TextEncoder().encode('text\n'));
-		await engine.pull();
-		await provider.move(file, 'a.md');
+		const file = await world.provider.createFile('a.txt', new TextEncoder().encode('text\n'));
+		await world.engine.pull();
+		await world.provider.move(file, 'a.md');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.files()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
 		expect(noteAt('a.md')).toMatchObject({ remoteId: file.remoteId, content: 'text\n' });
 	});
 
 	it('carries the rows under a folder moved there', async () => {
-		const folder = await provider.createFolder('Trips');
-		await provider.createFile('Trips/a.png', PNG.slice());
-		await engine.pull();
-		await provider.move(folder, 'Holidays');
+		const folder = await world.provider.createFolder('Trips');
+		await world.provider.createFile('Trips/a.png', PNG.slice());
+		await world.engine.pull();
+		await world.provider.move(folder, 'Holidays');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.files().map((file) => file.path)).toEqual(['Holidays/a.png']);
+		expect(world.store.files().map((file) => file.path)).toEqual(['Holidays/a.png']);
 	});
 
 	it('settles two rows a notebook renamed onto a deleted one leaves at one path', async () => {
 		// A pending row kept by its notebook's deletion there, and another
 		// notebook renamed onto that name by id, its files not listed again:
 		// only the backstop (`settleFileClashes`) sees them meet.
-		const a = await provider.createFolder('A');
-		const b = await provider.createFolder('B');
-		const file = await provider.createFile('B/x.png', OTHER.slice());
-		await engine.pull();
-		store.putFile(
+		const a = await world.provider.createFolder('A');
+		const b = await world.provider.createFolder('B');
+		const file = await world.provider.createFile('B/x.png', OTHER.slice());
+		await world.engine.pull();
+		world.store.putFile(
 			{ id: 'x1', path: 'A/x.png', size: PNG.byteLength },
 			{ bytes: PNG.slice(), pinned: true }
 		);
-		store.queue({ op: 'upload', fileId: 'x1', path: 'A/x.png' });
-		await provider.delete(a);
-		await provider.move(b, 'A');
+		world.store.queue({ op: 'upload', fileId: 'x1', path: 'A/x.png' });
+		await world.provider.delete(a);
+		await world.provider.move(b, 'A');
 
-		await pullNow([{ deleted: true, remoteId: a.remoteId }, entryAt(provider, 'A')]);
+		await pullNow([{ deleted: true, remoteId: a.remoteId }, entryAt(world.provider, 'A')]);
 
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			{ id: 'x1', path: conflictFilePath('A/x.png', AT), size: PNG.byteLength },
 			expect.objectContaining({ path: 'A/x.png', remoteId: file.remoteId }),
 		]);
 	});
 
 	it('lets a row a rename carries go for a file arriving where it was carried', async () => {
-		const trips = await provider.createFolder('Trips');
-		const file = await provider.createFile('Trips/a.png', PNG.slice());
-		await engine.pull();
-		await provider.delete(file);
-		await provider.move(trips, 'Holidays');
-		const other = await provider.createFile('Holidays/a.png', OTHER.slice());
+		const trips = await world.provider.createFolder('Trips');
+		const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+		await world.engine.pull();
+		await world.provider.delete(file);
+		await world.provider.move(trips, 'Holidays');
+		const other = await world.provider.createFile('Holidays/a.png', OTHER.slice());
 
-		await pullNow([entryAt(provider, 'Holidays'), other]);
+		await pullNow([entryAt(world.provider, 'Holidays'), other]);
 
-		expect(store.files()).toEqual([
+		expect(world.store.files()).toEqual([
 			expect.objectContaining({ path: 'Holidays/a.png', remoteId: other.remoteId }),
 		]);
 	});
 
 	it('takes a file rewritten in place at its size as a new version, with no stale bytes', async () => {
-		const file = await provider.createFile('a.png', PNG.slice());
-		await engine.pull();
-		const [row] = store.files();
+		const file = await world.provider.createFile('a.png', PNG.slice());
+		await world.engine.pull();
+		const [row] = world.store.files();
 		if (row === undefined) throw new Error('no row');
-		store.putFile(row, { bytes: PNG.slice(), version: file.version });
-		const now = provider.plantBytes('a.png', new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9]));
+		world.store.putFile(row, { bytes: PNG.slice(), version: file.version });
+		const now = world.provider.plantBytes('a.png', new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9]));
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.files()).toEqual([{ ...row, remoteVersion: now.version }]);
-		expect(store.heldBytes(row.id)).toEqual({ bytes: PNG, version: file.version });
-		expect(await store.fileBytes(row.id)).toBeUndefined();
+		expect(world.store.files()).toEqual([{ ...row, remoteVersion: now.version }]);
+		expect(world.store.heldBytes(row.id)).toEqual({ bytes: PNG, version: file.version });
+		expect(await world.store.fileBytes(row.id)).toBeUndefined();
 	});
 
 	describe('gone to a hidden path', () => {
@@ -2679,70 +2701,70 @@ describe('pulling a file that is not a note', () => {
 				}),
 			],
 		])('is gone with a notebook deleted %s as it moves on there', async (_how, deletion) => {
-			const trips = await provider.createFolder('Trips');
-			const file = await provider.createFile('Trips/a.png', PNG.slice());
-			await engine.pull();
+			const trips = await world.provider.createFolder('Trips');
+			const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+			await world.engine.pull();
 
 			await pullNow([deletion(trips), { ...file, path: '.trash/a.png' }]);
 
-			expect(store.files()).toEqual([]);
-			expect(store.folders()).toEqual([]);
+			expect(world.store.files()).toEqual([]);
+			expect(world.store.folders()).toEqual([]);
 		});
 
 		it.each([
 			['by path', (file: RemoteEntry) => ({ deleted: true as const, path: file.path })],
 			['by id', (file: RemoteEntry) => ({ deleted: true as const, remoteId: file.remoteId })],
 		])('is gone when its file is deleted %s as it moves on there', async (_how, deletion) => {
-			const file = await provider.createFile('a.png', PNG.slice());
-			await engine.pull();
+			const file = await world.provider.createFile('a.png', PNG.slice());
+			await world.engine.pull();
 
 			await pullNow([deletion(file), { ...file, path: '.trash/a.png' }]);
 
-			expect(store.files()).toEqual([]);
+			expect(world.store.files()).toEqual([]);
 		});
 
 		it('is gone when its file is deleted out of a folder the round moves, as it moves on there', async () => {
-			const folder = await provider.createFolder('Trips');
-			const file = await provider.createFile('Trips/a.png', PNG.slice());
-			await engine.pull();
-			await provider.move(folder, 'Holidays');
+			const folder = await world.provider.createFolder('Trips');
+			const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+			await world.engine.pull();
+			await world.provider.move(folder, 'Holidays');
 
 			await pullNow([
-				entryAt(provider, 'Holidays'),
+				entryAt(world.provider, 'Holidays'),
 				{ deleted: true, path: 'Trips/a.png' },
 				{ ...file, path: '.trash/a.png' },
 			]);
 
-			expect(store.files()).toEqual([]);
-			expect(store.folders().map((each) => each.path)).toEqual(['Holidays']);
+			expect(world.store.files()).toEqual([]);
+			expect(world.store.folders().map((each) => each.path)).toEqual(['Holidays']);
 		});
 
 		it('and a rescan finds nothing to put back', async () => {
-			const trips = await provider.createFolder('Trips');
-			const file = await provider.createFile('Trips/a.png', PNG.slice());
-			await engine.pull();
-			await provider.createFolder('.trash');
-			const moved = await provider.move(file, '.trash/a.png');
-			await provider.delete(trips);
+			const trips = await world.provider.createFolder('Trips');
+			const file = await world.provider.createFile('Trips/a.png', PNG.slice());
+			await world.engine.pull();
+			await world.provider.createFolder('.trash');
+			const moved = await world.provider.move(file, '.trash/a.png');
+			await world.provider.delete(trips);
 
 			await pullNow([{ deleted: true, remoteId: trips.remoteId, path: 'Trips' }, moved]);
 			killTheCursor();
-			expect((await engine.pull()).status).toBe('ok');
+			expect((await world.engine.pull()).status).toBe('ok');
 
-			expect(store.files()).toEqual([]);
+			expect(world.store.files()).toEqual([]);
 		});
 
 		it('gives its path up to a file arriving there as its own moves on', async () => {
-			const file = await provider.createFile('a.png', PNG.slice());
-			await engine.pull();
-			const other = await provider.createFile('b.png', OTHER.slice());
+			const file = await world.provider.createFile('a.png', PNG.slice());
+			await world.engine.pull();
+			const other = await world.provider.createFile('b.png', OTHER.slice());
 
 			await pullNow([
 				{ ...other, path: 'a.png' },
 				{ ...file, path: '.hidden/a.png' },
 			]);
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ path: 'a.png', remoteId: other.remoteId }),
 			]);
 		});
@@ -2750,85 +2772,92 @@ describe('pulling a file that is not a note', () => {
 
 	describe('after a rescan', () => {
 		it('lets go of a row whose file the scan did not return, and keeps one never sent', async () => {
-			const file = await provider.createFile('a.png', PNG.slice());
-			await engine.pull();
-			store.putFile(
+			const file = await world.provider.createFile('a.png', PNG.slice());
+			await world.engine.pull();
+			world.store.putFile(
 				{ id: 'x1', path: 'b.png', size: 3 },
 				{ bytes: OTHER.slice(), pinned: true }
 			);
-			await provider.delete(file);
+			await world.provider.delete(file);
 			killTheCursor();
 
-			expect((await engine.pull()).status).toBe('ok');
-			expect(store.files()).toEqual([{ id: 'x1', path: 'b.png', size: 3 }]);
+			expect((await world.engine.pull()).status).toBe('ok');
+			expect(world.store.files()).toEqual([{ id: 'x1', path: 'b.png', size: 3 }]);
 		});
 
 		it('sends one back up that it holds the bytes of, where the provider says it may have lost it', async () => {
-			const file = await provider.createFile('a.png', PNG.slice());
-			const gone = await provider.createFile('b.png', OTHER.slice());
-			await engine.pull();
-			const row = store.files().find((each) => each.path === 'a.png');
+			const file = await world.provider.createFile('a.png', PNG.slice());
+			const gone = await world.provider.createFile('b.png', OTHER.slice());
+			await world.engine.pull();
+			const row = world.store.files().find((each) => each.path === 'a.png');
 			if (row === undefined) throw new Error('no row');
-			store.putFile(row, { bytes: PNG.slice(), version: file.version });
-			await provider.delete(file);
-			await provider.delete(gone);
+			world.store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			await world.provider.delete(file);
+			await world.provider.delete(gone);
 			killTheCursor(true);
 
-			expect((await engine.pull()).status).toBe('ok');
+			expect((await world.engine.pull()).status).toBe('ok');
 			// Both pending again and owed an upload. The one held here goes back
 			// up; the other has nothing to send, and goes.
-			expect(store.files().map((each) => each.remoteId)).toEqual([undefined, undefined]);
+			expect(world.store.files().map((each) => each.remoteId)).toEqual([
+				undefined,
+				undefined,
+			]);
 			expect(opsNow().map((op) => op.op)).toEqual(['upload', 'upload']);
-			expect((await engine.push()).status).toBe('ok');
+			expect((await world.engine.push()).status).toBe('ok');
 
-			expect(store.files()).toEqual([
+			expect(world.store.files()).toEqual([
 				expect.objectContaining({ id: row.id, path: 'a.png', size: PNG.byteLength }),
 			]);
-			expect(provider.bytesAt('a.png')).toEqual(PNG);
-			expect(provider.bytesAt('b.png')).toBeUndefined();
+			expect(world.provider.bytesAt('a.png')).toEqual(PNG);
+			expect(world.provider.bytesAt('b.png')).toBeUndefined();
 		});
 	});
 });
 
 describe('deleting a file', () => {
 	it('deletes it by the id the queue recorded', async () => {
-		const file = await provider.createFile('a.png', new Uint8Array([1, 2, 3]));
-		store.queue({ op: 'delete-file', path: 'elsewhere.png', remoteId: file.remoteId });
+		const file = await world.provider.createFile('a.png', new Uint8Array([1, 2, 3]));
+		world.store.queue({ op: 'delete-file', path: 'elsewhere.png', remoteId: file.remoteId });
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(1);
-		expect(store.ops()).toEqual([]);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(1);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('fails a delete the provider refused for any other reason', async () => {
-		const file = await provider.createFile('a.png', new Uint8Array([1, 2, 3]));
-		store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
-		provider.setFault((call) => (call.op === 'delete' ? new Error('offline') : undefined));
+		const file = await world.provider.createFile('a.png', new Uint8Array([1, 2, 3]));
+		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+		world.provider.setFault((call) =>
+			call.op === 'delete' ? new Error('offline') : undefined
+		);
 
-		expect((await engine.push()).status).toBe('retry');
-		expect(store.ops()).toEqual([expect.objectContaining({ op: 'delete-file', attempts: 1 })]);
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(world.store.ops()).toEqual([
+			expect.objectContaining({ op: 'delete-file', attempts: 1 }),
+		]);
 	});
 
 	it('counts a file already gone as deleted', async () => {
-		store.queue({ op: 'delete-file', path: 'a.png', remoteId: 'id:gone' });
-		provider.setFault((call) =>
+		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: 'id:gone' });
+		world.provider.setFault((call) =>
 			call.op === 'delete' ? new NotFoundError('a.png') : undefined
 		);
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(store.ops()).toEqual([]);
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('keeps the directory of a notebook a file row is still under', async () => {
 		// A file added there and not sent yet: the notebook is the user's still,
 		// though the remote holds nothing in it.
-		const made = await provider.createFolder('Work');
-		store.putFile({ id: 'x1', path: 'Work/a.png', size: 3 });
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
-		store.removeFolder('Work');
+		const made = await world.provider.createFolder('Work');
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: 3 });
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		world.store.removeFolder('Work');
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.snapshot().map((entry) => entry.path)).toContain('Work');
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.snapshot().map((entry) => entry.path)).toContain('Work');
 	});
 });
 
@@ -2840,20 +2869,20 @@ describe('a note deleted here and changed there', () => {
 		// delete is something the user did; the remote change may well be their
 		// own from the other device.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
-		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(world.store.notes()).toEqual([]);
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
 	});
 });
 
@@ -2865,23 +2894,23 @@ describe('a move whose file is no longer there', () => {
 		// least of what the user has waiting. The note keeps its contents; the
 		// pull that reports the deletion cuts it loose or takes it away.
 		const entry = await remoteFile('a.md', 'body\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'body\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
-		store.put({ id: 'n2', path: 'c.md', content: 'behind it\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n2', path: 'c.md' });
-		await provider.delete(entry);
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.put({ id: 'n2', path: 'c.md', content: 'behind it\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n2', path: 'c.md' });
+		await world.provider.delete(entry);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		// And the op behind it got its turn.
-		expect(provider.contentAt('c.md')).toBe('behind it\n');
+		expect(world.provider.contentAt('c.md')).toBe('behind it\n');
 	});
 });
 
@@ -2891,13 +2920,18 @@ describe('a note the user is still typing into', () => {
 		// were sent, and the push is the only thing that knows which those were.
 		// Reporting what the note holds *now* calls an edit that never left the
 		// device saved, and the next remote change overwrites it.
-		store.put({ id: 'mine', path: 'a.md', content: 'first\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
+		world.store.put({ id: 'mine', path: 'a.md', content: 'first\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
 		const whileTyping: StorageProvider = {
-			...provider,
+			...world.provider,
 			write: async (path, content, opts) => {
-				const entry = await provider.write(path, content, opts);
-				store.put({ id: 'mine', path: 'a.md', content: 'and then more\n', dirty: true });
+				const entry = await world.provider.write(path, content, opts);
+				world.store.put({
+					id: 'mine',
+					path: 'a.md',
+					content: 'and then more\n',
+					dirty: true,
+				});
 				return entry;
 			},
 		};
@@ -2912,10 +2946,10 @@ describe('a note the user is still typing into', () => {
 
 describe('authorization', () => {
 	it('refreshes the token once and carries on', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		let refreshed = 0;
-		provider.setFault((call) =>
+		world.provider.setFault((call) =>
 			call.op === 'write' && refreshed === 0 ? new AuthError('expired') : undefined
 		);
 		const withAuth = engineWith({
@@ -2929,7 +2963,7 @@ describe('authorization', () => {
 
 		expect(refreshed).toBe(1);
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
 	});
 
 	it('refreshes for a token that expired while resolving a push conflict', async () => {
@@ -2939,17 +2973,17 @@ describe('authorization', () => {
 		// going stale at exactly the wrong moment spent one of the write's
 		// attempts and left the conflict unresolved.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
 			...boundTo(entry),
 		});
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 		let refreshed = 0;
-		provider.setFault((call) =>
+		world.provider.setFault((call) =>
 			call.op === 'read' && refreshed === 0 ? new AuthError('expired') : undefined
 		);
 		const withAuth = engineWith({
@@ -2965,21 +2999,23 @@ describe('authorization', () => {
 		expect(result.status).toBe('ok');
 		// The write is done with — what is left queued is the conflict copy's
 		// own write, which the resolution made.
-		expect(store.ops().map((queued) => queued.seq)).not.toContain(op.seq);
-		expect(store.lastError(op.seq)).toBeUndefined();
+		expect(world.store.ops().map((queued) => queued.seq)).not.toContain(op.seq);
+		expect(world.store.lastError(op.seq)).toBeUndefined();
 		// And the conflict rule got to run after the fresh token: the remote
 		// keeps the path and the local copy is beside it.
 		expect(result.conflicts).toHaveLength(1);
-		expect([...store.notes()].map((note) => note.path).sort()).toEqual(
+		expect([...world.store.notes()].map((note) => note.path).sort()).toEqual(
 			['a.md', ...result.conflicts].sort()
 		);
 	});
 
 	it('pauses rather than looping when the refresh does not help', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 		let refreshed = 0;
-		provider.setFault((call) => (call.op === 'write' ? new AuthError('expired') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'write' ? new AuthError('expired') : undefined
+		);
 		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
@@ -2995,16 +3031,20 @@ describe('authorization', () => {
 	});
 
 	it('pauses immediately when there is no way to refresh', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) => (call.op === 'write' ? new AuthError('expired') : undefined));
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) =>
+			call.op === 'write' ? new AuthError('expired') : undefined
+		);
 
-		expect((await engine.push()).status).toBe('paused');
+		expect((await world.engine.push()).status).toBe('paused');
 	});
 
 	it('pauses a pull after one refresh that does not help, as it does a push', async () => {
 		let refreshed = 0;
-		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'changes' ? new AuthError('expired') : undefined
+		);
 		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
@@ -3022,13 +3062,13 @@ describe('authorization', () => {
 
 	it('pauses a pull at once when there is no way to refresh', async () => {
 		let asked = 0;
-		provider.setFault((call) => {
+		world.provider.setFault((call) => {
 			if (call.op !== 'changes') return undefined;
 			asked += 1;
 			return new AuthError('expired');
 		});
 
-		expect(await engine.pull()).toEqual(
+		expect(await world.engine.pull()).toEqual(
 			expect.objectContaining({ status: 'paused', error: 'authorization required' })
 		);
 		expect(asked).toBe(1);
@@ -3046,12 +3086,12 @@ describe('authorization', () => {
 		const refreshes: number[] = [];
 		const withAuth = engineWith({
 			provider: {
-				...provider,
+				...world.provider,
 				changes: (cursor?: string) => {
 					asked.push(cursor);
 					const refusal = answer(cursor);
 					return refusal === undefined
-						? provider.changes(cursor)
+						? world.provider.changes(cursor)
 						: Promise.reject(refusal);
 				},
 			},
@@ -3066,7 +3106,7 @@ describe('authorization', () => {
 	it('refreshes for a token that expires in the scan that answers a dead cursor', async () => {
 		await pulledNote('a.md', 'one\n');
 		await remoteFile('b.md', 'two\n');
-		const dead = store.storedCursor();
+		const dead = world.store.storedCursor();
 		const run = answering((cursor) => {
 			if (cursor === dead) return new CursorResetError('reset');
 			return cursor === undefined && run.refreshed() === 0
@@ -3086,7 +3126,7 @@ describe('authorization', () => {
 	it('scans when the cursor turns out dead on the retry after a refresh', async () => {
 		await pulledNote('a.md', 'one\n');
 		await remoteFile('b.md', 'two\n');
-		const dead = store.storedCursor();
+		const dead = world.store.storedCursor();
 		const run = answering((cursor) => {
 			if (run.refreshed() === 0) return new AuthError('expired');
 			return cursor === dead ? new CursorResetError('reset') : undefined;
@@ -3103,10 +3143,10 @@ describe('authorization', () => {
 	it('keeps the upload a dead cursor asked for through the retry after a refresh', async () => {
 		await pulledNote('a.md', 'one\n');
 		const kept = noteAt('a.md');
-		const file = remoteAt(provider, 'a.md');
+		const file = remoteAt(world.provider, 'a.md');
 		if (file === undefined) throw new Error('no file');
-		await provider.delete(file);
-		const dead = store.storedCursor();
+		await world.provider.delete(file);
+		const dead = world.store.storedCursor();
 		// Refused with the upload once only: a provider asked again may say less.
 		const run = answering((cursor) => {
 			if (cursor === dead) return new CursorResetError('reset', run.asked.length === 1);
@@ -3119,14 +3159,14 @@ describe('authorization', () => {
 		expect(run.refreshed()).toBe(1);
 		// Sent back up, not let go of.
 		expect(noteAt('a.md')).toEqual(expect.objectContaining({ id: kept?.id, dirty: true }));
-		expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+		expect(world.store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
 			{ op: 'write', path: 'a.md' },
 		]);
 	});
 
 	it('pauses, after one refresh, a dead cursor whose scan keeps meeting an expired token', async () => {
 		await pulledNote('a.md', 'one\n');
-		const dead = store.storedCursor();
+		const dead = world.store.storedCursor();
 		const run = answering((cursor) =>
 			cursor === dead ? new CursorResetError('reset') : new AuthError('expired')
 		);
@@ -3138,16 +3178,18 @@ describe('authorization', () => {
 			expect.objectContaining({ status: 'paused', error: 'authorization required' })
 		);
 		expect(run.asked).toEqual([dead, undefined, undefined]);
-		expect(store.storedCursor()).toBe(dead);
+		expect(world.store.storedCursor()).toBe(dead);
 	});
 
 	it('pauses a pull from a stored cursor after one refresh, and keeps the cursor', async () => {
 		await remoteFile('a.md', 'one\n');
-		expect((await engine.pull()).status).toBe('ok');
-		const cursor = await store.cursor();
+		expect((await world.engine.pull()).status).toBe('ok');
+		const cursor = await world.store.cursor();
 		expect(cursor).toBeDefined();
 		let refreshed = 0;
-		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'changes' ? new AuthError('expired') : undefined
+		);
 		const withAuth = engineWith({
 			reauthorize: () => {
 				refreshed += 1;
@@ -3161,7 +3203,7 @@ describe('authorization', () => {
 		expect(result).toEqual(
 			expect.objectContaining({ status: 'paused', error: 'authorization required' })
 		);
-		expect(await store.cursor()).toBe(cursor);
+		expect(await world.store.cursor()).toBe(cursor);
 	});
 });
 
@@ -3170,43 +3212,43 @@ describe("the clipboard's folder", () => {
 	// clipboard"). The engine decides nothing about them, as about any hidden
 	// path; it only says it met one, so the clipboard is read again.
 	const clip = (name: string) =>
-		provider.createFile(`.clipboard/${name}`, new TextEncoder().encode('copied'));
+		world.provider.createFile(`.clipboard/${name}`, new TextEncoder().encode('copied'));
 
 	it('says a round met it, and makes nothing of it', async () => {
-		await engine.pull();
-		await provider.createFolder('.clipboard');
+		await world.engine.pull();
+		await world.provider.createFolder('.clipboard');
 		await clip('20261006T153012123Z-text-3f9a1c2b.txt');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
-		expect(store.notes()).toEqual([]);
-		expect(store.files()).toEqual([]);
-		expect(store.folders()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 
 	it('says a scan met it', async () => {
-		await provider.createFolder('.clipboard');
+		await world.provider.createFolder('.clipboard');
 		await clip('20261006T153012123Z-pasted-image-3f9a1c2b.png');
 
-		expect(await engine.pull()).toMatchObject({ status: 'ok', clipboard: true });
-		expect(store.files()).toEqual([]);
+		expect(await world.engine.pull()).toMatchObject({ status: 'ok', clipboard: true });
+		expect(world.store.files()).toEqual([]);
 	});
 
 	it('says an item went', async () => {
-		await provider.createFolder('.clipboard');
+		await world.provider.createFolder('.clipboard');
 		const item = await clip('20261006T153012123Z-text-3f9a1c2b.txt');
-		await engine.pull();
-		await provider.delete(item);
+		await world.engine.pull();
+		await world.provider.delete(item);
 
-		expect(await engine.pull()).toMatchObject({ pulled: 0, clipboard: true });
+		expect(await world.engine.pull()).toMatchObject({ pulled: 0, clipboard: true });
 	});
 
 	it('says it may have met it, for something gone by its id alone', async () => {
 		// An id feed's path comes from its tree, and an item this device sent
 		// is not in it until the feed reports it back: let go of on another
 		// device first, it is an id and nothing else.
-		await engine.pull();
+		await world.engine.pull();
 
 		const result = await pullNow([{ deleted: true, remoteId: 'an-item-pasted-here' }]);
 
@@ -3214,22 +3256,22 @@ describe("the clipboard's folder", () => {
 	});
 
 	it('says nothing of a round that did not meet it', async () => {
-		await provider.createFolder('.clipboard');
-		await engine.pull();
+		await world.provider.createFolder('.clipboard');
+		await world.engine.pull();
 		await remoteFile('a.md', 'x\n');
-		await provider.write('.cache', 'binary\n', {});
+		await world.provider.write('.cache', 'binary\n', {});
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.pulled).toBe(1);
 		expect(result.clipboard).toBeUndefined();
 	});
 
 	it('carries it through a whole sync', async () => {
-		await engine.pull();
-		await provider.createFolder('.clipboard');
+		await world.engine.pull();
+		await world.provider.createFolder('.clipboard');
 
-		expect((await engine.sync()).clipboard).toBe(true);
+		expect((await world.engine.sync()).clipboard).toBe(true);
 	});
 });
 
@@ -3240,25 +3282,25 @@ describe('the key file for secrets', () => {
 	const keyFile = '{"schemaVersion":1,"recipient":"age1…","setAt":"2026-10-14T00:00:00Z"}\n';
 
 	it('says a round met it, and makes nothing of it', async () => {
-		await engine.pull();
-		await provider.write('.encryption.json', keyFile, {});
+		await world.engine.pull();
+		await world.provider.write('.encryption.json', keyFile, {});
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result).toMatchObject({ status: 'ok', pulled: 0, encryption: true });
 		expect(result.clipboard).toBeUndefined();
-		expect(store.notes()).toEqual([]);
-		expect(store.files()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
 	});
 
 	it('says a scan met it', async () => {
-		await provider.write('.encryption.json', keyFile, {});
+		await world.provider.write('.encryption.json', keyFile, {});
 
-		expect(await engine.pull()).toMatchObject({ status: 'ok', encryption: true });
+		expect(await world.engine.pull()).toMatchObject({ status: 'ok', encryption: true });
 	});
 
 	it('says it may have met it, for something gone by its id alone', async () => {
-		await engine.pull();
+		await world.engine.pull();
 
 		const result = await pullNow([{ deleted: true, remoteId: 'gone-by-id' }]);
 
@@ -3266,23 +3308,23 @@ describe('the key file for secrets', () => {
 	});
 
 	it('says nothing of a round that did not meet it', async () => {
-		await provider.write('.encryption.json', keyFile, {});
-		await engine.pull();
+		await world.provider.write('.encryption.json', keyFile, {});
+		await world.engine.pull();
 		await remoteFile('a.md', 'x\n');
-		await provider.createFolder('notes');
-		await provider.write('notes/.encryption.json', keyFile, {});
+		await world.provider.createFolder('notes');
+		await world.provider.write('notes/.encryption.json', keyFile, {});
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.pulled).toBeGreaterThan(0);
 		expect(result.encryption).toBeUndefined();
 	});
 
 	it('carries it through a whole sync', async () => {
-		await engine.pull();
-		await provider.write('.encryption.json', keyFile, {});
+		await world.engine.pull();
+		await world.provider.write('.encryption.json', keyFile, {});
 
-		expect((await engine.sync()).encryption).toBe(true);
+		expect((await world.engine.sync()).encryption).toBe(true);
 	});
 });
 
@@ -3291,33 +3333,38 @@ describe("the scratchpad's folder", () => {
 	// hidden from the notebooks by its dot, but notes all the same, synced as
 	// any are. The clipboard's folder beside it stays hidden.
 	it('brings a scratch note and its folder in', async () => {
-		await provider.createFolder('.scratchpad');
+		await world.provider.createFolder('.scratchpad');
 		await remoteFile('.scratchpad/untitled.md', 'milk, eggs\n');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('.scratchpad/untitled.md')?.content).toBe('milk, eggs\n');
-		expect(store.folders().map((folder) => folder.path)).toEqual(['.scratchpad']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['.scratchpad']);
 		expect(result.clipboard).toBeUndefined();
 	});
 
 	it('sends one written here', async () => {
-		store.put({ id: 'n1', path: '.scratchpad/untitled.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: '.scratchpad/untitled.md' });
+		world.store.put({
+			id: 'n1',
+			path: '.scratchpad/untitled.md',
+			content: 'mine\n',
+			dirty: true,
+		});
+		world.store.queue({ op: 'write', noteId: 'n1', path: '.scratchpad/untitled.md' });
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.contentAt('.scratchpad/untitled.md')).toBe('mine\n');
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.contentAt('.scratchpad/untitled.md')).toBe('mine\n');
 		expect(noteAt('.scratchpad/untitled.md')?.dirty).toBe(false);
 	});
 
 	it('passes over what is hidden inside it', async () => {
-		await provider.createFolder('.scratchpad');
+		await world.provider.createFolder('.scratchpad');
 		await remoteFile('.scratchpad/.draft.md', 'x\n');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -3326,29 +3373,29 @@ describe("the vault's passwords' folder", () => {
 	// hidden from the notebooks by its dot, but notes all the same, synced as
 	// any are, as the scratchpad's are.
 	it('brings an item and its folder in', async () => {
-		await provider.createFolder('.vault');
+		await world.provider.createFolder('.vault');
 		await remoteFile('.vault/github.md', '---\ntitle: GitHub\n---\n');
 
-		expect((await engine.pull()).status).toBe('ok');
+		expect((await world.engine.pull()).status).toBe('ok');
 		expect(noteAt('.vault/github.md')?.content).toBe('---\ntitle: GitHub\n---\n');
-		expect(store.folders().map((folder) => folder.path)).toEqual(['.vault']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['.vault']);
 	});
 
 	it('sends one written here', async () => {
-		store.put({ id: 'n1', path: '.vault/github.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: '.vault/github.md' });
+		world.store.put({ id: 'n1', path: '.vault/github.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: '.vault/github.md' });
 
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.contentAt('.vault/github.md')).toBe('mine\n');
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.contentAt('.vault/github.md')).toBe('mine\n');
 	});
 
 	it('passes over what is hidden inside it', async () => {
-		await provider.createFolder('.vault');
+		await world.provider.createFolder('.vault');
 		await remoteFile('.vault/.draft.md', 'x\n');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -3357,13 +3404,13 @@ describe('deletions that are not about a note', () => {
 		// The app owns the folder but not everything in it. A file it does not
 		// show being removed is not news, and counting it puts a number in
 		// front of the user for something that did not happen.
-		await provider.write('.cache', 'binary\n', {});
-		await engine.pull();
-		const hidden = remoteAt(provider, '.cache');
+		await world.provider.write('.cache', 'binary\n', {});
+		await world.engine.pull();
+		const hidden = remoteAt(world.provider, '.cache');
 		if (hidden === undefined) throw new Error('no file');
-		await provider.delete(hidden);
+		await world.provider.delete(hidden);
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(result.pulled).toBe(0);
@@ -3372,24 +3419,24 @@ describe('deletions that are not about a note', () => {
 	it('lets go of a file that is not a note when it is deleted', async () => {
 		// A picture beside the notes is a row of its own (§7), and its
 		// deletion is news like a note's.
-		await provider.write('photo.png', 'binary\n', {});
-		await engine.pull();
-		expect(store.files().map((file) => file.path)).toEqual(['photo.png']);
-		const shot = remoteAt(provider, 'photo.png');
+		await world.provider.write('photo.png', 'binary\n', {});
+		await world.engine.pull();
+		expect(world.store.files().map((file) => file.path)).toEqual(['photo.png']);
+		const shot = remoteAt(world.provider, 'photo.png');
 		if (shot === undefined) throw new Error('no file');
-		await provider.delete(shot);
+		await world.provider.delete(shot);
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result).toMatchObject({ status: 'ok', pulled: 1 });
-		expect(store.files()).toEqual([]);
+		expect(world.store.files()).toEqual([]);
 	});
 
 	it('leaves a note of our own alone when the deletion is about another file', async () => {
 		// The deletion names an id we have never seen, so the file it is about
 		// is not ours — the path has been reused since. Matching on the path
 		// anyway deletes a note over an event that was never about it.
-		store.put({ id: 'n1', path: 'a.md', content: 'never pushed\n' });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'never pushed\n' });
 
 		await pullNow([{ path: 'a.md', deleted: true, remoteId: 'a-file-we-never-saw' }]);
 
@@ -3400,7 +3447,7 @@ describe('deletions that are not about a note', () => {
 		// The counterpart: with no id there is nothing but the path to go on,
 		// and refusing to act would leave deleted notes on the device for ever.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'one\n',
@@ -3420,8 +3467,8 @@ describe('a deletion by id alone', () => {
 	// the batch is read against a stored cursor and not swept up by a scan.
 	const pulled = async (path: string) => {
 		const entry = await remoteFile(path, 'body\n');
-		await engine.pull();
-		expect(store.storedCursor()).toBeDefined();
+		await world.engine.pull();
+		expect(world.store.storedCursor()).toBeDefined();
 		return entry;
 	};
 
@@ -3431,12 +3478,12 @@ describe('a deletion by id alone', () => {
 		const result = await pullNow([{ deleted: true, remoteId: entry.remoteId }]);
 
 		expect(result.pulled).toBe(1);
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('keeps an edit here, cut loose from the file', async () => {
 		const entry = await pulled('a.md');
-		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		world.store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
 
 		await pullNow([{ deleted: true, remoteId: entry.remoteId }]);
 
@@ -3451,7 +3498,7 @@ describe('a deletion by id alone', () => {
 
 		await pullNow([entry, { deleted: true, remoteId: entry.remoteId }]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('is undone by an entry for the file behind it', async () => {
@@ -3462,18 +3509,18 @@ describe('a deletion by id alone', () => {
 			{ ...entry, path: 'b.md' },
 		]);
 
-		expect(store.notes().map((note) => note.path)).toEqual(['b.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['b.md']);
 	});
 
 	it('takes the notebook held by that id', async () => {
-		await provider.createFolder('Work');
-		await engine.pull();
-		const [work] = store.folders();
+		await world.provider.createFolder('Work');
+		await world.engine.pull();
+		const [work] = world.store.folders();
 		if (work?.remoteId === undefined) throw new Error('no folder id');
 
 		await pullNow([{ deleted: true, remoteId: work.remoteId }]);
 
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 
 	it('does nothing for an id nothing here holds', async () => {
@@ -3496,20 +3543,20 @@ describe('a file the user duplicated', () => {
 		// copy over the note it came from — unpushed edits included — and leaves
 		// the two files fighting over one row on every sync afterwards.
 		const entry = await remoteFile('a.md', noteFile('n1', 'original'));
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: noteFile('n1', 'my unpushed edit'),
 			...boundTo(entry),
 			dirty: true,
 		});
-		await provider.write('a copy.md', noteFile('n1', 'original'), {});
+		await world.provider.write('a copy.md', noteFile('n1', 'original'), {});
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.content).toContain('my unpushed edit');
 		expect(noteAt('a copy.md')?.id).not.toBe('n1');
-		expect(store.notes()).toHaveLength(2);
+		expect(world.store.notes()).toHaveLength(2);
 	});
 
 	it('still adopts the id when nothing else holds it', async () => {
@@ -3518,7 +3565,7 @@ describe('a file the user duplicated', () => {
 		// breaks. Only a *taken* id is refused.
 		await remoteFile('a.md', noteFile('shared', 'body'));
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.id).toBe('shared');
 	});
@@ -3530,14 +3577,14 @@ describe('a file the user duplicated', () => {
 		// about to remove — makes the two devices disagree for ever about which
 		// note this is.
 		const first = await remoteFile('a.md', '---\nid: keep-me\n---\n\nbody\n');
-		await engine.pull();
+		await world.engine.pull();
 		expect(noteAt('a.md')?.id).toBe('keep-me');
-		await provider.delete(first);
+		await world.provider.delete(first);
 		const second = await remoteFile('b.md', '---\nid: keep-me\n---\n\nbody\n');
 
 		await pullNow([{ path: 'a.md', deleted: true, remoteId: first.remoteId }, second]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('b.md')?.id).toBe('keep-me');
 	});
 
@@ -3545,9 +3592,9 @@ describe('a file the user duplicated', () => {
 		await remoteFile('a.md', noteFile('shared', 'body'));
 		await remoteFile('b.md', noteFile('shared', 'body'));
 
-		await engine.pull();
+		await world.engine.pull();
 
-		const ids = store.notes().map((note) => note.id);
+		const ids = world.store.notes().map((note) => note.id);
 		expect(ids).toHaveLength(2);
 		expect(new Set(ids).size).toBe(2);
 	});
@@ -3561,48 +3608,48 @@ describe('a rescan of a remote that changed while the cursor was dead', () => {
 		// note the same batch just brought in, reports `ok`, and stores the
 		// cursor, so it never comes back.
 		const first = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		await provider.delete(first);
+		await world.provider.delete(first);
 		await remoteFile('a.md', 'two\n');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('two\n');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 	});
 
 	it('does not delete a notebook that was recreated under the same name', async () => {
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		const folder = remoteAt(provider, 'Work');
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		await provider.delete(folder);
-		await provider.createFolder('Work');
+		await world.provider.delete(folder);
+		await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'again\n');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.folders().map((each) => each.path)).toEqual(['Work']);
+		expect(world.store.folders().map((each) => each.path)).toEqual(['Work']);
 		expect(noteAt('Work/a.md')?.content).toBe('again\n');
 	});
 
 	it('still deletes what the rescan really did not find', async () => {
 		// The guard above must not turn reconciling off.
 		await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		store.put({ id: 'ghost', path: 'ghost.md', content: 'x\n', remoteId: 'no-such-id' });
-		store.putFolder({ path: 'Ghost', remoteId: 'no-such-folder' });
+		world.store.put({ id: 'ghost', path: 'ghost.md', content: 'x\n', remoteId: 'no-such-id' });
+		world.store.putFolder({ path: 'Ghost', remoteId: 'no-such-folder' });
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('ghost.md')).toBeUndefined();
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 		expect(noteAt('a.md')).toBeDefined();
 	});
 });
@@ -3617,7 +3664,7 @@ describe('a file that is gone by the time we read it', () => {
 		// way. Push never runs either, because `sync` stops on a pull that is
 		// not `ok`, so the user's unpushed edit never leaves the device.
 		const entry = await remoteFile('a.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'mine',
 			path: 'a.md',
 			content: 'my edit\n',
@@ -3625,7 +3672,7 @@ describe('a file that is gone by the time we read it', () => {
 			remoteVersion: 'stale',
 			dirty: true,
 		});
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 
 		const result = await pullNow([
 			entry,
@@ -3644,15 +3691,15 @@ describe('a file that is gone by the time we read it', () => {
 		// there has not been displaced by anything — moving it aside would
 		// rename the user's note for a file that never arrived.
 		const entry = await remoteFile('other.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'theirs',
 			path: 'other.md',
 			content: 'theirs\n',
 			remoteId: entry.remoteId,
 			remoteVersion: 'older',
 		});
-		store.put({ id: 'mine', path: 'x.md', content: 'never pushed\n', dirty: true });
-		await provider.delete(entry);
+		world.store.put({ id: 'mine', path: 'x.md', content: 'never pushed\n', dirty: true });
+		await world.provider.delete(entry);
 
 		const result = await pullNow([{ ...entry, path: 'x.md' }]);
 
@@ -3665,13 +3712,15 @@ describe('a file that is gone by the time we read it', () => {
 		// or broken read is a batch that has not been decided, and reporting it
 		// as applied would move the cursor past changes nobody looked at.
 		await remoteFile('a.md', 'theirs\n');
-		provider.setFault((call) => (call.op === 'read' ? new Error('network down') : undefined));
+		world.provider.setFault((call) =>
+			call.op === 'read' ? new Error('network down') : undefined
+		);
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('retry');
 		expect(result.error).toBe('network down');
-		expect(store.storedCursor()).toBeUndefined();
+		expect(world.store.storedCursor()).toBeUndefined();
 	});
 });
 
@@ -3683,13 +3732,13 @@ describe('a deletion the same batch also describes as present', () => {
 		// dropped here is dropped for ever, because the cursor moves on and
 		// nothing mentions it again. The row is left holding a dead `remoteId`.
 		const entry = await remoteFile('a.md', 'body\n');
-		store.put({
+		world.store.put({
 			id: 'mine',
 			path: 'a.md',
 			content: 'body\n',
 			...boundTo(entry),
 		});
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 
 		const result = await pullNow([
 			entry,
@@ -3697,7 +3746,7 @@ describe('a deletion the same batch also describes as present', () => {
 		]);
 
 		expect(result.pulled).toBe(1);
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('acts on a deletion of the very file the entry before it wrote back', async () => {
@@ -3709,17 +3758,17 @@ describe('a deletion the same batch also describes as present', () => {
 		// at a file that does not exist. Every later queued op then piles up
 		// behind a move the remote cannot perform.
 		const entry = await remoteFile('a.md', 'body\n');
-		store.put({
+		world.store.put({
 			id: 'mine',
 			path: 'b.md',
 			content: 'body\n',
 			...boundTo(entry),
 		});
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 
 		await pullNow([entry, { path: 'a.md', deleted: true, remoteId: entry.remoteId }]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('still leaves alone a note the batch re-pointed at another file', async () => {
@@ -3728,14 +3777,14 @@ describe('a deletion the same batch also describes as present', () => {
 		// deletion that follows is about the file it replaced, and acting on it
 		// deletes what the same batch has just imported.
 		const first = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		await provider.delete(first);
+		await world.provider.delete(first);
 		const second = await remoteFile('a.md', 'two\n');
 
 		await pullNow([second, { path: 'a.md', deleted: true, remoteId: first.remoteId }]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.id).toBe(before?.id);
 		expect(noteAt('a.md')?.content).toBe('two\n');
 	});
@@ -3748,18 +3797,18 @@ describe('a deletion the same batch also describes as present', () => {
 		// with the row any more — acting on it cuts the note loose from the
 		// file it has just been given, and the next push makes a duplicate.
 		const first = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
 		if (before === undefined) throw new Error('no note');
-		store.put({ ...before, content: 'my edit\n', dirty: true });
-		await provider.delete(first);
+		world.store.put({ ...before, content: 'my edit\n', dirty: true });
+		await world.provider.delete(first);
 		const second = await remoteFile('a.md', 'two\n');
 
 		await pullNow([second, { path: 'a.md', deleted: true, remoteId: first.remoteId }]);
 
 		expect(noteAt('a.md')?.content).toBe('two\n');
 		expect(noteAt('a.md')?.remoteId).toBe(second.remoteId);
-		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+		expect(world.store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 
 	it('says nothing twice about a note it has already cut loose', async () => {
@@ -3769,14 +3818,14 @@ describe('a deletion the same batch also describes as present', () => {
 		// could be about, and reporting it tells the user something happened
 		// twice when it happened once.
 		const entry = await remoteFile('a.md', 'body\n');
-		store.put({
+		world.store.put({
 			id: 'mine',
 			path: 'a.md',
 			content: 'my edit\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 
 		const result = await pullNow([
 			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
@@ -3793,9 +3842,9 @@ describe('a deletion the same batch also describes as present', () => {
 		// surviving entry is at a different path, whichever order it arrives
 		// in, so this is one file moving rather than two things happening.
 		const entry = await remoteFile('a.md', 'body\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		const moved = await provider.move(entry, 'b.md');
+		const moved = await world.provider.move(entry, 'b.md');
 
 		const result = await pullNow([
 			moved,
@@ -3813,9 +3862,11 @@ describe('a deletion the same batch also describes as present', () => {
 		// and letting the entry put the note back reaches the same place by way
 		// of cutting it loose from the remote and telling the user twice.
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		const edited = await provider.write('a.md', 'two\n', { expectedVersion: entry.version });
+		const edited = await world.provider.write('a.md', 'two\n', {
+			expectedVersion: entry.version,
+		});
 
 		const result = await pullNow([
 			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
@@ -3833,7 +3884,7 @@ describe('a deletion the same batch also describes as present', () => {
 		// describing a path rather than a thing. Nothing here is worth losing a
 		// note over, and the version is adopted so the next push agrees.
 		const entry = await remoteFile('a.md', 'body\n');
-		store.put({
+		world.store.put({
 			id: 'mine',
 			path: 'a.md',
 			content: 'body\n',
@@ -3857,13 +3908,13 @@ describe('a batch that both deletes a folder and reconciles a scan', () => {
 		// should be holding this up.
 		// No stored cursor, so this pull is a full scan and reconciles what the
 		// scan did not mention against what we hold.
-		store.putFolder({ path: 'Work', remoteId: 'rf' });
-		store.put({ id: 'inside', path: 'Work/a.md', content: 'x\n', remoteId: 'ra' });
+		world.store.putFolder({ path: 'Work', remoteId: 'rf' });
+		world.store.put({ id: 'inside', path: 'Work/a.md', content: 'x\n', remoteId: 'ra' });
 
 		await pullNow([{ path: 'Work', deleted: true, remoteId: 'rf' }]);
 
-		expect(store.notes()).toEqual([]);
-		expect(store.folders()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 });
 
@@ -3875,15 +3926,15 @@ describe('a file created, deleted and re-created in one window', () => {
 		// to the folder branch; the second file finds no occupant and lands on
 		// top. Two rows at one path is a note the sidebar shows twice, and on a
 		// path-based provider they would share a `remoteId` as well.
-		await engine.pull();
+		await world.engine.pull();
 		const first = await remoteFile('a.md', 'one\n');
-		await provider.delete(first);
+		await world.provider.delete(first);
 		await remoteFile('a.md', 'two\n');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.content).toBe('two\n');
 	});
 });
@@ -3895,23 +3946,23 @@ describe('two entries for one path with nothing said about the first', () => {
 		// one path can be claimed twice in a batch with no deletion between
 		// them. The second claim has to see the note the first just made, and
 		// the store cannot say: none of the batch has been applied.
-		await engine.pull();
+		await world.engine.pull();
 		const first = await remoteFile('a.md', 'one\n');
 		// Moved, not deleted: the entry the feed carries for it is stale, and a
 		// stale entry still resolves by id. A file that is genuinely gone is the
 		// other rule — there is nothing to import and the deletion arrives on
 		// its own.
-		await provider.move(first, 'b.md');
+		await world.provider.move(first, 'b.md');
 		const second = await remoteFile('a.md', 'two\n');
 
 		const result = await pullNow([first, second]);
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.remoteId).toBe(second.remoteId);
-		expect(store.notes()).toHaveLength(2);
-		expect(store.notes().find((note) => note.remoteId === first.remoteId)?.path).toContain(
-			'conflict'
-		);
+		expect(world.store.notes()).toHaveLength(2);
+		expect(
+			world.store.notes().find((note) => note.remoteId === first.remoteId)?.path
+		).toContain('conflict');
 	});
 });
 
@@ -3921,14 +3972,14 @@ describe('a path that has been reused', () => {
 		// writes racing for the same file. The note we hold has nothing of its
 		// own left — its remote copy is gone — so it becomes the new file.
 		const first = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		await provider.delete(first);
+		await world.provider.delete(first);
 		const second = await remoteFile('a.md', 'two\n');
 
 		await pullNow([{ path: 'a.md', deleted: true, remoteId: first.remoteId }, second]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.content).toBe('two\n');
 		expect(noteAt('a.md')?.id).toBe(before?.id);
 	});
@@ -3939,9 +3990,9 @@ describe('a path that has been reused', () => {
 		// note would adopt their contents, and our next push would overwrite
 		// them with ours.
 		const mine = await remoteFile('a.md', 'mine\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		const moved = await provider.move(mine, 'b.md');
+		const moved = await world.provider.move(mine, 'b.md');
 		const theirs = await remoteFile('a.md', 'theirs\n');
 
 		await pullNow([theirs, moved]);
@@ -3957,13 +4008,13 @@ describe('a path that has been reused', () => {
 		// the old one. Taken in this order the note is moved and then, by a
 		// deletion that names only a path we have just left, deleted.
 		const file = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		const moved = await provider.move(file, 'b.md');
+		const moved = await world.provider.move(file, 'b.md');
 
 		await pullNow([moved, { path: 'a.md', deleted: true }]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('b.md')?.id).toBe(before?.id);
 		expect(noteAt('b.md')?.content).toBe('one\n');
 	});
@@ -3973,13 +4024,13 @@ describe('a path that has been reused', () => {
 		// deletion carries nothing, there is no folder above the note to ask
 		// about, and the entry that would re-establish it has not been reached.
 		const file = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		const moved = await provider.move(file, 'b.md');
+		const moved = await world.provider.move(file, 'b.md');
 
 		const result = await pullNow([{ path: 'a.md', deleted: true }, moved]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('b.md')?.id).toBe(before?.id);
 		// One thing happened. Taking the deletion at face value and letting the
 		// entry put the note back reaches the same place, but by way of cutting
@@ -3992,8 +4043,8 @@ describe('a path that has been reused', () => {
 		// is half a move is the id it carries. Without it the engine decides a
 		// folder was deleted as well as a note imported, and tells the user two
 		// things happened when one did.
-		const other = await provider.write('untracked.md', 'x\n', {});
-		const moved = await provider.move(other, 'renamed.md');
+		const other = await world.provider.write('untracked.md', 'x\n', {});
+		const moved = await world.provider.move(other, 'renamed.md');
 
 		const result = await pullNow([
 			{ path: 'untracked.md', deleted: true, remoteId: other.remoteId },
@@ -4013,7 +4064,7 @@ describe('a note that carries its own id', () => {
 		// different note on every device, and every link between them breaks.
 		await remoteFile('a.md', '---\nid: from-the-file\n---\n\nbody\n');
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.id).toBe('from-the-file');
 	});
@@ -4021,7 +4072,7 @@ describe('a note that carries its own id', () => {
 	it('invents one for a file written by something else', async () => {
 		await remoteFile('a.md', 'no frontmatter\n');
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('a.md')?.id).toBe('copy-1');
 	});
@@ -4034,18 +4085,18 @@ describe('a rename the provider does not re-list the children of', () => {
 		// can be the folder at its new path plus the old child path as deleted,
 		// with no id on the deletion and nothing at all about the child's new
 		// one. Read literally, every note in the folder is gone.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('Work/a.md');
-		const folder = remoteAt(provider, 'Work');
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		const moved = await provider.move(folder, 'Archive');
+		const moved = await world.provider.move(folder, 'Archive');
 
 		const result = await pullNow([moved, { path: 'Work/a.md', deleted: true }]);
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('Archive/a.md')?.id).toBe(before?.id);
 		expect(noteAt('Archive/a.md')?.content).toBe('one\n');
 	});
@@ -4054,18 +4105,18 @@ describe('a rename the provider does not re-list the children of', () => {
 		// The same batch the other way round, where the only thing saying the
 		// folder is alive is the store: `Work` still holds the remote id that
 		// the entry further down the batch is about.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('Work/a.md');
-		const folder = remoteAt(provider, 'Work');
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		const moved = await provider.move(folder, 'Archive');
+		const moved = await world.provider.move(folder, 'Archive');
 
 		const result = await pullNow([{ path: 'Work/a.md', deleted: true }, moved]);
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('Archive/a.md')?.id).toBe(before?.id);
 	});
 
@@ -4075,13 +4126,13 @@ describe('a rename the provider does not re-list the children of', () => {
 		// provider knew it well enough to identify it — and "some folder above
 		// it is also in this batch" is not evidence against it. Dropped here it
 		// is dropped for ever: the cursor moves on and nothing mentions it again.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
 		await remoteFile('Work/b.md', 'two\n');
-		await engine.pull();
-		const folder = remoteAt(provider, 'Work');
+		await world.engine.pull();
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		await provider.delete(file);
+		await world.provider.delete(file);
 
 		await pullNow([folder, { path: 'Work/a.md', deleted: true, remoteId: file.remoteId }]);
 
@@ -4092,19 +4143,19 @@ describe('a rename the provider does not re-list the children of', () => {
 	it('still deletes a note when the folder really did go', async () => {
 		// The guard leans on the folder being alive somewhere in the batch. When
 		// it is not, the deletion means what it says.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
-		const folder = remoteAt(provider, 'Work');
+		await world.engine.pull();
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		await provider.delete(folder);
+		await world.provider.delete(folder);
 
 		await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
 		]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -4116,16 +4167,16 @@ describe('an entry the provider sent twice', () => {
 		// dropped — so a note deleted remotely stays on the device for ever.
 		const a = await remoteFile('a.md', 'a\n');
 		const b = await remoteFile('b.md', 'b\n');
-		await engine.pull();
-		await provider.delete(a);
-		await provider.delete(b);
+		await world.engine.pull();
+		await world.provider.delete(a);
+		await world.provider.delete(b);
 
 		await pullNow([
 			{ path: 'a.md', deleted: true },
 			{ path: 'b.md', deleted: true },
 		]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('conflicts a note once, not once per mention', async () => {
@@ -4135,7 +4186,7 @@ describe('an entry the provider sent twice', () => {
 		// wanting the same path — which the store cannot keep apart, and the
 		// push then writes one over the other and gives them one remote id.
 		const entry = await remoteFile('a.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
@@ -4143,17 +4194,17 @@ describe('an entry the provider sent twice', () => {
 			remoteVersion: 'stale',
 			dirty: true,
 		});
-		const changed = await provider.write('a.md', 'theirs\n', {
+		const changed = await world.provider.write('a.md', 'theirs\n', {
 			expectedVersion: entry.version,
 		});
 
 		const result = await pullNow([changed, changed]);
 
 		expect(result.conflicts).toHaveLength(1);
-		const copies = store.notes().filter((note) => note.path.includes('conflict'));
+		const copies = world.store.notes().filter((note) => note.path.includes('conflict'));
 		expect(copies).toHaveLength(1);
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
-		expect(store.ops()).toHaveLength(1);
+		expect(world.store.ops()).toHaveLength(1);
 	});
 
 	it('takes the last word on a file, not the first', async () => {
@@ -4161,9 +4212,13 @@ describe('an entry the provider sent twice', () => {
 		// current state. Keeping the first applies a version the remote has
 		// already moved past, and the note is left holding bytes nobody has.
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
-		const second = await provider.write('a.md', 'two\n', { expectedVersion: entry.version });
-		const third = await provider.write('a.md', 'three\n', { expectedVersion: second.version });
+		await world.engine.pull();
+		const second = await world.provider.write('a.md', 'two\n', {
+			expectedVersion: entry.version,
+		});
+		const third = await world.provider.write('a.md', 'three\n', {
+			expectedVersion: second.version,
+		});
 
 		await pullNow([second, third]);
 
@@ -4177,9 +4232,9 @@ describe('an entry the provider sent twice', () => {
 		// to be. Folding the two together drops the new file; acting on the
 		// deletion afterwards deletes the note that was just imported.
 		const first = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		await provider.delete(first);
+		await world.provider.delete(first);
 		const second = await remoteFile('a.md', 'two\n');
 
 		const result = await pullNow([
@@ -4188,7 +4243,7 @@ describe('an entry the provider sent twice', () => {
 		]);
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.content).toBe('two\n');
 		expect(noteAt('a.md')?.id).toBe(before?.id);
 	});
@@ -4197,13 +4252,13 @@ describe('an entry the provider sent twice', () => {
 		// Two entries for one path, but two things happening — not one thing
 		// said twice. Folding them together would drop whichever came second.
 		const first = await remoteFile('a.md', 'one\n');
-		await engine.pull();
-		await provider.delete(first);
+		await world.engine.pull();
+		await world.provider.delete(first);
 		const second = await remoteFile('a.md', 'two\n');
 
 		await pullNow([{ path: 'a.md', deleted: true, remoteId: first.remoteId }, second]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.content).toBe('two\n');
 	});
 });
@@ -4212,7 +4267,10 @@ describe('a store that cannot answer', () => {
 	/** The memory store with one method replaced by a rejection. */
 	const breaking = (method: keyof SyncStore): SyncEngine =>
 		engineWith({
-			store: { ...store, [method]: () => Promise.reject(new Error(`${method} failed`)) },
+			store: {
+				...world.store,
+				[method]: () => Promise.reject(new Error(`${method} failed`)),
+			},
 		});
 
 	it.each(['cursor', 'pendingOps', 'failOp'] as const)(
@@ -4224,9 +4282,11 @@ describe('a store that cannot answer', () => {
 			// used to carry the only `catch` — so a caller who took the promise
 			// at its word would have the app die on them.
 			await remoteFile('a.md', 'one\n');
-			store.put({ id: 'n1', path: 'b.md', content: 'x\n', dirty: true });
-			store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-			provider.setFault((call) => (call.op === 'write' ? new Error('offline') : undefined));
+			world.store.put({ id: 'n1', path: 'b.md', content: 'x\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+			world.provider.setFault((call) =>
+				call.op === 'write' ? new Error('offline') : undefined
+			);
 
 			const result = await breaking(method).sync();
 
@@ -4243,17 +4303,17 @@ describe('a note of ours where a remote one lands', () => {
 		// where it is, the sidebar shows the same row twice and the queued write
 		// for ours eventually lands on the other one's file — after which both
 		// rows carry one remote id and overwrite each other for ever.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('b.md', 'theirs\n');
-		await engine.pull();
-		store.put({ id: 'mine', path: 'Work/b.md', content: 'mine\n', dirty: true });
-		await provider.move(entry, 'Work/b.md');
+		await world.engine.pull();
+		world.store.put({ id: 'mine', path: 'Work/b.md', content: 'mine\n', dirty: true });
+		await world.provider.move(entry, 'Work/b.md');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes()).toHaveLength(2);
+		expect(world.store.notes()).toHaveLength(2);
 		expect(noteAt('Work/b.md')?.content).toBe('theirs\n');
-		const ours = store.notes().find((note) => note.id === 'mine');
+		const ours = world.store.notes().find((note) => note.id === 'mine');
 		expect(ours?.content).toBe('mine\n');
 		expect(ours?.dirty).toBe(true);
 		expect(ours?.path).toContain('conflict');
@@ -4265,25 +4325,25 @@ describe('a note of ours where a remote one lands', () => {
 		// that path *and* the note the entry is about, because it has never been
 		// pushed and the path is all there is to go on — so this is an ordinary
 		// conflict, not something to move out of its own way first.
-		store.put({ id: 'mine', path: 'Untitled.md', content: 'mine\n', dirty: true });
+		world.store.put({ id: 'mine', path: 'Untitled.md', content: 'mine\n', dirty: true });
 		await remoteFile('Untitled.md', 'theirs\n');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		// One thing happened to this note. Moving it out of its own way first
 		// and then conflicting it reaches the same place by way of telling the
 		// user their note moved somewhere it never was.
 		expect(result.pulled).toBe(1);
 
-		expect(store.notes()).toHaveLength(2);
+		expect(world.store.notes()).toHaveLength(2);
 		expect(noteAt('Untitled.md')?.id).toBe('mine');
 		expect(noteAt('Untitled.md')?.content).toBe('theirs\n');
-		expect(store.notes().find((note) => note.content.includes('mine'))?.path).toContain(
+		expect(world.store.notes().find((note) => note.content.includes('mine'))?.path).toContain(
 			'conflict'
 		);
 		// Moving it out of its own way first would leave it sharing a path with
 		// the copy made of it a moment later.
-		expect(new Set(store.notes().map((note) => note.path)).size).toBe(2);
+		expect(new Set(world.store.notes().map((note) => note.path)).size).toBe(2);
 	});
 
 	it('moves a synced note aside too, and brings it home next time', async () => {
@@ -4294,24 +4354,24 @@ describe('a note of ours where a remote one lands', () => {
 		// back one of two rows, so the other would be stale for ever.
 		const mine = await remoteFile('a.md', 'mine\n');
 		const theirs = await remoteFile('b.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
 		// On the remote, ours moved out and theirs moved in. Only the second half
 		// reaches us in this batch, so we still think ours is at `a.md`.
-		const movedMine = await provider.move(mine, 'c.md');
-		const movedTheirs = await provider.move(theirs, 'a.md');
+		const movedMine = await world.provider.move(mine, 'c.md');
+		const movedTheirs = await world.provider.move(theirs, 'a.md');
 
 		await pullNow([movedTheirs]);
 
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
-		const ours = store.notes().find((note) => note.id === before?.id);
+		const ours = world.store.notes().find((note) => note.id === before?.id);
 		expect(ours?.path).toContain('conflict');
 		// It keeps its `remoteId`, so the entry that says where it went — this
 		// is the other half, a batch later — puts it back where it belongs.
 		await pullNow([movedMine]);
 
 		expect(noteAt('c.md')?.id).toBe(before?.id);
-		expect(store.notes()).toHaveLength(2);
+		expect(world.store.notes()).toHaveLength(2);
 	});
 
 	it('moves aside a note the same batch detached', async () => {
@@ -4320,22 +4380,22 @@ describe('a note of ours where a remote one lands', () => {
 		// detaches it and leaves it where it is. Asking the store as it was gets
 		// the wrong answer, and the two notes end up on one path — and then, on
 		// the next push, one `remoteId` between them.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const ours = await remoteFile('Work/b.md', 'theirs-old\n');
 		const loose = await remoteFile('loose.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('Work/b.md');
 		if (mine === undefined) throw new Error('no note');
-		store.put({ ...mine, content: 'my unpushed edit\n', dirty: true });
+		world.store.put({ ...mine, content: 'my unpushed edit\n', dirty: true });
 
 		// On the remote: ours deleted, and `loose.md` renamed into its place.
-		await provider.delete(ours);
-		const moved = await provider.move(loose, 'Work/b.md');
+		await world.provider.delete(ours);
+		const moved = await world.provider.move(loose, 'Work/b.md');
 
 		await pullNow([{ path: 'Work/b.md', deleted: true, remoteId: ours.remoteId }, moved]);
 
 		expect(noteAt('Work/b.md')?.content).toBe('theirs\n');
-		const kept = store.notes().find((note) => note.id === mine.id);
+		const kept = world.store.notes().find((note) => note.id === mine.id);
 		expect(kept?.content).toBe('my unpushed edit\n');
 		expect(kept?.path).toContain('conflict');
 		expect(kept?.remoteId).toBeUndefined();
@@ -4346,27 +4406,27 @@ describe('a note of ours where a remote one lands', () => {
 		// The one entry needs both — and both are named from the same path, so
 		// without one seeing the other they get the same name and the store is
 		// handed two notes for one file.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('Work/old.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const theirs = noteAt('Work/old.md');
 		if (theirs === undefined) throw new Error('no note');
-		store.put({ ...theirs, content: 'my edit\n', dirty: true });
-		store.put({ id: 'squatter', path: 'Work/a.md', content: 'squatting\n', dirty: true });
+		world.store.put({ ...theirs, content: 'my edit\n', dirty: true });
+		world.store.put({ id: 'squatter', path: 'Work/a.md', content: 'squatting\n', dirty: true });
 
-		const moved = await provider.move(entry, 'Work/a.md');
-		const edited = await provider.write('Work/a.md', 'theirs, edited\n', {
+		const moved = await world.provider.move(entry, 'Work/a.md');
+		const edited = await world.provider.write('Work/a.md', 'theirs, edited\n', {
 			expectedVersion: moved.version,
 		});
 
 		await pullNow([edited]);
 
 		expect(noteAt('Work/a.md')?.content).toBe('theirs, edited\n');
-		const aside = store.notes().filter((note) => note.path.includes('conflict'));
+		const aside = world.store.notes().filter((note) => note.path.includes('conflict'));
 		expect(aside).toHaveLength(2);
 		expect(new Set(aside.map((note) => note.path)).size).toBe(2);
-		expect(store.notes().map((note) => note.content)).toContain('squatting\n');
-		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+		expect(world.store.notes().map((note) => note.content)).toContain('squatting\n');
+		expect(world.store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 
 	it('does not move a note an earlier folder delete already took', async () => {
@@ -4374,18 +4434,18 @@ describe('a note of ours where a remote one lands', () => {
 		// by the time the entry lands there is nothing to move aside. Asking the
 		// store to move it anyway fails the batch — for ever, since the cursor
 		// moves only with it.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const loose = await remoteFile('loose.md', 'theirs\n');
-		await engine.pull();
-		store.put({ id: 'goner', path: 'Work/a.md', content: 'never pushed\n' });
+		await world.engine.pull();
+		world.store.put({ id: 'goner', path: 'Work/a.md', content: 'never pushed\n' });
 
 		// On the remote, `Work` was deleted and made again, and a file moved in.
 		// One batch can carry the deletion of the old one and the file in the new.
-		const old = remoteAt(provider, 'Work');
+		const old = remoteAt(world.provider, 'Work');
 		if (old === undefined) throw new Error('no folder');
-		await provider.delete(old);
-		await provider.createFolder('Work');
-		const moved = await provider.move(loose, 'Work/a.md');
+		await world.provider.delete(old);
+		await world.provider.createFolder('Work');
+		const moved = await world.provider.move(loose, 'Work/a.md');
 
 		const result = await pullNow([
 			{ path: 'Work', deleted: true, remoteId: old.remoteId },
@@ -4403,16 +4463,16 @@ describe('a note of ours where a remote one lands', () => {
 		// or the note is dragged off to a conflict name instead of its new home.
 		const mine = await remoteFile('a.md', 'mine\n');
 		const theirs = await remoteFile('b.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
-		const movedMine = await provider.move(mine, 'c.md');
-		const movedTheirs = await provider.move(theirs, 'a.md');
+		const movedMine = await world.provider.move(mine, 'c.md');
+		const movedTheirs = await world.provider.move(theirs, 'a.md');
 
 		await pullNow([movedMine, movedTheirs]);
 
 		expect(noteAt('c.md')?.id).toBe(before?.id);
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
-		expect(store.notes()).toHaveLength(2);
+		expect(world.store.notes()).toHaveLength(2);
 	});
 
 	it('does not move a note an earlier conflict already moved out', async () => {
@@ -4420,22 +4480,22 @@ describe('a note of ours where a remote one lands', () => {
 		// takes the remote's path, which is not the one it was at.
 		const mine = await remoteFile('a.md', 'mine\n');
 		const theirs = await remoteFile('b.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('a.md');
 		if (before === undefined) throw new Error('no note');
-		store.put({ ...before, content: 'my edit\n', dirty: true });
+		world.store.put({ ...before, content: 'my edit\n', dirty: true });
 
-		const movedMine = await provider.move(mine, 'c.md');
-		const editedMine = await provider.write('c.md', 'theirs, edited\n', {
+		const movedMine = await world.provider.move(mine, 'c.md');
+		const editedMine = await world.provider.write('c.md', 'theirs, edited\n', {
 			expectedVersion: movedMine.version,
 		});
-		const movedTheirs = await provider.move(theirs, 'a.md');
+		const movedTheirs = await world.provider.move(theirs, 'a.md');
 
 		await pullNow([editedMine, movedTheirs]);
 
 		expect(noteAt('c.md')?.id).toBe(before.id);
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
-		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+		expect(world.store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 
 	it('does not move a note a folder move already carried off', async () => {
@@ -4443,17 +4503,17 @@ describe('a note of ours where a remote one lands', () => {
 		// moved in. Our note went with the rename; the store still has it at the
 		// old path, so without following the folder move the occupant check
 		// drags it into the new `Work` under a conflict name.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'mine\n');
 		const loose = await remoteFile('loose.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('Work/a.md');
-		const old = remoteAt(provider, 'Work');
+		const old = remoteAt(world.provider, 'Work');
 		if (old === undefined) throw new Error('no folder');
 
-		const renamed = await provider.move(old, 'Archive');
-		const fresh = await provider.createFolder('Work');
-		const moved = await provider.move(loose, 'Work/a.md');
+		const renamed = await world.provider.move(old, 'Archive');
+		const fresh = await world.provider.createFolder('Work');
+		const moved = await world.provider.move(loose, 'Work/a.md');
 
 		await pullNow([renamed, fresh, moved]);
 
@@ -4472,40 +4532,40 @@ describe('a note of ours where a remote one lands', () => {
 		// stranded with it.
 		const ours = await remoteFile('Untitled.md', 'mine\n');
 		const theirs = await remoteFile('other.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'mine',
 			path: 'Groceries.md',
 			content: 'mine\n',
 			...boundTo(ours),
 		});
-		store.put({
+		world.store.put({
 			id: 'theirs',
 			path: 'other.md',
 			content: 'theirs\n',
 			...boundTo(theirs),
 		});
-		store.queue({
+		world.store.queue({
 			op: 'move',
 			noteId: 'mine',
 			path: 'Untitled.md',
 			targetPath: 'Groceries.md',
 		});
-		const moved = await provider.move(theirs, 'Groceries.md');
+		const moved = await world.provider.move(theirs, 'Groceries.md');
 
 		// Our own file among them: this is a scan, and a scan says everything
 		// that exists, so a list that leaves `Untitled.md` out is a list saying
 		// it is gone — and the note is then displaced *and* let go of, which is
 		// right for that list and not what this test is about.
 		await pullNow([ours, moved]);
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		// And the rename followed the note: the remote file it names is where
 		// the note now is, rather than still sitting under its first name.
-		const displaced = store.notes().find((note) => note.id === 'mine');
+		const displaced = world.store.notes().find((note) => note.id === 'mine');
 		expect(displaced?.path).toContain('conflict');
-		expect(provider.snapshot().map((node) => node.path)).toContain(displaced?.path);
+		expect(world.provider.snapshot().map((node) => node.path)).toContain(displaced?.path);
 	});
 
 	it('displaces a note a folder move in the same batch brings down on the path', async () => {
@@ -4513,20 +4573,20 @@ describe('a note of ours where a remote one lands', () => {
 		// Our `Old/b.md` is carried into `New` by the rename, so by the time the
 		// file lands there is something at that path — and the store, asked
 		// before any of it, says the path is free.
-		await provider.createFolder('Old');
-		await engine.pull();
-		store.put({ id: 'mine', path: 'Old/b.md', content: 'my edit\n', dirty: true });
-		const old = remoteAt(provider, 'Old');
+		await world.provider.createFolder('Old');
+		await world.engine.pull();
+		world.store.put({ id: 'mine', path: 'Old/b.md', content: 'my edit\n', dirty: true });
+		const old = remoteAt(world.provider, 'Old');
 		if (old === undefined) throw new Error('no folder');
 
-		const renamed = await provider.move(old, 'New');
+		const renamed = await world.provider.move(old, 'New');
 		const landing = await remoteFile('New/b.md', 'theirs\n');
 
 		const result = await pullNow([renamed, landing]);
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('New/b.md')?.content).toBe('theirs\n');
-		const ours = store.notes().find((note) => note.id === 'mine');
+		const ours = world.store.notes().find((note) => note.id === 'mine');
 		expect(ours?.content).toBe('my edit\n');
 		expect(ours?.path).toContain('conflict');
 	});
@@ -4536,33 +4596,33 @@ describe('a note of ours where a remote one lands', () => {
 		// conflict copy — which is exactly the name the copy about to be made
 		// wants. Nothing else in the batch mentions it: a rename re-lists no
 		// children, so the folder entry is the only thing saying where it went.
-		await provider.createFolder('Old');
+		await world.provider.createFolder('Old');
 		const file = await remoteFile('Old/b.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('Old/b.md');
 		if (before === undefined) throw new Error('no note');
-		store.put({ ...before, content: 'my edit\n', dirty: true });
-		store.put({
+		world.store.put({ ...before, content: 'my edit\n', dirty: true });
+		world.store.put({
 			id: 'older',
 			path: conflictPath('Old/b.md', AT, []),
 			content: 'an earlier copy\n',
 			dirty: true,
 		});
-		const old = remoteAt(provider, 'Old');
+		const old = remoteAt(world.provider, 'Old');
 		if (old === undefined) throw new Error('no folder');
 
-		const renamed = await provider.move(old, 'New');
-		const edited = await provider.write('New/b.md', 'theirs, edited\n', {
+		const renamed = await world.provider.move(old, 'New');
+		const edited = await world.provider.write('New/b.md', 'theirs, edited\n', {
 			expectedVersion: file.version,
 		});
 
 		await pullNow([renamed, edited]);
 
 		expect(noteAt('New/b.md')?.content).toBe('theirs, edited\n');
-		expect(store.notes().find((note) => note.id === 'older')?.content).toBe(
+		expect(world.store.notes().find((note) => note.id === 'older')?.content).toBe(
 			'an earlier copy\n'
 		);
-		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+		expect(world.store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 
 	it('gives a displacement a name nothing else is using', async () => {
@@ -4570,23 +4630,25 @@ describe('a note of ours where a remote one lands', () => {
 		// and there may already be one of those sitting beside it from an
 		// earlier sync. Taking it again is two notes at one path.
 		const entry = await remoteFile('other.md', 'theirs\n');
-		await engine.pull();
-		store.put({ id: 'mine', path: 'b.md', content: 'never pushed\n', dirty: true });
-		store.put({
+		await world.engine.pull();
+		world.store.put({ id: 'mine', path: 'b.md', content: 'never pushed\n', dirty: true });
+		world.store.put({
 			id: 'older',
 			path: conflictPath('b.md', AT, []),
 			content: 'an earlier copy\n',
 			dirty: true,
 		});
-		await provider.move(entry, 'b.md');
+		await world.provider.move(entry, 'b.md');
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('b.md')?.content).toBe('theirs\n');
-		expect(store.notes().find((note) => note.id === 'older')?.content).toBe(
+		expect(world.store.notes().find((note) => note.id === 'older')?.content).toBe(
 			'an earlier copy\n'
 		);
-		expect(store.notes().find((note) => note.id === 'mine')?.content).toBe('never pushed\n');
+		expect(world.store.notes().find((note) => note.id === 'mine')?.content).toBe(
+			'never pushed\n'
+		);
 	});
 
 	it('gives two notes landing on one path two different names', async () => {
@@ -4594,27 +4656,31 @@ describe('a note of ours where a remote one lands', () => {
 		// more than one can be in the way of a single remote file. Named
 		// without each other they both take the same conflict name, and the
 		// sidebar shows one row twice.
-		const folder = await provider.createFolder('Old');
-		store.putFolder({ path: 'Old', remoteId: folder.remoteId });
+		const folder = await world.provider.createFolder('Old');
+		world.store.putFolder({ path: 'Old', remoteId: folder.remoteId });
 		const file = await remoteFile('other.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'theirs',
 			path: 'other.md',
 			content: 'theirs\n',
 			...boundTo(file),
 		});
-		store.put({ id: 'here', path: 'New/b.md', content: 'already here\n', dirty: true });
-		store.put({ id: 'carried', path: 'Old/b.md', content: 'carried in\n', dirty: true });
+		world.store.put({ id: 'here', path: 'New/b.md', content: 'already here\n', dirty: true });
+		world.store.put({ id: 'carried', path: 'Old/b.md', content: 'carried in\n', dirty: true });
 
-		const renamed = await provider.move(folder, 'New');
-		const landing = await provider.move(file, 'New/b.md');
+		const renamed = await world.provider.move(folder, 'New');
+		const landing = await world.provider.move(file, 'New/b.md');
 
 		const result = await pullNow([renamed, landing]);
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('New/b.md')?.content).toBe('theirs\n');
-		expect(store.notes().find((note) => note.id === 'here')?.content).toBe('already here\n');
-		expect(store.notes().find((note) => note.id === 'carried')?.content).toBe('carried in\n');
+		expect(world.store.notes().find((note) => note.id === 'here')?.content).toBe(
+			'already here\n'
+		);
+		expect(world.store.notes().find((note) => note.id === 'carried')?.content).toBe(
+			'carried in\n'
+		);
 	});
 
 	it('does not move a note a conflict and a folder delete already took', async () => {
@@ -4622,14 +4688,14 @@ describe('a note of ours where a remote one lands', () => {
 		// clean — and a clean note goes with the folder delete that follows
 		// rather than surviving it detached. Reading the dirty flag as it was
 		// before the batch has the engine move a note the store has dropped.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'theirs\n');
 		const other = await remoteFile('Work/z.md', 'other\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('Work/a.md');
 		if (before === undefined) throw new Error('no note');
-		store.put({ ...before, content: 'my edit\n', dirty: true });
-		const edited = await provider.write('Work/a.md', 'theirs, edited\n', {
+		world.store.put({ ...before, content: 'my edit\n', dirty: true });
+		const edited = await world.provider.write('Work/a.md', 'theirs, edited\n', {
 			expectedVersion: file.version,
 		});
 
@@ -4648,9 +4714,9 @@ describe('a note of ours where a remote one lands', () => {
 		// ask the store to move a note that is not there — and a batch the store
 		// rejects is retried for ever, because the cursor moves only with it.
 		const entry = await remoteFile('b.md', 'theirs\n');
-		await engine.pull();
-		store.put({ id: 'mine', path: 'a.md', content: 'never pushed\n' });
-		const moved = await provider.move(entry, 'a.md');
+		await world.engine.pull();
+		world.store.put({ id: 'mine', path: 'a.md', content: 'never pushed\n' });
+		const moved = await world.provider.move(entry, 'a.md');
 
 		const result = await pullNow([{ path: 'a.md', deleted: true }, moved]);
 
@@ -4666,28 +4732,28 @@ describe('a push interrupted after the write landed', () => {
 		// remote has moved past. The retry conflicts — over bytes identical to
 		// the ones it just sent. Pull has this rule; push needs it too.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 
 		// The interruption: the write lands, the store never hears about it.
-		const landed = await provider.write('a.md', 'edited\n', {
+		const landed = await world.provider.write('a.md', 'edited\n', {
 			expectedVersion: entry.version,
 		});
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(result.conflicts).toEqual([]);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.remoteVersion).toBe(landed.version);
 		expect(noteAt('a.md')?.dirty).toBe(false);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('records the failure when the resolution itself cannot finish', async () => {
@@ -4695,7 +4761,7 @@ describe('a push interrupted after the write landed', () => {
 		// Left uncounted, the op's `attempts` never moves and it can never reach
 		// `blocked` however long it has been failing.
 		const entry = await remoteFile('a.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
@@ -4703,14 +4769,14 @@ describe('a push interrupted after the write landed', () => {
 			remoteVersion: 'stale',
 			dirty: true,
 		});
-		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
+		const op = world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()[0]?.attempts).toBe(1);
-		expect(store.lastError(op.seq)).toBeDefined();
+		expect(world.store.ops()[0]?.attempts).toBe(1);
+		expect(world.store.lastError(op.seq)).toBeDefined();
 	});
 });
 
@@ -4728,23 +4794,23 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		// where the user can see what happened to it.
 		const mine = await remoteFile('a.md', 'mine\n');
 		await remoteFile('b.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(mine),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		// Its own file still, not the one that was in the way.
-		expect(store.notes()[0]?.remoteId).toBe(mine.remoteId);
-		expect(store.notes()[0]?.path).toBe(conflictPath('b.md', AT));
-		expect(provider.contentAt('b.md')).toBe('theirs\n');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.notes()[0]?.remoteId).toBe(mine.remoteId);
+		expect(world.store.notes()[0]?.path).toBe(conflictPath('b.md', AT));
+		expect(world.provider.contentAt('b.md')).toBe('theirs\n');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('moves from where the note is now, not where the op was queued', async () => {
@@ -4753,21 +4819,21 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		// identifies the file, and the whole address where it does not — WebDAV,
 		// where `remoteId` *is* the path (deferred).
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'moved-by-pull.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
 		const seen: string[] = [];
 		const byPath = engineWith({
 			provider: {
-				...provider,
+				...world.provider,
 				move: (ref, target) => {
 					seen.push(ref.path);
-					return provider.move({ remoteId: ref.remoteId, path: ref.path }, target);
+					return world.provider.move({ remoteId: ref.remoteId, path: ref.path }, target);
 				},
 			},
 		});
@@ -4781,21 +4847,21 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		// it resolves by `remoteId` first, so only a provider addressed by path
 		// can see the difference.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'moved-by-pull.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
 		const seen: string[] = [];
 		const byPath = engineWith({
 			provider: {
-				...provider,
+				...world.provider,
 				delete: (ref) => {
 					seen.push(ref.path);
-					return provider.delete(ref);
+					return world.provider.delete(ref);
 				},
 			},
 		});
@@ -4811,24 +4877,24 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		// nothing said anywhere; it fails, and stops the push once it has
 		// failed too often, with the row still queued.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({ id: 'n1', path: 'b.md', content: 'one\n', ...boundTo(entry) });
-		const op = store.queue({ op: 'malformed', path: 'a.md', problem: 'no targetPath' });
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.put({ id: 'n1', path: 'b.md', content: 'one\n', ...boundTo(entry) });
+		const op = world.store.queue({ op: 'malformed', path: 'a.md', problem: 'no targetPath' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()).toHaveLength(2);
-		expect(store.ops()[0]?.attempts).toBe(1);
-		expect(store.lastError(op.seq)).toContain('no targetPath');
+		expect(world.store.ops()).toHaveLength(2);
+		expect(world.store.ops()[0]?.attempts).toBe(1);
+		expect(world.store.lastError(op.seq)).toContain('no targetPath');
 
 		// At the limit, it stops the push, and is still there.
-		store.ops().forEach((each) => {
-			store.unqueue(each.seq);
+		world.store.ops().forEach((each) => {
+			world.store.unqueue(each.seq);
 		});
-		store.queue({ op: 'malformed', path: 'a.md', problem: 'no targetPath', attempts: 5 });
-		expect((await engine.push()).status).toBe('blocked');
-		expect(store.ops().map((each) => each.op)).toEqual(['malformed']);
+		world.store.queue({ op: 'malformed', path: 'a.md', problem: 'no targetPath', attempts: 5 });
+		expect((await world.engine.push()).status).toBe('blocked');
+		expect(world.store.ops().map((each) => each.op)).toEqual(['malformed']);
 	});
 
 	it('stops rather than discarding a mkdir that found a file in the way', async () => {
@@ -4836,15 +4902,15 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		// Completing it would tell the queue the folder exists, and the write
 		// behind it would go to a path that is not there.
 		await remoteFile('Work', 'not a folder\n');
-		store.put({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'mkdir', path: 'Work' });
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
+		world.store.put({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops()).toHaveLength(2);
-		expect(provider.contentAt('Work/a.md')).toBeUndefined();
+		expect(world.store.ops()).toHaveLength(2);
+		expect(world.provider.contentAt('Work/a.md')).toBeUndefined();
 	});
 });
 
@@ -4856,7 +4922,7 @@ describe('a write whose file is not where it was', () => {
 		// the user with two notes where they had one, and the next pull would
 		// import the stray as a third.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
@@ -4864,30 +4930,30 @@ describe('a write whose file is not where it was', () => {
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.move(entry, 'renamed.md');
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.move(entry, 'renamed.md');
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
 		expect(
-			provider.snapshot().filter((node) => node.kind === 'file' && !isHidden(node.path))
+			world.provider.snapshot().filter((node) => node.kind === 'file' && !isHidden(node.path))
 		).toHaveLength(1);
-		expect(store.ops()).toHaveLength(1);
+		expect(world.store.ops()).toHaveLength(1);
 
 		// And the next sync finds out where it went. The fake changes a file's
 		// version on a move, as OneDrive's eTag does and Dropbox's rev does not,
 		// but the file still holds the bytes this note last synced — so it was
 		// renamed, not edited, and the note follows it with its edit, which then
 		// goes out to the new name. No copy (docs/ARCHITECTURE.md §7).
-		const synced = await engine.sync();
+		const synced = await world.engine.sync();
 
 		expect(synced.status).toBe('ok');
 		expect(synced.conflicts).toEqual([]);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('renamed.md')).toMatchObject({ id: 'n1', content: 'edited\n', dirty: false });
-		expect(provider.contentAt('renamed.md')).toBe('edited\n');
+		expect(world.provider.contentAt('renamed.md')).toBe('edited\n');
 	});
 
 	it('does the rename itself when the move is queued behind it', async () => {
@@ -4900,7 +4966,7 @@ describe('a write whose file is not where it was', () => {
 		// would fix it. The user's edit would sit here for ever, with every op
 		// behind it.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
@@ -4908,15 +4974,15 @@ describe('a write whose file is not where it was', () => {
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
-		expect(provider.contentAt('b.md')).toBe('edited\n');
-		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(world.store.ops()).toEqual([]);
+		expect(world.provider.contentAt('b.md')).toBe('edited\n');
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
 		expect(noteAt('b.md')?.dirty).toBe(false);
 	});
 
@@ -4924,7 +4990,7 @@ describe('a write whose file is not where it was', () => {
 		// Not "has changed on the remote": nobody changed it, and an op failed
 		// under that name spends an attempt on a throttle.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
@@ -4932,26 +4998,26 @@ describe('a write whose file is not where it was', () => {
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 		// The first read finds the file by its id; the second is the one after
 		// the move.
-		provider.setFault((call) =>
+		world.provider.setFault((call) =>
 			call.op === 'read' && call.attempt === 2
 				? new RateLimitError('slow down', 3000)
 				: undefined
 		);
 
-		const limited = await engine.push();
+		const limited = await world.engine.push();
 
 		expect(limited.retryAfterMs).toBe(3000);
-		expect(store.ops()[0]?.attempts ?? 0).toBe(0);
+		expect(world.store.ops()[0]?.attempts ?? 0).toBe(0);
 
 		// And then the edit goes up over the file it was always for, as itself.
-		provider.setFault(undefined);
-		expect((await engine.push()).conflicts).toEqual([]);
-		expect(provider.contentAt('b.md')).toBe('edited\n');
-		expect(store.ops()).toEqual([]);
+		world.provider.setFault(undefined);
+		expect((await world.engine.push()).conflicts).toEqual([]);
+		expect(world.provider.contentAt('b.md')).toBe('edited\n');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('keeps both where there is no record of what the note synced, rather than guess', async () => {
@@ -4960,24 +5026,24 @@ describe('a write whose file is not where it was', () => {
 		// the remote keeps the path and the edit goes beside it. A copy nobody
 		// needed, where the other guess is an edit nobody can get back.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		await engine.push();
-		const result = await engine.push();
+		await world.engine.push();
+		const result = await world.engine.push();
 
 		expect(result.conflicts).toHaveLength(1);
-		expect(provider.contentAt('b.md')).toBe('one\n');
+		expect(world.provider.contentAt('b.md')).toBe('one\n');
 		// The copy carries a frontmatter id of its own, and the words.
-		expect(store.notes().some((note) => note.content.endsWith('edited\n'))).toBe(true);
-		expect(store.ops().filter((op) => op.op === 'move')).toEqual([]);
+		expect(world.store.notes().some((note) => note.content.endsWith('edited\n'))).toBe(true);
+		expect(world.store.ops().filter((op) => op.op === 'move')).toEqual([]);
 	});
 
 	it('makes the notebook the note was moved into, when the remote has not got it yet', async () => {
@@ -4987,7 +5053,7 @@ describe('a write whose file is not where it was', () => {
 		// same not-found as a file that is not there. `runMove` asks which; this
 		// has to as well, or the write fails the same way every time.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'Work/Inner/a.md',
 			content: 'edited\n',
@@ -4995,17 +5061,22 @@ describe('a write whose file is not where it was', () => {
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/Inner/a.md' });
-		store.queue({ op: 'mkdir', path: 'Work' });
-		store.queue({ op: 'mkdir', path: 'Work/Inner' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/Inner/a.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/Inner/a.md' });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
+		world.store.queue({ op: 'mkdir', path: 'Work/Inner' });
+		world.store.queue({
+			op: 'move',
+			noteId: 'n1',
+			path: 'a.md',
+			targetPath: 'Work/Inner/a.md',
+		});
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
-		expect(provider.contentAt('Work/Inner/a.md')).toBe('edited\n');
-		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(world.store.ops()).toEqual([]);
+		expect(world.provider.contentAt('Work/Inner/a.md')).toBe('edited\n');
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
 	});
 
 	it('does not move a file changed on the remote since the pull, to write over it', async () => {
@@ -5013,26 +5084,26 @@ describe('a write whose file is not where it was', () => {
 		// hands back rather than the one the note was in step with, and the
 		// other device's edit would be gone with no conflict anywhere.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		expect((await engine.push()).status).toBe('retry');
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
-		expect(provider.contentAt('b.md')).toBeUndefined();
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(world.provider.contentAt('a.md')).toBe('theirs\n');
+		expect(world.provider.contentAt('b.md')).toBeUndefined();
 
 		// And the next pull answers it as the conflict it is: both kept.
-		await engine.sync();
+		await world.engine.sync();
 		const texts = [
-			...store.notes().map((note) => note.content),
-			...provider.snapshot().map((node) => provider.contentAt(node.path)),
+			...world.store.notes().map((note) => note.content),
+			...world.provider.snapshot().map((node) => world.provider.contentAt(node.path)),
 		];
 		expect(texts).toContain('theirs\n');
 		expect(texts.some((text) => text?.includes('edited'))).toBe(true);
@@ -5041,28 +5112,28 @@ describe('a write whose file is not where it was', () => {
 	it('moves a note aside from a name taken while its rename was being followed', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
 		const other = await remoteFile('other.md', 'other\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
-		provider.setFault((call) =>
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.provider.setFault((call) =>
 			call.op === 'move' ? new ConflictError({ ...other, path: 'b.md' }) : undefined
 		);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
 		expect(result.conflicts).toEqual([]);
-		const mine = store.notes().find((note) => note.id === 'n1');
+		const mine = world.store.notes().find((note) => note.id === 'n1');
 		expect(mine).toMatchObject({ content: 'edited\n', remoteId: entry.remoteId });
 		expect(mine?.path).toContain('conflict');
-		expect(store.ops().find((op) => op.op === 'move')?.targetPath).toBe(mine?.path);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.ops().find((op) => op.op === 'move')?.targetPath).toBe(mine?.path);
+		expect(world.store.notes()).toHaveLength(1);
 	});
 
 	it('moves a note aside from a file it does not hold, at the name it was renamed to', async () => {
@@ -5070,7 +5141,7 @@ describe('a write whose file is not where it was', () => {
 		// there, and it is not this note's: its id says so. A conflict would give
 		// this note that file's contents and id, and orphan its own file.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
@@ -5078,20 +5149,20 @@ describe('a write whose file is not where it was', () => {
 			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 		const theirs = await remoteFile('b.md', 'other\n');
 
-		await engine.push();
-		await engine.sync();
+		await world.engine.push();
+		await world.engine.sync();
 
-		const mine = store.notes().find((note) => note.id === 'n1');
+		const mine = world.store.notes().find((note) => note.id === 'n1');
 		expect(mine).toMatchObject({ content: 'edited\n', remoteId: entry.remoteId, dirty: false });
 		expect(mine?.path).toContain('conflict');
-		expect(provider.contentAt(mine?.path ?? '')).toBe('edited\n');
-		expect(provider.contentAt('b.md')).toBe('other\n');
-		expect(provider.contentAt('a.md')).toBeUndefined();
-		expect(store.notes().find((note) => note.remoteId === theirs.remoteId)?.content).toBe(
+		expect(world.provider.contentAt(mine?.path ?? '')).toBe('edited\n');
+		expect(world.provider.contentAt('b.md')).toBe('other\n');
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
+		expect(world.store.notes().find((note) => note.remoteId === theirs.remoteId)?.content).toBe(
 			'other\n'
 		);
 	});
@@ -5108,31 +5179,31 @@ describe('a write whose file is not where it was', () => {
 		await remoteFile('b.md', 'theirs\n');
 		const theirCopy = conflictPath('b.md', AT);
 		await remoteFile(theirCopy, 'somebody else\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
 			...boundTo(mine),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		await engine.push();
-		await engine.push();
+		await world.engine.push();
+		await world.engine.push();
 
 		// One suffix, with the counter `conflictName` adds for a name taken in
 		// the same minute \u2014 not `(conflict \u2026) (conflict \u2026)`.
-		const note = store.notes().find((each) => each.id === 'n1');
+		const note = world.store.notes().find((each) => each.id === 'n1');
 		expect(note?.path).toBe(conflictPath('b.md', AT, [basename(theirCopy)]));
 		// Still bound to its own file, and nothing of ours written or moved
 		// onto either of theirs.
 		expect(note?.remoteId).toBe(mine.remoteId);
-		expect(provider.contentAt(theirCopy)).toBe('somebody else\n');
-		expect(provider.contentAt('b.md')).toBe('theirs\n');
+		expect(world.provider.contentAt(theirCopy)).toBe('somebody else\n');
+		expect(world.provider.contentAt('b.md')).toBe('theirs\n');
 		// And the op was not stepped aside a second time: it is still aimed at
 		// the one name the note was given.
-		expect(store.ops().map((op) => op.path)).not.toContain(
+		expect(world.store.ops().map((op) => op.path)).not.toContain(
 			conflictPath(conflictPath('b.md', AT), AT)
 		);
 	});
@@ -5149,24 +5220,26 @@ describe('a write whose file is not where it was', () => {
 			(names) => [...names, basename(conflictPath('b.md', AT, names))],
 			[]
 		);
-		taken.forEach((name, i) => store.put({ id: `copy${i}`, path: name, content: 'copy\n' }));
-		store.put({
+		taken.forEach((name, i) =>
+			world.store.put({ id: `copy${i}`, path: name, content: 'copy\n' })
+		);
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
 			...boundTo(mine),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		// One attempt spent, on the op that met the name, and nothing moved.
 		expect(result.status).toBe('retry');
-		expect(store.ops().map((op) => op.attempts)).toEqual([1, 0]);
-		expect(store.notes().find((each) => each.id === 'n1')?.path).toBe('b.md');
-		expect(store.notes().filter((each) => each.path === taken.at(-1))).toHaveLength(1);
+		expect(world.store.ops().map((op) => op.attempts)).toEqual([1, 0]);
+		expect(world.store.notes().find((each) => each.id === 'n1')?.path).toBe('b.md');
+		expect(world.store.notes().filter((each) => each.path === taken.at(-1))).toHaveLength(1);
 	});
 
 	it('does the same with no rename queued to carry the file after it', async () => {
@@ -5179,23 +5252,23 @@ describe('a write whose file is not where it was', () => {
 		await remoteFile('b.md', 'theirs\n');
 		const theirCopy = conflictPath('b.md', AT);
 		await remoteFile(theirCopy, 'somebody else\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'b.md',
 			content: 'edited\n',
 			...boundTo(mine),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
 
-		await engine.push();
-		await engine.push();
+		await world.engine.push();
+		await world.engine.push();
 
-		const note = store.notes().find((each) => each.id === 'n1');
+		const note = world.store.notes().find((each) => each.id === 'n1');
 		expect(note?.path).toBe(conflictPath('b.md', AT, [basename(theirCopy)]));
 		expect(note?.remoteId).toBe(mine.remoteId);
 		expect(note?.content).toBe('edited\n');
-		expect(provider.contentAt(theirCopy)).toBe('somebody else\n');
+		expect(world.provider.contentAt(theirCopy)).toBe('somebody else\n');
 	});
 
 	it('answers a file replaced at the note\u2019s own path with the conflict rule, not by moving aside', async () => {
@@ -5203,79 +5276,79 @@ describe('a write whose file is not where it was', () => {
 		// Moved aside, this note would keep its frontmatter id beside a file that
 		// claims the same one. The conflict copy takes a fresh id instead.
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.delete(entry);
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.delete(entry);
 		await remoteFile('a.md', 'theirs\n');
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.conflicts).toHaveLength(1);
-		expect(store.notes().find((note) => note.id === 'n1')?.content).toBe('theirs\n');
-		expect(store.notes().find((note) => note.id !== 'n1')?.content).toContain('edited');
+		expect(world.store.notes().find((note) => note.id === 'n1')?.content).toBe('theirs\n');
+		expect(world.store.notes().find((note) => note.id !== 'n1')?.content).toContain('edited');
 	});
 
 	it('is one note when the version survives the move, as Dropbox rev does', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		const moved = await provider.move(entry, 'renamed.md');
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		const moved = await world.provider.move(entry, 'renamed.md');
 
 		// The one thing the fake models differently, fed in as Dropbox sends it.
 		const stable = engineWith({
-			provider: reporting(provider, [{ ...moved, version: entry.version }]),
+			provider: reporting(world.provider, [{ ...moved, version: entry.version }]),
 		});
 		await stable.pull();
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('renamed.md')?.content).toBe('edited\n');
 		expect(noteAt('renamed.md')?.dirty).toBe(true);
 	});
 });
 
 describe('the bytes a note last synced', () => {
-	const hashOf = (id: string) => store.notes().find((note) => note.id === id)?.syncedHash;
+	const hashOf = (id: string) => world.store.notes().find((note) => note.id === id)?.syncedHash;
 
 	it('are recorded when a pull brings a note in', async () => {
 		await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		expect(noteAt('a.md')?.syncedHash).toBe(await contentHash('one\n'));
 	});
 
 	it('are recorded when a push sends a note out', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const id = noteAt('a.md')?.id ?? '';
-		store.put({ ...noteAt('a.md')!, content: 'two\n', dirty: true });
-		store.queue({ op: 'write', noteId: id, path: 'a.md' });
+		world.store.put({ ...noteAt('a.md')!, content: 'two\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: id, path: 'a.md' });
 
-		await engine.push();
+		await world.engine.push();
 
-		expect(provider.contentAt('a.md')).toBe('two\n');
+		expect(world.provider.contentAt('a.md')).toBe('two\n');
 		expect(entry.version).not.toBe(noteAt('a.md')?.remoteVersion);
 		expect(hashOf(id)).toBe(await contentHash('two\n'));
 	});
 
 	it('are the remote\u2019s once a conflict hands the note its bytes', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const id = noteAt('a.md')?.id ?? '';
-		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.conflicts).toHaveLength(1);
 		expect(hashOf(id)).toBe(await contentHash('theirs\n'));
@@ -5283,18 +5356,18 @@ describe('the bytes a note last synced', () => {
 
 	it('still make a remote edit a conflict, however the version moved', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
-		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
-		const edited = await provider.write('a.md', 'theirs\n', {
+		await world.engine.pull();
+		world.store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		const edited = await world.provider.write('a.md', 'theirs\n', {
 			expectedVersion: entry.version,
 		});
-		await provider.move(edited, 'b.md');
+		await world.provider.move(edited, 'b.md');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.conflicts).toHaveLength(1);
 		expect(noteAt('b.md')?.content).toBe('theirs\n');
-		expect(store.notes().find((note) => note.content.includes('mine'))?.path).toContain(
+		expect(world.store.notes().find((note) => note.content.includes('mine'))?.path).toContain(
 			'conflict'
 		);
 	});
@@ -5304,37 +5377,39 @@ describe('the bytes a note last synced', () => {
 		// had, or a provider rewriting metadata. Same path, same bytes, new
 		// version: the local edit goes out against the version that is there.
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const id = noteAt('a.md')?.id ?? '';
-		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: id, path: 'a.md' });
-		const again = await provider.write('a.md', 'one\n', { expectedVersion: entry.version });
+		world.store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: id, path: 'a.md' });
+		const again = await world.provider.write('a.md', 'one\n', {
+			expectedVersion: entry.version,
+		});
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.conflicts).toEqual([]);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')?.remoteVersion).not.toBe(again.version);
-		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
 		expect(noteAt('a.md')?.dirty).toBe(false);
 	});
 
 	it('follow a remote rename that happened while a push was still queued', async () => {
-		await provider.createFolder('Work');
-		await provider.createFolder('Archive');
+		await world.provider.createFolder('Work');
+		await world.provider.createFolder('Archive');
 		const entry = await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const id = noteAt('Work/a.md')?.id ?? '';
-		store.put({ ...noteAt('Work/a.md')!, content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: id, path: 'Work/a.md' });
-		await provider.move(entry, 'Archive/b.md');
+		world.store.put({ ...noteAt('Work/a.md')!, content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: id, path: 'Work/a.md' });
+		await world.provider.move(entry, 'Archive/b.md');
 
-		const pulled = await engine.pull();
+		const pulled = await world.engine.pull();
 
 		expect(pulled.conflicts).toEqual([]);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('Archive/b.md')).toMatchObject({ id, content: 'mine\n', dirty: true });
-		expect(store.ops()).toMatchObject([{ op: 'write', path: 'Archive/b.md' }]);
+		expect(world.store.ops()).toMatchObject([{ op: 'write', path: 'Archive/b.md' }]);
 	});
 
 	it('are not taken from a read that answers with an older version', async () => {
@@ -5343,22 +5418,22 @@ describe('the bytes a note last synced', () => {
 		// match the hash, but they are not the version being adopted — taking
 		// the shortcut would push the local edit over an edit nobody has seen.
 		const entry = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const id = noteAt('a.md')?.id ?? '';
-		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: id, path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: id, path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 		const stale: StorageProvider = {
-			...provider,
+			...world.provider,
 			read: () => Promise.resolve({ content: 'one\n', version: entry.version }),
 		};
 
 		const pulled = await engineWith({ provider: stale }).pull();
-		await engine.sync();
+		await world.engine.sync();
 
 		expect(pulled.conflicts).toHaveLength(1);
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
-		expect(store.notes().some((note) => note.content.includes('mine'))).toBe(true);
+		expect(world.provider.contentAt('a.md')).toBe('theirs\n');
+		expect(world.store.notes().some((note) => note.content.includes('mine'))).toBe(true);
 	});
 
 	it('are kept when a note is let go of and bound again in one batch', async () => {
@@ -5366,19 +5441,19 @@ describe('the bytes a note last synced', () => {
 		// provider whose version survives a move: the deletion detaches the
 		// note, which drops its hash, and the move binds it again without a
 		// read. The bytes it synced have not changed, so neither has the hash.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
-		const folder = remoteAt(provider, 'Work');
+		await world.engine.pull();
+		const folder = remoteAt(world.provider, 'Work');
 		const note = noteAt('Work/a.md')!;
-		store.put({ ...note, content: 'mine\n', dirty: true });
+		world.store.put({ ...note, content: 'mine\n', dirty: true });
 		const entries: ChangeEntry[] = [
 			{ path: 'Work', deleted: true, remoteId: folder?.remoteId ?? '' },
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			{ ...file, path: 'a.md' },
 		];
 
-		await engineWith({ provider: reporting(provider, entries) }).pull();
+		await engineWith({ provider: reporting(world.provider, entries) }).pull();
 
 		expect(noteAt('a.md')).toMatchObject({ id: note.id, remoteId: file.remoteId, dirty: true });
 		expect(hashOf(note.id)).toBe(await contentHash('one\n'));
@@ -5388,10 +5463,10 @@ describe('the bytes a note last synced', () => {
 describe('a dead cursor', () => {
 	it('re-scans instead of retrying it forever', async () => {
 		await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('one\n');
@@ -5401,9 +5476,9 @@ describe('a dead cursor', () => {
 		// A scan says what exists, never what was removed. Without reconciling,
 		// every note deleted while the cursor was dead comes back.
 		await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		store.put({
+		world.store.put({
 			id: 'n2',
 			path: 'ghost.md',
 			content: 'gone\n',
@@ -5411,7 +5486,7 @@ describe('a dead cursor', () => {
 			remoteVersion: 'v1',
 		});
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('a.md')).toBeDefined();
 		expect(noteAt('ghost.md')).toBeUndefined();
@@ -5426,17 +5501,17 @@ describe('a dead cursor', () => {
 		// conflict copy of a note that never conflicted.
 		const one = await remoteFile('a.md', 'one\n');
 		const two = await remoteFile('b.md', 'two\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('a.md')?.id;
-		await provider.delete(one);
-		await provider.move(two, 'a.md');
+		await world.provider.delete(one);
+		await world.provider.move(two, 'a.md');
 		killTheCursor();
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.notes().map((note) => note.path)).toEqual(['a.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md']);
 		expect(noteAt('a.md')?.remoteId).toBe(two.remoteId);
-		expect(store.notes().find((note) => note.id === mine)).toBeUndefined();
+		expect(world.store.notes().find((note) => note.id === mine)).toBeUndefined();
 	});
 
 	it('keeps one it moved aside whose own file the scan did find', async () => {
@@ -5444,15 +5519,15 @@ describe('a dead cursor', () => {
 		// two files swapping names is two displacements and no deletions.
 		const one = await remoteFile('a.md', 'one\n');
 		const two = await remoteFile('b.md', 'two\n');
-		await engine.pull();
-		await provider.move(one, 'c.md');
-		await provider.move(two, 'a.md');
+		await world.engine.pull();
+		await world.provider.move(one, 'c.md');
+		await world.provider.move(two, 'a.md');
 		killTheCursor();
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(
-			store
+			world.store
 				.notes()
 				.map((note) => note.path)
 				.sort()
@@ -5466,22 +5541,22 @@ describe('a dead cursor', () => {
 		// than deleted, and the edit goes back up under the name it moved to.
 		const one = await remoteFile('a.md', 'one\n');
 		const two = await remoteFile('b.md', 'two\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('a.md')?.id ?? '';
-		store.put({
+		world.store.put({
 			id: mine,
 			path: 'a.md',
 			content: 'edited\n',
 			...boundTo(one),
 			dirty: true,
 		});
-		await provider.delete(one);
-		await provider.move(two, 'a.md');
+		await world.provider.delete(one);
+		await world.provider.move(two, 'a.md');
 		killTheCursor();
 
-		await engine.pull();
+		await world.engine.pull();
 
-		const kept = store.notes().find((note) => note.id === mine);
+		const kept = world.store.notes().find((note) => note.id === mine);
 		expect(kept?.content).toBe('edited\n');
 		expect(kept?.path).toContain('conflict');
 		expect(kept?.remoteId).toBeUndefined();
@@ -5491,14 +5566,14 @@ describe('a dead cursor', () => {
 		// Folders too. A notebook deleted while the cursor was dead is never
 		// mentioned again by anything, so a scan that only reconciles notes
 		// leaves an empty row in the sidebar for ever.
-		await provider.createFolder('Work');
-		await engine.pull();
+		await world.provider.createFolder('Work');
+		await world.engine.pull();
 		killTheCursor();
-		store.putFolder({ path: 'Ghost', remoteId: 'no-such-id' });
+		world.store.putFolder({ path: 'Ghost', remoteId: 'no-such-id' });
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.folders().map((folder) => folder.path)).toEqual(['Work']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['Work']);
 	});
 
 	describe('when the provider says its own copy may have lost something', () => {
@@ -5509,16 +5584,16 @@ describe('a dead cursor', () => {
 		// on every device, quietly. https://learn.microsoft.com/en-us/graph/api/driveitem-delta
 		it('sends a clean note back up instead of deleting it', async () => {
 			await remoteFile('a.md', 'one\n');
-			await engine.pull();
+			await world.engine.pull();
 			const kept = noteAt('a.md');
 			expect(kept?.dirty).toBeFalsy();
 			killTheCursor(true);
 			// The remote lost it; the store still points at the file it had.
-			const file = remoteAt(provider, 'a.md');
+			const file = remoteAt(world.provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
-			await provider.delete(file);
+			await world.provider.delete(file);
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.status).toBe('ok');
 			// Still here, with its words, and owed a write.
@@ -5527,37 +5602,37 @@ describe('a dead cursor', () => {
 			expect(note?.content).toBe('one\n');
 			expect(note?.dirty).toBe(true);
 			expect(note?.remoteId).toBeUndefined();
-			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+			expect(world.store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
 				{ op: 'write', path: 'a.md' },
 			]);
 
 			// And the push puts it back where it was.
-			expect((await engine.push()).status).toBe('ok');
-			expect(provider.contentAt('a.md')).toBe('one\n');
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(world.provider.contentAt('a.md')).toBe('one\n');
 		});
 
 		it('makes a notebook the scan did not return again, keeping what is in it', async () => {
-			await provider.createFolder('Work');
+			await world.provider.createFolder('Work');
 			await remoteFile('Work/a.md', 'one\n');
-			await engine.pull();
+			await world.engine.pull();
 			killTheCursor(true);
-			const folder = remoteAt(provider, 'Work');
+			const folder = remoteAt(world.provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
-			await provider.delete(folder);
+			await world.provider.delete(folder);
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.status).toBe('ok');
 			// The notebook is not deleted, and it does not cascade: the note
 			// inside is sent back up, not taken away with the folder.
-			expect(store.folders().map((each) => each.path)).toEqual(['Work']);
+			expect(world.store.folders().map((each) => each.path)).toEqual(['Work']);
 			expect(noteAt('Work/a.md')?.content).toBe('one\n');
 			// In that order: the queue is ordered, and the write of a note in a
 			// notebook that is not there yet is only rescued by a round trip.
-			expect(store.ops().map((op) => op.op)).toEqual(['mkdir', 'write']);
+			expect(world.store.ops().map((op) => op.op)).toEqual(['mkdir', 'write']);
 
-			expect((await engine.push()).status).toBe('ok');
-			expect(provider.contentAt('Work/a.md')).toBe('one\n');
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(world.provider.contentAt('Work/a.md')).toBe('one\n');
 		});
 
 		it('makes every notebook again, not the outermost one only', async () => {
@@ -5566,28 +5641,28 @@ describe('a dead cursor', () => {
 			// here — each notebook needs its own `mkdir` — so naming only the
 			// outermost leaves every nested one local-only, holding notes whose
 			// writes then have to make their parents by accident.
-			await provider.createFolder('Work');
-			await provider.createFolder('Work/Sub');
+			await world.provider.createFolder('Work');
+			await world.provider.createFolder('Work/Sub');
 			await remoteFile('Work/Sub/a.md', 'one\n');
-			await engine.pull();
+			await world.engine.pull();
 			killTheCursor(true);
-			const folder = remoteAt(provider, 'Work');
+			const folder = remoteAt(world.provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
-			await provider.delete(folder);
+			await world.provider.delete(folder);
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.status).toBe('ok');
-			expect(store.folders().map((each) => each.path)).toEqual(['Work', 'Work/Sub']);
+			expect(world.store.folders().map((each) => each.path)).toEqual(['Work', 'Work/Sub']);
 			// Both, outermost first, and only then the note inside.
-			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+			expect(world.store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
 				{ op: 'mkdir', path: 'Work' },
 				{ op: 'mkdir', path: 'Work/Sub' },
 				{ op: 'write', path: 'Work/Sub/a.md' },
 			]);
 
-			expect((await engine.push()).status).toBe('ok');
-			expect(provider.contentAt('Work/Sub/a.md')).toBe('one\n');
+			expect((await world.engine.push()).status).toBe('ok');
+			expect(world.provider.contentAt('Work/Sub/a.md')).toBe('one\n');
 		});
 
 		it('makes the notebooks outermost first whatever order the store lists them in', async () => {
@@ -5595,23 +5670,24 @@ describe('a dead cursor', () => {
 			// parent-first only by accident — one by its primary key, one by
 			// insertion. So the test above cannot tell an engine that sorts
 			// from a fixture that happened to be sorted. This one can.
-			await provider.createFolder('Work');
-			await provider.createFolder('Work/Sub');
+			await world.provider.createFolder('Work');
+			await world.provider.createFolder('Work/Sub');
 			await remoteFile('Work/Sub/a.md', 'one\n');
 			const backwards = {
-				...store,
-				foldersWithRemote: async () => [...(await store.foldersWithRemote())].reverse(),
+				...world.store,
+				foldersWithRemote: async () =>
+					[...(await world.store.foldersWithRemote())].reverse(),
 			};
 			const engineOver = engineWith({ store: backwards });
 			await engineOver.pull();
 			killTheCursor(true);
-			const folder = remoteAt(provider, 'Work');
+			const folder = remoteAt(world.provider, 'Work');
 			if (folder === undefined) throw new Error('no folder');
-			await provider.delete(folder);
+			await world.provider.delete(folder);
 
 			expect((await engineOver.pull()).status).toBe('ok');
 
-			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+			expect(world.store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
 				{ op: 'mkdir', path: 'Work' },
 				{ op: 'mkdir', path: 'Work/Sub' },
 				{ op: 'write', path: 'Work/Sub/a.md' },
@@ -5626,19 +5702,19 @@ describe('a dead cursor', () => {
 			// second copy of it on a remote that still has the first.
 			const one = await remoteFile('a.md', 'one\n');
 			const two = await remoteFile('b.md', 'two\n');
-			await engine.pull();
+			await world.engine.pull();
 			const mine = noteAt('a.md')?.id;
 			killTheCursor(true);
-			await provider.delete(one);
-			await provider.move(two, 'a.md');
+			await world.provider.delete(one);
+			await world.provider.move(two, 'a.md');
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.status).toBe('ok');
-			const kept = store.notes().find((note) => note.id === mine);
+			const kept = world.store.notes().find((note) => note.id === mine);
 			expect(kept?.path).toContain('conflict');
 			expect(kept?.remoteId).toBe(one.remoteId);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it('still takes the remote\u2019s side for a file the scan did return', async () => {
@@ -5647,17 +5723,17 @@ describe('a dead cursor', () => {
 			// are what it last synced and the remote's are the newer ones; a
 			// dirty note takes the conflict rule instead, as it always does.
 			const file = await remoteFile('a.md', 'one\n');
-			await engine.pull();
+			await world.engine.pull();
 			killTheCursor(true);
-			await provider.write('a.md', 'theirs\n', { expectedVersion: file.version });
+			await world.provider.write('a.md', 'theirs\n', { expectedVersion: file.version });
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.status).toBe('ok');
 			expect(noteAt('a.md')?.content).toBe('theirs\n');
 			expect(noteAt('a.md')?.dirty).toBeFalsy();
 			expect(result.conflicts).toEqual([]);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 
 		it('does not ask a second time for a note that is already owed a write', async () => {
@@ -5666,9 +5742,9 @@ describe('a dead cursor', () => {
 			// for reupload as well would queue a second write of the same bytes
 			// to the same path: the first makes the file, the second is a blind
 			// write over a file the store has no version for.
-			await engine.pull();
+			await world.engine.pull();
 			killTheCursor(true);
-			store.put({
+			world.store.put({
 				id: 'n2',
 				path: 'mine.md',
 				content: 'unsent\n',
@@ -5678,13 +5754,13 @@ describe('a dead cursor', () => {
 			});
 			// As the real store has it: a dirty note is dirty because an edit
 			// queued the write.
-			store.queue({ op: 'write', noteId: 'n2', path: 'mine.md' });
+			world.store.queue({ op: 'write', noteId: 'n2', path: 'mine.md' });
 
-			await engine.pull();
+			await world.engine.pull();
 
 			expect(noteAt('mine.md')?.content).toBe('unsent\n');
 			expect(noteAt('mine.md')?.remoteId).toBeUndefined();
-			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+			expect(world.store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
 				{ op: 'write', path: 'mine.md' },
 			]);
 		});
@@ -5694,24 +5770,24 @@ describe('a dead cursor', () => {
 			// no further than the first page, every page after it scans as an
 			// ordinary reset and the notes the remote lost are deleted — the
 			// whole point of the flag, undone by paging alone.
-			provider = createFakeProvider({ pageSize: 1 });
-			await provider.ensureRoot();
-			store = createMemoryStore();
-			engine = engineWith();
-			await provider.write('a.md', 'one\n', {});
-			await provider.write('b.md', 'two\n', {});
-			await provider.write('c.md', 'three\n', {});
-			await engine.pull();
+			world.provider = createFakeProvider({ pageSize: 1 });
+			await world.provider.ensureRoot();
+			world.store = createMemoryStore();
+			world.engine = engineWith();
+			await world.provider.write('a.md', 'one\n', {});
+			await world.provider.write('b.md', 'two\n', {});
+			await world.provider.write('c.md', 'three\n', {});
+			await world.engine.pull();
 			killTheCursor(true);
-			const file = remoteAt(provider, 'a.md');
+			const file = remoteAt(world.provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
-			await provider.delete(file);
+			await world.provider.delete(file);
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.status).toBe('ok');
 			expect(noteAt('a.md')?.content).toBe('one\n');
-			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+			expect(world.store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
 				{ op: 'write', path: 'a.md' },
 			]);
 		});
@@ -5720,23 +5796,23 @@ describe('a dead cursor', () => {
 			// The other half of the rule, and the one an unrecognised reset code
 			// falls back to: without the flag a scan is still the truth.
 			await remoteFile('a.md', 'one\n');
-			await engine.pull();
+			await world.engine.pull();
 			killTheCursor();
-			const file = remoteAt(provider, 'a.md');
+			const file = remoteAt(world.provider, 'a.md');
 			if (file === undefined) throw new Error('no file');
-			await provider.delete(file);
+			await world.provider.delete(file);
 
-			await engine.pull();
+			await world.engine.pull();
 
 			expect(noteAt('a.md')).toBeUndefined();
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 		});
 	});
 
 	it('keeps a dirty note the re-scan did not mention', async () => {
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		store.put({
+		world.store.put({
 			id: 'n2',
 			path: 'mine.md',
 			content: 'unsent\n',
@@ -5745,7 +5821,7 @@ describe('a dead cursor', () => {
 			dirty: true,
 		});
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('mine.md')?.content).toBe('unsent\n');
 		expect(noteAt('mine.md')?.remoteId).toBeUndefined();
@@ -5755,11 +5831,11 @@ describe('a dead cursor', () => {
 		// It was never in the scan because it has never existed remotely — and
 		// it is clean, so nothing but the `remoteId` check stands between it and
 		// being deleted as missing. A dirty note would survive either way.
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		store.put({ id: 'n3', path: 'new.md', content: 'brand new\n' });
+		world.store.put({ id: 'n3', path: 'new.md', content: 'brand new\n' });
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt('new.md')?.content).toBe('brand new\n');
 	});
@@ -5770,34 +5846,34 @@ describe('a dead cursor', () => {
 		// every note the *other* pages hold as missing and delete nearly the
 		// whole store — and, because the scan then finishes normally, report
 		// `ok` and store the cursor over it.
-		provider = createFakeProvider({ pageSize: 1 });
-		await provider.ensureRoot();
-		await provider.write('a.md', '1\n', {});
-		await provider.write('b.md', '2\n', {});
-		await provider.write('c.md', '3\n', {});
-		store = createMemoryStore();
-		engine = engineWith({
+		world.provider = createFakeProvider({ pageSize: 1 });
+		await world.provider.ensureRoot();
+		await world.provider.write('a.md', '1\n', {});
+		await world.provider.write('b.md', '2\n', {});
+		await world.provider.write('c.md', '3\n', {});
+		world.store = createMemoryStore();
+		world.engine = engineWith({
 			// One id per note. A constant here would have all three land on one
 			// row, and the test would fail for a reason of its own making.
 			newId: () => {
-				ids += 1;
-				return `copy-${String(ids)}`;
+				world.ids += 1;
+				return `copy-${String(world.ids)}`;
 			},
 		});
 
-		await engine.pull();
-		const before = store.notes().map((note) => note.id);
+		await world.engine.pull();
+		const before = world.store.notes().map((note) => note.id);
 		killTheCursor();
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md', 'c.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md', 'c.md']);
 		// The same notes, not three replacements. Reconciling a page against a
 		// scan that has only reached that page deletes everything the other
 		// pages hold; the later pages put a note back at each path, so the only
 		// thing left saying it happened is that they are no longer the same
 		// notes — new ids, and everything the app hung off the old ones gone.
-		expect(store.notes().map((note) => note.id)).toEqual(before);
+		expect(world.store.notes().map((note) => note.id)).toEqual(before);
 	});
 
 	it('does not reconcile away a root folder row it somehow holds', async () => {
@@ -5806,11 +5882,11 @@ describe('a dead cursor', () => {
 		// every path is within the root — so reconciling it away after a cursor
 		// reset is every note on the device, in one batch, reported as `ok`.
 		await remoteFile('a.md', 'one\n');
-		await engine.pull();
-		store.putFolder({ path: '', remoteId: 'root-id' });
+		await world.engine.pull();
+		world.store.putFolder({ path: '', remoteId: 'root-id' });
 		killTheCursor();
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')).toBeDefined();
@@ -5821,10 +5897,10 @@ describe('a dead cursor', () => {
 		// folder, so reconciling deletes it, and the delete cascades over the
 		// note the same batch has just brought in. The exemption for that note
 		// is undone from the other direction.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('Work/a.md', 'one\n');
-		store.putFolder({ path: 'Work', remoteId: 'f-from-an-older-sync' });
-		store.put({
+		world.store.putFolder({ path: 'Work', remoteId: 'f-from-an-older-sync' });
+		world.store.put({
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'old\n',
@@ -5835,17 +5911,17 @@ describe('a dead cursor', () => {
 		await pullNow([entry]);
 
 		expect(noteAt('Work/a.md')?.content).toBe('one\n');
-		expect(store.folders().map((each) => each.path)).toContain('Work');
+		expect(world.store.folders().map((each) => each.path)).toContain('Work');
 	});
 
 	it('leaves a notebook that was never pushed alone', async () => {
-		await engine.pull();
+		await world.engine.pull();
 		killTheCursor();
-		store.putFolder({ path: 'Fresh' });
+		world.store.putFolder({ path: 'Fresh' });
 
-		await engine.pull();
+		await world.engine.pull();
 
-		expect(store.folders().map((folder) => folder.path)).toContain('Fresh');
+		expect(world.store.folders().map((folder) => folder.path)).toContain('Fresh');
 	});
 });
 
@@ -5858,10 +5934,10 @@ describe('a provider that reports a folder recursively', () => {
 	 * only ever confirms the reading.
 	 */
 	const setUpWork = async () => {
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
-		const folder = remoteAt(provider, 'Work');
+		await world.engine.pull();
+		const folder = remoteAt(world.provider, 'Work');
 		const note = noteAt('Work/a.md');
 		if (folder === undefined || note === undefined) throw new Error('not set up');
 		return { file, folder, noteId: note.id };
@@ -5873,10 +5949,10 @@ describe('a provider that reports a folder recursively', () => {
 		// longer there, and a batch that fails here fails for ever — the cursor
 		// moves only with the batch, so the next pull gets the same one back.
 		const { file, folder } = await setUpWork();
-		await provider.createFolder('Work/Deep');
-		const deep = remoteAt(provider, 'Work/Deep');
+		await world.provider.createFolder('Work/Deep');
+		const deep = remoteAt(world.provider, 'Work/Deep');
 		if (deep === undefined) throw new Error('no folder');
-		await provider.delete(folder);
+		await world.provider.delete(folder);
 
 		const result = await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
@@ -5886,8 +5962,8 @@ describe('a provider that reports a folder recursively', () => {
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('Work/a.md')).toBeUndefined();
-		expect(store.folders()).toEqual([]);
-		expect(store.storedCursor()).toBe('reported');
+		expect(world.store.folders()).toEqual([]);
+		expect(world.store.storedCursor()).toBe('reported');
 		// One decision, not three. The folder takes the rest with it, and
 		// repeating them would tell the user three things happened.
 		expect(result.pulled).toBe(1);
@@ -5899,9 +5975,9 @@ describe('a provider that reports a folder recursively', () => {
 		// the folder took it — names a row that will not be there, and the batch
 		// that rejects is retried for ever.
 		const { file, folder, noteId } = await setUpWork();
-		await provider.move(file, 'a.md');
-		await provider.delete(folder);
-		const out = remoteAt(provider, 'a.md');
+		await world.provider.move(file, 'a.md');
+		await world.provider.delete(folder);
+		const out = remoteAt(world.provider, 'a.md');
 		if (out === undefined) throw new Error('no file');
 
 		const result = await pullNow([
@@ -5912,8 +5988,8 @@ describe('a provider that reports a folder recursively', () => {
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('one\n');
-		expect(store.folders()).toEqual([]);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.folders()).toEqual([]);
+		expect(world.store.notes()).toHaveLength(1);
 		// Written back under the id it had, so it is the note that moved rather
 		// than one that disappeared and another that arrived.
 		expect(noteAt('a.md')?.id).toBe(noteId);
@@ -5922,7 +5998,7 @@ describe('a provider that reports a folder recursively', () => {
 	it('deletes them in the other order too', async () => {
 		// Nothing promises the descendants come after the folder.
 		const { file, folder } = await setUpWork();
-		await provider.delete(folder);
+		await world.provider.delete(folder);
 
 		const result = await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
@@ -5931,7 +6007,7 @@ describe('a provider that reports a folder recursively', () => {
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('Work/a.md')).toBeUndefined();
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 
 	it('keeps an edited note when its folder is deleted remotely', async () => {
@@ -5940,8 +6016,8 @@ describe('a provider that reports a folder recursively', () => {
 		const { file, folder } = await setUpWork();
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, content: 'mine\n', dirty: true });
-		await provider.delete(folder);
+		world.store.put({ ...note, content: 'mine\n', dirty: true });
+		await world.provider.delete(folder);
 
 		await pullNow([
 			{ path: 'Work', deleted: true, remoteId: folder.remoteId },
@@ -5956,8 +6032,8 @@ describe('a provider that reports a folder recursively', () => {
 		// The dangerous half. Read literally, the first two entries say the
 		// folder and the note in it are gone; the last two say where they went.
 		const { file, folder, noteId } = await setUpWork();
-		const moved = await provider.move(folder, 'Archive');
-		const movedFile = remoteAt(provider, 'Archive/a.md');
+		const moved = await world.provider.move(folder, 'Archive');
+		const movedFile = remoteAt(world.provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -5972,21 +6048,21 @@ describe('a provider that reports a folder recursively', () => {
 		// The same folder, moved — not deleted and conjured back into existence
 		// by a note's parent path, which leaves it with no `remoteId` and so no
 		// way to be recognised the next time it moves.
-		expect(store.folders()).toEqual([{ path: 'Archive', remoteId: folder.remoteId }]);
+		expect(world.store.folders()).toEqual([{ path: 'Archive', remoteId: folder.remoteId }]);
 		// The same note, not a replacement that happens to hold the same text.
 		// Deleting and re-importing it reads the same from here and is not: it
 		// drops whatever the note was — and a note with unpushed edits would be
 		// detached by the delete and then duplicated by the import.
 		expect(noteAt('Archive/a.md')?.id).toBe(noteId);
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 	});
 
 	it('does not delete a note when the rename carries no ids at all', async () => {
 		// Dropbox's `DeletedMetadata` is a path and nothing else, so the only
 		// thing left to match on is what we already hold at that path.
 		const { folder, noteId } = await setUpWork();
-		const moved = await provider.move(folder, 'Archive');
-		const movedFile = remoteAt(provider, 'Archive/a.md');
+		const moved = await world.provider.move(folder, 'Archive');
+		const movedFile = remoteAt(world.provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -5998,12 +6074,12 @@ describe('a provider that reports a folder recursively', () => {
 
 		expect(noteAt('Archive/a.md')?.id).toBe(noteId);
 		expect(noteAt('Archive/a.md')?.content).toBe('one\n');
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		// Moved, not deleted and re-made: a folder that arrives as the side
 		// effect of a note's path has no `remoteId`, and a folder with no
 		// `remoteId` cannot be recognised the next time it moves, or reconciled
 		// after a cursor reset.
-		expect(store.folders()).toEqual([{ path: 'Archive', remoteId: folder.remoteId }]);
+		expect(world.store.folders()).toEqual([{ path: 'Archive', remoteId: folder.remoteId }]);
 	});
 
 	it('does not conflict an edited note when only the folder was renamed', async () => {
@@ -6014,9 +6090,9 @@ describe('a provider that reports a folder recursively', () => {
 		const { folder, noteId } = await setUpWork();
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, content: 'mine\n', dirty: true });
-		const moved = await provider.move(folder, 'Archive');
-		const movedFile = remoteAt(provider, 'Archive/a.md');
+		world.store.put({ ...note, content: 'mine\n', dirty: true });
+		const moved = await world.provider.move(folder, 'Archive');
+		const movedFile = remoteAt(world.provider, 'Archive/a.md');
 		if (movedFile === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -6026,7 +6102,7 @@ describe('a provider that reports a folder recursively', () => {
 			movedFile,
 		]);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('Archive/a.md')?.id).toBe(noteId);
 		expect(noteAt('Archive/a.md')?.content).toBe('mine\n');
 		expect(noteAt('Archive/a.md')?.dirty).toBe(true);
@@ -6037,10 +6113,10 @@ describe('a provider that reports a folder recursively', () => {
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
 		const { syncedHash: _hash, ...unrecorded } = note;
-		store.put({ ...(recorded ? note : unrecorded), content: 'mine\n', dirty: true });
-		await provider.move(file, 'a.md');
-		await provider.delete(folder);
-		const out = remoteAt(provider, 'a.md');
+		world.store.put({ ...(recorded ? note : unrecorded), content: 'mine\n', dirty: true });
+		await world.provider.move(file, 'a.md');
+		await world.provider.delete(folder);
+		const out = remoteAt(world.provider, 'a.md');
 		if (out === undefined) throw new Error('no file');
 
 		await pullNow([
@@ -6059,9 +6135,9 @@ describe('a provider that reports a folder recursively', () => {
 		// follows it, still holding the edit, and there is nothing to copy.
 		const id = await moveOutOfDeletedFolder(true);
 
-		expect(store.notes()).toHaveLength(1);
+		expect(world.store.notes()).toHaveLength(1);
 		expect(noteAt('a.md')).toMatchObject({ id, content: 'mine\n', dirty: true });
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 
 	it('keeps it as a copy when the note cannot say what it last synced', async () => {
@@ -6070,10 +6146,10 @@ describe('a provider that reports a folder recursively', () => {
 		// deleted.
 		await moveOutOfDeletedFolder(false);
 
-		const copy = store.notes().find((each) => each.content.includes('mine'));
+		const copy = world.store.notes().find((each) => each.content.includes('mine'));
 		expect(copy?.path).toBe(conflictPath('a.md', AT));
 		expect(noteAt('a.md')?.content).toBe('one\n');
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 
 	it('survives the same deletion being reported twice', async () => {
@@ -6081,7 +6157,7 @@ describe('a provider that reports a folder recursively', () => {
 		// path may appear more than once in a batch and that the last entry
 		// wins. Said twice, the second is about a note the first took away.
 		const { file, folder } = await setUpWork();
-		await provider.delete(folder);
+		await world.provider.delete(folder);
 
 		const result = await pullNow([
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
@@ -6090,8 +6166,8 @@ describe('a provider that reports a folder recursively', () => {
 		]);
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
-		expect(store.storedCursor()).toBe('reported');
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.storedCursor()).toBe('reported');
 	});
 
 	it.each([['', 'empty'] as const, ['/', 'a bare separator'] as const])(
@@ -6102,13 +6178,13 @@ describe('a provider that reports a folder recursively', () => {
 			// matches no note and no folder under any code path — it would have
 			// passed with the guard deleted.
 			await setUpWork();
-			store.putFolder({ path: '', remoteId: 'root-id' });
+			world.store.putFolder({ path: '', remoteId: 'root-id' });
 
 			const result = await pullNow([{ path, deleted: true, remoteId: 'root-id' }]);
 
 			expect(result.status).toBe('ok');
 			expect(noteAt('Work/a.md')).toBeDefined();
-			expect(store.folders().map((each) => each.path)).toContain('Work');
+			expect(world.store.folders().map((each) => each.path)).toContain('Work');
 		}
 	);
 
@@ -6117,7 +6193,7 @@ describe('a provider that reports a folder recursively', () => {
 		// reconciled away after the next cursor reset as a folder the scan did
 		// not mention — and that one deletion takes every note with it.
 		await setUpWork();
-		const root = await provider.ensureRoot();
+		const root = await world.provider.ensureRoot();
 
 		await pullNow([
 			{
@@ -6130,7 +6206,7 @@ describe('a provider that reports a folder recursively', () => {
 			},
 		]);
 
-		expect(store.folders().map((each) => each.path)).not.toContain('');
+		expect(world.store.folders().map((each) => each.path)).not.toContain('');
 	});
 });
 
@@ -6138,7 +6214,7 @@ describe('two conflicts in one batch', () => {
 	/** A note the remote and this device have both changed. */
 	const diverge = async (path: string) => {
 		const entry = await remoteFile(path, 'theirs\n');
-		store.put({
+		world.store.put({
 			id: `n-${path}`,
 			path,
 			content: 'mine\n',
@@ -6146,7 +6222,7 @@ describe('two conflicts in one batch', () => {
 			remoteVersion: 'stale',
 			dirty: true,
 		});
-		return provider.write(path, 'theirs\n', { expectedVersion: entry.version });
+		return world.provider.write(path, 'theirs\n', { expectedVersion: entry.version });
 	};
 
 	it('avoids a copy name already in the store', async () => {
@@ -6156,12 +6232,12 @@ describe('two conflicts in one batch', () => {
 		// keeping the copy, and today's lands on the same minute.
 		await diverge('a.md');
 		const taken = conflictPath('a.md', AT);
-		store.put({ id: 'kept', path: taken, content: 'yesterday\n', dirty: true });
+		world.store.put({ id: 'kept', path: taken, content: 'yesterday\n', dirty: true });
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt(taken)?.content).toBe('yesterday\n');
-		const mine = store.notes().find((note) => note.content.includes('mine'));
+		const mine = world.store.notes().find((note) => note.content.includes('mine'));
 		expect(mine?.path).toContain('conflict');
 		expect(mine?.path).not.toBe(taken);
 	});
@@ -6169,9 +6245,9 @@ describe('two conflicts in one batch', () => {
 	it('avoids a name already taken in the folder the note moved to', async () => {
 		// The copy lands beside the note's new home, so the names it has to
 		// avoid are that folder's — not the ones back where the note came from.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('a.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
@@ -6180,12 +6256,12 @@ describe('two conflicts in one batch', () => {
 			dirty: true,
 		});
 		// Someone already holds the name the copy would want in `Work`.
-		store.put({ id: 'squatter', path: conflictPath('Work/a.md', AT), content: 'x\n' });
-		const moved = await provider.move(entry, 'Work/a.md');
+		world.store.put({ id: 'squatter', path: conflictPath('Work/a.md', AT), content: 'x\n' });
+		const moved = await world.provider.move(entry, 'Work/a.md');
 
 		await pullNow([moved]);
 
-		const mine = store.notes().find((note) => note.content.includes('mine'));
+		const mine = world.store.notes().find((note) => note.content.includes('mine'));
 		expect(mine?.path).toContain('conflict');
 		expect(mine?.path).not.toBe(conflictPath('Work/a.md', AT));
 		expect(noteAt(conflictPath('Work/a.md', AT))?.id).toBe('squatter');
@@ -6195,11 +6271,11 @@ describe('two conflicts in one batch', () => {
 		await diverge('a.md');
 		await diverge('b.md');
 
-		await engine.pull();
+		await world.engine.pull();
 
-		const copies = store.notes().filter((note) => note.path.includes('conflict'));
+		const copies = world.store.notes().filter((note) => note.path.includes('conflict'));
 		expect(copies).toHaveLength(2);
-		expect(store.notes().map((note) => note.content)).toContain('theirs\n');
+		expect(world.store.notes().map((note) => note.content)).toContain('theirs\n');
 	});
 
 	it('avoids a name the same batch is bringing in', async () => {
@@ -6211,10 +6287,10 @@ describe('two conflicts in one batch', () => {
 		const taken = conflictPath('a.md', AT);
 		await remoteFile(taken, 'theirs, conflicted\n');
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(noteAt(taken)?.content).toBe('theirs, conflicted\n');
-		const mine = store.notes().find((note) => note.content.includes('mine'));
+		const mine = world.store.notes().find((note) => note.content.includes('mine'));
 		expect(mine?.path).not.toBe(taken);
 		expect(mine?.path).toContain('conflict');
 	});
@@ -6222,21 +6298,21 @@ describe('two conflicts in one batch', () => {
 
 describe('a remote folder move', () => {
 	it('carries the notes inside it, dirty or not', async () => {
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('Work/a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		const folder = remoteAt(provider, 'Work');
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		await provider.move(folder, 'Archive');
-		await engine.pull();
+		await world.provider.move(folder, 'Archive');
+		await world.engine.pull();
 
 		// Metadata, so it applies over a dirty note: the user's edit is to the
 		// contents and the move does not touch them.
@@ -6245,28 +6321,28 @@ describe('a remote folder move', () => {
 	});
 
 	it('rewrites the queued ops that named the old path', async () => {
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('Work/a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'edited\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
-		await engine.pull();
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
+		await world.engine.pull();
 
-		const folder = remoteAt(provider, 'Work');
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		await provider.move(folder, 'Archive');
-		await engine.pull();
-		await engine.push();
+		await world.provider.move(folder, 'Archive');
+		await world.engine.pull();
+		await world.engine.push();
 
 		// The op would otherwise write to a path that no longer exists, and on a
 		// provider that creates missing parents it would resurrect the folder.
-		expect(provider.contentAt('Archive/a.md')).toBe('edited\n');
-		expect(provider.contentAt('Work/a.md')).toBeUndefined();
+		expect(world.provider.contentAt('Archive/a.md')).toBe('edited\n');
+		expect(world.provider.contentAt('Work/a.md')).toBeUndefined();
 	});
 });
 
@@ -6279,20 +6355,23 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// folder move over a path that does not exist moves nothing and says
 		// nothing about it, and the tree disagrees with the remote for as long
 		// as the cursor lives.
-		const outer = await provider.createFolder('A');
-		const inner = await provider.createFolder('A/sub');
+		const outer = await world.provider.createFolder('A');
+		const inner = await world.provider.createFolder('A/sub');
 		await remoteFile('A/sub/x.md', 'x\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('A/sub/x.md');
 
-		const renamed = await provider.move(outer, 'B');
-		const lifted = await provider.move({ remoteId: inner.remoteId, path: 'B/sub' }, 'sub');
+		const renamed = await world.provider.move(outer, 'B');
+		const lifted = await world.provider.move(
+			{ remoteId: inner.remoteId, path: 'B/sub' },
+			'sub'
+		);
 
 		await pullNow([renamed, lifted]);
 
-		expect(store.notes().map((note) => note.path)).toEqual(['sub/x.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['sub/x.md']);
 		expect(noteAt('sub/x.md')?.id).toBe(before?.id);
-		expect(store.folders().map((folder) => folder.path)).toEqual(['B', 'sub']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['B', 'sub']);
 	});
 
 	it('makes a folder afresh when the batch already took the one it was', async () => {
@@ -6301,18 +6380,18 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// with its parent, so there is nothing at that path to move — a
 		// `move-folder` naming it moves nothing and says nothing about it, and
 		// the notebook never appears at all.
-		const work = await provider.createFolder('Work');
-		const sub = await provider.createFolder('Work/Sub');
+		const work = await world.provider.createFolder('Work');
+		const sub = await world.provider.createFolder('Work/Sub');
 		await remoteFile('Work/Sub/x.md', 'x\n');
-		await engine.pull();
-		await provider.delete(work);
+		await world.engine.pull();
+		await world.provider.delete(work);
 
 		await pullNow([
 			{ path: 'Work', deleted: true },
 			{ ...sub, path: 'Archive' },
 		]);
 
-		expect(store.folders().map((folder) => folder.path)).toEqual(['Archive']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['Archive']);
 	});
 
 	it('deletes the folder being replaced before moving the new one in', async () => {
@@ -6323,14 +6402,14 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// afterwards against a path that has changed hands, then takes the
 		// newcomer's notes instead. Both folders' notes gone, `ok` reported,
 		// cursor stored, and only a cursor reset would ever bring them back.
-		const doomed = await provider.createFolder('Archive');
+		const doomed = await world.provider.createFolder('Archive');
 		await remoteFile('Archive/old.md', 'old\n');
-		const renaming = await provider.createFolder('Archive 2024');
+		const renaming = await world.provider.createFolder('Archive 2024');
 		await remoteFile('Archive 2024/new.md', 'new\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(doomed);
-		const renamed = await provider.move(renaming, 'Archive');
+		await world.provider.delete(doomed);
+		const renamed = await world.provider.move(renaming, 'Archive');
 
 		const result = await pullNow([
 			renamed,
@@ -6338,25 +6417,25 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		]);
 
 		expect(result.status).toBe('ok');
-		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
-		expect(store.folders().map((folder) => folder.path)).toEqual(['Archive']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['Archive']);
 	});
 
 	it('recognises a deletion that carries no id at all', async () => {
 		// Dropbox's `DeletedMetadata` is a path and nothing else, so the folder
 		// being replaced can only be matched by where it was.
-		const doomed = await provider.createFolder('Archive');
+		const doomed = await world.provider.createFolder('Archive');
 		await remoteFile('Archive/old.md', 'old\n');
-		const renaming = await provider.createFolder('Archive 2024');
+		const renaming = await world.provider.createFolder('Archive 2024');
 		await remoteFile('Archive 2024/new.md', 'new\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(doomed);
-		const renamed = await provider.move(renaming, 'Archive');
+		await world.provider.delete(doomed);
+		const renamed = await world.provider.move(renaming, 'Archive');
 
 		await pullNow([renamed, { path: 'Archive', deleted: true }]);
 
-		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
 	});
 
 	it('recognises a deletion whose path is not where we think the folder is', async () => {
@@ -6364,18 +6443,18 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// deletion names a path our row has never held. The id is the only
 		// thing tying the two together, and without it the folder is read as
 		// merely in the way and moved aside rather than deleted.
-		const doomed = await provider.createFolder('Archive');
+		const doomed = await world.provider.createFolder('Archive');
 		await remoteFile('Archive/old.md', 'old\n');
-		const renaming = await provider.createFolder('Archive 2024');
+		const renaming = await world.provider.createFolder('Archive 2024');
 		await remoteFile('Archive 2024/new.md', 'new\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(doomed);
-		const renamed = await provider.move(renaming, 'Archive');
+		await world.provider.delete(doomed);
+		const renamed = await world.provider.move(renaming, 'Archive');
 
 		await pullNow([renamed, { path: 'Vault', deleted: true, remoteId: doomed.remoteId }]);
 
-		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
 	});
 
 	it('gives two folders displaced out of one path different names', async () => {
@@ -6384,28 +6463,28 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// So one path can be claimed twice, and the folder each claim displaces
 		// needs a name of its own — landing on the same one puts two folders at
 		// one path, which is where a notebook's notes get merged into another's.
-		const first = await provider.createFolder('A');
+		const first = await world.provider.createFolder('A');
 		await remoteFile('A/one.md', 'one\n');
-		const second = await provider.createFolder('B');
+		const second = await world.provider.createFolder('B');
 		await remoteFile('B/two.md', 'two\n');
-		const third = await provider.createFolder('C');
+		const third = await world.provider.createFolder('C');
 		await remoteFile('C/three.md', 'three\n');
-		await engine.pull();
+		await world.engine.pull();
 
 		await pullNow([
 			{ ...second, path: 'A' },
 			{ ...third, path: 'A' },
 		]);
 
-		const paths = store.notes().map((note) => note.path);
+		const paths = world.store.notes().map((note) => note.path);
 		expect(paths).toEqual([...new Set(paths)]);
-		expect(store.notes()).toHaveLength(3);
+		expect(world.store.notes()).toHaveLength(3);
 		expect(noteAt('A/three.md')?.content).toBe('three\n');
 		// And the two that were pushed out are still two notebooks, each with
 		// its own note. Landing on one name merges them, which reads as "both
 		// notes are somewhere called conflict" unless the folders are compared.
-		const one = store.notes().find((note) => note.content === 'one\n')?.path ?? '';
-		const two = store.notes().find((note) => note.content === 'two\n')?.path ?? '';
+		const one = world.store.notes().find((note) => note.content === 'one\n')?.path ?? '';
+		const two = world.store.notes().find((note) => note.content === 'two\n')?.path ?? '';
 		expect(one).toContain('conflict');
 		expect(two).toContain('conflict');
 		expect(parentPath(one)).not.toBe(parentPath(two));
@@ -6418,14 +6497,14 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// one that is *not* deleted — so it has to be moved aside. Reading the
 		// occupant off the store instead answers `A`, which the batch says is
 		// doomed, and the delete that follows takes `B`'s notes with it.
-		const doomed = await provider.createFolder('A');
+		const doomed = await world.provider.createFolder('A');
 		await remoteFile('A/one.md', 'one\n');
-		const second = await provider.createFolder('B');
+		const second = await world.provider.createFolder('B');
 		await remoteFile('B/two.md', 'two\n');
-		const third = await provider.createFolder('C');
+		const third = await world.provider.createFolder('C');
 		await remoteFile('C/three.md', 'three\n');
-		await engine.pull();
-		await provider.delete(doomed);
+		await world.engine.pull();
+		await world.provider.delete(doomed);
 
 		await pullNow([
 			{ ...second, path: 'A' },
@@ -6436,24 +6515,24 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// `B` kept its own notebook rather than being merged into `C`'s: both
 		// notes surviving is not the same as both notebooks surviving, and the
 		// merge leaves them side by side under one name.
-		const two = store.notes().find((note) => note.content === 'two\n')?.path ?? '';
+		const two = world.store.notes().find((note) => note.content === 'two\n')?.path ?? '';
 		expect(two).toContain('conflict');
 		expect(parentPath(two)).not.toBe('A');
 		expect(noteAt('A/three.md')?.content).toBe('three\n');
-		expect(store.notes().some((note) => note.content === 'one\n')).toBe(false);
+		expect(world.store.notes().some((note) => note.content === 'one\n')).toBe(false);
 	});
 
 	it('does not displace a folder onto a name already standing', async () => {
 		// A folder displaced in an earlier batch and never claimed is still
 		// sitting there under its conflict name. Taking that name again puts
 		// two notebooks at one path and merges their notes.
-		await provider.createFolder('A');
+		await world.provider.createFolder('A');
 		await remoteFile('A/one.md', 'one\n');
-		const second = await provider.createFolder('B');
+		const second = await world.provider.createFolder('B');
 		await remoteFile('B/two.md', 'two\n');
-		await engine.pull();
-		store.putFolder({ path: conflictFolderPath('A', AT, []) });
-		store.put({
+		await world.engine.pull();
+		world.store.putFolder({ path: conflictFolderPath('A', AT, []) });
+		world.store.put({
 			id: 'stranded',
 			path: `${conflictFolderPath('A', AT, [])}/old.md`,
 			content: 'from before\n',
@@ -6462,27 +6541,29 @@ describe('a folder whose ancestor moved in the same batch', () => {
 
 		await pullNow([{ ...second, path: 'A' }]);
 
-		const paths = store.notes().map((note) => note.path);
+		const paths = world.store.notes().map((note) => note.path);
 		expect(paths).toEqual([...new Set(paths)]);
-		expect(store.notes().find((note) => note.id === 'stranded')?.content).toBe('from before\n');
-		expect(store.notes().find((note) => note.content === 'one\n')?.path).toContain('-2');
+		expect(world.store.notes().find((note) => note.id === 'stranded')?.content).toBe(
+			'from before\n'
+		);
+		expect(world.store.notes().find((note) => note.content === 'one\n')?.path).toContain('-2');
 	});
 
 	it('is right when the deletion comes first, too', async () => {
 		// The order the engine has always handled. Asserted beside the other so
 		// a fix for one that breaks the other cannot pass.
-		const doomed = await provider.createFolder('Archive');
+		const doomed = await world.provider.createFolder('Archive');
 		await remoteFile('Archive/old.md', 'old\n');
-		const renaming = await provider.createFolder('Archive 2024');
+		const renaming = await world.provider.createFolder('Archive 2024');
 		await remoteFile('Archive 2024/new.md', 'new\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(doomed);
-		const renamed = await provider.move(renaming, 'Archive');
+		await world.provider.delete(doomed);
+		const renamed = await world.provider.move(renaming, 'Archive');
 
 		await pullNow([{ path: 'Archive', deleted: true, remoteId: doomed.remoteId }, renamed]);
 
-		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
 	});
 
 	it('moves a folder merely in the way aside, and brings it home', async () => {
@@ -6492,19 +6573,19 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// and leaving it merges both folders into one notebook, which is how
 		// `Archive/old.md` ends up inside `Older`. It moves aside, and the
 		// entry saying where it really went moves it on from there.
-		const other = await provider.createFolder('Archive');
+		const other = await world.provider.createFolder('Archive');
 		await remoteFile('Archive/old.md', 'old\n');
-		const renaming = await provider.createFolder('Archive 2024');
+		const renaming = await world.provider.createFolder('Archive 2024');
 		await remoteFile('Archive 2024/new.md', 'new\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const lifted = await provider.move(other, 'Older');
-		const renamed = await provider.move(renaming, 'Archive');
+		const lifted = await world.provider.move(other, 'Older');
+		const renamed = await world.provider.move(renaming, 'Archive');
 
 		await pullNow([renamed, lifted]);
 
 		expect(
-			store
+			world.store
 				.notes()
 				.map((note) => note.path)
 				.sort()
@@ -6517,20 +6598,20 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// under a name the user can recognise, with its notes still inside it.
 		// The alternative is the merge: two notebooks' notes in one, and a row
 		// gone for good.
-		const other = await provider.createFolder('Archive');
+		const other = await world.provider.createFolder('Archive');
 		await remoteFile('Archive/old.md', 'old\n');
-		const renaming = await provider.createFolder('Archive 2024');
+		const renaming = await world.provider.createFolder('Archive 2024');
 		await remoteFile('Archive 2024/new.md', 'new\n');
-		await engine.pull();
-		await provider.move(other, 'Older');
-		const renamed = await provider.move(renaming, 'Archive');
+		await world.engine.pull();
+		await world.provider.move(other, 'Older');
+		const renamed = await world.provider.move(renaming, 'Archive');
 
 		await pullNow([renamed]);
 
 		expect(noteAt('Archive/new.md')?.content).toBe('new\n');
-		const kept = store.notes().find((note) => note.content === 'old\n');
+		const kept = world.store.notes().find((note) => note.content === 'old\n');
 		expect(kept?.path).toContain('conflict');
-		expect(store.folders().map((folder) => folder.path)).toContain(
+		expect(world.store.folders().map((folder) => folder.path)).toContain(
 			parentPath(kept?.path ?? '')
 		);
 	});
@@ -6540,34 +6621,34 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		// before any of it — has never heard of the folder, so the deletion is
 		// read as news about something that is not ours. The notebook sits in
 		// the sidebar with nothing behind it until the next cursor reset.
-		const folder = await provider.createFolder('Work');
-		await provider.delete(folder);
+		const folder = await world.provider.createFolder('Work');
+		await world.provider.delete(folder);
 
 		await pullNow([folder, { path: 'Work', deleted: true, remoteId: folder.remoteId }]);
 
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 });
 
 describe('a remote folder delete', () => {
 	it('takes the clean notes inside it', async () => {
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		const entry = await remoteFile('Work/a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'Work/a.md',
 			content: 'one\n',
 			...boundTo(entry),
 		});
-		await engine.pull();
+		await world.engine.pull();
 
-		const folder = remoteAt(provider, 'Work');
+		const folder = remoteAt(world.provider, 'Work');
 		if (folder === undefined) throw new Error('no folder');
-		await provider.delete(folder);
-		await engine.pull();
+		await world.provider.delete(folder);
+		await world.engine.pull();
 
 		expect(noteAt('Work/a.md')).toBeUndefined();
-		expect(store.folders().map((f) => f.path)).not.toContain('Work');
+		expect(world.store.folders().map((f) => f.path)).not.toContain('Work');
 	});
 
 	it('keeps a dirty note inside it', async () => {
@@ -6606,45 +6687,47 @@ describe('a remote folder delete', () => {
 describe('sync', () => {
 	it('pulls before it pushes', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			...boundTo(entry),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		// Pulling first turns a failed round trip into a decision made locally:
 		// the conflict is found and resolved before anything is sent.
 		expect(result.conflicts).toEqual(['a (conflict 2026-09-15T14-32).md']);
-		expect(provider.contentAt('a (conflict 2026-09-15T14-32).md')).toContain('mine\n');
+		expect(world.provider.contentAt('a (conflict 2026-09-15T14-32).md')).toContain('mine\n');
 	});
 
 	it('does not push when the pull could not finish', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		provider.setFault((call) => (call.op === 'changes' ? new AuthError('expired') : undefined));
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.provider.setFault((call) =>
+			call.op === 'changes' ? new AuthError('expired') : undefined
+		);
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('paused');
-		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
 	});
 
 	it('gets a new note to the remote and back into the store', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
 
-		await engine.sync();
+		await world.engine.sync();
 
-		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(world.provider.contentAt('a.md')).toBe('mine\n');
 		expect(noteAt('a.md')?.dirty).toBe(false);
 		expect(noteAt('a.md')?.remoteId).toBeDefined();
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 });
 
@@ -6664,22 +6747,22 @@ describe('a folder move landing on top of what is already there', () => {
 		// still something at `B/x.md`. `A/x.md` then lands on top of it: two
 		// rows at one path, and after the next push both point at one file,
 		// each overwriting the other for ever.
-		const fa = await provider.createFolder('A');
+		const fa = await world.provider.createFolder('A');
 		await remoteFile('A/x.md', 'from A\n');
-		const fb = await provider.createFolder('B');
+		const fb = await world.provider.createFolder('B');
 		await remoteFile('B/x.md', 'from B\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('B/x.md');
 		if (mine === undefined) throw new Error('nothing at B/x.md');
-		store.put({ ...mine, content: 'my edit\n', dirty: true });
+		world.store.put({ ...mine, content: 'my edit\n', dirty: true });
 
-		await provider.delete(fb);
-		const renamed = await provider.move(fa, 'B');
+		await world.provider.delete(fb);
+		const renamed = await world.provider.move(fa, 'B');
 
 		await pullNow([{ path: 'B', deleted: true, remoteId: fb.remoteId }, renamed]);
 
 		expect(noteAt('B/x.md')?.content).toBe('from A\n');
-		const kept = store.notes().find((note) => note.content === 'my edit\n');
+		const kept = world.store.notes().find((note) => note.content === 'my edit\n');
 		expect(kept?.path).toContain('conflict');
 		expect(parentPath(kept?.path ?? '')).toBe('B');
 	});
@@ -6688,18 +6771,18 @@ describe('a folder move landing on top of what is already there', () => {
 		// Every note under `Work` is both a mover and a sitter here. Displacing
 		// them against themselves would rename every note in the notebook to a
 		// conflict copy over a change that moved nothing at all.
-		await provider.createFolder('Work');
+		await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'a\n');
-		await engine.pull();
-		const folder = await provider
+		await world.engine.pull();
+		const folder = await world.provider
 			.list('')
 			.then((entries) => entries.find((entry) => entry.path === 'Work'));
 		if (folder === undefined) throw new Error('no Work folder');
-		const renamed = await provider.move(folder, 'Archive');
+		const renamed = await world.provider.move(folder, 'Archive');
 
 		await pullNow([renamed]);
 
-		expect(store.notes().map((note) => note.path)).toEqual(['Archive/a.md']);
+		expect(world.store.notes().map((note) => note.path)).toEqual(['Archive/a.md']);
 	});
 });
 
@@ -6710,14 +6793,14 @@ describe('a folder deletion decided against a path that changed hands', () => {
 		// has never held a row at that path. Asking the store alone drops the
 		// deletion, and a dropped deletion is dropped for ever: the cursor moves
 		// on and nothing says it again.
-		const fa = await provider.createFolder('A');
-		await provider.createFolder('A/sub');
+		const fa = await world.provider.createFolder('A');
+		await world.provider.createFolder('A/sub');
 		await remoteFile('A/sub/inside.md', 'inside\n');
-		const fb = await provider.createFolder('B');
-		await engine.pull();
+		const fb = await world.provider.createFolder('B');
+		await world.engine.pull();
 
-		await provider.delete(fb);
-		const renamed = await provider.move(fa, 'B');
+		await world.provider.delete(fb);
+		const renamed = await world.provider.move(fa, 'B');
 
 		await pullNow([
 			{ path: 'B', deleted: true, remoteId: fb.remoteId },
@@ -6725,8 +6808,8 @@ describe('a folder deletion decided against a path that changed hands', () => {
 			{ path: 'B/sub', deleted: true },
 		]);
 
-		expect(store.notes()).toEqual([]);
-		expect(store.folders().map((folder) => folder.path)).toEqual(['B']);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['B']);
 	});
 
 	it('acts on a second deletion of a path re-occupied in the same batch', () =>
@@ -6735,14 +6818,14 @@ describe('a folder deletion decided against a path that changed hands', () => {
 			// one path and mean two different folders. Reading the second as
 			// already covered by the first leaves the notebook the user deleted
 			// in the sidebar until something else happens to it.
-			const fa = await provider.createFolder('A');
+			const fa = await world.provider.createFolder('A');
 			await remoteFile('A/in A.md', 'in A\n');
-			const fb = await provider.createFolder('B');
+			const fb = await world.provider.createFolder('B');
 			await remoteFile('B/in B.md', 'in B\n');
-			await engine.pull();
+			await world.engine.pull();
 
-			await provider.delete(fa);
-			const renamed = await provider.move(fb, 'A');
+			await world.provider.delete(fa);
+			const renamed = await world.provider.move(fb, 'A');
 
 			await pullNow([
 				{ path: 'A', deleted: true, remoteId: fa.remoteId },
@@ -6750,8 +6833,8 @@ describe('a folder deletion decided against a path that changed hands', () => {
 				{ path: 'A', deleted: true, remoteId: fb.remoteId },
 			]);
 
-			expect(store.notes()).toEqual([]);
-			expect(store.folders()).toEqual([]);
+			expect(world.store.notes()).toEqual([]);
+			expect(world.store.folders()).toEqual([]);
 		})());
 });
 
@@ -6762,10 +6845,10 @@ describe('two different files deleted at one path', () => {
 		// last — so the first file's note is never let go of, and survives as a
 		// conflict copy of something the remote no longer has.
 		const first = await remoteFile('x.md', 'first\n');
-		await engine.pull();
-		await provider.delete(first);
+		await world.engine.pull();
+		await world.provider.delete(first);
 		const second = await remoteFile('x.md', 'second\n');
-		await provider.delete(second);
+		await world.provider.delete(second);
 
 		await pullNow([
 			{ path: 'x.md', deleted: true, remoteId: first.remoteId },
@@ -6773,7 +6856,7 @@ describe('two different files deleted at one path', () => {
 			{ path: 'x.md', deleted: true, remoteId: second.remoteId },
 		]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -6783,13 +6866,13 @@ describe('a note the batch put back after taking it away', () => {
 		// one window. The note is taken away by the cascade, written back by the
 		// new file, and deleted again — and a decision that stops looking at a
 		// note the moment it is first removed never sees the last two.
-		const folder = await provider.createFolder('A');
+		const folder = await world.provider.createFolder('A');
 		const file = await remoteFile('A/x.md', 'x\n');
-		await engine.pull();
-		await provider.delete(folder);
-		const again = await provider.createFolder('A');
+		await world.engine.pull();
+		await world.provider.delete(folder);
+		const again = await world.provider.createFolder('A');
 		const back = await remoteFile('A/x.md', 'x again\n');
-		await provider.delete(back);
+		await world.provider.delete(back);
 
 		await pullNow([
 			{ path: 'A', deleted: true, remoteId: folder.remoteId },
@@ -6799,7 +6882,7 @@ describe('a note the batch put back after taking it away', () => {
 			{ path: 'A/x.md', deleted: true, remoteId: back.remoteId },
 		]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -6810,13 +6893,13 @@ describe('an entry matched by path to a note that has moved', () => {
 		// the file. A different file then arrives at `A/x.md`, and the store
 		// still shows our note sitting there, so matching by path writes their
 		// bytes over our note while its own file goes on existing as `Z/x.md`.
-		const folder = await provider.createFolder('A');
+		const folder = await world.provider.createFolder('A');
 		await remoteFile('A/x.md', 'mine\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('A/x.md');
 
-		const renamed = await provider.move(folder, 'Z');
-		await provider.createFolder('A');
+		const renamed = await world.provider.move(folder, 'Z');
+		await world.provider.createFolder('A');
 		const theirs = await remoteFile('A/x.md', 'theirs\n');
 
 		await pullNow([renamed, theirs]);
@@ -6839,33 +6922,36 @@ describe('a file moved back onto the path a folder rename carried its note off',
 
 	it('follows the file when the version survived the move', async () => {
 		// Dropbox's `rev` survives a move, so this is decided without a read.
-		const folder = await provider.createFolder('A');
+		const folder = await world.provider.createFolder('A');
 		const file = await remoteFile('A/x.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('A/x.md');
 
-		const renamed = await provider.move(folder, 'B');
-		const made = await provider.createFolder('A');
-		const back = await provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
+		const renamed = await world.provider.move(folder, 'B');
+		const made = await world.provider.createFolder('A');
+		const back = await world.provider.move(
+			{ remoteId: file.remoteId, path: 'B/x.md' },
+			'A/x.md'
+		);
 
 		for (const entries of [
 			[renamed, made, { ...back, version: file.version }],
 			[made, renamed, { ...back, version: file.version }],
 		]) {
-			store.put({ ...(before as SyncNote) });
+			world.store.put({ ...(before as SyncNote) });
 			const result = await pullNow(entries);
 
 			expect(result.status).toBe('ok');
-			expect(store.notes().map((note) => note.path)).toEqual(['A/x.md']);
+			expect(world.store.notes().map((note) => note.path)).toEqual(['A/x.md']);
 			expect(noteAt('A/x.md')?.id).toBe(before?.id);
 		}
 
 		// The version the feed was made to keep is not the fake's own.
-		store.put({ ...(noteAt('A/x.md') as SyncNote), remoteVersion: back.version });
-		editHere(store, noteAt('A/x.md') as SyncNote, 'edited\n');
-		expect((await engine.push()).status).toBe('ok');
-		expect(provider.contentAt('A/x.md')).toBe('edited\n');
-		expect(store.ops()).toEqual([]);
+		world.store.put({ ...(noteAt('A/x.md') as SyncNote), remoteVersion: back.version });
+		editHere(world.store, noteAt('A/x.md') as SyncNote, 'edited\n');
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.contentAt('A/x.md')).toBe('edited\n');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	for (const folderChanges of ['folder-only', 'recursive'] as const) {
@@ -6902,41 +6988,44 @@ describe('a file moved back onto the path a folder rename carried its note off',
 	it('follows the file under unpushed edits, which stay dirty', async () => {
 		// The `syncedHash` route to the same answer: the remote's bytes are the
 		// ones this note last synced, so it was moved and not edited.
-		const folder = await provider.createFolder('A');
+		const folder = await world.provider.createFolder('A');
 		const file = await remoteFile('A/x.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('A/x.md') as SyncNote;
-		editHere(store, before, 'edited\n');
+		editHere(world.store, before, 'edited\n');
 
-		await provider.move(folder, 'B');
-		await provider.createFolder('A');
-		await provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
+		await world.provider.move(folder, 'B');
+		await world.provider.createFolder('A');
+		await world.provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
 		expect(result.conflicts).toEqual([]);
-		expect(store.notes().map((note) => note.path)).toEqual(['A/x.md']);
-		expect(provider.contentAt('A/x.md')).toBe('edited\n');
+		expect(world.store.notes().map((note) => note.path)).toEqual(['A/x.md']);
+		expect(world.provider.contentAt('A/x.md')).toBe('edited\n');
 	});
 
 	it('lets go of the note when that file is gone by the time it is read', async () => {
 		// The deletion behind this entry is at `A/x.md`, and from Dropbox it has
 		// no id — so it finds nothing once the note has been carried to
 		// `B/x.md`, and the note is held there over no file for ever.
-		const folder = await provider.createFolder('A');
+		const folder = await world.provider.createFolder('A');
 		const file = await remoteFile('A/x.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const renamed = await provider.move(folder, 'B');
-		const made = await provider.createFolder('A');
-		const back = await provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
-		await provider.delete(back);
+		const renamed = await world.provider.move(folder, 'B');
+		const made = await world.provider.createFolder('A');
+		const back = await world.provider.move(
+			{ remoteId: file.remoteId, path: 'B/x.md' },
+			'A/x.md'
+		);
+		await world.provider.delete(back);
 
 		const result = await pullNow([renamed, made, back]);
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -6949,37 +7038,37 @@ describe('a queued move whose destination folder is not on the remote yet', () =
 		// source. Reading that as "the file is gone" completes the op and the
 		// user's drag is lost with nothing said anywhere.
 		const file = await remoteFile('x.md', 'x\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'Work/Deep/x.md',
 			content: 'x\n',
 			...boundTo(file),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'Work/Deep/x.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'Work/Deep/x.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('Work/Deep/x.md')).toBe('x\n');
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt('Work/Deep/x.md')).toBe('x\n');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('still drops a move whose file is genuinely gone', async () => {
 		const file = await remoteFile('x.md', 'x\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'x.md',
 			content: 'x\n',
 			...boundTo(file),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'y.md' });
-		await provider.delete(file);
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'y.md' });
+		await world.provider.delete(file);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
-		expect(provider.snapshot().some((entry) => entry.path === 'y.md')).toBe(false);
+		expect(world.store.ops()).toEqual([]);
+		expect(world.provider.snapshot().some((entry) => entry.path === 'y.md')).toBe(false);
 	});
 });
 
@@ -6991,22 +7080,24 @@ describe('a note the pull conflicted with a write still queued', () => {
 		// changed nothing — and which can lose a race against a real edit made
 		// in between.
 		const file = await remoteFile('x.md', 'one\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'x.md',
 			content: 'my edit\n',
 			...boundTo(file),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'x.md' });
-		const theirs = await provider.write('x.md', 'theirs\n', { expectedVersion: file.version });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'x.md' });
+		const theirs = await world.provider.write('x.md', 'theirs\n', {
+			expectedVersion: file.version,
+		});
 
 		await pullNow([theirs]);
-		await engine.push();
+		await world.engine.push();
 
-		expect(provider.contentAt('x.md')).toBe('theirs\n');
-		expect(remoteAt(provider, 'x.md')?.version).toBe(theirs.version);
-		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+		expect(world.provider.contentAt('x.md')).toBe('theirs\n');
+		expect(remoteAt(world.provider, 'x.md')?.version).toBe(theirs.version);
+		expect(world.store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
 	});
 });
 
@@ -7019,17 +7110,19 @@ describe('two devices making a conflict copy at once', () => {
 		// same puts two notes at one path, which the sidebar shows twice and the
 		// next push has overwrite each other for ever.
 		const file = await remoteFile('a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('a.md');
 		if (mine === undefined) throw new Error('nothing at a.md');
-		store.put({ ...mine, content: 'my edit\n', dirty: true });
+		world.store.put({ ...mine, content: 'my edit\n', dirty: true });
 
-		const theirs = await provider.write('a.md', 'theirs\n', { expectedVersion: file.version });
+		const theirs = await world.provider.write('a.md', 'theirs\n', {
+			expectedVersion: file.version,
+		});
 		const theirCopy = await remoteFile('a (conflict 2026-09-15T14-32).md', 'their edit\n');
 
 		await pullNow([theirs, theirCopy]);
 
-		const copies = store
+		const copies = world.store
 			.notes()
 			.filter((note) => note.path.includes('conflict'))
 			.map((note) => note.path);
@@ -7045,24 +7138,24 @@ describe('the deeper reaches of a folder move', () => {
 		// it causes are not all at the top of it. Looking only at the immediate
 		// children of the destination leaves the nested ones to land on top of
 		// each other.
-		const fa = await provider.createFolder('A');
-		await provider.createFolder('A/sub');
+		const fa = await world.provider.createFolder('A');
+		await world.provider.createFolder('A/sub');
 		await remoteFile('A/sub/x.md', 'from A\n');
-		const fb = await provider.createFolder('B');
-		await provider.createFolder('B/sub');
+		const fb = await world.provider.createFolder('B');
+		await world.provider.createFolder('B/sub');
 		await remoteFile('B/sub/x.md', 'from B\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('B/sub/x.md');
 		if (mine === undefined) throw new Error('nothing at B/sub/x.md');
-		store.put({ ...mine, content: 'my edit\n', dirty: true });
+		world.store.put({ ...mine, content: 'my edit\n', dirty: true });
 
-		await provider.delete(fb);
-		const renamed = await provider.move(fa, 'B');
+		await world.provider.delete(fb);
+		const renamed = await world.provider.move(fa, 'B');
 
 		await pullNow([{ path: 'B', deleted: true, remoteId: fb.remoteId }, renamed]);
 
 		expect(noteAt('B/sub/x.md')?.content).toBe('from A\n');
-		const kept = store.notes().find((note) => note.content === 'my edit\n');
+		const kept = world.store.notes().find((note) => note.content === 'my edit\n');
 		expect(kept?.path).toContain('conflict');
 		expect(parentPath(kept?.path ?? '')).toBe('B/sub');
 	});
@@ -7076,13 +7169,13 @@ describe('an id-less deletion arriving behind a folder rename', () => {
 		// store still shows our note sitting there, so matching by path lets go
 		// of the note that just moved — which is alive and well at `Z/x.md`, and
 		// is the one the user has been writing in.
-		const folder = await provider.createFolder('A');
+		const folder = await world.provider.createFolder('A');
 		await remoteFile('A/x.md', 'mine\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('A/x.md');
 
-		const renamed = await provider.move(folder, 'Z');
-		await provider.createFolder('A');
+		const renamed = await world.provider.move(folder, 'Z');
+		await world.provider.createFolder('A');
 		const theirs = await remoteFile('A/x.md', 'theirs\n');
 
 		await pullNow([renamed, theirs, { path: 'A/x.md', deleted: true }]);
@@ -7099,24 +7192,24 @@ describe('a rescan that finds a whole notebook tree gone', () => {
 		// taken away. The store forgives that — a rejected batch is retried for
 		// ever — but forgiveness is not the same as being right, and a store
 		// that does reject would strand this user's sync permanently.
-		await provider.createFolder('Work');
-		await provider.createFolder('Work/Sub');
+		await world.provider.createFolder('Work');
+		await world.provider.createFolder('Work/Sub');
 		await remoteFile('Work/Sub/a.md', 'a\n');
-		await engine.pull();
-		expect(store.folders().map((folder) => folder.path)).toEqual(['Work', 'Work/Sub']);
+		await world.engine.pull();
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['Work', 'Work/Sub']);
 
-		const folder = await provider
+		const folder = await world.provider
 			.list('')
 			.then((entries) => entries.find((entry) => entry.path === 'Work'));
 		if (folder === undefined) throw new Error('no Work folder');
-		await provider.delete(folder);
+		await world.provider.delete(folder);
 		killTheCursor();
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.folders()).toEqual([]);
-		expect(store.notes()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -7129,11 +7222,11 @@ describe('an id-less deletion behind a folder moved out of the way', () => {
 		// our note at that path, and letting go of it throws away a note that is
 		// alive under its new name while the file the deletion is about goes on
 		// being held.
-		await provider.createFolder('A');
+		await world.provider.createFolder('A');
 		await remoteFile('A/x.md', 'mine\n');
-		const other = await provider.createFolder('A2');
+		const other = await world.provider.createFolder('A2');
 		const theirs = await remoteFile('A2/x.md', 'theirs\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('A/x.md');
 
 		await pullNow([
@@ -7142,7 +7235,7 @@ describe('an id-less deletion behind a folder moved out of the way', () => {
 			{ path: 'A/x.md', deleted: true },
 		]);
 
-		const mine = store.notes().find((note) => note.id === before?.id);
+		const mine = world.store.notes().find((note) => note.id === before?.id);
 		expect(mine?.content).toBe('mine\n');
 		expect(parentPath(mine?.path ?? '')).toContain('conflict');
 	});
@@ -7161,10 +7254,10 @@ describe('a note an earlier decision moved into a folder', () => {
 		// is still at the old path in the store, so neither `notesUnder(folder)`
 		// nor `notesUnder(a move-folder source)` can see it. Missing it means
 		// nothing is displaced when a second file lands on the same name.
-		await provider.createFolder('X');
-		await provider.createFolder('Y');
+		await world.provider.createFolder('X');
+		await world.provider.createFolder('Y');
 		const mine = await remoteFile('X/a.md', 'mine\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'X/a.md',
 			content: 'mine, edited\n',
@@ -7175,36 +7268,36 @@ describe('a note an earlier decision moved into a folder', () => {
 		// bytes, and Dropbox's `rev` survives one), is deleted, and a different
 		// file takes the name. Ours holds an edit, so the deletion cuts it loose
 		// rather than taking it, and it is still in the way.
-		const moved = await provider.move(mine, 'Y/a.md');
-		await provider.delete(moved);
+		const moved = await world.provider.move(mine, 'Y/a.md');
+		await world.provider.delete(moved);
 		const theirs = await remoteFile('Y/a.md', 'theirs\n');
 
 		await pullNow([{ ...mine, path: 'Y/a.md' }, { path: 'Y/a.md', deleted: true }, theirs]);
 
 		expect(noteAt('Y/a.md')?.content).toBe('theirs\n');
-		const ours = store.notes().find((note) => note.id === 'n1');
+		const ours = world.store.notes().find((note) => note.id === 'n1');
 		expect(ours?.content).toBe('mine, edited\n');
 		expect(ours?.path).toContain('conflict');
 		expect(parentPath(ours?.path ?? '')).toBe('Y');
 	});
 
 	it('lets go of a clean note in its place, which the deletion was about', async () => {
-		await provider.createFolder('X');
-		await provider.createFolder('Y');
+		await world.provider.createFolder('X');
+		await world.provider.createFolder('Y');
 		const mine = await remoteFile('X/a.md', 'mine\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'X/a.md',
 			content: 'mine\n',
 			...boundTo(mine),
 		});
-		const moved = await provider.move(mine, 'Y/a.md');
-		await provider.delete(moved);
+		const moved = await world.provider.move(mine, 'Y/a.md');
+		await world.provider.delete(moved);
 		const theirs = await remoteFile('Y/a.md', 'theirs\n');
 
 		await pullNow([{ ...mine, path: 'Y/a.md' }, { path: 'Y/a.md', deleted: true }, theirs]);
 
-		expect(store.notes().map((note) => [note.path, note.content])).toEqual([
+		expect(world.store.notes().map((note) => [note.path, note.content])).toEqual([
 			['Y/a.md', 'theirs\n'],
 		]);
 	});
@@ -7217,51 +7310,51 @@ describe('a write whose remote folder is gone', () => {
 		// — an unsaved edit outranks a remote deletion — which leaves nothing on
 		// the remote above it. Every write then fails the same way, and the
 		// ordered queue strands every op behind it for every note.
-		const folder = await provider.createFolder('Work');
+		const folder = await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'x\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('Work/a.md');
 		if (mine === undefined) throw new Error('nothing at Work/a.md');
-		store.put({ ...mine, content: 'my edit\n', dirty: true });
-		store.queue({ op: 'write', noteId: mine.id, path: 'Work/a.md' });
-		await provider.delete(folder);
+		world.store.put({ ...mine, content: 'my edit\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: mine.id, path: 'Work/a.md' });
+		await world.provider.delete(folder);
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('Work/a.md')).toBe('my edit\n');
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt('Work/a.md')).toBe('my edit\n');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('leaves a kept note a notebook to be in', async () => {
 		// The cascade takes the folder rows on the way down. A note left at a
 		// path with no notebook behind it is invisible in the sidebar while
 		// still holding its name.
-		const folder = await provider.createFolder('Work');
+		const folder = await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'x\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('Work/a.md');
 		if (mine === undefined) throw new Error('nothing at Work/a.md');
-		store.put({ ...mine, content: 'my edit\n', dirty: true });
-		await provider.delete(folder);
+		world.store.put({ ...mine, content: 'my edit\n', dirty: true });
+		await world.provider.delete(folder);
 
 		await pullNow([{ path: 'Work', deleted: true, remoteId: folder.remoteId }]);
 
 		expect(noteAt('Work/a.md')?.content).toBe('my edit\n');
-		expect(store.folders().map((each) => each.path)).toEqual(['Work']);
+		expect(world.store.folders().map((each) => each.path)).toEqual(['Work']);
 	});
 
 	it('does not leave a folder behind for a note that moved out of it', async () => {
 		// The other half: the row is only wanted where a note actually ends up.
-		const folder = await provider.createFolder('Work');
+		const folder = await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'one\n');
-		await engine.pull();
+		await world.engine.pull();
 		const mine = noteAt('Work/a.md');
 		if (mine === undefined) throw new Error('nothing at Work/a.md');
-		store.put({ ...mine, content: 'mine\n', dirty: true });
-		await provider.move(file, 'a.md');
-		await provider.delete(folder);
-		const out = remoteAt(provider, 'a.md');
+		world.store.put({ ...mine, content: 'mine\n', dirty: true });
+		await world.provider.move(file, 'a.md');
+		await world.provider.delete(folder);
+		const out = remoteAt(world.provider, 'a.md');
 		if (out === undefined) throw new Error('no file at a.md');
 
 		await pullNow([
@@ -7270,7 +7363,7 @@ describe('a write whose remote folder is gone', () => {
 			out,
 		]);
 
-		expect(store.folders()).toEqual([]);
+		expect(world.store.folders()).toEqual([]);
 	});
 });
 
@@ -7282,24 +7375,24 @@ describe('a pull carrying our own echo of a rename we have not pushed', () => {
 		// imported rather than displaced, and the queued move then conflicts on
 		// that path for ever with the whole queue behind it.
 		const file = await remoteFile('a.md', 'x\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'c.md',
 			content: 'x\n',
 			...boundTo(file),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'c.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'c.md' });
 		const theirs = await remoteFile('c.md', 'theirs\n');
 
 		await pullNow([file, theirs]);
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		// Ours was displaced by theirs rather than moved back to `a.md`, and its
 		// queued rename went with it.
 		expect(noteAt('c.md')?.content).toBe('theirs\n');
-		expect(store.notes().find((each) => each.id === 'n1')?.path).toContain('conflict');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.notes().find((each) => each.id === 'n1')?.path).toContain('conflict');
+		expect(world.store.ops()).toEqual([]);
 	});
 });
 
@@ -7311,28 +7404,30 @@ describe('a push conflict over a file another note already holds', () => {
 		// — `noteByRemoteId` hands back one of them and the other is stale for
 		// ever.
 		const file = await remoteFile('c.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'theirs',
 			path: 'c.md',
 			content: 'theirs\n',
 			...boundTo(file),
 		});
-		await provider.move(file, 'b.md');
-		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
+		await world.provider.move(file, 'b.md');
+		world.store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
-		const mine = store.notes().find((each) => each.id === 'mine');
+		const mine = world.store.notes().find((each) => each.id === 'mine');
 		expect(mine?.content).toBe('mine\n');
 		expect(mine?.path).toContain('conflict');
-		expect(store.notes().find((each) => each.id === 'theirs')?.remoteId).toBe(file.remoteId);
+		expect(world.store.notes().find((each) => each.id === 'theirs')?.remoteId).toBe(
+			file.remoteId
+		);
 		// Its own file, not theirs: the whole point of moving aside. And made
 		// here rather than next round — the note has no file of its own to stay
 		// bound to, so the write goes now and the op is done with.
 		expect(mine?.remoteId).not.toBe(file.remoteId);
-		expect(provider.contentAt(mine?.path ?? '')).toBe('mine\n');
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt(mine?.path ?? '')).toBe('mine\n');
+		expect(world.store.ops()).toEqual([]);
 		expect(result.conflicts).toEqual([mine?.path]);
 	});
 
@@ -7342,56 +7437,58 @@ describe('a push conflict over a file another note already holds', () => {
 		// the remote as the write goes, the next name is taken instead — rather
 		// than spending an attempt and handing the note two conflict suffixes.
 		const file = await remoteFile('c.md', 'theirs\n');
-		store.put({
+		world.store.put({
 			id: 'theirs',
 			path: 'c.md',
 			content: 'theirs\n',
 			...boundTo(file),
 		});
-		await provider.move(file, 'b.md');
+		await world.provider.move(file, 'b.md');
 		await remoteFile(conflictPath('b.md', AT), 'somebody else\n');
-		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
+		world.store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		const mine = store.notes().find((each) => each.id === 'mine');
+		const mine = world.store.notes().find((each) => each.id === 'mine');
 		// One suffix, with the counter `conflictName` adds for a name taken in
 		// the same minute — not `(conflict …) (conflict …)`.
 		expect(mine?.path).toBe(conflictPath('b.md', AT, [basename(conflictPath('b.md', AT))]));
-		expect(provider.contentAt(mine?.path ?? '')).toBe('mine\n');
-		expect(provider.contentAt(conflictPath('b.md', AT))).toBe('somebody else\n');
+		expect(world.provider.contentAt(mine?.path ?? '')).toBe('mine\n');
+		expect(world.provider.contentAt(conflictPath('b.md', AT))).toBe('somebody else\n');
 		// One push, and no attempt spent on a name the remote had already given
 		// away: the op is gone from the queue.
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 	it('fails the op rather than write to a name it has not looked at', async () => {
 		// The same exhaustion as the note that steps aside, met by a note with
 		// no file of its own, which takes its name by writing there: out of
 		// tries, it writes nowhere, moves nowhere, and is retried.
 		const file = await remoteFile('c.md', 'theirs\n');
-		store.put({ id: 'theirs', path: 'c.md', content: 'theirs\n', ...boundTo(file) });
-		await provider.move(file, 'b.md');
+		world.store.put({ id: 'theirs', path: 'c.md', content: 'theirs\n', ...boundTo(file) });
+		await world.provider.move(file, 'b.md');
 		const taken = Array.from({ length: 101 }).reduce<string[]>(
 			(names) => [...names, basename(conflictPath('b.md', AT, names))],
 			[]
 		);
-		taken.forEach((name, i) => store.put({ id: `copy${i}`, path: name, content: 'copy\n' }));
-		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
+		taken.forEach((name, i) =>
+			world.store.put({ id: `copy${i}`, path: name, content: 'copy\n' })
+		);
+		world.store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(store.ops().map((op) => op.attempts)).toEqual([1]);
-		expect(store.notes().find((each) => each.id === 'mine')).toMatchObject({
+		expect(world.store.ops().map((op) => op.attempts)).toEqual([1]);
+		expect(world.store.notes().find((each) => each.id === 'mine')).toMatchObject({
 			path: 'b.md',
 			content: 'mine\n',
 			dirty: true,
 		});
-		expect(provider.contentAt(taken.at(-1) ?? '')).toBeUndefined();
-		expect(provider.contentAt('b.md')).toBe('theirs\n');
+		expect(world.provider.contentAt(taken.at(-1) ?? '')).toBeUndefined();
+		expect(world.provider.contentAt('b.md')).toBe('theirs\n');
 	});
 	describe('a rename the remote refuses at every name', () => {
 		/** `b.md`, taken on the remote, and this many of its conflict names. */
@@ -7407,34 +7504,34 @@ describe('a push conflict over a file another note already holds', () => {
 
 		const renameToB = async () => {
 			const entry = await remoteFile('a.md', 'one\n');
-			store.put({ id: 'n1', path: 'b.md', content: 'one\n', ...boundTo(entry) });
-			store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+			world.store.put({ id: 'n1', path: 'b.md', content: 'one\n', ...boundTo(entry) });
+			world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
 		};
 
 		it('lands at the tenth conflict name', async () => {
 			const taken = await takeBeside(9);
 			await renameToB();
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
 			const tenth = conflictPath('b.md', AT, taken);
-			expect(provider.contentAt(tenth)).toBe('one\n');
-			expect(provider.contentAt('a.md')).toBeUndefined();
+			expect(world.provider.contentAt(tenth)).toBe('one\n');
+			expect(world.provider.contentAt('a.md')).toBeUndefined();
 		});
 
 		it("fails the op on the remote's last refusal, past ten", async () => {
 			const taken = await takeBeside(10);
 			await renameToB();
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			// One attempt spent, and the file where it was: the remote keeps
 			// every name it refused, and no eleventh was asked for.
 			expect(result.status).toBe('retry');
-			expect(store.ops().map((op) => op.attempts)).toEqual([1]);
-			expect(provider.contentAt('a.md')).toBe('one\n');
-			expect(provider.contentAt(conflictPath('b.md', AT, taken))).toBeUndefined();
+			expect(world.store.ops().map((op) => op.attempts)).toEqual([1]);
+			expect(world.provider.contentAt('a.md')).toBe('one\n');
+			expect(world.provider.contentAt(conflictPath('b.md', AT, taken))).toBeUndefined();
 		});
 	});
 });
@@ -7444,23 +7541,23 @@ describe('a rescan naming a folder the same batch has moved', () => {
 		// A scan is one batch like any other. Naming the pre-batch path asks the
 		// store to delete a row that is not there, and leaves the notebook the
 		// remote no longer has sitting in the sidebar under its new name.
-		const fa = await provider.createFolder('A');
-		await provider.createFolder('A/sub');
+		const fa = await world.provider.createFolder('A');
+		await world.provider.createFolder('A/sub');
 		await remoteFile('A/sub/x.md', 'x\n');
-		await engine.pull();
-		const sub = await provider
+		await world.engine.pull();
+		const sub = await world.provider
 			.list('A')
 			.then((entries) => entries.find((entry) => entry.path === 'A/sub'));
 		if (sub === undefined) throw new Error('no A/sub');
-		await provider.delete(sub);
-		await provider.move(fa, 'B');
+		await world.provider.delete(sub);
+		await world.provider.move(fa, 'B');
 		killTheCursor();
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.folders().map((folder) => folder.path)).toEqual(['B']);
-		expect(store.notes()).toEqual([]);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['B']);
+		expect(world.store.notes()).toEqual([]);
 	});
 });
 
@@ -7468,27 +7565,29 @@ describe('a queued rename onto a path the remote will not give up', () => {
 	it('lands beside it instead of stranding the queue', async () => {
 		const one = await remoteFile('x.md', 'one\n');
 		const two = await remoteFile('y.md', 'two\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'y.md',
 			content: 'two\n',
 			...boundTo(two),
 		});
-		store.put({
+		world.store.put({
 			id: 'n2',
 			path: 'z.md',
 			content: 'one\n',
 			...boundTo(one),
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'y.md', targetPath: 'z.md' });
-		await provider.move(one, 'z.md');
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'y.md', targetPath: 'z.md' });
+		await world.provider.move(one, 'z.md');
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes().find((each) => each.id === 'n1')?.path).toBe(conflictPath('z.md', AT));
+		expect(world.store.notes().find((each) => each.id === 'n1')?.path).toBe(
+			conflictPath('z.md', AT)
+		);
 		expect(noteAt('z.md')?.id).toBe('n2');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 });
 
@@ -7498,19 +7597,19 @@ describe('our own echo arriving with a new version', () => {
 		// own write coming back — so the bytes are read and found to match, and
 		// the path still differs because the rename has not been pushed.
 		const file = await remoteFile('a.md', 'x\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'c.md',
 			content: 'x\n',
 			remoteId: file.remoteId,
 			remoteVersion: 'stale',
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'c.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'c.md' });
 
 		await pullNow([file]);
 
-		expect(store.notes().map((each) => each.path)).toEqual(['c.md']);
-		expect(store.notes()[0]?.remoteVersion).toBe(file.version);
+		expect(world.store.notes().map((each) => each.path)).toEqual(['c.md']);
+		expect(world.store.notes()[0]?.remoteVersion).toBe(file.version);
 	});
 });
 
@@ -7519,23 +7618,23 @@ describe('an op withdrawn after the queue was read', () => {
 		// The engine reads the queue once. A restore that withdraws a delete
 		// while an earlier op is out would otherwise still delete the file.
 		const kept = await remoteFile('a.md', 'keep\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'keep\n',
 			...boundTo(kept),
 		});
-		const remove = store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
-		const stale = await store.pendingOps();
-		await store.completeOp(remove.seq, { kind: 'done' });
+		const remove = world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		const stale = await world.store.pendingOps();
+		await world.store.completeOp(remove.seq, { kind: 'done' });
 
 		const result = await engineWith({
-			store: { ...store, pendingOps: () => Promise.resolve(stale) },
+			store: { ...world.store, pendingOps: () => Promise.resolve(stale) },
 		}).push();
 
 		expect(result).toMatchObject({ status: 'ok', pushed: 0 });
-		expect(provider.callLog().filter((call) => call.op === 'delete')).toEqual([]);
-		expect(provider.contentAt('a.md')).toBe('keep\n');
+		expect(world.provider.callLog().filter((call) => call.op === 'delete')).toEqual([]);
+		expect(world.provider.contentAt('a.md')).toBe('keep\n');
 	});
 });
 
@@ -7546,21 +7645,21 @@ describe('a write that finds nothing, with an unrelated rename queued', () => {
 		// move says nothing about it, and acting on it moves the user's file
 		// somewhere they never named.
 		const file = await remoteFile('a.md', 'x\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'c.md',
 			content: 'mine\n',
 			...boundTo(file),
 			dirty: true,
 		});
-		store.queue({ op: 'write', noteId: 'n1', path: 'c.md' });
-		store.queue({ op: 'move', noteId: 'n1', path: 'c.md', targetPath: 'd.md' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'c.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'c.md', targetPath: 'd.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('retry');
-		expect(provider.snapshot().map((each) => each.path)).toContain('a.md');
-		expect(provider.snapshot().map((each) => each.path)).not.toContain('c.md');
+		expect(world.provider.snapshot().map((each) => each.path)).toContain('a.md');
+		expect(world.provider.snapshot().map((each) => each.path)).not.toContain('c.md');
 	});
 });
 
@@ -7569,73 +7668,66 @@ describe('a write that finds nothing, with an unrelated rename queued', () => {
  * underneath one device found once it was (`randomRemote.test.ts`). Each test
  * here is one of those findings, reduced to the entries that caused it.
  */
-const folderPaths = () =>
-	store
-		.folders()
-		.map((folder) => folder.path)
-		.sort();
-
-const notePaths = () =>
-	store
-		.notes()
-		.map((note) => note.path)
-		.sort();
-
 describe('a notebook removed here, whose directory the remote still has', () => {
 	/** The folder paths the remote holds, which is what an `rmdir` is about. */
 	const remoteFolders = () =>
-		provider
+		world.provider
 			.snapshot()
 			.filter((entry) => entry.kind === 'folder')
 			.map((entry) => entry.path)
 			.sort();
 
 	it('removes the directory a deleted notebook left behind', async () => {
-		const made = await provider.createFolder('Work');
+		const made = await world.provider.createFolder('Work');
 		const file = await remoteFile('Work/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 		// What the app queues for a notebook delete: the notes' deletes, and
 		// the folder behind them.
-		store.put({ ...noteAt('Work/a.md')!, dirty: true });
-		store.queue({ op: 'delete', noteId: noteAt('Work/a.md')!.id, path: 'Work/a.md' });
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
-		store.removeFolder('Work');
+		world.store.put({ ...noteAt('Work/a.md')!, dirty: true });
+		world.store.queue({ op: 'delete', noteId: noteAt('Work/a.md')!.id, path: 'Work/a.md' });
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		world.store.removeFolder('Work');
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(remoteFolders()).toEqual([]);
-		expect(provider.contentAt(file.path)).toBeUndefined();
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt(file.path)).toBeUndefined();
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('removes the directory a renamed notebook left behind, after its notes move', async () => {
 		// The rename goes up as the note moving and the old directory being
 		// removed. Ordered the other way round, the `rmdir` would find the note
 		// still in there and leave the directory for ever.
-		const made = await provider.createFolder('Work');
+		const made = await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, path: 'Plans/a.md' });
-		store.removeFolder('Work');
-		store.putFolder({ path: 'Plans' });
-		store.queue({ op: 'mkdir', path: 'Plans' });
-		store.queue({ op: 'move', noteId: note.id, path: 'Work/a.md', targetPath: 'Plans/a.md' });
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		world.store.put({ ...note, path: 'Plans/a.md' });
+		world.store.removeFolder('Work');
+		world.store.putFolder({ path: 'Plans' });
+		world.store.queue({ op: 'mkdir', path: 'Plans' });
+		world.store.queue({
+			op: 'move',
+			noteId: note.id,
+			path: 'Work/a.md',
+			targetPath: 'Plans/a.md',
+		});
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(remoteFolders()).toEqual(['Plans']);
-		expect(provider.contentAt('Plans/a.md')).toBe('a\n');
+		expect(world.provider.contentAt('Plans/a.md')).toBe('a\n');
 		// And the notebook here holds the directory the `mkdir` made, so its
 		// own `rmdir` could name it later.
-		expect(store.folders()).toEqual([
+		expect(world.store.folders()).toEqual([
 			{
 				path: 'Plans',
-				remoteId: remoteAt(provider, 'Plans')?.remoteId,
+				remoteId: remoteAt(world.provider, 'Plans')?.remoteId,
 			},
 		]);
 	});
@@ -7643,56 +7735,56 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 	it('leaves a directory holding a file this device never pulled', async () => {
 		// The whole difficulty: another device wrote into the notebook while
 		// this one was deleting it. Removed recursively, that file goes with it.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
 		await remoteFile('Work/theirs.md', 'theirs\n');
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(remoteFolders()).toEqual(['Work']);
-		expect(provider.contentAt('Work/theirs.md')).toBe('theirs\n');
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt('Work/theirs.md')).toBe('theirs\n');
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('leaves a directory holding a hidden file, or one in a subfolder', async () => {
-		const made = await provider.createFolder('Work');
-		await provider.createFolder('Work/Deep');
-		await engine.pull();
-		await provider.write('Work/Deep/.keep', 'x\n', {});
-		store.removeFolder('Work');
-		store.removeFolder('Work/Deep');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		const made = await world.provider.createFolder('Work');
+		await world.provider.createFolder('Work/Deep');
+		await world.engine.pull();
+		await world.provider.write('Work/Deep/.keep', 'x\n', {});
+		world.store.removeFolder('Work');
+		world.store.removeFolder('Work/Deep');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 
-		await engine.push();
+		await world.engine.push();
 
 		expect(remoteFolders()).toEqual(['Work', 'Work/Deep']);
 	});
 
 	it('removes a directory whose subfolders are empty', async () => {
-		const made = await provider.createFolder('Work');
-		await provider.createFolder('Work/Deep');
-		await engine.pull();
-		store.removeFolder('Work');
-		store.removeFolder('Work/Deep');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		const made = await world.provider.createFolder('Work');
+		await world.provider.createFolder('Work/Deep');
+		await world.engine.pull();
+		world.store.removeFolder('Work');
+		world.store.removeFolder('Work/Deep');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 
-		await engine.push();
+		await world.engine.push();
 
 		expect(remoteFolders()).toEqual([]);
 	});
 
 	it('leaves the directory alone once the user has made the notebook again', async () => {
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 		// Made again here, which the queue's own withdrawal usually catches —
 		// this is the backstop for an `rmdir` already at the network.
-		store.putFolder({ path: 'Work' });
+		world.store.putFolder({ path: 'Work' });
 
-		await engine.push();
+		await world.engine.push();
 
 		expect(remoteFolders()).toEqual(['Work']);
 	});
@@ -7701,22 +7793,22 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// A note made here and not pushed yet, so the directory is empty on the
 		// remote and the walk says nothing: the row is what says the notebook
 		// is still in use, and its write is queued behind this.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		store.put({ id: 'n1', path: 'Work/fresh.md', content: 'fresh\n', dirty: true });
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/fresh.md' });
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		world.store.put({ id: 'n1', path: 'Work/fresh.md', content: 'fresh\n', dirty: true });
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/fresh.md' });
 
-		await engine.push();
+		await world.engine.push();
 
 		expect(remoteFolders()).toEqual(['Work']);
-		expect(provider.contentAt('Work/fresh.md')).toBe('fresh\n');
+		expect(world.provider.contentAt('Work/fresh.md')).toBe('fresh\n');
 		// Never even asked for: removed and made again by the write behind it,
 		// the directory would be a new one on the provider, and every other
 		// device would see the notebook go and come back.
 		expect(
-			provider.callLog().some((call) => call.op === 'delete' && call.path === 'Work')
+			world.provider.callLog().some((call) => call.op === 'delete' && call.path === 'Work')
 		).toBe(false);
 	});
 
@@ -7726,46 +7818,46 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// holds the name would take theirs.
 		// And theirs is empty, so nothing but the id stands between this op and
 		// a directory that was never ours.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		await provider.move(made, 'Ours');
-		const theirs = await provider.createFolder('Work');
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		await world.provider.move(made, 'Ours');
+		const theirs = await world.provider.createFolder('Work');
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 
-		await engine.push();
+		await world.engine.push();
 
 		expect(remoteFolders()).toEqual(['Ours', 'Work']);
-		expect(remoteAt(provider, 'Work')?.remoteId).toBe(theirs.remoteId);
+		expect(remoteAt(world.provider, 'Work')?.remoteId).toBe(theirs.remoteId);
 		// Ours is the one the op named, and it is still there too: the folder
 		// that moved away is not what the path says any more.
-		expect(remoteAt(provider, 'Ours')?.remoteId).toBe(made.remoteId);
+		expect(remoteAt(world.provider, 'Ours')?.remoteId).toBe(made.remoteId);
 	});
 
 	it('does nothing at all without the id it was queued with', async () => {
-		await provider.createFolder('Work');
-		await engine.pull();
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work' });
+		await world.provider.createFolder('Work');
+		await world.engine.pull();
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(remoteFolders()).toEqual(['Work']);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('finishes when the directory is already gone', async () => {
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		await provider.delete(made);
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		await world.provider.delete(made);
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('does not put the notebook back from the mkdir its own push is about to answer', async () => {
@@ -7779,17 +7871,17 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// is stored: that is what puts it in the next round's feed. Created on
 		// the remote before the first pull, it would be behind the cursor and
 		// the feed would be empty, which is no test of anything.
-		store.putFolder({ path: 'Work' });
-		store.queue({ op: 'mkdir', path: 'Work' });
-		await engine.pull();
-		await engine.push();
-		const made = remoteAt(provider, 'Work');
-		expect(made?.remoteId).toBe(store.folders()[0]?.remoteId);
+		world.store.putFolder({ path: 'Work' });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
+		await world.engine.pull();
+		await world.engine.push();
+		const made = remoteAt(world.provider, 'Work');
+		expect(made?.remoteId).toBe(world.store.folders()[0]?.remoteId);
 		// The user deletes it again before the next round.
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made?.remoteId });
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made?.remoteId });
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual([]);
@@ -7800,18 +7892,18 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// The row above is still here — nothing here deleted it — so no `mkdir`
 		// was owed for it, and the one for the subfolder finds nothing to make
 		// it in. Left to fail it blocks the queue over a notebook.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		store.putFolder({ path: 'Work/Inner' });
-		store.queue({ op: 'mkdir', path: 'Work/Inner' });
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		world.store.putFolder({ path: 'Work/Inner' });
+		world.store.queue({ op: 'mkdir', path: 'Work/Inner' });
 		// Another device removes the directory the notebook is in.
-		await provider.delete(made);
+		await world.provider.delete(made);
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(remoteFolders()).toEqual(['Work', 'Work/Inner']);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('leaves the directory, rather than deleting it, where the provider cannot see what it would delete', async () => {
@@ -7891,23 +7983,23 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// Housekeeping, and the only op that is not the user's: an empty
 		// directory left on the remote costs them nothing, and every note they
 		// write from here on waiting behind it costs them everything.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		store.removeFolder('Work');
-		store.queue({
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		world.store.removeFolder('Work');
+		world.store.queue({
 			op: 'rmdir',
 			path: 'Work',
 			remoteId: made.remoteId,
 			attempts: 5,
 		});
-		store.put({ id: 'n1', path: 'later.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'later.md' });
+		world.store.put({ id: 'n1', path: 'later.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'later.md' });
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('later.md')).toBe('mine\n');
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt('later.md')).toBe('mine\n');
+		expect(world.store.ops()).toEqual([]);
 		expect(remoteFolders()).toEqual(['Work']);
 	});
 
@@ -7922,22 +8014,22 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// The notebook alone, with nothing in it yet: a note in it would keep
 		// the row by itself — a cascade leaves the notes it keeps a notebook to
 		// be in — and the empty notebook is the case that needs the rule.
-		store.putFolder({ path: 'Work' });
-		store.queue({ op: 'mkdir', path: 'Work' });
+		world.store.putFolder({ path: 'Work' });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
 
 		const result = await pullNow([{ path: 'Work', deleted: true }]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['Work']);
 		// And its `mkdir` is still owed: the directory has to be made again.
-		expect(store.ops().map((op) => op.op)).toEqual(['mkdir']);
+		expect(world.store.ops().map((op) => op.op)).toEqual(['mkdir']);
 	});
 
 	it('still takes a notebook the remote did have at the name', async () => {
 		// The other half: a row with an id is a directory the remote knows, and
 		// a deletion by path alone is about it.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
 		expect(folderPaths()).toEqual(['Work']);
 
 		const result = await pullNow([{ path: 'Work', deleted: true }]);
@@ -7950,18 +8042,18 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 	it('keeps a notebook another device made at the name it is removing', async () => {
 		// A different folder, with an id of its own: the `rmdir` is not about
 		// it, and neither is the row.
-		const made = await provider.createFolder('Work');
-		await engine.pull();
-		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
-		await provider.move(made, 'Ours');
-		const theirs = await provider.createFolder('Work');
+		const made = await world.provider.createFolder('Work');
+		await world.engine.pull();
+		world.store.removeFolder('Work');
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		await world.provider.move(made, 'Ours');
+		const theirs = await world.provider.createFolder('Work');
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['Ours', 'Work']);
-		expect(store.folders().find((folder) => folder.path === 'Work')?.remoteId).toBe(
+		expect(world.store.folders().find((folder) => folder.path === 'Work')?.remoteId).toBe(
 			theirs.remoteId
 		);
 	});
@@ -7970,20 +8062,25 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// What the op is for on this device: the `mkdir` of the new name and the
 		// old directory's removal both come back in the next round, and the old
 		// notebook must not be among them.
-		const made = await provider.createFolder('Work');
+		const made = await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, path: 'Plans/a.md' });
-		store.removeFolder('Work');
-		store.putFolder({ path: 'Plans' });
-		store.queue({ op: 'mkdir', path: 'Plans' });
-		store.queue({ op: 'move', noteId: note.id, path: 'Work/a.md', targetPath: 'Plans/a.md' });
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
-		await engine.push();
+		world.store.put({ ...note, path: 'Plans/a.md' });
+		world.store.removeFolder('Work');
+		world.store.putFolder({ path: 'Plans' });
+		world.store.queue({ op: 'mkdir', path: 'Plans' });
+		world.store.queue({
+			op: 'move',
+			noteId: note.id,
+			path: 'Work/a.md',
+			targetPath: 'Plans/a.md',
+		});
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		await world.engine.push();
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['Plans']);
@@ -8002,45 +8099,45 @@ describe('a notebook the user moved a note into, removed by another device', () 
 	 * it again: only a re-scan would find the note.
 	 */
 	const setUp = async () => {
-		const made = await provider.createFolder('Plans');
+		const made = await world.provider.createFolder('Plans');
 		await remoteFile('a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 		const note = noteAt('a.md');
 		if (note === undefined) throw new Error('no note');
 		// The rename, as the app queues it: the row moves now, the file moves
 		// when the op runs.
-		store.put({ ...note, path: 'Plans/a.md' });
-		store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'Plans/a.md' });
-		await provider.delete({ remoteId: made.remoteId, path: 'Plans' });
+		world.store.put({ ...note, path: 'Plans/a.md' });
+		world.store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'Plans/a.md' });
+		await world.provider.delete({ remoteId: made.remoteId, path: 'Plans' });
 		return note;
 	};
 
 	it('keeps the note the rename has not moved yet', async () => {
 		const note = await setUp();
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(notePaths()).toEqual(['Plans/a.md']);
-		const kept = store.notes().find((one) => one.id === note.id);
+		const kept = world.store.notes().find((one) => one.id === note.id);
 		expect(kept?.remoteId).toBe(note.remoteId);
 		expect(kept?.dirty).toBe(false);
 		// And a notebook to be in, from the same `ensure-folder` that roofs
 		// over the notes a cascade keeps.
 		expect(folderPaths()).toEqual(['Plans']);
-		expect(store.ops().map((op) => op.op)).toEqual(['move']);
+		expect(world.store.ops().map((op) => op.op)).toEqual(['move']);
 	});
 
 	it('and the rename makes the directory again when it runs', async () => {
 		await setUp();
-		await engine.pull();
+		await world.engine.pull();
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
-		expect(provider.contentAt('Plans/a.md')).toBe('a\n');
-		expect(provider.contentAt('a.md')).toBeUndefined();
-		expect(store.ops()).toEqual([]);
+		expect(world.provider.contentAt('Plans/a.md')).toBe('a\n');
+		expect(world.provider.contentAt('a.md')).toBeUndefined();
+		expect(world.store.ops()).toEqual([]);
 	});
 
 	it('keeps it on a scan, where the notebook is gone by not being mentioned', async () => {
@@ -8048,8 +8145,8 @@ describe('a notebook the user moved a note into, removed by another device', () 
 		// exists, and `reconcile` turns everything it did not mention into a
 		// deletion. The queued rename is the same, and so is the harm.
 		const entry = await remoteFile('a.md', 'a\n');
-		store.putFolder({ path: 'Plans', remoteId: 'folder-the-remote-lost' });
-		store.put({
+		world.store.putFolder({ path: 'Plans', remoteId: 'folder-the-remote-lost' });
+		world.store.put({
 			id: 'n1',
 			path: 'Plans/a.md',
 			content: 'a\n',
@@ -8057,14 +8154,14 @@ describe('a notebook the user moved a note into, removed by another device', () 
 			syncedHash: await contentHash('a\n'),
 			dirty: false,
 		});
-		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Plans/a.md' });
+		world.store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Plans/a.md' });
 
 		// No cursor, so this is a scan.
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(notePaths()).toEqual(['Plans/a.md']);
-		expect(store.notes()[0]?.remoteId).toBe(entry.remoteId);
+		expect(world.store.notes()[0]?.remoteId).toBe(entry.remoteId);
 		expect(folderPaths()).toEqual(['Plans']);
 	});
 
@@ -8074,8 +8171,8 @@ describe('a notebook the user moved a note into, removed by another device', () 
 		// loose. Before, only the rounds `decideAll` decides made roofs, so a
 		// scan left the note at a path with no notebook — holding its name,
 		// invisible in the sidebar.
-		store.putFolder({ path: 'Plans', remoteId: 'folder-the-remote-lost' });
-		store.put({
+		world.store.putFolder({ path: 'Plans', remoteId: 'folder-the-remote-lost' });
+		world.store.put({
 			id: 'n1',
 			path: 'Plans/a.md',
 			content: 'mine\n',
@@ -8083,10 +8180,10 @@ describe('a notebook the user moved a note into, removed by another device', () 
 			dirty: true,
 		});
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(notePaths()).toEqual(['Plans/a.md']);
-		expect(store.notes()[0]?.remoteId).toBeUndefined();
+		expect(world.store.notes()[0]?.remoteId).toBeUndefined();
 		expect(folderPaths()).toEqual(['Plans']);
 	});
 
@@ -8097,17 +8194,22 @@ describe('a notebook the user moved a note into, removed by another device', () 
 		// directory all the same. Kept, it would be a clean note pointing at a
 		// file in the bin, under a notebook row for a directory the remote
 		// does not have.
-		const made = await provider.createFolder('Work');
+		const made = await world.provider.createFolder('Work');
 		await remoteFile('Work/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, path: 'Work/b.md' });
-		store.queue({ op: 'move', noteId: note.id, path: 'Work/a.md', targetPath: 'Work/b.md' });
-		const moved = await provider.move(made, 'Plans');
-		await provider.delete({ remoteId: moved.remoteId, path: 'Plans' });
+		world.store.put({ ...note, path: 'Work/b.md' });
+		world.store.queue({
+			op: 'move',
+			noteId: note.id,
+			path: 'Work/a.md',
+			targetPath: 'Work/b.md',
+		});
+		const moved = await world.provider.move(made, 'Plans');
+		await world.provider.delete({ remoteId: moved.remoteId, path: 'Plans' });
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(notePaths()).toEqual([]);
 		expect(folderPaths()).toEqual([]);
@@ -8116,16 +8218,21 @@ describe('a notebook the user moved a note into, removed by another device', () 
 	it('takes the note whose file is inside the directory that has gone', async () => {
 		// The other half of the rule: a rename *within* the notebook says
 		// nothing about a file the deletion really does remove.
-		const made = await provider.createFolder('Plans');
+		const made = await world.provider.createFolder('Plans');
 		await remoteFile('Plans/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 		const note = noteAt('Plans/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, path: 'Plans/b.md' });
-		store.queue({ op: 'move', noteId: note.id, path: 'Plans/a.md', targetPath: 'Plans/b.md' });
-		await provider.delete({ remoteId: made.remoteId, path: 'Plans' });
+		world.store.put({ ...note, path: 'Plans/b.md' });
+		world.store.queue({
+			op: 'move',
+			noteId: note.id,
+			path: 'Plans/a.md',
+			targetPath: 'Plans/b.md',
+		});
+		await world.provider.delete({ remoteId: made.remoteId, path: 'Plans' });
 
-		await engine.pull();
+		await world.engine.pull();
 
 		expect(notePaths()).toEqual([]);
 		expect(folderPaths()).toEqual([]);
@@ -8139,14 +8246,14 @@ describe('a round of changes spread over several pages', () => {
 		// `C` goes with everything under it, and the page that says `C/A` went
 		// to `B` first finds nothing to move: the notebook comes back empty and
 		// its clean notes are gone from this device while the remote has them.
-		const doomed = await provider.createFolder('C');
-		await provider.createFolder('C/A');
+		const doomed = await world.provider.createFolder('C');
+		await world.provider.createFolder('C/A');
 		await remoteFile('C/A/n.md', 'kept\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('C/A/n.md');
 
-		const moved = await provider.move(entryAt(provider, 'C/A'), 'B');
-		await provider.delete(doomed);
+		const moved = await world.provider.move(entryAt(world.provider, 'C/A'), 'B');
+		await world.provider.delete(doomed);
 
 		const result = await pullPages([
 			[{ path: 'C', deleted: true, remoteId: doomed.remoteId }],
@@ -8156,20 +8263,20 @@ describe('a round of changes spread over several pages', () => {
 		expect(result.status).toBe('ok');
 		expect(noteAt('B/n.md')?.id).toBe(before?.id);
 		expect(folderPaths()).toEqual(['B']);
-		expect(store.storedCursor()).toBe('page-1');
+		expect(world.store.storedCursor()).toBe('page-1');
 	});
 
 	it('keeps a clean note moved out of a deleted folder as the same note', async () => {
 		// A provider that lists every descendant reports the note's move as
 		// its own entry. The cascade would take the note first, and the entry
 		// would bring the file back as a new note under a new id.
-		const doomed = await provider.createFolder('C');
+		const doomed = await world.provider.createFolder('C');
 		await remoteFile('C/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('C/n.md');
 
-		const moved = await provider.move(entryAt(provider, 'C/n.md'), 'n.md');
-		await provider.delete(doomed);
+		const moved = await world.provider.move(entryAt(world.provider, 'C/n.md'), 'n.md');
+		await world.provider.delete(doomed);
 
 		const result = await pullNow([
 			{ path: 'C', deleted: true, remoteId: doomed.remoteId },
@@ -8185,19 +8292,19 @@ describe('a round of changes spread over several pages', () => {
 		// The move is decided ahead of the deletion, and then again in its own
 		// turn. Asked twice against the store as the batch began, an edited
 		// note would be copied twice to the same name.
-		const doomed = await provider.createFolder('C');
-		await engine.pull();
+		const doomed = await world.provider.createFolder('C');
+		await world.engine.pull();
 		const first = await remoteFile('C/n.md', 'original\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'C/n.md',
 			content: 'mine\n',
 			...boundTo(first),
 			dirty: true,
 		});
-		await provider.write('C/n.md', 'theirs\n', { expectedVersion: first.version });
-		const moved = await provider.move(entryAt(provider, 'C/n.md'), 'n.md');
-		await provider.delete(doomed);
+		await world.provider.write('C/n.md', 'theirs\n', { expectedVersion: first.version });
+		const moved = await world.provider.move(entryAt(world.provider, 'C/n.md'), 'n.md');
+		await world.provider.delete(doomed);
 
 		const result = await pullNow([
 			{ path: 'C', deleted: true, remoteId: doomed.remoteId },
@@ -8207,7 +8314,9 @@ describe('a round of changes spread over several pages', () => {
 		expect(result.status).toBe('ok');
 		expect(result.conflicts).toHaveLength(1);
 		expect(noteAt('n.md')?.content).toBe('theirs\n');
-		expect(store.notes().filter((note) => note.content.includes('mine\n'))).toHaveLength(1);
+		expect(world.store.notes().filter((note) => note.content.includes('mine\n'))).toHaveLength(
+			1
+		);
 		expect(folderPaths()).toEqual([]);
 	});
 
@@ -8215,9 +8324,9 @@ describe('a round of changes spread over several pages', () => {
 		// The cost of reading the round whole: a failure on any page redoes it
 		// from the stored cursor, as a failure before the first page always did.
 		const file = await remoteFile('a.md', 'a\n');
-		await engine.pull();
-		const cursor = store.storedCursor();
-		await provider.delete(file);
+		await world.engine.pull();
+		const cursor = world.store.storedCursor();
+		await world.provider.delete(file);
 
 		const result = await pullPages([
 			[{ path: 'a.md', deleted: true, remoteId: file.remoteId }],
@@ -8226,7 +8335,7 @@ describe('a round of changes spread over several pages', () => {
 
 		expect(result.status).toBe('retry');
 		expect(noteAt('a.md')).toBeDefined();
-		expect(store.storedCursor()).toBe(cursor);
+		expect(world.store.storedCursor()).toBe(cursor);
 	});
 
 	it('decides a round of two thousand new notes without reading the store for each again', async () => {
@@ -8242,14 +8351,14 @@ describe('a round of changes spread over several pages', () => {
 		await paged.ensureRoot();
 		const counted = { reads: 0 };
 		const counting: SyncStore = {
-			...store,
+			...world.store,
 			noteById: (id) => {
 				counted.reads += 1;
-				return store.noteById(id);
+				return world.store.noteById(id);
 			},
 			notesUnder: (path) => {
 				counted.reads += 1;
-				return store.notesUnder(path);
+				return world.store.notesUnder(path);
 			},
 		};
 		const big = engineWith({ provider: paged, store: counting });
@@ -8267,7 +8376,7 @@ describe('a round of changes spread over several pages', () => {
 		const result = await big.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toHaveLength(notes);
+		expect(world.store.notes()).toHaveLength(notes);
 		expect(counted.reads).toBeLessThan(notes * 4);
 		// The reads above are the guard; this one only catches every decision
 		// replayed for every note again, which took a minute here. Seconds now,
@@ -8282,16 +8391,19 @@ describe('a folder moved into what it was', () => {
 		// and `C` at `B`. The first move leaves `B` empty and `B/B` full; asked
 		// backwards, a path inside the old one read as still holding the folder
 		// that left it, and the arriving `C` was displaced to a conflict name.
-		await provider.createFolder('B');
+		await world.provider.createFolder('B');
 		await remoteFile('B/a.md', 'a\n');
-		await provider.createFolder('C');
+		await world.provider.createFolder('C');
 		await remoteFile('C/c.md', 'c\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.move(entryAt(provider, 'B'), 'C/B');
-		await provider.move(entryAt(provider, 'C'), 'B');
+		await world.provider.move(entryAt(world.provider, 'B'), 'C/B');
+		await world.provider.move(entryAt(world.provider, 'C'), 'B');
 
-		const result = await pullNow([entryAt(provider, 'B/B'), entryAt(provider, 'B')]);
+		const result = await pullNow([
+			entryAt(world.provider, 'B/B'),
+			entryAt(world.provider, 'B'),
+		]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'B/B']);
@@ -8305,9 +8417,9 @@ describe('a folder said to move twice in one round', () => {
 		// moved into `A`, `A` renamed to `C` — needs the first rename to have
 		// happened for the file to land inside it. Keeping only the last word
 		// about the folder put the file in an `A` that never was.
-		const folder = await provider.createFolder('B');
+		const folder = await world.provider.createFolder('B');
 		const file = await remoteFile('a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 
 		const result = await pullNow([
 			{ ...folder, path: 'A' },
@@ -8321,8 +8433,8 @@ describe('a folder said to move twice in one round', () => {
 	});
 
 	it('follows a folder it made from where it made it', async () => {
-		await engine.pull();
-		const folder = await provider.createFolder('B');
+		await world.engine.pull();
+		const folder = await world.provider.createFolder('B');
 
 		await pullNow([{ ...folder, path: 'A' }, folder]);
 
@@ -8335,13 +8447,13 @@ describe('an id-less deletion under a folder the round renames', () => {
 		// `B/c.md` deleted, then `B` renamed to `A`. The deletion reads exactly
 		// like a rename's old path, so the feed alone cannot say; the file is
 		// asked for by id, and only "not found" lets go.
-		await provider.createFolder('B');
+		await world.provider.createFolder('B');
 		const gone = await remoteFile('B/c.md', 'c\n');
 		await remoteFile('B/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(gone);
-		const renamed = await provider.move(entryAt(provider, 'B'), 'A');
+		await world.provider.delete(gone);
+		const renamed = await world.provider.move(entryAt(world.provider, 'B'), 'A');
 
 		const result = await pullNow([{ path: 'B/c.md', deleted: true }, renamed]);
 
@@ -8350,13 +8462,13 @@ describe('an id-less deletion under a folder the round renames', () => {
 	});
 
 	it('asks the provider about a folder, where the rename puts it', async () => {
-		await provider.createFolder('C');
-		const gone = await provider.createFolder('C/A');
-		await provider.createFolder('C/K');
-		await engine.pull();
+		await world.provider.createFolder('C');
+		const gone = await world.provider.createFolder('C/A');
+		await world.provider.createFolder('C/K');
+		await world.engine.pull();
 
-		await provider.delete(gone);
-		const renamed = await provider.move(entryAt(provider, 'C'), 'B');
+		await world.provider.delete(gone);
+		const renamed = await world.provider.move(entryAt(world.provider, 'C'), 'B');
 
 		const result = await pullNow([
 			{ path: 'C/A', deleted: true },
@@ -8372,13 +8484,13 @@ describe('an id-less deletion under a folder the round renames', () => {
 		// `C` renamed to `B`, and then to `Z` after the round was read. Asked
 		// where `A` should be, the provider has no `B` to list: that says
 		// nothing about `A`, and taking it would lose it from this device.
-		await provider.createFolder('C');
-		await provider.createFolder('C/A');
+		await world.provider.createFolder('C');
+		await world.provider.createFolder('C/A');
 		await remoteFile('C/A/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const renamed = await provider.move(entryAt(provider, 'C'), 'B');
-		await provider.move(entryAt(provider, 'B'), 'Z');
+		const renamed = await world.provider.move(entryAt(world.provider, 'C'), 'B');
+		await world.provider.move(entryAt(world.provider, 'B'), 'Z');
 
 		const result = await pullNow([{ path: 'C/A', deleted: true }, renamed]);
 
@@ -8392,17 +8504,17 @@ describe('an id-less deletion under a folder the round renames', () => {
 		// read. `B` lists no `A`, which is also what the deletion would look
 		// like; the note is asked by its id, found, and the folder stays for
 		// the next round to move.
-		await provider.createFolder('C');
-		await provider.createFolder('C/A');
+		await world.provider.createFolder('C');
+		await world.provider.createFolder('C/A');
 		await remoteFile('C/A/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('C/A/n.md');
 
-		const renamed = await provider.move(entryAt(provider, 'C'), 'B');
-		await provider.move(entryAt(provider, 'B/A'), 'A');
+		const renamed = await world.provider.move(entryAt(world.provider, 'C'), 'B');
+		await world.provider.move(entryAt(world.provider, 'B/A'), 'A');
 
 		const first = await pullNow([{ path: 'C/A', deleted: true }, renamed]);
-		const second = await pullNow([entryAt(provider, 'A')]);
+		const second = await pullNow([entryAt(world.provider, 'A')]);
 
 		expect(first.status).toBe('ok');
 		expect(second.status).toBe('ok');
@@ -8414,15 +8526,15 @@ describe('an id-less deletion under a folder the round renames', () => {
 		// `C/C/B` deleted, `C` renamed to `A`, and `A/C` to `A/B`. Rebased
 		// through `C` alone, `B` is looked for in an `A/C` that is gone, and
 		// "not found" there says nothing; through `C/C`, it is asked of `A/B`.
-		await provider.createFolder('C');
-		await provider.createFolder('C/C');
-		await provider.createFolder('C/C/B');
+		await world.provider.createFolder('C');
+		await world.provider.createFolder('C/C');
+		await world.provider.createFolder('C/C/B');
 		await remoteFile('C/C/B/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(entryAt(provider, 'C/C/B'));
-		const outer = await provider.move(entryAt(provider, 'C'), 'A');
-		const inner = await provider.move(entryAt(provider, 'A/C'), 'A/B');
+		await world.provider.delete(entryAt(world.provider, 'C/C/B'));
+		const outer = await world.provider.move(entryAt(world.provider, 'C'), 'A');
+		const inner = await world.provider.move(entryAt(world.provider, 'A/C'), 'A/B');
 
 		const result = await pullNow([
 			{ path: 'C/C/B', deleted: true },
@@ -8440,14 +8552,14 @@ describe('an id-less deletion under a folder the round renames', () => {
 		// `B` moved into `A` as `A/B`, `A` renamed to `B`, and `B/B` deleted.
 		// The folder's one entry is at `A/B`, before its parent's rename took
 		// it to `B/B`: where it was, not somewhere it lives on.
-		await provider.createFolder('A');
-		await provider.createFolder('B');
+		await world.provider.createFolder('A');
+		await world.provider.createFolder('B');
 		await remoteFile('B/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const nested = await provider.move(entryAt(provider, 'B'), 'A/B');
-		const renamed = await provider.move(entryAt(provider, 'A'), 'B');
-		await provider.delete(entryAt(provider, 'B/B'));
+		const nested = await world.provider.move(entryAt(world.provider, 'B'), 'A/B');
+		const renamed = await world.provider.move(entryAt(world.provider, 'A'), 'B');
+		await world.provider.delete(entryAt(world.provider, 'B/B'));
 
 		const result = await pullNow([nested, renamed, { path: 'B/B', deleted: true }]);
 
@@ -8457,9 +8569,9 @@ describe('an id-less deletion under a folder the round renames', () => {
 	});
 
 	it('takes a folder made and renamed in the round at the name it was deleted at', async () => {
-		await engine.pull();
-		const folder = await provider.createFolder('B');
-		await provider.delete(folder);
+		await world.engine.pull();
+		const folder = await world.provider.createFolder('B');
+		await world.provider.delete(folder);
 
 		await pullNow([{ ...folder, path: 'A' }, folder, { path: 'B', deleted: true }]);
 
@@ -8469,12 +8581,12 @@ describe('an id-less deletion under a folder the round renames', () => {
 	it('takes a new folder at a renamed folder’s old name', async () => {
 		// `B` renamed to `A`, a new `B` made and deleted. The deletion is not
 		// the rename's old path: something else has been at `B` since.
-		const old = await provider.createFolder('B');
-		await engine.pull();
+		const old = await world.provider.createFolder('B');
+		await world.engine.pull();
 
-		const renamed = await provider.move(old, 'A');
-		const made = await provider.createFolder('B');
-		await provider.delete(made);
+		const renamed = await world.provider.move(old, 'A');
+		const made = await world.provider.createFolder('B');
+		await world.provider.delete(made);
 
 		await pullNow([renamed, made, { path: 'B', deleted: true }]);
 
@@ -8487,8 +8599,8 @@ describe('an id-less deletion of a folder renamed away and back', () => {
 		// `A` renamed to `C`, back to `A`, then deleted. The rename to `C` is an
 		// entry at another path, but an earlier one than the entry that brought
 		// it back, so it is not where the deletion found the folder.
-		const folder = await provider.createFolder('A');
-		await engine.pull();
+		const folder = await world.provider.createFolder('A');
+		await world.engine.pull();
 
 		const result = await pullNow([
 			{ ...folder, path: 'C' },
@@ -8505,9 +8617,9 @@ describe('an id-less deletion of a folder renamed away and back', () => {
 		// by path before the folder is listed at the new one. Nothing was at
 		// `D` before the round, so the second deletion has to be asked of the
 		// folder the round put there, which is alive at `C` afterwards.
-		const folder = await provider.createFolder('C');
+		const folder = await world.provider.createFolder('C');
 		await remoteFile('C/x.md', 'x\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('C/x.md');
 
 		const result = await pullNow([
@@ -8528,13 +8640,13 @@ describe('two id-less deletions of one path', () => {
 		// `C` deleted, `A` renamed to `C`, `C` deleted again: Dropbox says a
 		// path may appear more than once, in order. Folded into one, or read as
 		// both about the first `C`, the second folder stays for ever.
-		await provider.createFolder('C');
+		await world.provider.createFolder('C');
 		await remoteFile('C/x.md', 'x\n');
-		await provider.createFolder('A');
+		await world.provider.createFolder('A');
 		await remoteFile('A/y.md', 'y\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const renamed = { ...entryAt(provider, 'A'), path: 'C' };
+		const renamed = { ...entryAt(world.provider, 'A'), path: 'C' };
 
 		const result = await pullNow([
 			{ path: 'C', deleted: true },
@@ -8553,12 +8665,14 @@ describe('a deletion by id of something the round has already carried there', ()
 		// The edit names `B/c.md`; `B` is renamed to `C`; `C/c.md` is deleted.
 		// The edit is an entry at another path, but an earlier one, and the
 		// folder has taken the note to exactly where the deletion found it.
-		const folder = await provider.createFolder('B');
+		const folder = await world.provider.createFolder('B');
 		const file = await remoteFile('B/c.md', 'c\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const edited = await provider.write('B/c.md', 'c2\n', { expectedVersion: file.version });
-		const renamed = await provider.move(folder, 'C');
+		const edited = await world.provider.write('B/c.md', 'c2\n', {
+			expectedVersion: file.version,
+		});
+		const renamed = await world.provider.move(folder, 'C');
 
 		const result = await pullNow([
 			edited,
@@ -8572,9 +8686,9 @@ describe('a deletion by id of something the round has already carried there', ()
 	});
 
 	it('lets go of a folder carried off by its parent, and deleted', async () => {
-		const inner = await provider.createFolder('B');
-		const outer = await provider.createFolder('A');
-		await engine.pull();
+		const inner = await world.provider.createFolder('B');
+		const outer = await world.provider.createFolder('A');
+		await world.engine.pull();
 
 		const result = await pullNow([
 			{ ...inner, path: 'A/B' },
@@ -8587,8 +8701,8 @@ describe('a deletion by id of something the round has already carried there', ()
 	});
 
 	it('lets go of a folder moved twice and deleted where it ended', async () => {
-		const folder = await provider.createFolder('B');
-		await engine.pull();
+		const folder = await world.provider.createFolder('B');
+		await world.engine.pull();
 
 		await pullNow([
 			{ ...folder, path: 'A' },
@@ -8605,15 +8719,15 @@ describe('a folder arriving where another is about to leave', () => {
 		// Drive reports a page as it stands: a new `B`, and the old `B` inside
 		// it as `B/C`. Merged into one row, the move that follows carries the
 		// new folder off with the old one's notes, and `B` is gone from here.
-		const old = await provider.createFolder('B');
+		const old = await world.provider.createFolder('B');
 		await remoteFile('B/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.move(old, 'X');
-		const made = await provider.createFolder('B');
-		await provider.move(entryAt(provider, 'X'), 'B/C');
+		await world.provider.move(old, 'X');
+		const made = await world.provider.createFolder('B');
+		await world.provider.move(entryAt(world.provider, 'X'), 'B/C');
 
-		const result = await pullNow([made, entryAt(provider, 'B/C')]);
+		const result = await pullNow([made, entryAt(world.provider, 'B/C')]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'B/C']);
@@ -8624,41 +8738,41 @@ describe('a folder arriving where another is about to leave', () => {
 		// `B` deleted and a new `B` made, reported new first. Merged into the
 		// old row, the new folder takes the old one's notes, and the deletion
 		// by the old id finds nothing to take.
-		const old = await provider.createFolder('B');
+		const old = await world.provider.createFolder('B');
 		await remoteFile('B/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.delete(old);
-		const made = await provider.createFolder('B');
+		await world.provider.delete(old);
+		const made = await world.provider.createFolder('B');
 
 		const result = await pullNow([made, { path: 'B', deleted: true, remoteId: old.remoteId }]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B']);
 		expect(notePaths()).toEqual([]);
-		expect(store.folders()[0]?.remoteId).toBe(made.remoteId);
+		expect(world.store.folders()[0]?.remoteId).toBe(made.remoteId);
 	});
 
 	it('moves out a subfolder whose own move is what deletes its folder', async () => {
 		// `D1` and `D2` deleted, `D1/S1` moved to `D2` and `D2/S2` to `D1`.
 		// Deciding `S1` clears `D2`, whose rescue decides `S2`, which clears
 		// `D1` — with `S1` still in it and its entry already being decided.
-		const d1 = await provider.createFolder('D1');
-		await provider.createFolder('D1/S1');
+		const d1 = await world.provider.createFolder('D1');
+		await world.provider.createFolder('D1/S1');
 		await remoteFile('D1/S1/n1.md', 'n1\n');
-		const d2 = await provider.createFolder('D2');
-		await provider.createFolder('D2/S2');
+		const d2 = await world.provider.createFolder('D2');
+		await world.provider.createFolder('D2/S2');
 		await remoteFile('D2/S2/n2.md', 'n2\n');
-		await engine.pull();
+		await world.engine.pull();
 		const one = noteAt('D1/S1/n1.md');
 		const two = noteAt('D2/S2/n2.md');
 
-		await provider.move(entryAt(provider, 'D1/S1'), 'X1');
-		await provider.move(entryAt(provider, 'D2/S2'), 'X2');
-		await provider.delete(d1);
-		await provider.delete(d2);
-		const s1 = await provider.move(entryAt(provider, 'X1'), 'D2');
-		const s2 = await provider.move(entryAt(provider, 'X2'), 'D1');
+		await world.provider.move(entryAt(world.provider, 'D1/S1'), 'X1');
+		await world.provider.move(entryAt(world.provider, 'D2/S2'), 'X2');
+		await world.provider.delete(d1);
+		await world.provider.delete(d2);
+		const s1 = await world.provider.move(entryAt(world.provider, 'X1'), 'D2');
+		const s2 = await world.provider.move(entryAt(world.provider, 'X2'), 'D1');
 
 		const result = await pullNow([
 			s1,
@@ -8678,14 +8792,14 @@ describe('a folder arriving where another is about to leave', () => {
 		// at `C/C` is outside `B`, but decided already, and the rename after
 		// it carried the folder back in: nothing is leaving, and all of it
 		// goes.
-		await provider.createFolder('C');
-		await provider.createFolder('C/B');
+		await world.provider.createFolder('C');
+		await world.provider.createFolder('C/B');
 		await remoteFile('C/B/a.md', 'a\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		const inner = await provider.move(entryAt(provider, 'C/B'), 'C/C');
-		const outer = await provider.move(entryAt(provider, 'C'), 'B');
-		await provider.delete(entryAt(provider, 'B'));
+		const inner = await world.provider.move(entryAt(world.provider, 'C/B'), 'C/C');
+		const outer = await world.provider.move(entryAt(world.provider, 'C'), 'B');
+		await world.provider.delete(entryAt(world.provider, 'B'));
 
 		const result = await pullNow([inner, outer, { path: 'B', deleted: true }]);
 
@@ -8699,15 +8813,15 @@ describe('a folder arriving where another is about to leave', () => {
 		// `B` first, as an id-tree page lists folders. Deleted to make room,
 		// the old `B` would take `B/sub` and its notes with it before the
 		// entry saying where `sub` went is reached.
-		const old = await provider.createFolder('B');
-		await provider.createFolder('B/sub');
+		const old = await world.provider.createFolder('B');
+		await world.provider.createFolder('B/sub');
 		await remoteFile('B/sub/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('B/sub/n.md');
 
-		const moved = await provider.move(entryAt(provider, 'B/sub'), 'Keep');
-		await provider.delete(old);
-		const made = await provider.createFolder('B');
+		const moved = await world.provider.move(entryAt(world.provider, 'B/sub'), 'Keep');
+		await world.provider.delete(old);
+		const made = await world.provider.createFolder('B');
 
 		const result = await pullNow([
 			made,
@@ -8724,17 +8838,17 @@ describe('a folder arriving where another is about to leave', () => {
 		// The same, with unpushed edits. Cut loose by the cascade, the note
 		// stays behind at `B/sub/n.md` with no file, and its push makes a
 		// second copy beside `Keep/n.md` instead of going to that file.
-		const old = await provider.createFolder('B');
-		await provider.createFolder('B/sub');
+		const old = await world.provider.createFolder('B');
+		await world.provider.createFolder('B/sub');
 		const file = await remoteFile('B/sub/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('B/sub/n.md');
 		if (before === undefined) throw new Error('no note');
-		store.put({ ...before, content: 'mine\n', dirty: true });
+		world.store.put({ ...before, content: 'mine\n', dirty: true });
 
-		const moved = await provider.move(entryAt(provider, 'B/sub'), 'Keep');
-		await provider.delete(old);
-		const made = await provider.createFolder('B');
+		const moved = await world.provider.move(entryAt(world.provider, 'B/sub'), 'Keep');
+		await world.provider.delete(old);
+		const made = await world.provider.createFolder('B');
 
 		const result = await pullNow([
 			made,
@@ -8744,7 +8858,7 @@ describe('a folder arriving where another is about to leave', () => {
 
 		expect(result.status).toBe('ok');
 		expect(
-			store.notes().map((note) => [note.path, note.content, note.remoteId, note.dirty])
+			world.store.notes().map((note) => [note.path, note.content, note.remoteId, note.dirty])
 		).toEqual([['Keep/n.md', 'mine\n', file.remoteId, true]]);
 	});
 
@@ -8753,15 +8867,15 @@ describe('a folder arriving where another is about to leave', () => {
 		// round. `X` is inside the `B` it displaces, so it has to be asked where
 		// it is again after the displacement, or it moves from a path it has
 		// already left.
-		await provider.createFolder('B');
-		await provider.createFolder('B/X');
+		await world.provider.createFolder('B');
+		await world.provider.createFolder('B/X');
 		await remoteFile('B/X/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.move(entryAt(provider, 'B'), 'Z');
-		await provider.move(entryAt(provider, 'Z/X'), 'B');
+		await world.provider.move(entryAt(world.provider, 'B'), 'Z');
+		await world.provider.move(entryAt(world.provider, 'Z/X'), 'B');
 
-		const result = await pullNow([entryAt(provider, 'B'), entryAt(provider, 'Z')]);
+		const result = await pullNow([entryAt(world.provider, 'B'), entryAt(world.provider, 'Z')]);
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'Z']);
@@ -8771,19 +8885,19 @@ describe('a folder arriving where another is about to leave', () => {
 	it('keeps a subfolder moved up to the name of the folder being deleted', async () => {
 		// `C/A` moved up to `C` as `C` is deleted. Clearing the way by deleting
 		// `C` would take the arrival with it.
-		const doomed = await provider.createFolder('C');
-		await provider.createFolder('C/A');
+		const doomed = await world.provider.createFolder('C');
+		await world.provider.createFolder('C/A');
 		await remoteFile('C/A/n.md', 'n\n');
-		await engine.pull();
+		await world.engine.pull();
 		const before = noteAt('C/A/n.md');
 
-		await provider.move(entryAt(provider, 'C/A'), 'X');
-		await provider.delete(doomed);
-		await provider.move(entryAt(provider, 'X'), 'C');
+		await world.provider.move(entryAt(world.provider, 'C/A'), 'X');
+		await world.provider.delete(doomed);
+		await world.provider.move(entryAt(world.provider, 'X'), 'C');
 
 		const result = await pullNow([
 			{ path: 'C', deleted: true, remoteId: doomed.remoteId },
-			entryAt(provider, 'C'),
+			entryAt(world.provider, 'C'),
 		]);
 
 		expect(result.status).toBe('ok');
@@ -8798,19 +8912,19 @@ describe('two notes meeting at a path neither ends up at', () => {
 		// and its `c.md` to `a.md`, reported as they stand. The note arriving
 		// and the one carried there meet at `A/c.md` for a moment, and a
 		// conflict copy of either is a note that never conflicted.
-		await provider.createFolder('C');
+		await world.provider.createFolder('C');
 		await remoteFile('C/c.md', 'c\n');
 		await remoteFile('b.md', 'b\n');
-		await engine.pull();
+		await world.engine.pull();
 
-		await provider.move(entryAt(provider, 'C'), 'A');
-		await provider.move(entryAt(provider, 'A/c.md'), 'A/a.md');
-		await provider.move(entryAt(provider, 'b.md'), 'A/c.md');
+		await world.provider.move(entryAt(world.provider, 'C'), 'A');
+		await world.provider.move(entryAt(world.provider, 'A/c.md'), 'A/a.md');
+		await world.provider.move(entryAt(world.provider, 'b.md'), 'A/c.md');
 
 		const result = await pullNow([
-			entryAt(provider, 'A/c.md'),
-			entryAt(provider, 'A'),
-			entryAt(provider, 'A/a.md'),
+			entryAt(world.provider, 'A/c.md'),
+			entryAt(world.provider, 'A'),
+			entryAt(world.provider, 'A/a.md'),
 		]);
 
 		expect(result.status).toBe('ok');
@@ -8830,32 +8944,32 @@ describe('two devices at random', () => {
 		// The store reports it clean, so claiming it writes the other device's
 		// bytes into a note the user deleted, and its queued delete then
 		// removes their note from the remote.
-		await engine.pull();
-		store.put({ id: 'n1', path: 'a.md', content: 'mine\n' });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		await world.engine.pull();
+		world.store.put({ id: 'n1', path: 'a.md', content: 'mine\n' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 		const theirs = await remoteFile('a.md', 'theirs\n');
 
 		await pullNow([theirs]);
-		await engine.push();
+		await world.engine.push();
 
-		expect(store.notes().find((note) => note.id === 'n1')?.remoteId).toBeUndefined();
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(world.store.notes().find((note) => note.id === 'n1')?.remoteId).toBeUndefined();
+		expect(world.provider.contentAt('a.md')).toBe('theirs\n');
 	});
 
 	it('does not let a note deleted here and there take the file made at its name', async () => {
 		// Written back under the same id, the new file is still a deleted note
 		// here, and the queued delete takes it from the remote.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
-		await provider.delete(entry);
+		world.store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
+		await world.provider.delete(entry);
 		const theirs = await remoteFile('a.md', 'theirs\n');
 
 		await pullNow([{ path: 'a.md', deleted: true, remoteId: entry.remoteId }, theirs]);
-		await engine.push();
+		await world.engine.push();
 
-		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(world.store.notes().map((each) => each.id)).not.toContain(note.id);
+		expect(world.provider.contentAt('a.md')).toBe('theirs\n');
 	});
 
 	it('does not let it take that file in a rescan either, which never says the old one went', async () => {
@@ -8866,16 +8980,16 @@ describe('two devices at random', () => {
 		// replaced while the cursor was dead, and its queued delete took the
 		// other device's note from the remote.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
-		await provider.delete(entry);
+		world.store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
+		await world.provider.delete(entry);
 		await remoteFile('a.md', 'theirs\n');
 		killTheCursor();
 
-		expect((await engine.sync()).status).toBe('ok');
+		expect((await world.engine.sync()).status).toBe('ok');
 
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(world.provider.contentAt('a.md')).toBe('theirs\n');
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
-		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+		expect(world.store.notes().map((each) => each.id)).not.toContain(note.id);
 	});
 
 	it('does not let a note renamed here onto a name take the file made there', async () => {
@@ -8883,12 +8997,12 @@ describe('two devices at random', () => {
 		// lets a note whose own file was replaced be claimed. The rename's file
 		// is still at the old name, and claimed, the note forgets it for ever.
 		const { entry, note } = await pulledNote('a.md', 'mine\n');
-		renameHere(store, note, 'b.md');
+		renameHere(world.store, note, 'b.md');
 		const theirs = await remoteFile('b.md', 'theirs\n');
 
 		await pullNow([{ path: 'b.md', deleted: true }, theirs]);
 
-		const mine = store.notes().find((each) => each.id === note.id);
+		const mine = world.store.notes().find((each) => each.id === note.id);
 		expect(mine?.remoteId).toBe(entry.remoteId);
 		expect(mine?.content).toBe('mine\n');
 		expect(noteAt('b.md')?.content).toBe('theirs\n');
@@ -8896,11 +9010,13 @@ describe('two devices at random', () => {
 
 	it('does not let a note take a file that arrives at its path while its own is unmentioned', async () => {
 		const { entry, note } = await pulledNote('a.md', 'mine\n');
-		const theirs = await provider.write('b.md', 'theirs\n', {});
+		const theirs = await world.provider.write('b.md', 'theirs\n', {});
 
 		await pullNow([{ ...theirs, path: 'a.md' }]);
 
-		expect(store.notes().find((each) => each.id === note.id)?.remoteId).toBe(entry.remoteId);
+		expect(world.store.notes().find((each) => each.id === note.id)?.remoteId).toBe(
+			entry.remoteId
+		);
 	});
 
 	it('does not let a deletion at a name take the note renamed onto it here', async () => {
@@ -8908,29 +9024,31 @@ describe('two devices at random', () => {
 		// back after the user gave the name to another.
 		const gone = await pulledNote('a.md', 'gone\n');
 		const { note } = await pulledNote('b.md', 'kept\n');
-		store.queue({ op: 'delete', noteId: gone.note.id, path: 'a.md' });
-		await engine.push();
-		renameHere(store, note, 'a.md');
+		world.store.queue({ op: 'delete', noteId: gone.note.id, path: 'a.md' });
+		await world.engine.push();
+		renameHere(world.store, note, 'a.md');
 
 		await pullNow([{ path: 'a.md', deleted: true }]);
-		await engine.push();
+		await world.engine.push();
 
 		expect(noteAt('a.md')?.id).toBe(note.id);
-		expect(provider.contentAt('a.md')).toBe('kept\n');
+		expect(world.provider.contentAt('a.md')).toBe('kept\n');
 	});
 
 	it('lets a deletion at the old name of a queued rename take that note', async () => {
 		// Ahead of a note the user made at the name the rename freed, which has
 		// never had a file for it to be about.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		renameHere(store, note, 'b.md');
-		store.put({ id: 'made', path: 'a.md', content: 'new\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'made', path: 'a.md' });
-		await provider.delete(entry);
+		renameHere(world.store, note, 'b.md');
+		world.store.put({ id: 'made', path: 'a.md', content: 'new\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'made', path: 'a.md' });
+		await world.provider.delete(entry);
 
 		await pullNow([{ path: 'a.md', deleted: true }]);
 
-		expect(store.notes().map((each) => [each.id, each.content])).toEqual([['made', 'new\n']]);
+		expect(world.store.notes().map((each) => [each.id, each.content])).toEqual([
+			['made', 'new\n'],
+		]);
 	});
 
 	it('does not let a deletion at a rename’s old name take the note whose file has moved on', async () => {
@@ -8938,22 +9056,24 @@ describe('two devices at random', () => {
 		// the queue still names the old path, and something made there later
 		// and deleted is not this note's file.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		renameHere(store, note, 'b.md');
-		const moved = await provider.move(entry, 'c.md');
+		renameHere(world.store, note, 'b.md');
+		const moved = await world.provider.move(entry, 'c.md');
 		await pullNow([{ path: 'a.md', deleted: true }, moved]);
 		const later = await remoteFile('a.md', 'later\n');
-		await provider.delete(later);
+		await world.provider.delete(later);
 
 		await pullNow([{ path: 'a.md', deleted: true }]);
 
-		expect(store.notes().find((each) => each.id === note.id)?.remoteId).toBe(entry.remoteId);
-		expect(store.ops().map((op) => op.op)).toEqual(['move']);
+		expect(world.store.notes().find((each) => each.id === note.id)?.remoteId).toBe(
+			entry.remoteId
+		);
+		expect(world.store.ops().map((op) => op.op)).toEqual(['move']);
 	});
 
 	it('takes a note at the path that has a file ahead of the one renamed from it', async () => {
 		const { note } = await pulledNote('a.md', 'one\n');
-		renameHere(store, note, 'b.md');
-		store.put({
+		renameHere(world.store, note, 'b.md');
+		world.store.put({
 			id: 'here',
 			path: 'a.md',
 			content: 'here\n',
@@ -8963,19 +9083,21 @@ describe('two devices at random', () => {
 
 		await pullNow([{ path: 'a.md', deleted: true }]);
 
-		expect(store.notes().map((each) => each.id)).toEqual([note.id]);
+		expect(world.store.notes().map((each) => each.id)).toEqual([note.id]);
 	});
 
 	it('lets a note take the file that replaced its own when the feed reports no deletion', async () => {
 		// A provider need not report the deletion of a file replaced at its path.
 		// Moved aside instead, the note points at a file nothing will mention again.
 		const { entry } = await pulledNote('a.md', 'one\n');
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 		const theirs = await remoteFile('a.md', 'two\n');
 
 		await pullNow([theirs]);
 
-		expect(store.notes().map((each) => [each.path, each.content])).toEqual([['a.md', 'two\n']]);
+		expect(world.store.notes().map((each) => [each.path, each.content])).toEqual([
+			['a.md', 'two\n'],
+		]);
 	});
 
 	it.each([
@@ -8991,8 +9113,8 @@ describe('two devices at random', () => {
 			// note, holding an edit, is cut loose and then conflicts with the file
 			// that took its place, rather than moving aside.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			store.put({ ...note, content: 'mine\n', dirty: true });
-			const theirs = await provider.write('elsewhere.md', 'theirs\n', {});
+			world.store.put({ ...note, content: 'mine\n', dirty: true });
+			const theirs = await world.provider.write('elsewhere.md', 'theirs\n', {});
 
 			await pullNow([deletion(entry.remoteId), { ...theirs, path: 'a.md' }]);
 
@@ -9001,25 +9123,25 @@ describe('two devices at random', () => {
 	);
 
 	it('takes a note never pushed when its own first push comes back', async () => {
-		await engine.pull();
-		store.put({ id: 'n1', path: 'a.md', content: 'body\n' });
+		await world.engine.pull();
+		world.store.put({ id: 'n1', path: 'a.md', content: 'body\n' });
 		const file = await remoteFile('a.md', 'body\n');
 
 		await pullNow([file]);
 
-		expect(store.notes().map((each) => [each.id, each.remoteId])).toEqual([
+		expect(world.store.notes().map((each) => [each.id, each.remoteId])).toEqual([
 			['n1', file.remoteId],
 		]);
 	});
 
 	it('takes a note never pushed when the file coming back carries its id', async () => {
-		await engine.pull();
-		store.put({ id: 'n1', path: 'a.md', content: 'body\n' });
+		await world.engine.pull();
+		world.store.put({ id: 'n1', path: 'a.md', content: 'body\n' });
 		const file = await remoteFile('a.md', '---\nid: n1\n---\n\nbody\n');
 
 		await pullNow([file]);
 
-		expect(store.notes().map((each) => [each.id, each.remoteId])).toEqual([
+		expect(world.store.notes().map((each) => [each.id, each.remoteId])).toEqual([
 			['n1', file.remoteId],
 		]);
 	});
@@ -9028,7 +9150,7 @@ describe('two devices at random', () => {
 		// A page boundary between the two, or the file deleted between the feed
 		// and the read: nothing at the new path to find the note by afterwards.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 
 		await pullNow([
 			{ path: 'a.md', deleted: true },
@@ -9036,44 +9158,44 @@ describe('two devices at random', () => {
 		]);
 		await pullNow([{ path: 'c.md', deleted: true }]);
 
-		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+		expect(world.store.notes().map((each) => each.id)).not.toContain(note.id);
 	});
 
 	it('leaves a note at its own path to the deletion that follows, not to the read', async () => {
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		await provider.delete(entry);
+		await world.provider.delete(entry);
 
 		await pullNow([{ ...entry, version: 'edited-elsewhere' }]);
 
-		expect(store.notes().map((each) => each.id)).toEqual([note.id]);
+		expect(world.store.notes().map((each) => each.id)).toEqual([note.id]);
 	});
 
 	it('asks whether a file is there when a rename queued here adopted it and a deletion follows', async () => {
 		// Adopting the version reads nothing, so it says nothing about whether
 		// the file outlived the deletion behind it.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		renameHere(store, note, 'b.md');
-		await provider.delete(entry);
+		renameHere(world.store, note, 'b.md');
+		await world.provider.delete(entry);
 
 		await pullNow([entry, { path: 'a.md', deleted: true }]);
 
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 	});
 
 	it('lets go of a note whose file moved and then went', async () => {
 		// The deletion is at the new name, where the note never got to, and
 		// carries no id to find it by.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		store.put({ id: 'made', path: 'c.md', content: 'new\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'made', path: 'c.md' });
-		await provider.delete(entry);
+		world.store.put({ id: 'made', path: 'c.md', content: 'new\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'made', path: 'c.md' });
+		await world.provider.delete(entry);
 
 		await pullNow([
 			{ ...entry, path: 'c.md', version: 'after-the-move' },
 			{ path: 'c.md', deleted: true },
 		]);
 
-		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+		expect(world.store.notes().map((each) => each.id)).not.toContain(note.id);
 		expect(noteAt('c.md')?.content).toBe('new\n');
 	});
 
@@ -9084,18 +9206,18 @@ describe('two devices at random', () => {
 		// rename.
 		const copyName = 'b (conflict 2026-09-15T14-32).md';
 		const { note } = await pulledNote(copyName, 'renamed\n');
-		store.put({ id: 'made', path: 'b.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'made', path: 'b.md' });
-		renameHere(store, note, 'r.md');
+		world.store.put({ id: 'made', path: 'b.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'made', path: 'b.md' });
+		renameHere(world.store, note, 'r.md');
 		const theirs = await remoteFile('b.md', 'theirs\n');
 
 		await pullNow([theirs]);
-		const pushed = await engine.push();
+		const pushed = await world.engine.push();
 
-		const mine = store.notes().find((each) => each.content.includes('mine'));
+		const mine = world.store.notes().find((each) => each.content.includes('mine'));
 		expect(mine?.path).not.toBe(copyName);
 		expect(pushed.status).toBe('ok');
-		expect(provider.contentAt('r.md')).toBe('renamed\n');
+		expect(world.provider.contentAt('r.md')).toBe('renamed\n');
 	});
 });
 
@@ -9111,11 +9233,11 @@ describe('a file that is not UTF-8 text', () => {
 	const COPY = 'a (conflict 2026-09-15T14-32).md';
 
 	const holders = (remoteId: string): SyncNote[] =>
-		store.notes().filter((note) => note.remoteId === remoteId);
+		world.store.notes().filter((note) => note.remoteId === remoteId);
 
 	/** What the engine has asked the provider to change, which is never this file. */
 	const sent = (): string[] =>
-		provider
+		world.provider
 			.callLog()
 			.filter((call) => call.op === 'write' || call.op === 'move' || call.op === 'delete')
 			.map((call) => `${call.op} ${call.path ?? ''}`);
@@ -9123,53 +9245,53 @@ describe('a file that is not UTF-8 text', () => {
 	it('imports nothing, and the pull goes through', async () => {
 		// A throw here is a pull that never moves its cursor: the same entry
 		// and the same bytes next time, and the user's sync is over.
-		const file = provider.plantBytes('a.md', LATIN1);
+		const file = world.provider.plantBytes('a.md', LATIN1);
 		await remoteFile('b.md', 'readable\n');
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.storedCursor()).toBeDefined();
-		expect(store.notes().map((note) => note.path)).toEqual(['b.md']);
+		expect(world.store.storedCursor()).toBeDefined();
+		expect(world.store.notes().map((note) => note.path)).toEqual(['b.md']);
 		expect(holders(file.remoteId)).toEqual([]);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
 	it('reads a file holding a NUL the same way', async () => {
 		// UTF-16 with no BOM is valid UTF-8 to a decoder, with a NUL for every
 		// other byte; so is most of what a binary holds.
 		const utf16 = new Uint8Array([0x68, 0x00, 0x69, 0x00]);
-		provider.plantBytes('a.md', utf16);
+		world.provider.plantBytes('a.md', utf16);
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
-		expect(provider.bytesAt('a.md')).toEqual(utf16);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.provider.bytesAt('a.md')).toEqual(utf16);
 	});
 
 	it('moves a note never pushed aside, and its push makes the copy', async () => {
-		await engine.pull();
-		store.put({ id: 'mine', path: 'a.md', content: 'mine\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
-		const file = provider.plantBytes('a.md', LATIN1);
+		await world.engine.pull();
+		world.store.put({ id: 'mine', path: 'a.md', content: 'mine\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
+		const file = world.provider.plantBytes('a.md', LATIN1);
 
 		// By the pull, as for any file arriving at a name of ours: left to the
 		// push, the note sits on the file's path until a write has failed there.
-		const pulled = await engine.pull();
+		const pulled = await world.engine.pull();
 
 		expect(pulled.status).toBe('ok');
 		expect(noteAt(COPY)).toMatchObject({ id: 'mine', content: 'mine\n', dirty: true });
 		expect(noteAt('a.md')).toBeUndefined();
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(result.conflicts).toEqual([]);
 		expect(noteAt(COPY)).toMatchObject({ id: 'mine', content: 'mine\n', dirty: false });
-		expect(provider.contentAt(COPY)).toBe('mine\n');
+		expect(world.provider.contentAt(COPY)).toBe('mine\n');
 		expect(holders(file.remoteId)).toEqual([]);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
 	it('lets go of a clean note whose file became unreadable, and sends nothing', async () => {
@@ -9177,76 +9299,76 @@ describe('a file that is not UTF-8 text', () => {
 		// its version, and the first push from it replaces the user's bytes.
 		const { entry } = await pulledNote('a.md', 'one\n');
 		const before = sent();
-		provider.plantBytes('a.md', LATIN1);
+		world.provider.plantBytes('a.md', LATIN1);
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		expect(sent()).toEqual(before);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
-		expect(remoteAt(provider, 'a.md')?.remoteId).toBe(entry.remoteId);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(remoteAt(world.provider, 'a.md')?.remoteId).toBe(entry.remoteId);
 	});
 
 	it('cuts a dirty note loose and moves it aside, and its edit goes up beside the file', async () => {
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		editHere(store, note, 'my edit\n');
-		provider.plantBytes('a.md', LATIN1);
+		editHere(world.store, note, 'my edit\n');
+		world.provider.plantBytes('a.md', LATIN1);
 
-		const pulled = await engine.pull();
+		const pulled = await world.engine.pull();
 
 		expect(pulled.status).toBe('ok');
 		expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: true });
 		expect(noteAt(COPY)?.remoteId).toBeUndefined();
 		expect(noteAt('a.md')).toBeUndefined();
 
-		const result = await engine.push();
+		const result = await world.engine.push();
 
 		expect(result.status).toBe('ok');
 		expect(result.conflicts).toEqual([]);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
 		expect(noteAt(COPY)?.remoteId).not.toBe(entry.remoteId);
-		expect(provider.contentAt(COPY)).toBe('my edit\n');
+		expect(world.provider.contentAt(COPY)).toBe('my edit\n');
 		expect(holders(entry.remoteId)).toEqual([]);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
 	it('leaves a dirty note the user renamed where they put it', async () => {
 		// Nothing is in its way at the new name. Its queued move has no file to
 		// move any more and finishes as done; the write makes the file.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
-		store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
-		store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
-		provider.plantBytes('a.md', LATIN1);
+		world.store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
+		world.store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
+		world.store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
+		world.provider.plantBytes('a.md', LATIN1);
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
-		expect(store.ops()).toEqual([]);
-		expect(store.notes().map((each) => each.path)).toEqual(['b.md']);
+		expect(world.store.ops()).toEqual([]);
+		expect(world.store.notes().map((each) => each.path)).toEqual(['b.md']);
 		expect(noteAt('b.md')).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
-		expect(provider.contentAt('b.md')).toBe('my edit\n');
+		expect(world.provider.contentAt('b.md')).toBe('my edit\n');
 		expect(sent().filter((call) => call.startsWith('move'))).toEqual([]);
 		expect(holders(entry.remoteId)).toEqual([]);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
 	it('keeps an edit typed after the note was decided clean', async () => {
 		// The store refuses a `delete-note` for a note edited since (§7), the
 		// batch rolls back with its cursor, and the next pull meets a dirty note.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		provider.plantBytes('a.md', LATIN1);
-		const cursor = store.storedCursor();
+		world.provider.plantBytes('a.md', LATIN1);
+		const cursor = world.store.storedCursor();
 		const typed = { done: false };
 		const typing: SyncStore = {
-			...store,
+			...world.store,
 			applyChanges: (batch) => {
-				if (!typed.done) editHere(store, note, 'typed just now\n');
+				if (!typed.done) editHere(world.store, note, 'typed just now\n');
 				typed.done = true;
-				return store.applyChanges(batch);
+				return world.store.applyChanges(batch);
 			},
 		};
 		const racing = engineWith({ store: typing });
@@ -9254,32 +9376,32 @@ describe('a file that is not UTF-8 text', () => {
 		const refused = await racing.pull();
 
 		expect(refused.status).toBe('retry');
-		expect(store.storedCursor()).toBe(cursor);
+		expect(world.store.storedCursor()).toBe(cursor);
 
 		const result = await racing.sync();
 
 		expect(result.status).toBe('ok');
 		expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'typed just now\n' });
-		expect(provider.contentAt(COPY)).toBe('typed just now\n');
+		expect(world.provider.contentAt(COPY)).toBe('typed just now\n');
 		expect(holders(entry.remoteId)).toEqual([]);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
 	it('drops the delete of a note whose file became unreadable', async () => {
 		// The user deleted text they had seen, not these bytes. The file is left
 		// alone, and the tombstone goes with nothing sent.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
-		provider.plantBytes('a.md', LATIN1);
+		world.store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
+		world.provider.plantBytes('a.md', LATIN1);
 
-		const result = await engine.sync();
+		const result = await world.engine.sync();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes()).toEqual([]);
-		expect(store.ops()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
+		expect(world.store.ops()).toEqual([]);
 		expect(sent().filter((call) => call.startsWith('delete'))).toEqual([]);
-		expect(remoteAt(provider, 'a.md')?.remoteId).toBe(entry.remoteId);
-		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(remoteAt(world.provider, 'a.md')?.remoteId).toBe(entry.remoteId);
+		expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 	});
 
 	it('takes a file it cannot read for one that is still there', async () => {
@@ -9288,8 +9410,8 @@ describe('a file that is not UTF-8 text', () => {
 		// that other file; a throw would stop the pull. It is there, so the note
 		// moves aside, and the file's own entry then lets go of it.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		await provider.move(entry, 'old.md');
-		const old = provider.plantBytes('old.md', LATIN1);
+		await world.provider.move(entry, 'old.md');
+		const old = world.provider.plantBytes('old.md', LATIN1);
 		const theirs = await remoteFile('a.md', 'theirs\n');
 
 		const result = await pullNow([theirs]);
@@ -9302,9 +9424,9 @@ describe('a file that is not UTF-8 text', () => {
 		const next = await pullNow([old]);
 
 		expect(next.status).toBe('ok');
-		expect(store.notes().map((each) => each.path)).toEqual(['a.md']);
+		expect(world.store.notes().map((each) => each.path)).toEqual(['a.md']);
 		expect(holders(entry.remoteId)).toEqual([]);
-		expect(provider.bytesAt('old.md')).toEqual(LATIN1);
+		expect(world.provider.bytesAt('old.md')).toEqual(LATIN1);
 	});
 
 	describe('a delete queued for a note whose file became unreadable', () => {
@@ -9317,17 +9439,17 @@ describe('a file that is not UTF-8 text', () => {
 		const tombstone = async () => {
 			await pulledNote('a.md', `---\nid: n1\n---\n\none\n`);
 			expect(noteAt('a.md')?.id).toBe('n1');
-			store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+			world.store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 		};
 		const resave = (): void => {
-			provider.plantBytes('a.md', LATIN1);
+			world.provider.plantBytes('a.md', LATIN1);
 		};
 		const setAsideThere = async (): Promise<void> => {
 			await remoteFile(COPY, theirCopy);
 		};
 		const pullNothing = (): Promise<void> => Promise.resolve();
 		const pullBetween = async (): Promise<void> => {
-			expect((await engine.pull()).status).toBe('ok');
+			expect((await world.engine.pull()).status).toBe('ok');
 		};
 
 		it.each([
@@ -9343,15 +9465,15 @@ describe('a file that is not UTF-8 text', () => {
 				await between();
 				await second();
 
-				const result = await engine.sync();
+				const result = await world.engine.sync();
 
 				expect(result.status).toBe('ok');
-				expect(store.ops()).toEqual([]);
+				expect(world.store.ops()).toEqual([]);
 				expect(sent().filter((call) => call.startsWith('delete'))).toEqual([]);
-				expect(provider.contentAt(COPY)).toBe(theirCopy);
+				expect(world.provider.contentAt(COPY)).toBe(theirCopy);
 				expect(noteAt(COPY)?.content).toBe(theirCopy);
 				expect(noteAt(COPY)?.id).not.toBe('n1');
-				expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+				expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 			}
 		);
 	});
@@ -9359,10 +9481,10 @@ describe('a file that is not UTF-8 text', () => {
 	describe('met by a push', () => {
 		it('sets the edit aside in one drain when the note’s own file cannot be read', async () => {
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			provider.plantBytes('a.md', LATIN1);
+			editHere(world.store, note, 'my edit\n');
+			world.provider.plantBytes('a.md', LATIN1);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
 			expect(result.conflicts).toEqual([COPY]);
@@ -9370,35 +9492,35 @@ describe('a file that is not UTF-8 text', () => {
 			// did. An ordinary conflict's does not: its copy's write is queued.
 			expect(result.pushed).toBe(1);
 			// Finished, not failed and retried: no attempt was spent on it.
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
-			expect(provider.contentAt(COPY)).toBe('my edit\n');
+			expect(world.provider.contentAt(COPY)).toBe('my edit\n');
 			expect(holders(entry.remoteId)).toEqual([]);
-			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 		});
 
 		it('has cut the note loose even when the copy could not be made', async () => {
 			// Still bound, the retry goes out against the unreadable file's id.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			provider.plantBytes('a.md', LATIN1);
-			provider.setFault((call) =>
+			editHere(world.store, note, 'my edit\n');
+			world.provider.plantBytes('a.md', LATIN1);
+			world.provider.setFault((call) =>
 				call.op === 'write' && call.path === COPY ? new Error('network down') : undefined
 			);
 
-			const failed = await engine.push();
+			const failed = await world.engine.push();
 
 			expect(failed.status).toBe('retry');
 			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: true });
 			expect(holders(entry.remoteId)).toEqual([]);
 
-			provider.setFault(undefined);
-			const result = await engine.push();
+			world.provider.setFault(undefined);
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
-			expect(store.notes().map((each) => each.path)).toEqual([COPY]);
-			expect(provider.contentAt(COPY)).toBe('my edit\n');
-			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+			expect(world.store.notes().map((each) => each.path)).toEqual([COPY]);
+			expect(world.provider.contentAt(COPY)).toBe('my edit\n');
+			expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 		});
 
 		it('takes the next name when another device has set its own edit aside under the first', async () => {
@@ -9408,46 +9530,46 @@ describe('a file that is not UTF-8 text', () => {
 			// another device's file — is resolved as a conflict with it: a copy
 			// of the copy, under two suffixes.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			provider.plantBytes('a.md', LATIN1);
+			editHere(world.store, note, 'my edit\n');
+			world.provider.plantBytes('a.md', LATIN1);
 			await remoteFile(COPY, 'their edit\n');
 			const next = conflictPath('a.md', AT, [COPY]);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result).toMatchObject({ status: 'ok', pushed: 1, conflicts: [next] });
-			expect(store.ops()).toEqual([]);
-			expect(provider.contentAt(next)).toBe('my edit\n');
-			expect(provider.contentAt(COPY)).toBe('their edit\n');
-			expect(store.notes().map((each) => each.path)).toEqual([next]);
+			expect(world.store.ops()).toEqual([]);
+			expect(world.provider.contentAt(next)).toBe('my edit\n');
+			expect(world.provider.contentAt(COPY)).toBe('their edit\n');
+			expect(world.store.notes().map((each) => each.path)).toEqual([next]);
 			expect(noteAt(next)).toMatchObject({
 				id: note.id,
 				dirty: false,
-				remoteId: remoteAt(provider, next)?.remoteId,
+				remoteId: remoteAt(world.provider, next)?.remoteId,
 			});
 			expect(holders(entry.remoteId)).toEqual([]);
-			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 		});
 
 		it('gives up on a name after as many refusals as a rename does, and says why', async () => {
 			const { note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			provider.plantBytes('a.md', LATIN1);
-			provider.setFault((call) =>
-				call.op === 'write' ? new ConflictError(entryAt(provider, 'a.md')) : undefined
+			editHere(world.store, note, 'my edit\n');
+			world.provider.plantBytes('a.md', LATIN1);
+			world.provider.setFault((call) =>
+				call.op === 'write' ? new ConflictError(entryAt(world.provider, 'a.md')) : undefined
 			);
 			const before = sent().length;
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('retry');
-			expect(store.ops().map((op) => op.attempts)).toEqual([1]);
+			expect(world.store.ops().map((op) => op.attempts)).toEqual([1]);
 			// The op's own write, and ten names tried.
 			expect(sent().slice(before)).toHaveLength(11);
 			// Still the user's edit, still theirs to send, and cut loose.
-			expect(store.notes()).toHaveLength(1);
-			expect(store.notes()[0]).toMatchObject({ content: 'my edit\n', dirty: true });
-			expect(store.notes()[0]?.remoteId).toBeUndefined();
+			expect(world.store.notes()).toHaveLength(1);
+			expect(world.store.notes()[0]).toMatchObject({ content: 'my edit\n', dirty: true });
+			expect(world.store.notes()[0]?.remoteId).toBeUndefined();
 		});
 
 		it('keeps a note bound to its own file when the one in the way is another', async () => {
@@ -9456,43 +9578,43 @@ describe('a file that is not UTF-8 text', () => {
 			// elsewhere: a copy made now would leave it behind with no note. So
 			// the note steps aside still bound, and its own file follows it.
 			const { entry, note } = await pulledNote('mine.md', 'one\n');
-			store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
-			store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
-			store.queue({ op: 'move', noteId: note.id, path: 'mine.md', targetPath: 'a.md' });
-			const file = provider.plantBytes('a.md', LATIN1);
+			world.store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
+			world.store.queue({ op: 'move', noteId: note.id, path: 'mine.md', targetPath: 'a.md' });
+			const file = world.provider.plantBytes('a.md', LATIN1);
 
-			await engine.push();
+			await world.engine.push();
 
 			expect(noteAt(COPY)).toMatchObject({ id: note.id, remoteId: entry.remoteId });
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 			expect(noteAt(COPY)).toMatchObject({ remoteId: entry.remoteId, dirty: false });
-			expect(provider.contentAt(COPY)).toBe('my edit\n');
-			expect(provider.contentAt('mine.md')).toBeUndefined();
+			expect(world.provider.contentAt(COPY)).toBe('my edit\n');
+			expect(world.provider.contentAt('mine.md')).toBeUndefined();
 			expect(holders(file.remoteId)).toEqual([]);
-			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('a.md')).toEqual(LATIN1);
 		});
 
 		it('sets the edit aside when the file was renamed away and cannot be read', async () => {
 			// `runWrite`: nothing at the note's path, so the file is asked after
 			// by id. It is there; what it holds is not for this note to replace.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			await provider.move(entry, 'renamed.md');
-			provider.plantBytes('renamed.md', LATIN1);
+			editHere(world.store, note, 'my edit\n');
+			await world.provider.move(entry, 'renamed.md');
+			world.provider.plantBytes('renamed.md', LATIN1);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
 			expect(result.conflicts).toEqual([COPY]);
-			expect(store.ops()).toEqual([]);
-			expect(provider.contentAt(COPY)).toBe('my edit\n');
-			expect(provider.contentAt('a.md')).toBeUndefined();
+			expect(world.store.ops()).toEqual([]);
+			expect(world.provider.contentAt(COPY)).toBe('my edit\n');
+			expect(world.provider.contentAt('a.md')).toBeUndefined();
 			expect(holders(entry.remoteId)).toEqual([]);
-			expect(provider.bytesAt('renamed.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('renamed.md')).toEqual(LATIN1);
 		});
 
 		it('sets the edit aside when the file it has just renamed cannot be read', async () => {
@@ -9500,24 +9622,24 @@ describe('a file that is not UTF-8 text', () => {
 			// and the move. The move has put it at the note's path, so the note
 			// is what moves on.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
-			store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
-			store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
-			provider.setFault((call) => {
-				if (call.op === 'move') provider.plantBytes('a.md', LATIN1);
+			world.store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
+			world.store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
+			world.provider.setFault((call) => {
+				if (call.op === 'move') world.provider.plantBytes('a.md', LATIN1);
 				return undefined;
 			});
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			const copy = 'b (conflict 2026-09-15T14-32).md';
 			expect(result.status).toBe('ok');
 			expect(result.conflicts).toEqual([copy]);
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 			expect(noteAt(copy)).toMatchObject({ id: note.id, content: 'my edit\n' });
-			expect(provider.contentAt(copy)).toBe('my edit\n');
+			expect(world.provider.contentAt(copy)).toBe('my edit\n');
 			expect(holders(entry.remoteId)).toEqual([]);
-			expect(provider.bytesAt('b.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('b.md')).toEqual(LATIN1);
 		});
 
 		it('cuts the note loose when its own file cannot be read and another has its name', async () => {
@@ -9525,45 +9647,50 @@ describe('a file that is not UTF-8 text', () => {
 			// file, is set aside a second time, and the user is handed a note
 			// named "(conflict …) (conflict …)".
 			const { entry, note } = await pulledNote('x.md', 'one\n');
-			store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
-			store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
-			store.queue({ op: 'move', noteId: note.id, path: 'x.md', targetPath: 'a.md' });
+			world.store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
+			world.store.queue({ op: 'move', noteId: note.id, path: 'x.md', targetPath: 'a.md' });
 			await remoteFile('a.md', 'theirs\n');
-			provider.plantBytes('x.md', LATIN1);
+			world.provider.plantBytes('x.md', LATIN1);
 
-			await engine.push();
-			const result = await engine.push();
+			await world.engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
-			expect(store.ops()).toEqual([]);
+			expect(world.store.ops()).toEqual([]);
 			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
-			expect(provider.contentAt(COPY)).toBe('my edit\n');
-			expect(provider.contentAt('a.md')).toBe('theirs\n');
+			expect(world.provider.contentAt(COPY)).toBe('my edit\n');
+			expect(world.provider.contentAt('a.md')).toBe('theirs\n');
 			expect(holders(entry.remoteId)).toEqual([]);
-			expect(provider.bytesAt('x.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('x.md')).toEqual(LATIN1);
 		});
 
 		it('carries out a rename of a file it cannot read, and the next pull lets go of the note', async () => {
 			// `runMove`: the move found no folder to go into and asks whether the
 			// file is there. It is. A rename changes no bytes.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			store.putFolder({ path: 'New' });
-			store.put({ ...note, path: 'New/a.md' });
-			store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'New/a.md' });
-			provider.plantBytes('a.md', LATIN1);
+			world.store.putFolder({ path: 'New' });
+			world.store.put({ ...note, path: 'New/a.md' });
+			world.store.queue({
+				op: 'move',
+				noteId: note.id,
+				path: 'a.md',
+				targetPath: 'New/a.md',
+			});
+			world.provider.plantBytes('a.md', LATIN1);
 
-			const result = await engine.push();
+			const result = await world.engine.push();
 
 			expect(result.status).toBe('ok');
-			expect(store.ops()).toEqual([]);
-			expect(provider.bytesAt('New/a.md')).toEqual(LATIN1);
+			expect(world.store.ops()).toEqual([]);
+			expect(world.provider.bytesAt('New/a.md')).toEqual(LATIN1);
 
-			const next = await engine.sync();
+			const next = await world.engine.sync();
 
 			expect(next.status).toBe('ok');
-			expect(store.notes()).toEqual([]);
+			expect(world.store.notes()).toEqual([]);
 			expect(holders(entry.remoteId)).toEqual([]);
-			expect(provider.bytesAt('New/a.md')).toEqual(LATIN1);
+			expect(world.provider.bytesAt('New/a.md')).toEqual(LATIN1);
 		});
 	});
 
@@ -9575,24 +9702,24 @@ describe('a file that is not UTF-8 text', () => {
 	 */
 	describe('is listed', () => {
 		const listed = async (): Promise<string[]> =>
-			(await store.unreadable()).map((file) => `${file.remoteId} ${file.path}`).sort();
+			(await world.store.unreadable()).map((file) => `${file.remoteId} ${file.path}`).sort();
 
 		/** Where the list says the user's notes went, by the file that took the name. */
 		const movedAside = async (): Promise<Record<string, readonly string[]>> =>
 			Object.fromEntries(
-				(await store.unreadable()).flatMap((file) =>
+				(await world.store.unreadable()).flatMap((file) =>
 					file.movedAside === undefined ? [] : [[file.path, file.movedAside]]
 				)
 			);
 
 		/** Every batch handed to the store, to see what a pull had to say. */
-		const watched = (over: StorageProvider = provider) => {
+		const watched = (over: StorageProvider = world.provider) => {
 			const batches: PullBatch[] = [];
 			const watching: SyncStore = {
-				...store,
+				...world.store,
 				applyChanges: (batch) => {
 					batches.push(batch);
-					return store.applyChanges(batch);
+					return world.store.applyChanges(batch);
 				},
 			};
 			return {
@@ -9602,10 +9729,10 @@ describe('a file that is not UTF-8 text', () => {
 		};
 
 		it('once it has been found, and the pull counts it', async () => {
-			const file = provider.plantBytes('a.md', LATIN1);
+			const file = world.provider.plantBytes('a.md', LATIN1);
 			await remoteFile('b.md', 'readable\n');
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			// The note imported and the file listed: the device shows two things
 			// it did not before.
@@ -9616,10 +9743,10 @@ describe('a file that is not UTF-8 text', () => {
 		it('and says nothing when the feed names the file again with nothing changed', async () => {
 			// No row holds the file's version, so every mention is a read. A
 			// record for each would have `pulled` count a change that is not one.
-			const file = provider.plantBytes('a.md', LATIN1);
-			await engine.pull();
+			const file = world.provider.plantBytes('a.md', LATIN1);
+			await world.engine.pull();
 			const { batches, engine: again } = watched();
-			provider.plantBytes('a.md', LATIN1);
+			world.provider.plantBytes('a.md', LATIN1);
 
 			const result = await again.pull();
 
@@ -9629,11 +9756,11 @@ describe('a file that is not UTF-8 text', () => {
 		});
 
 		it('under its new name when it is renamed, once', async () => {
-			const file = provider.plantBytes('a.md', LATIN1);
-			await engine.pull();
-			await provider.move(file, 'renamed.md');
+			const file = world.provider.plantBytes('a.md', LATIN1);
+			await world.engine.pull();
+			await world.provider.move(file, 'renamed.md');
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result).toMatchObject({ status: 'ok', pulled: 1 });
 			expect(await listed()).toEqual([`${file.remoteId} renamed.md`]);
@@ -9645,10 +9772,10 @@ describe('a file that is not UTF-8 text', () => {
 			// as a conflict, the user is told the one thing that did not happen
 			// — and the banner is gone by the time they wonder about the name.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			provider.plantBytes('a.md', LATIN1);
+			editHere(world.store, note, 'my edit\n');
+			world.provider.plantBytes('a.md', LATIN1);
 
-			const result = await engine.pull();
+			const result = await world.engine.pull();
 
 			expect(result.conflicts).toEqual([]);
 			expect(await listed()).toEqual([`${entry.remoteId} a.md`]);
@@ -9657,13 +9784,13 @@ describe('a file that is not UTF-8 text', () => {
 		});
 
 		it('and so is a note never pushed that an unreadable file took the name of', async () => {
-			await engine.pull();
-			const file = provider.plantBytes('a.md', LATIN1);
-			await engine.pull();
+			await world.engine.pull();
+			const file = world.provider.plantBytes('a.md', LATIN1);
+			await world.engine.pull();
 			// Made here after the file was listed: the record is a repeat, and
 			// the note moving aside is still news.
-			store.put({ id: 'mine', path: 'a.md', content: 'mine\n', dirty: true });
-			store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
+			world.store.put({ id: 'mine', path: 'a.md', content: 'mine\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
 
 			const result = await pullNow([file]);
 
@@ -9679,22 +9806,24 @@ describe('a file that is not UTF-8 text', () => {
 			// next time it is read. Told only about the last, they go looking
 			// for a note that is not where they left it and nothing says where
 			// it went.
-			await engine.pull();
-			const file = provider.plantBytes('a.md', LATIN1);
-			store.put({ id: 'first', path: 'a.md', content: 'first\n', dirty: true });
-			store.queue({ op: 'write', noteId: 'first', path: 'a.md' });
+			await world.engine.pull();
+			const file = world.provider.plantBytes('a.md', LATIN1);
+			world.store.put({ id: 'first', path: 'a.md', content: 'first\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: 'first', path: 'a.md' });
 
 			await pullNow([file]);
 
-			store.put({ id: 'second', path: 'a.md', content: 'second\n', dirty: true });
-			store.queue({ op: 'write', noteId: 'second', path: 'a.md' });
-			const resaved = provider.plantBytes('a.md', LATIN1);
+			world.store.put({ id: 'second', path: 'a.md', content: 'second\n', dirty: true });
+			world.store.queue({ op: 'write', noteId: 'second', path: 'a.md' });
+			const resaved = world.provider.plantBytes('a.md', LATIN1);
 
 			await pullNow([resaved]);
 
 			const aside = await movedAside();
 			expect(aside['a.md']).toHaveLength(2);
-			expect(new Set(aside['a.md'])).toEqual(new Set(store.notes().map((each) => each.path)));
+			expect(new Set(aside['a.md'])).toEqual(
+				new Set(world.store.notes().map((each) => each.path))
+			);
 			expect(noteAt('a.md')).toBeUndefined();
 			expect(await listed()).toEqual([`${file.remoteId} a.md`]);
 		});
@@ -9703,12 +9832,12 @@ describe('a file that is not UTF-8 text', () => {
 			// The note is still at the name it was given. A record re-made for
 			// the rename and left bare would drop the only explanation of it.
 			const { note } = await pulledNote('a.md', 'one\n');
-			editHere(store, note, 'my edit\n');
-			const file = provider.plantBytes('a.md', LATIN1);
-			await engine.pull();
-			await provider.move(file, 'renamed.md');
+			editHere(world.store, note, 'my edit\n');
+			const file = world.provider.plantBytes('a.md', LATIN1);
+			await world.engine.pull();
+			await world.provider.move(file, 'renamed.md');
 
-			await engine.pull();
+			await world.engine.pull();
 
 			expect(await listed()).toEqual([`${file.remoteId} renamed.md`]);
 			expect(await movedAside()).toEqual({ 'renamed.md': [COPY] });
@@ -9716,11 +9845,11 @@ describe('a file that is not UTF-8 text', () => {
 
 		describe('until it reads', () => {
 			it('under the same id, and is imported', async () => {
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				await provider.write('a.md', 'fixed\n', { expectedVersion: file.version });
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				await world.provider.write('a.md', 'fixed\n', { expectedVersion: file.version });
 
-				const result = await engine.pull();
+				const result = await world.engine.pull();
 
 				expect(result.status).toBe('ok');
 				expect(await listed()).toEqual([]);
@@ -9731,14 +9860,14 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('under the same id at another name, fixed and renamed between two pulls', async () => {
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				const fixed = await provider.write('a.md', 'fixed\n', {
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				const fixed = await world.provider.write('a.md', 'fixed\n', {
 					expectedVersion: file.version,
 				});
-				await provider.move(fixed, 'b.md');
+				await world.provider.move(fixed, 'b.md');
 
-				await engine.pull();
+				await world.engine.pull();
 
 				expect(await listed()).toEqual([]);
 				expect(noteAt('b.md')).toMatchObject({ content: 'fixed\n' });
@@ -9750,17 +9879,19 @@ describe('a file that is not UTF-8 text', () => {
 				// notice for a file that reads perfectly well never goes: its
 				// entries all take this branch, and only a re-scan clears it.
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				await store.applyChanges({
+				await world.store.applyChanges({
 					changes: [
 						{ kind: 'unreadable', file: { remoteId: entry.remoteId, path: 'zzz.md' } },
 					],
 				});
-				const reads = provider.callLog().filter((call) => call.op === 'read').length;
+				const reads = world.provider.callLog().filter((call) => call.op === 'read').length;
 
 				const result = await pullNow([entry]);
 
 				expect(result.status).toBe('ok');
-				expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
+				expect(world.provider.callLog().filter((call) => call.op === 'read')).toHaveLength(
+					reads
+				);
 				expect(await listed()).toEqual([]);
 				expect(noteAt('a.md')?.id).toBe(note.id);
 			});
@@ -9768,15 +9899,17 @@ describe('a file that is not UTF-8 text', () => {
 			it('or a note this device already holds is renamed onto its path, and nothing is read', async () => {
 				// The version the row holds, so no read: a file this device has
 				// read is at the path, and whatever was listed there is not.
-				const file = provider.plantBytes('a.md', LATIN1);
+				const file = world.provider.plantBytes('a.md', LATIN1);
 				const { entry, note } = await pulledNote('b.md', 'one\n');
 				expect(await listed()).toEqual([`${file.remoteId} a.md`]);
-				await provider.delete(file);
-				const reads = provider.callLog().filter((call) => call.op === 'read').length;
+				await world.provider.delete(file);
+				const reads = world.provider.callLog().filter((call) => call.op === 'read').length;
 
 				await pullNow([{ ...entry, path: 'a.md' }]);
 
-				expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
+				expect(world.provider.callLog().filter((call) => call.op === 'read')).toHaveLength(
+					reads
+				);
 				expect(noteAt('a.md')).toMatchObject({ id: note.id });
 				expect(await listed()).toEqual([]);
 			});
@@ -9784,9 +9917,9 @@ describe('a file that is not UTF-8 text', () => {
 			it('at the same path under a new id, with no word of the old file going', async () => {
 				// A tool that saves by deleting and writing again, on a feed that
 				// need not report the deletion of a file replaced at its path.
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				await provider.delete(file);
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				await world.provider.delete(file);
 				const fixed = await remoteFile('a.md', 'fixed\n');
 				expect(fixed.remoteId).not.toBe(file.remoteId);
 
@@ -9798,10 +9931,10 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('or is replaced at its path by another that does not', async () => {
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				await provider.delete(file);
-				const other = provider.plantBytes('a.md', LATIN1);
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				await world.provider.delete(file);
+				const other = world.provider.plantBytes('a.md', LATIN1);
 
 				await pullNow([other]);
 
@@ -9813,24 +9946,24 @@ describe('a file that is not UTF-8 text', () => {
 				['a.txt', 2, ['a.txt']],
 				['.a.md', 1, []],
 			])('or is no longer a note the app would show: %s', async (path, pulled, files) => {
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				await provider.move(file, path);
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				await world.provider.move(file, path);
 
-				const result = await engine.pull();
+				const result = await world.engine.pull();
 
 				expect(result).toMatchObject({ status: 'ok', pulled });
 				expect(await listed()).toEqual([]);
-				expect(store.files().map((each) => each.path)).toEqual(files);
+				expect(world.store.files().map((each) => each.path)).toEqual(files);
 			});
 		});
 
 		describe('until it is deleted', () => {
 			it('by a deletion that names its id', async () => {
-				const file = provider.plantBytes('a.md', LATIN1);
-				provider.plantBytes('b.md', LATIN1);
-				await engine.pull();
-				const other = entryAt(provider, 'b.md');
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				world.provider.plantBytes('b.md', LATIN1);
+				await world.engine.pull();
+				const other = entryAt(world.provider, 'b.md');
 
 				// The id and not the path: a deletion that carries an id and is
 				// matched by path anyway takes whatever has the name now.
@@ -9840,9 +9973,9 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('by a deletion that names only its path', async () => {
-				provider.plantBytes('a.md', LATIN1);
-				const other = provider.plantBytes('ab.md', LATIN1);
-				await engine.pull();
+				world.provider.plantBytes('a.md', LATIN1);
+				const other = world.provider.plantBytes('ab.md', LATIN1);
+				await world.engine.pull();
 
 				await pullNow([{ deleted: true, path: 'a.md' }]);
 
@@ -9850,15 +9983,15 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('by the deletion of a folder above it, which is all a path-only feed says', async () => {
-				await provider.createFolder('Work');
-				await provider.createFolder('Work/Old');
-				provider.plantBytes('Work/Old/a.md', LATIN1);
-				const other = provider.plantBytes('Workshop.md', LATIN1);
-				await engine.pull();
+				await world.provider.createFolder('Work');
+				await world.provider.createFolder('Work/Old');
+				world.provider.plantBytes('Work/Old/a.md', LATIN1);
+				const other = world.provider.plantBytes('Workshop.md', LATIN1);
+				await world.engine.pull();
 				// No row for the folder, so no `delete-folder` to do it in the
 				// store: this is the engine's own rule.
-				store.removeFolder('Work/Old');
-				store.removeFolder('Work');
+				world.store.removeFolder('Work/Old');
+				world.store.removeFolder('Work');
 
 				await pullNow([{ deleted: true, path: 'Work' }]);
 
@@ -9872,14 +10005,14 @@ describe('a file that is not UTF-8 text', () => {
 				// anyway. Nothing but this deletion will ever mention what was
 				// inside it, and left listed the file is named for ever at a
 				// path that no longer exists.
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('Work/a.md', LATIN1);
-				const other = provider.plantBytes('Workshop.md', LATIN1);
-				await engine.pull();
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('Work/a.md', LATIN1);
+				const other = world.provider.plantBytes('Workshop.md', LATIN1);
+				await world.engine.pull();
 				expect(await listed()).toEqual(
 					[`${file.remoteId} Work/a.md`, `${other.remoteId} Workshop.md`].sort()
 				);
-				store.removeFolder('Work');
+				world.store.removeFolder('Work');
 
 				await pullNow([{ deleted: true, remoteId: folder.remoteId, path: 'Work' }]);
 
@@ -9894,11 +10027,11 @@ describe('a file that is not UTF-8 text', () => {
 				['the entry last', false],
 				['the entry first', true],
 			])('but not when the same round says the file is elsewhere, %s', async (_o, first) => {
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('Work/a.md', LATIN1);
-				await engine.pull();
-				store.removeFolder('Work');
-				const moved = await provider.move(file, 'a.md');
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('Work/a.md', LATIN1);
+				await world.engine.pull();
+				world.store.removeFolder('Work');
+				const moved = await world.provider.move(file, 'a.md');
 				const gone: ChangeEntry = {
 					deleted: true,
 					remoteId: folder.remoteId,
@@ -9913,10 +10046,10 @@ describe('a file that is not UTF-8 text', () => {
 			it('but not by a deletion that names an id and no path, which says nothing of what was inside', async () => {
 				// Graph, for a folder it can no longer place. The notice waits
 				// for a re-scan (docs/ARCHITECTURE.md §7).
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('Work/a.md', LATIN1);
-				await engine.pull();
-				store.removeFolder('Work');
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('Work/a.md', LATIN1);
+				await world.engine.pull();
+				world.store.removeFolder('Work');
 
 				await pullNow([{ deleted: true, remoteId: folder.remoteId }]);
 
@@ -9924,25 +10057,25 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('by the deletion of a folder above it, on a feed that names the folder by id alone', async () => {
-				const folder = await provider.createFolder('Work');
-				provider.plantBytes('Work/a.md', LATIN1);
-				await engine.pull();
+				const folder = await world.provider.createFolder('Work');
+				world.provider.plantBytes('Work/a.md', LATIN1);
+				await world.engine.pull();
 
 				await pullNow([{ deleted: true, remoteId: folder.remoteId }]);
 
 				expect(await listed()).toEqual([]);
-				expect(store.folders()).toEqual([]);
+				expect(world.store.folders()).toEqual([]);
 			});
 
 			it('when its own entry finds it gone, which is all the word there may be', async () => {
 				// Moved into a folder that was then deleted, on a feed that reports
 				// folders alone: the file's entry and the folder's deletion, and
 				// the record is still at the path the file had before.
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				const moved = await provider.move(file, 'Work/a.md');
-				await provider.delete(folder);
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				const moved = await world.provider.move(file, 'Work/a.md');
+				await world.provider.delete(folder);
 
 				const result = await pullNow([moved, { deleted: true, remoteId: folder.remoteId }]);
 
@@ -9955,9 +10088,9 @@ describe('a file that is not UTF-8 text', () => {
 				['the entry first', true],
 				['the deletion first', false],
 			])('but not by the deletion half of a move, %s', async (_order, entryFirst) => {
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
-				const moved = await provider.move(file, 'b.md');
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
+				const moved = await world.provider.move(file, 'b.md');
 				const gone: ChangeEntry = { deleted: true, path: 'a.md' };
 
 				const result = await pullNow(entryFirst ? [moved, gone] : [gone, moved]);
@@ -9969,11 +10102,11 @@ describe('a file that is not UTF-8 text', () => {
 			describe('under a folder the same round moves', () => {
 				/** The folder renamed, with the listed file still inside it. */
 				const renamedOver = async () => {
-					const folder = await provider.createFolder('Work');
-					const file = provider.plantBytes('Work/a.md', LATIN1);
-					await engine.pull();
+					const folder = await world.provider.createFolder('Work');
+					const file = world.provider.plantBytes('Work/a.md', LATIN1);
+					await world.engine.pull();
 					expect(await listed()).toEqual([`${file.remoteId} Work/a.md`]);
-					const moved = await provider.move(folder, 'Archive');
+					const moved = await world.provider.move(folder, 'Archive');
 					return { file, moved };
 				};
 
@@ -10014,8 +10147,8 @@ describe('a file that is not UTF-8 text', () => {
 				// A deletion by path, and then the same file at the same path. The
 				// list the batch began with says it is listed already; by then it
 				// is not.
-				const file = provider.plantBytes('a.md', LATIN1);
-				await engine.pull();
+				const file = world.provider.plantBytes('a.md', LATIN1);
+				await world.engine.pull();
 
 				await pullNow([{ deleted: true, path: 'a.md' }, file]);
 
@@ -10025,10 +10158,10 @@ describe('a file that is not UTF-8 text', () => {
 
 		describe('until a rescan does not see it', () => {
 			const twoListed = async () => {
-				const kept = provider.plantBytes('a.md', LATIN1);
-				const gone = provider.plantBytes('b.md', LATIN1);
-				await engine.pull();
-				await provider.delete(gone);
+				const kept = world.provider.plantBytes('a.md', LATIN1);
+				const gone = world.provider.plantBytes('b.md', LATIN1);
+				await world.engine.pull();
+				await world.provider.delete(gone);
 				return { kept, gone };
 			};
 
@@ -10036,7 +10169,7 @@ describe('a file that is not UTF-8 text', () => {
 				const { kept } = await twoListed();
 				killTheCursor();
 
-				const result = await engine.pull();
+				const result = await world.engine.pull();
 
 				expect(result).toMatchObject({ status: 'ok', pulled: 1 });
 				expect(await listed()).toEqual([`${kept.remoteId} a.md`]);
@@ -10046,7 +10179,7 @@ describe('a file that is not UTF-8 text', () => {
 				const { kept, gone } = await twoListed();
 				killTheCursor(true);
 
-				const result = await engine.pull();
+				const result = await world.engine.pull();
 
 				expect(result.status).toBe('ok');
 				expect(await listed()).toEqual([`${kept.remoteId} a.md`, `${gone.remoteId} b.md`]);
@@ -10060,7 +10193,7 @@ describe('a file that is not UTF-8 text', () => {
 				const first = paged.plantBytes('a.md', LATIN1);
 				const second = paged.plantBytes('b.md', LATIN1);
 				await engineWith({ provider: paged }).pull();
-				const dead = store.storedCursor();
+				const dead = world.store.storedCursor();
 				const pages = { read: 0 };
 				const interrupted = engineWith({
 					provider: {
@@ -10088,13 +10221,13 @@ describe('a file that is not UTF-8 text', () => {
 
 		describe('under a folder', () => {
 			it('follows the folder when a feed says the folder moved and nothing else', async () => {
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('Work/a.md', LATIN1);
-				const other = provider.plantBytes('Workshop.md', LATIN1);
-				await engine.pull();
-				await provider.move(folder, 'Archive');
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('Work/a.md', LATIN1);
+				const other = world.provider.plantBytes('Workshop.md', LATIN1);
+				await world.engine.pull();
+				await world.provider.move(folder, 'Archive');
 
-				const result = await engine.pull();
+				const result = await world.engine.pull();
 
 				expect(result.status).toBe('ok');
 				expect(await listed()).toEqual(
@@ -10110,10 +10243,10 @@ describe('a file that is not UTF-8 text', () => {
 				async (_order, entryFirst) => {
 					// Taken at its word, the deletion covers everything under the
 					// path, and nothing in the round lists the file again.
-					const folder = await provider.createFolder('Work');
-					const file = provider.plantBytes('Work/a.md', LATIN1);
-					await engine.pull();
-					const moved = await provider.move(folder, 'Archive');
+					const folder = await world.provider.createFolder('Work');
+					const file = world.provider.plantBytes('Work/a.md', LATIN1);
+					await world.engine.pull();
+					const moved = await world.provider.move(folder, 'Archive');
 					const gone: ChangeEntry = { deleted: true, path: 'Work' };
 
 					const result = await pullNow(entryFirst ? [moved, gone] : [gone, moved]);
@@ -10126,9 +10259,9 @@ describe('a file that is not UTF-8 text', () => {
 			it('is listed again when the round deletes the folder and then says the file is there', async () => {
 				// The folder's deletion takes the record with it in the store, so
 				// the entry behind it is not the repeat the batch's list says it is.
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('Work/a.md', LATIN1);
-				await engine.pull();
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('Work/a.md', LATIN1);
+				await world.engine.pull();
 
 				await pullNow([
 					{ deleted: true, remoteId: folder.remoteId },
@@ -10142,12 +10275,14 @@ describe('a file that is not UTF-8 text', () => {
 			it('and a file the same round says is still unreadable there is not listed twice', async () => {
 				// The engine has to see the folder's move in what it has decided,
 				// or the file reads as renamed and is recorded over its own record.
-				const folder = await provider.createFolder('Work');
-				const file = provider.plantBytes('Work/a.md', LATIN1);
-				await engine.pull();
-				const moved = await provider.move(folder, 'Archive');
+				const folder = await world.provider.createFolder('Work');
+				const file = world.provider.plantBytes('Work/a.md', LATIN1);
+				await world.engine.pull();
+				const moved = await world.provider.move(folder, 'Archive');
 				const entry = { ...file, path: 'Archive/a.md' };
-				const { batches, engine: again } = watched(reporting(provider, [moved, entry]));
+				const { batches, engine: again } = watched(
+					reporting(world.provider, [moved, entry])
+				);
 
 				await again.pull();
 
@@ -10161,10 +10296,10 @@ describe('a file that is not UTF-8 text', () => {
 		describe('by a push that meets it', () => {
 			it('when the conflict says which file and where', async () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				editHere(store, note, 'my edit\n');
-				provider.plantBytes('a.md', LATIN1);
+				editHere(world.store, note, 'my edit\n');
+				world.provider.plantBytes('a.md', LATIN1);
 
-				const result = await engine.push();
+				const result = await world.engine.push();
 
 				expect(result.conflicts).toEqual([COPY]);
 				expect(await listed()).toEqual([`${entry.remoteId} a.md`]);
@@ -10172,20 +10307,25 @@ describe('a file that is not UTF-8 text', () => {
 
 			it('when the note steps aside still bound to a file of its own', async () => {
 				const { note } = await pulledNote('mine.md', 'one\n');
-				store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
-				store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
-				store.queue({ op: 'move', noteId: note.id, path: 'mine.md', targetPath: 'a.md' });
-				const file = provider.plantBytes('a.md', LATIN1);
+				world.store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
+				world.store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
+				world.store.queue({
+					op: 'move',
+					noteId: note.id,
+					path: 'mine.md',
+					targetPath: 'a.md',
+				});
+				const file = world.provider.plantBytes('a.md', LATIN1);
 
-				await engine.push();
+				await world.engine.push();
 
 				expect(await listed()).toEqual([`${file.remoteId} a.md`]);
 			});
 
 			it('once, when the name the edit was first given turns out to be taken', async () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				editHere(store, note, 'my edit\n');
-				provider.plantBytes('a.md', LATIN1);
+				editHere(world.store, note, 'my edit\n');
+				world.provider.plantBytes('a.md', LATIN1);
 				await remoteFile(COPY, 'their edit\n');
 				const { batches, engine: pushing } = watched();
 
@@ -10206,15 +10346,15 @@ describe('a file that is not UTF-8 text', () => {
 				// `runWrite` found nothing at the note's path and asked by id. The
 				// file is somewhere, and only its own entry says where.
 				const { entry, note } = await pulledNote('a.md', 'one\n');
-				editHere(store, note, 'my edit\n');
-				await provider.move(entry, 'renamed.md');
-				provider.plantBytes('renamed.md', LATIN1);
+				editHere(world.store, note, 'my edit\n');
+				await world.provider.move(entry, 'renamed.md');
+				world.provider.plantBytes('renamed.md', LATIN1);
 
-				await engine.push();
+				await world.engine.push();
 
 				expect(await listed()).toEqual([]);
 
-				await engine.pull();
+				await world.engine.pull();
 
 				expect(await listed()).toEqual([`${entry.remoteId} renamed.md`]);
 			});
@@ -10223,16 +10363,16 @@ describe('a file that is not UTF-8 text', () => {
 		it('and the list costs nothing when it is lost: the next mention is read and listed again', async () => {
 			// No decision rests on the list. A store that lost it is a store the
 			// notice is missing from until the file is next named, and no more.
-			const file = provider.plantBytes('a.md', LATIN1);
-			await engine.pull();
-			await store.applyChanges({
+			const file = world.provider.plantBytes('a.md', LATIN1);
+			await world.engine.pull();
+			await world.store.applyChanges({
 				changes: [{ kind: 'forget-unreadable', remoteId: file.remoteId }],
 			});
 
 			const result = await pullNow([file]);
 
 			expect(result).toMatchObject({ status: 'ok', pulled: 1 });
-			expect(store.notes()).toEqual([]);
+			expect(world.store.notes()).toEqual([]);
 			expect(await listed()).toEqual([`${file.remoteId} a.md`]);
 		});
 	});
@@ -10254,18 +10394,18 @@ describe('progress', () => {
 	};
 
 	it('lists every page before it reads, then counts up to what it found', async () => {
-		provider = createFakeProvider({ pageSize: 1 });
-		await provider.ensureRoot();
-		await provider.write('a.md', '1\n', {});
-		await provider.write('b.md', '2\n', {});
-		await provider.createFolder('Work');
-		await provider.write('notes.txt', 'not a note\n', {});
+		world.provider = createFakeProvider({ pageSize: 1 });
+		await world.provider.ensureRoot();
+		await world.provider.write('a.md', '1\n', {});
+		await world.provider.write('b.md', '2\n', {});
+		await world.provider.createFolder('Work');
+		await world.provider.write('notes.txt', 'not a note\n', {});
 		const reads: string[] = [];
 		const { said, counted } = watching({
-			...provider,
+			...world.provider,
 			read: (entry) => {
 				reads.push(entry.path);
-				return provider.read(entry);
+				return world.provider.read(entry);
 			},
 		});
 
@@ -10296,12 +10436,12 @@ describe('progress', () => {
 	it('counts each note once across pages, the one being read and the ones applied', async () => {
 		// One note a page, so a page's reads are let go of as it is applied:
 		// counted again, the third page would say three done with two.
-		provider = createFakeProvider({ pageSize: 1 });
-		await provider.ensureRoot();
-		await provider.write('a.md', '1\n', {});
-		await provider.write('b.md', '2\n', {});
-		await provider.write('c.md', '3\n', {});
-		const { said, counted } = watching(provider);
+		world.provider = createFakeProvider({ pageSize: 1 });
+		await world.provider.ensureRoot();
+		await world.provider.write('a.md', '1\n', {});
+		await world.provider.write('b.md', '2\n', {});
+		await world.provider.write('c.md', '3\n', {});
+		const { said, counted } = watching(world.provider);
 
 		await counted.pull();
 
@@ -10334,14 +10474,14 @@ describe('progress', () => {
 	it('counts a note it already holds as done without reading it', async () => {
 		const held = await remoteFile('a.md', '1\n');
 		await remoteFile('b.md', '2\n');
-		store.put({
+		world.store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: '1\n',
 			...boundTo(held),
 			dirty: false,
 		});
-		const { said, counted } = watching(provider);
+		const { said, counted } = watching(world.provider);
 
 		await counted.pull();
 
@@ -10352,11 +10492,11 @@ describe('progress', () => {
 
 	it('counts a round from a stored cursor note by note, having read its pages first', async () => {
 		await remoteFile('a.md', '1\n');
-		await engine.pull();
+		await world.engine.pull();
 		await remoteFile('b.md', '2\n');
 		await remoteFile('c.md', '3\n');
-		await provider.createFolder('Work');
-		const { said, counted } = watching(provider);
+		await world.provider.createFolder('Work');
+		const { said, counted } = watching(world.provider);
 
 		await counted.pull();
 
@@ -10374,13 +10514,13 @@ describe('progress', () => {
 		// Reported on a phone: another device's notebooks moved was minutes of
 		// plain "Syncing…" while the round's pages were read, before the first
 		// note was counted.
-		provider = createFakeProvider({ pageSize: 1 });
-		await provider.ensureRoot();
-		const { said, counted } = watching(provider);
+		world.provider = createFakeProvider({ pageSize: 1 });
+		await world.provider.ensureRoot();
+		const { said, counted } = watching(world.provider);
 		await counted.pull();
-		await provider.write('a.md', '1\n', {});
-		await provider.createFolder('Work');
-		await provider.write('b.md', '2\n', {});
+		await world.provider.write('a.md', '1\n', {});
+		await world.provider.createFolder('Work');
+		await world.provider.write('b.md', '2\n', {});
 		said.length = 0;
 
 		await counted.pull();
@@ -10396,17 +10536,17 @@ describe('progress', () => {
 	});
 
 	it('counts a note a round names that it already holds, without reading it', async () => {
-		await engine.pull();
+		await world.engine.pull();
 		// This device's own push, which the next round reports back.
-		store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		await engine.push();
+		world.store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await world.engine.push();
 		const reads: string[] = [];
 		const { said, counted } = watching({
-			...provider,
+			...world.provider,
 			read: (entry) => {
 				reads.push(entry.path);
-				return provider.read(entry);
+				return world.provider.read(entry);
 			},
 		});
 
@@ -10424,9 +10564,9 @@ describe('progress', () => {
 
 	it('says only that it is reading the pages of a round that names no note, and then that it is not', async () => {
 		await remoteFile('a.md', '1\n');
-		await engine.pull();
-		await provider.createFolder('Work');
-		const { said, counted } = watching(provider);
+		await world.engine.pull();
+		await world.provider.createFolder('Work');
+		const { said, counted } = watching(world.provider);
 
 		await counted.pull();
 
@@ -10437,11 +10577,11 @@ describe('progress', () => {
 	});
 
 	it('counts a push against its queue', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
-		store.put({ id: 'n2', path: 'b.md', content: 'two\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
-		const { said, counted } = watching(provider);
+		world.store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
+		world.store.put({ id: 'n2', path: 'b.md', content: 'two\n', dirty: true });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		world.store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
+		const { said, counted } = watching(world.provider);
 
 		await counted.push();
 
@@ -10458,11 +10598,11 @@ describe('progress', () => {
 			writesAtOnce: 4,
 		});
 		await four.ensureRoot();
-		store.put({ id: 'n1', path: 'Work/a.md', content: 'one\n', dirty: true });
-		store.put({ id: 'n2', path: 'Work/b.md', content: 'two\n', dirty: true });
-		store.queue({ op: 'mkdir', path: 'Work' });
-		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
-		store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
+		world.store.put({ id: 'n1', path: 'Work/a.md', content: 'one\n', dirty: true });
+		world.store.put({ id: 'n2', path: 'Work/b.md', content: 'two\n', dirty: true });
+		world.store.queue({ op: 'mkdir', path: 'Work' });
+		world.store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
+		world.store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
 		const { said, counted } = watching(four);
 
 		await counted.push();
@@ -10477,7 +10617,7 @@ describe('progress', () => {
 	});
 
 	it('says nothing for a push with nothing to send', async () => {
-		const { said, counted } = watching(provider);
+		const { said, counted } = watching(world.provider);
 		await counted.push();
 		expect(said).toEqual([]);
 	});
@@ -10525,35 +10665,35 @@ describe('a pull that fails part-way', () => {
 
 	/** Six notes sent from another device since this one's cursor: one round. */
 	const sixInARound = async (): Promise<void> => {
-		await engine.pull();
-		expect(store.storedCursor()).toBeDefined();
+		await world.engine.pull();
+		expect(world.store.storedCursor()).toBeDefined();
 		for (const path of PATHS) await remoteFile(path, `${path}\n`);
 	};
 
 	const paths = () =>
-		store
+		world.store
 			.notes()
 			.map((note) => note.path)
 			.sort();
 
 	it('reads each note of a round once, however many tries it takes', async () => {
 		await sixInARound();
-		const before = readsOf(provider).length;
-		failFirstReadOf(provider, 'd.md');
+		const before = readsOf(world.provider).length;
+		failFirstReadOf(world.provider, 'd.md');
 
-		const failed = await engine.pull();
+		const failed = await world.engine.pull();
 
 		expect(failed.status).toBe('retry');
-		expect(store.notes()).toEqual([]);
+		expect(world.store.notes()).toEqual([]);
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(paths()).toEqual(PATHS);
-		expect(store.notes().find((note) => note.path === 'c.md')?.content).toBe('c.md\n');
+		expect(world.store.notes().find((note) => note.path === 'c.md')?.content).toBe('c.md\n');
 		// The three read before the failure are not read again. The one that
 		// failed is, and those after it once each.
-		expect(readCounts(provider, before)).toEqual({
+		expect(readCounts(world.provider, before)).toEqual({
 			'a.md': 1,
 			'b.md': 1,
 			'c.md': 1,
@@ -10565,31 +10705,33 @@ describe('a pull that fails part-way', () => {
 
 	it('reads nothing again when it was the commit that failed', async () => {
 		await sixInARound();
-		store.breakNextApply();
+		world.store.breakNextApply();
 
-		expect((await engine.pull()).status).toBe('retry');
-		const before = readsOf(provider).length;
-		const result = await engine.pull();
+		expect((await world.engine.pull()).status).toBe('retry');
+		const before = readsOf(world.provider).length;
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(paths()).toEqual(PATHS);
-		expect(readsOf(provider)).toHaveLength(before);
+		expect(readsOf(world.provider)).toHaveLength(before);
 	});
 
 	it('reads again a note written over since it was read', async () => {
 		await sixInARound();
-		failFirstReadOf(provider, 'd.md');
-		expect((await engine.pull()).status).toBe('retry');
-		provider.setFault(undefined);
-		const held = remoteAt(provider, 'a.md');
-		await provider.write('a.md', 'written since\n', { expectedVersion: held?.version });
-		const before = readsOf(provider).length;
+		failFirstReadOf(world.provider, 'd.md');
+		expect((await world.engine.pull()).status).toBe('retry');
+		world.provider.setFault(undefined);
+		const held = remoteAt(world.provider, 'a.md');
+		await world.provider.write('a.md', 'written since\n', { expectedVersion: held?.version });
+		const before = readsOf(world.provider).length;
 
-		const result = await engine.pull();
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
-		expect(store.notes().find((note) => note.path === 'a.md')?.content).toBe('written since\n');
-		expect(readCounts(provider, before)).toEqual({
+		expect(world.store.notes().find((note) => note.path === 'a.md')?.content).toBe(
+			'written since\n'
+		);
+		expect(readCounts(world.provider, before)).toEqual({
 			'a.md': 1,
 			'd.md': 1,
 			'e.md': 1,
@@ -10598,20 +10740,20 @@ describe('a pull that fails part-way', () => {
 	});
 
 	it('does not hold a file it could not read as text', async () => {
-		await engine.pull();
+		await world.engine.pull();
 		await remoteFile('a.md', 'a\n');
-		provider.plantBytes('b.md', new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+		world.provider.plantBytes('b.md', new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]));
 		await remoteFile('c.md', 'c\n');
-		const before = readsOf(provider).length;
-		failFirstReadOf(provider, 'c.md');
+		const before = readsOf(world.provider).length;
+		failFirstReadOf(world.provider, 'c.md');
 
-		expect((await engine.pull()).status).toBe('retry');
-		const result = await engine.pull();
+		expect((await world.engine.pull()).status).toBe('retry');
+		const result = await world.engine.pull();
 
 		expect(result.status).toBe('ok');
 		expect(paths()).toEqual(['a.md', 'c.md']);
-		expect((await store.unreadable()).map((file) => file.path)).toEqual(['b.md']);
-		expect(readCounts(provider, before)).toEqual({ 'a.md': 1, 'b.md': 2, 'c.md': 2 });
+		expect((await world.store.unreadable()).map((file) => file.path)).toEqual(['b.md']);
+		expect(readCounts(world.provider, before)).toEqual({ 'a.md': 1, 'b.md': 2, 'c.md': 2 });
 	});
 
 	it('reads a round once more, not twice, when a token expires part-way', async () => {
@@ -10623,15 +10765,17 @@ describe('a pull that fails part-way', () => {
 				return Promise.resolve();
 			},
 		});
-		const before = readsOf(provider).length;
-		failFirstReadOf(provider, 'd.md', new AuthError('expired'));
+		const before = readsOf(world.provider).length;
+		failFirstReadOf(world.provider, 'd.md', new AuthError('expired'));
 
 		const result = await withAuth.pull();
 
 		expect(result.status).toBe('ok');
 		expect(refreshed).toBe(1);
 		expect(paths()).toEqual(PATHS);
-		expect(Object.values(readCounts(provider, before)).reduce((a, b) => a + b, 0)).toBe(7);
+		expect(Object.values(readCounts(world.provider, before)).reduce((a, b) => a + b, 0)).toBe(
+			7
+		);
 	});
 
 	it('keeps what a scan read on a page that did not commit', async () => {
@@ -10646,13 +10790,13 @@ describe('a pull that fails part-way', () => {
 		// Pages of two, in path order, the root folder first: [/, a] [b, c]
 		// [d, e] [f]. Two committed; the third had read d.md when e.md failed.
 		expect(paths()).toEqual(['a.md', 'b.md', 'c.md']);
-		expect(store.storedCursor()).toBeUndefined();
+		expect(world.store.storedCursor()).toBeUndefined();
 
 		const result = await scanning.pull();
 
 		expect(result.status).toBe('ok');
 		expect(paths()).toEqual(PATHS);
-		expect(store.storedCursor()).toBeDefined();
+		expect(world.store.storedCursor()).toBeDefined();
 		// a.md to c.md are in the store at their versions, and d.md is held.
 		// Only the note that failed is read twice.
 		expect(readCounts(paged, before)).toEqual({
