@@ -1,3 +1,4 @@
+import { PROVIDER_KINDS } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
@@ -6,9 +7,10 @@ import {
 	authorizeUrlOf,
 	buildApp,
 	type DropboxScript,
+	failWith,
 	googleTokenResponse,
 	microsoftTokenResponse,
-	testConfig,
+	workerLog,
 } from './harness.js';
 
 /**
@@ -52,7 +54,11 @@ describe.each(PROVIDERS)('$provider', (each) => {
 	};
 
 	it('is not offered where the operator has not enabled it', async () => {
-		const app = buildApp({ config: testConfig() });
+		// Every provider configured, the others listed: only the listing says no.
+		const others = PROVIDER_KINDS.filter((kind) => kind !== provider && kind !== 'webdav');
+		const app = buildApp({
+			config: allProvidersConfig({}, { ENABLED_PROVIDERS: others.join(',') }),
+		});
 		expect((await app.startConnect(provider)).status).toBe(404);
 	});
 
@@ -102,23 +108,15 @@ describe.each(PROVIDERS)('$provider', (each) => {
 	});
 
 	it('logs a failed exchange for the operator, with the code and nothing else', async () => {
-		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		const { connected } = connectWith(
-			() =>
-				new Response(
-					JSON.stringify({
-						error: 'invalid_client',
-						error_description: 'echoes the-code',
-					}),
-					{ status: 401 }
-				)
-		);
+		const log = workerLog();
+		const { connected } = connectWith(() => failWith('invalid_client', 401));
 		const { callback } = await connected;
 
 		expect(callback.headers.get('location')).toBe('/?connect=failed');
 		const logged = log.mock.calls.flat().join('\n');
 		expect(logged).toContain('invalid_client');
 		expect(logged).not.toContain('echoes');
+		expect(logged).not.toContain('AADSTS');
 		expect(logged).not.toContain(each.clientSecret);
 	});
 });

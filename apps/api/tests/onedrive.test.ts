@@ -8,12 +8,14 @@ import {
 	bothProvidersConfig,
 	buildApp,
 	createJar,
+	failWith,
 	flowStateOf,
 	MICROSOFT_ACCOUNT,
 	microsoftTokenResponse,
 	newCredential,
 	secretOf,
 	testConfig,
+	workerLog,
 } from './harness.js';
 
 /**
@@ -28,14 +30,6 @@ const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
 afterEach(() => {
 	vi.restoreAllMocks();
 });
-
-/** The Worker log, silenced and kept for the test to read. */
-const workerLog = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-const failWith = (error: string, status = 400) =>
-	new Response(JSON.stringify({ error, error_description: 'AADSTS000: echoes the-code' }), {
-		status,
-	});
 
 const tokenFor = (app: ReturnType<typeof buildApp>, credential: string) =>
 	app.request('/api/token', { method: 'POST', credential });

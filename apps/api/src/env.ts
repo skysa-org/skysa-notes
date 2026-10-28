@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { fromBase64Url } from './crypto.js';
 import { formatIssues } from './json.js';
-import type { OAuthProviderKind } from './oauth/providers.js';
+import { isOAuthProvider, type OAuthProviderKind } from './oauth/providers.js';
 import type { OAuthCredentials } from './oauth/types.js';
 
 /**
@@ -51,9 +51,6 @@ const credentialVars = Object.fromEntries(
 		.flatMap(({ id, secret }) => [id, secret])
 		.map((name) => [name, z.string().optional()])
 ) as Record<CredentialVar, z.ZodOptional<z.ZodString>>;
-
-const isOAuthProvider = (provider: ProviderKind): provider is OAuthProviderKind =>
-	Object.hasOwn(OAUTH_ENV, provider);
 
 const oauthCredentials = z.object({
 	clientId: z.string().min(1),
