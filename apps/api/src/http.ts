@@ -4,7 +4,8 @@ import { createMiddleware } from 'hono/factory';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
 
-import type { AppEnv } from './context.js';
+import type { AppEnv, AuthedEnv } from './context.js';
+import { bearerFrom, grantHolder } from './credentials.js';
 import { parseJson } from './json.js';
 
 /**
@@ -31,15 +32,18 @@ const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
  * it. The only way a route says no, so a code the app has never heard of
  * does not compile.
  */
-export const fail = (
-	c: Context<AppEnv>,
+export const fail = <E extends AppEnv>(
+	c: Context<E>,
 	code: ApiErrorCode,
 	status: ContentfulStatusCode,
 	beside: Readonly<Record<string, unknown> & { error?: never }> = {}
 ): Response => c.json({ ...beside, error: code }, status);
 
 /** The rate limiter said no: 429, with its `Retry-After` when it gave one. */
-export const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Response => {
+export const tooMany = <E extends AppEnv>(
+	c: Context<E>,
+	retryAfter: number | undefined
+): Response => {
 	if (retryAfter !== undefined) c.header('Retry-After', String(Math.ceil(retryAfter)));
 	return fail(c, 'rate_limited', 429);
 };
@@ -48,8 +52,32 @@ export const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Res
  * A route only this deployment's own pages may ask (`sameOrigin`), refused 403
  * before anything else is looked at.
  */
-export const requireSameOrigin = createMiddleware<AppEnv>(async (c, next) => {
-	if (!sameOrigin(c, c.get('config').appOrigin)) return fail(c, 'forbidden_origin', 403);
+export const requireSameOrigin = (appOrigin: string) =>
+	createMiddleware<AppEnv>(async (c, next) => {
+		if (!sameOrigin(c, appOrigin)) return fail(c, 'forbidden_origin', 403);
+		await next();
+	});
+
+/**
+ * Everything that acts on a connection needs the device's credential, and
+ * gets it here rather than in each handler. Each such route mounts this
+ * itself, and is typed `AuthedEnv` by it: a route that forgot it has no
+ * `bearer` to read.
+ *
+ * The two refusals differ on purpose. `credential_required` means the device
+ * never had one and has to connect; `credential_revoked` means the one it
+ * holds is not known here any more — revoked, expired for idleness, or from
+ * a deployment that has since been reset — and it should throw the
+ * credential away before offering to connect, or it will present it forever.
+ */
+export const requireBearer = createMiddleware<AuthedEnv>(async (c, next) => {
+	const credential = bearerFrom(c.req.header('authorization'));
+	if (credential === undefined) return fail(c, 'credential_required', 401);
+
+	const bearer = await grantHolder(c.get('db'), credential);
+	if (bearer === undefined) return fail(c, 'credential_revoked', 401);
+
+	c.set('bearer', bearer);
 	await next();
 });
 

@@ -1,14 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
-import type { AppEnv } from '../context.js';
+import type { AppEnv, RouteDeps } from '../context.js';
 import { openOAuthSecret, sealedOf, sealOAuthSecret, secretColumns } from '../crypto.js';
 import { schema } from '../db/client.js';
 import { knownCode } from '../gate.js';
-import { fail, tooMany } from '../http.js';
+import { fail, requireBearer, tooMany } from '../http.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
-import { type FetchLike, isGrantRefused } from '../oauth/types.js';
+import { isGrantRefused } from '../oauth/types.js';
 
 /**
  * Minting a provider access token for the client, which then talks to the
@@ -20,23 +20,24 @@ import { type FetchLike, isGrantRefused } from '../oauth/types.js';
  * request would be a second answer to a question already settled.
  */
 
-export const tokenRoutes = (doFetch: FetchLike) => {
+export const tokenRoutes = (deps: RouteDeps) => {
+	const { fetch: doFetch } = deps;
 	const app = new Hono<AppEnv>();
 
-	app.post('/token', async (c) => {
+	app.post('/token', requireBearer, async (c) => {
 		const db = c.get('db');
-		const config = c.get('config');
+		const config = deps.config;
 		const { connection } = c.get('bearer');
 
 		// A refresh is an outbound provider call, so it is throttleable too —
 		// keyed on the connection, since holding a credential is already the
 		// price of asking.
-		const limit = await c.get('rateLimiter').check(`token:${connection.id}`);
+		const limit = await deps.rateLimiter.check(`token:${connection.id}`);
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		// The entitlement seam: an operator of a shared instance decides which
 		// accounts may sync here. This repo always says yes. See docs/ARCHITECTURE.md §6.
-		const decision = await c.get('entitlements').check({
+		const decision = await deps.entitlements.check({
 			connectionId: connection.id,
 			provider: connection.provider,
 			accountId: connection.accountId,
@@ -61,9 +62,10 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		// A row sealed under a key this deployment no longer holds cannot be
 		// recovered here, and the client can do nothing about it by retrying. It
 		// is the same answer as a revoked grant: reconnect.
-		const secret = await openOAuthSecret(c.get('secretKey'), sealedOf(connection)).catch(
-			() => undefined
-		);
+		const secret = await openOAuthSecret(
+			(await deps.keys()).secretKey,
+			sealedOf(connection)
+		).catch(() => undefined);
 		if (secret === undefined) return fail(c, 'reauthorize_required', 401);
 
 		const refreshed = await client
@@ -92,7 +94,9 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		const rotated =
 			tokens.refreshToken === undefined || tokens.refreshToken === secret.refreshToken
 				? undefined
-				: await sealOAuthSecret(c.get('secretKey'), { refreshToken: tokens.refreshToken });
+				: await sealOAuthSecret((await deps.keys()).secretKey, {
+						refreshToken: tokens.refreshToken,
+					});
 
 		await db
 			.update(schema.connections)

@@ -1,18 +1,18 @@
 import { Hono } from 'hono';
 
-import type { AppEnv } from '../context.js';
+import type { AppEnv, RouteDeps } from '../context.js';
 import { liveGrant } from '../credentials.js';
-import { fail, requireSameOrigin, tooMany } from '../http.js';
-import { RELAY_SOCKET_MS, type RelayHub } from '../relay/hub.js';
+import { fail, requireBearer, requireSameOrigin, tooMany } from '../http.js';
+import { RELAY_SOCKET_MS } from '../relay/hub.js';
 import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
 
 /**
  * The change relay's two routes (docs/ARCHITECTURE.md §6, "Change relay"): a
  * ticket asked for with the bearer, and the WebSocket upgrade it opens.
  *
- * The upgrade is outside `/connection*` on purpose. `requireBearer` guards
- * everything there, and a browser cannot send `Authorization` on a WebSocket,
- * so under it every upgrade would be a 401. It checks for itself instead, and
+ * The upgrade is outside `/connection*` on purpose: a browser cannot send
+ * `Authorization` on a WebSocket, so behind `requireBearer` every upgrade
+ * would be a 401. It checks for itself instead, and
  * in an order where the cheap refusals come first and nothing reaches the hub
  * that the database has not just agreed to.
  *
@@ -20,18 +20,21 @@ import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
  * upgrade refuses another origin first, 403, so such a page learns nothing of
  * whether there is one.
  */
-export const relayRoutes = (relay: RelayHub | undefined) => {
+export const relayRoutes = (deps: RouteDeps) => {
+	const { relay } = deps;
 	const app = new Hono<AppEnv>();
+	/** Refuses a request from any page but this deployment's own. */
+	const ownOrigin = requireSameOrigin(deps.config.appOrigin);
 
-	app.post('/connection/relay/ticket', async (c) => {
+	app.post('/connection/relay/ticket', requireBearer, async (c) => {
 		if (relay === undefined) return fail(c, 'relay_disabled', 404);
 		const { connection, grant } = c.get('bearer');
 
-		const limit = await c.get('rateLimiter').check(`relay-ticket:${connection.id}`);
+		const limit = await deps.rateLimiter.check(`relay-ticket:${connection.id}`);
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		const ticket = await issueTicket(
-			c.get('ticketKey'),
+			(await deps.keys()).ticketKey,
 			{ grantId: grant.id, connectionId: connection.id },
 			Date.now()
 		);
@@ -40,13 +43,13 @@ export const relayRoutes = (relay: RelayHub | undefined) => {
 
 	// A page on another origin can open a WebSocket here, and the browser sends
 	// no preflight for one; `Origin` is how a server tells.
-	app.get('/relay', requireSameOrigin, async (c) => {
+	app.get('/relay', ownOrigin, async (c) => {
 		if (relay === undefined) return fail(c, 'relay_disabled', 404);
 		if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
 			return fail(c, 'upgrade_required', 426);
 		}
 		const now = Date.now();
-		const holder = await readTicket(c.get('ticketKey'), c.req.query('ticket'), now);
+		const holder = await readTicket((await deps.keys()).ticketKey, c.req.query('ticket'), now);
 		if (holder === undefined) return fail(c, 'ticket_invalid', 401);
 
 		// The ticket says who it was given to, not whether they still may: a
@@ -56,7 +59,7 @@ export const relayRoutes = (relay: RelayHub | undefined) => {
 			return fail(c, 'credential_revoked', 401);
 		}
 
-		const limit = await c.get('rateLimiter').check(`relay:${holder.connectionId}`);
+		const limit = await deps.rateLimiter.check(`relay:${holder.connectionId}`);
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		// Without its query: the hub has no use for the ticket, and what it never

@@ -681,3 +681,40 @@ describe('recording that a device is still in use', () => {
 		expect((await app.request('/api/connection', { credential })).status).toBe(200);
 	});
 });
+
+/**
+ * Each route that acts on a connection mounts `requireBearer` itself (#450),
+ * where one app-wide guard used to cover the paths. Leaving it off one is a
+ * type error — the handler has no `bearer` to read — and this is the same rule
+ * from the outside, for a handler that never reads it.
+ */
+describe('every route behind the credential', () => {
+	const ROUTES = [
+		['POST', '/api/token'],
+		['GET', '/api/connection'],
+		['DELETE', '/api/connection'],
+		['GET', '/api/connection/grants'],
+		['DELETE', '/api/connection/grants/some-grant'],
+		['POST', '/api/connection/relay/ticket'],
+	] as const;
+
+	it.each(ROUTES)('%s %s refuses a caller with no credential', async (method, path) => {
+		const response = await buildApp().request(path, { method });
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'credential_required' });
+	});
+
+	it.each(ROUTES)('%s %s refuses a credential not known here', async (method, path) => {
+		const app = buildApp();
+		await app.connect();
+		const response = await app.request(path, { method, credential: newCredential() });
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'credential_revoked' });
+	});
+
+	it('answers a path that is not a route as one, credential or not', async () => {
+		const response = await buildApp().request('/api/connection/nothing-here');
+		expect(response.status).toBe(404);
+		expect(await response.json()).toEqual({ error: 'not_found' });
+	});
+});
