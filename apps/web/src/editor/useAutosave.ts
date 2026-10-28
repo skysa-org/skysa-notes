@@ -348,6 +348,7 @@ export const useAutosave = <T>({
 	const gone = useRef(false);
 	const again = useRef<() => void>(() => undefined);
 	const [failing, setFailing] = useState(false);
+	// eslint-disable-next-line react-hooks/refs -- read when a save settles, never while rendering
 	const [held] = useState(() =>
 		createHeld<T>({
 			supersedes: () => supersedesRef.current,
@@ -382,7 +383,7 @@ export const useAutosave = <T>({
 			held.retry(tried);
 			return held.follow(tried, all);
 		},
-		[held]
+		[held, keyRef, saveRef]
 	);
 
 	const flush = useCallback(() => {
@@ -416,7 +417,7 @@ export const useAutosave = <T>({
 			// Not yet issued is newer than anything that was.
 			return waiting === null ? unstored : { value: waiting.value, displaced: false };
 		},
-		[held]
+		[held, keyRef]
 	);
 
 	const change = useCallback(
@@ -430,7 +431,7 @@ export const useAutosave = <T>({
 			if (timer.current !== null) clearTimeout(timer.current);
 			timer.current = setTimeout(flush, delayMs);
 		},
-		[delayMs, flush]
+		[delayMs, flush, supersedesRef]
 	);
 
 	// Flush when the note changes or the editor goes away. The cleanup runs
