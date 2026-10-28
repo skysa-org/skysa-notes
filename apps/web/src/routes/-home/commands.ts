@@ -13,7 +13,7 @@ import { keeping } from '../../store/keeping.js';
 import { type Moving } from '../../store/rearrange.js';
 import { titleShown } from '../../store/titles.js';
 import { type AppSearch } from '../search.js';
-import { isNotebook } from './rules.js';
+import { canMakeNote, isNotebook } from './rules.js';
 
 /**
  * The shell's chords and commands, and the URL arrivals the shell answers
@@ -154,13 +154,13 @@ const useDownloadCommand = ({
 export const useShellCommands = ({
 	setPaletteOpen,
 	onCreateNote,
-	canNew,
+	scratchModal,
 	setSearchOpen,
 	searchField,
 	connectionId,
 	source,
 	setProblem,
-	canUndo,
+	deleted,
 	undoDelete,
 	folder,
 	moving,
@@ -170,16 +170,16 @@ export const useShellCommands = ({
 }: Readonly<{
 	setPaletteOpen: (open: boolean) => void;
 	onCreateNote: () => void;
-	/** Whether a note can be made where the user is (`canMakeNote`). */
-	canNew: boolean;
+	/** Whether a scratch card is open over the page (`useScratchpad`). */
+	scratchModal: boolean;
 	setSearchOpen: (open: boolean) => void;
 	searchField: Readonly<RefObject<HTMLInputElement | null>>;
 	connectionId: string | undefined;
 	/** The source showing: `null` for the device's own, `undefined` until read. */
 	source: SyncStateRecord | null | undefined;
 	setProblem: (notice: Notice) => void;
-	/** Whether there is a deletion for the notice's undo to take back. */
-	canUndo: boolean;
+	/** The note just deleted, for the notice's undo to take back (`useUndoDelete`). */
+	deleted: NoteRecord | null;
 	undoDelete: () => void;
 	folder: string | undefined;
 	moving: Moving | null;
@@ -204,7 +204,7 @@ export const useShellCommands = ({
 		label: t('shell.commands.newNote'),
 		group: t('shell.commands.group.note'),
 		chord: NEW_NOTE,
-		enabled: canNew,
+		enabled: canMakeNote(folder, scratchModal),
 		run: onCreateNote,
 	});
 
@@ -229,17 +229,18 @@ export const useShellCommands = ({
 		id: 'note.undoDelete',
 		label: t('shell.commands.undoDelete'),
 		group: t('shell.commands.group.note'),
-		enabled: canUndo,
+		enabled: deleted !== null,
 		run: undoDelete,
 	});
 
 	/**
 	 * Picking up without a pointer. Dragging is a pointer gesture, and WCAG 2.2
-	 * SC 2.5.7 asks that whatever it does be doable without one; these two put
-	 * the same thing in the air that `dragstart` does, and the destination rows
-	 * in the sidebar are ordinary buttons, so a click or Enter on one puts it
-	 * down. No chord: they are rare enough to be found in the palette, and every
-	 * chord taken is one a note cannot use.
+	 * SC 2.5.7 asks that whatever it does be doable without one; this and
+	 * `note.move` (`useNoteMove`, below) put the same thing in the air that
+	 * `dragstart` does, and the destination rows in the sidebar are ordinary
+	 * buttons, so a click or Enter on one puts it down. No chord: they are rare
+	 * enough to be found in the palette, and every chord taken is one a note
+	 * cannot use.
 	 */
 	useCommand({
 		id: 'notebook.move',

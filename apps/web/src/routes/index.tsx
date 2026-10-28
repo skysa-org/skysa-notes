@@ -60,7 +60,7 @@ import { findFolder, notesUnder } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import { useEnterCode, useKeepOnInstall, useShellCommands } from './-home/commands.js';
 import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
-import { canMakeNote, covered, emptyPaneOffers, placeRow } from './-home/rules.js';
+import { covered, emptyPaneOffers, placeRow } from './-home/rules.js';
 import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
 import { useEscapePutsDown, useMoving } from './-home/useMoving.js';
@@ -440,13 +440,13 @@ const Home = () => {
 	useShellCommands({
 		setPaletteOpen,
 		onCreateNote,
-		canNew: canMakeNote(folder, scratch.modal),
+		scratchModal: scratch.modal,
 		setSearchOpen,
 		searchField,
 		connectionId: activeConnection,
 		source,
 		setProblem,
-		canUndo: deleted !== null,
+		deleted,
 		undoDelete,
 		folder,
 		moving,
