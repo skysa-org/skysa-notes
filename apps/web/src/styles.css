@@ -4573,7 +4573,7 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
    wide as the trigger, along the top of the panel right under it, out to the
    whole window — so which of the three was opened is never in doubt. Where the
    triggers are is measured, not worked out here (`Origins` in
-   `CompactBar.tsx`); the bar's share for each of them depends on whether the
+   `routes/panel.ts`); the bar's share for each of them depends on whether the
    search field fits beside them. */
 .compact .source-panel {
 	--from-left: var(--sources-left, 0px);
