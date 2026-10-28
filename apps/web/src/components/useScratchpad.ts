@@ -10,6 +10,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 're
 
 import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
+import type { Pane } from '../routes/panel.js';
 import type { Place } from '../routes/place.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { settleEditors } from '../store/heldEdits.js';
@@ -20,7 +21,6 @@ import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { titleShown } from '../store/titles.js';
 import { visibleBlocks } from '../store/visibleText.js';
-import type { Pane } from './CompactBar.js';
 import { COARSE_POINTER, useMediaQuery } from './layout.js';
 import type { NoteViewHandle, ScratchEditing } from './NoteView.js';
 import type { MarkChange } from './Scratchpad.js';

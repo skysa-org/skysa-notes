@@ -2,7 +2,6 @@ import { cell, isVaultPath, parentPath, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } 
 import { useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { heldPanel, openedHere, type Pane, panelKept } from '../../components/CompactBar.js';
 import { type ConnectedSource, showConnection } from '../../store/connection.js';
 import { db, type NoteRecord, type SyncStateRecord } from '../../store/db.js';
 import {
@@ -18,6 +17,7 @@ import { type Pins } from '../../store/pins.js';
 import { rememberRecent } from '../../store/recentNotes.js';
 import { isLive } from '../../store/rowStates.js';
 import { type FolderNode, selectedFolderPath } from '../../store/tree.js';
+import { heldPanel, openedHere, type Pane, panelKept } from '../panel.js';
 import {
 	findNamedPlace,
 	fragmentOf,

@@ -2,7 +2,7 @@ import { act, cleanup, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type * as Bar from '../src/components/CompactBar.js';
+import type * as Panel from '../src/routes/panel.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
@@ -21,8 +21,8 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
  */
 const drawn = vi.hoisted(() => ({ pages: 0 }));
 
-vi.mock('../src/components/CompactBar.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof Bar>();
+vi.mock('../src/routes/panel.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Panel>();
 	return {
 		...actual,
 		useCompactLayout: () => {

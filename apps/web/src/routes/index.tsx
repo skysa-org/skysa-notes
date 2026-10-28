@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
-import { CompactBar, type Pane, useCompactLayout } from '../components/CompactBar.js';
+import { CompactBar } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
@@ -95,6 +95,7 @@ import { canMakeNote, covered, emptyPaneOffers, isNotebook, placeRow } from './-
 import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
 import { canBegin, useOpenPlace } from './-home/useOpenPlace.js';
+import { type Pane, useCompactLayout } from './panel.js';
 import { type Place, placeFolder } from './place.js';
 import { parseSearch } from './search.js';
 
