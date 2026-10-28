@@ -366,7 +366,7 @@ const errorOf = ({ error }: { error?: string | undefined }): string =>
  * operator's policy gave (`ENTITLEMENT_CODES`), as a sentence of its own. With
  * none, what it always said: a refusal is still a refusal from a policy that
  * does not say which. The connect toast says the same reasons in its own
- * sentences (`refusedText` in `routes/index.tsx`).
+ * sentences (`refusedText` in `routes/-home/connectNotice.ts`).
  */
 const refusedSentence = (code: EntitlementCode | undefined): string => {
 	switch (code) {
