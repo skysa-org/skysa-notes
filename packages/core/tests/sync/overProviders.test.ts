@@ -1224,7 +1224,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			});
 		};
 
-		// Every seed that has failed is a test in `engine.test.ts` too. A new
+		// Every seed that has failed is a test in `engine/twoDevices.test.ts` too. A new
 		// failure prints the steps that led to it.
 		it.each(Array.from({ length: 120 }, (__, seed) => seed + 1))(
 			'lose nothing and agree, seed %i',
