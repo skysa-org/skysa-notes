@@ -54,156 +54,172 @@ interface Row {
 	apart: readonly string[];
 }
 
-const ROWS: readonly Row[] = [
-	{
-		change: {
-			kind: 'upsert-note',
-			id: 'n',
-			path: 'a.md',
-			content: '',
-			remote: entry('r', 'a.md'),
-			syncedHash: '',
-		},
-		notes: ['n'],
-		folders: [],
-		decided: ['n'],
-		apart: ['n'],
-	},
-	{
-		change: { kind: 'adopt-version', id: 'n', remote: entry('r', 'a.md') },
-		notes: ['n'],
-		folders: [],
-		decided: ['n'],
-		apart: ['n'],
-	},
-	{
-		change: { kind: 'move-note', id: 'n', path: 'b.md', remote: entry('r', 'b.md') },
-		notes: ['n'],
-		folders: [],
-		decided: ['n'],
-		apart: ['n'],
-	},
-	// Taken away, so said something about, but not written back.
-	{
-		change: { kind: 'delete-note', id: 'n' },
-		notes: [],
-		folders: [],
-		decided: ['n'],
-		apart: ['n'],
-	},
-	{
-		change: { kind: 'detach-note', id: 'n' },
-		notes: [],
-		folders: [],
-		decided: ['n'],
-		apart: ['n'],
-	},
-	// Moved out of another file's way, which says nothing about its own.
-	{
-		change: { kind: 'displace-note', id: 'n', path: 'a (moved).md' },
-		notes: [],
-		folders: [],
-		decided: ['n'],
-		apart: [],
-	},
-	{
-		change: { kind: 'reupload-note', id: 'n' },
-		notes: [],
-		folders: [],
-		decided: ['n'],
-		apart: ['n'],
-	},
-	{
-		change: { kind: 'ensure-folder', path: 'Work' },
-		notes: [],
-		folders: ['Work'],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'move-folder', from: 'Work', to: 'Play' },
-		notes: [],
-		folders: ['Play'],
-		decided: [],
-		apart: [],
-	},
-	// The notes a folder delete keeps are not decided by it.
-	{
-		change: { kind: 'delete-folder', path: 'Work', keep: ['n'] },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'reupload-folder', path: 'Work' },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'unreadable', file: { remoteId: 'r', path: 'a.md' } },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'forget-unreadable', remoteId: 'r' },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	// Two notes: the one that lost and the copy that keeps its edit.
-	{
-		change: {
-			kind: 'conflict',
-			resolution: {
-				noteId: 'n',
-				remoteContent: '',
-				remoteHash: '',
+/**
+ * The table, about note `n` (and its conflict copy) and folder `work`. Made
+ * twice over, so that pairs can be about one note or two.
+ */
+const rowsAbout = (n: string, work: string): readonly Row[] => {
+	const copy = `${n}-copy`;
+	const moved = `${work}-moved`;
+	return [
+		{
+			change: {
+				kind: 'upsert-note',
+				id: n,
+				path: 'a.md',
+				content: '',
 				remote: entry('r', 'a.md'),
-				copyId: 'copy',
-				copyPath: 'a (conflict).md',
-				copyContent: '',
+				syncedHash: '',
 			},
+			notes: [n],
+			folders: [],
+			decided: [n],
+			apart: [n],
 		},
-		notes: ['n', 'copy'],
-		folders: [],
-		decided: ['n', 'copy'],
-		apart: ['n', 'copy'],
-	},
-	{
-		change: { kind: 'upsert-file', fileId: 'f', path: 'a.png', remote: entry('r', 'a.png') },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'displace-file', fileId: 'f', path: 'b.png' },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'delete-file', fileId: 'f' },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-	{
-		change: { kind: 'reupload-file', fileId: 'f' },
-		notes: [],
-		folders: [],
-		decided: [],
-		apart: [],
-	},
-];
+		{
+			change: { kind: 'adopt-version', id: n, remote: entry('r', 'a.md') },
+			notes: [n],
+			folders: [],
+			decided: [n],
+			apart: [n],
+		},
+		{
+			change: { kind: 'move-note', id: n, path: 'b.md', remote: entry('r', 'b.md') },
+			notes: [n],
+			folders: [],
+			decided: [n],
+			apart: [n],
+		},
+		// Taken away, so said something about, but not written back.
+		{
+			change: { kind: 'delete-note', id: n },
+			notes: [],
+			folders: [],
+			decided: [n],
+			apart: [n],
+		},
+		{
+			change: { kind: 'detach-note', id: n },
+			notes: [],
+			folders: [],
+			decided: [n],
+			apart: [n],
+		},
+		// Moved out of another file's way, which says nothing about its own.
+		{
+			change: { kind: 'displace-note', id: n, path: 'a (moved).md' },
+			notes: [],
+			folders: [],
+			decided: [n],
+			apart: [],
+		},
+		{
+			change: { kind: 'reupload-note', id: n },
+			notes: [],
+			folders: [],
+			decided: [n],
+			apart: [n],
+		},
+		{
+			change: { kind: 'ensure-folder', path: work },
+			notes: [],
+			folders: [work],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'move-folder', from: work, to: moved },
+			notes: [],
+			folders: [moved],
+			decided: [],
+			apart: [],
+		},
+		// The notes a folder delete keeps are not decided by it.
+		{
+			change: { kind: 'delete-folder', path: work, keep: [n] },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'reupload-folder', path: work },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'unreadable', file: { remoteId: 'r', path: 'a.md' } },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'forget-unreadable', remoteId: 'r' },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		// Two notes: the one that lost and the copy that keeps its edit.
+		{
+			change: {
+				kind: 'conflict',
+				resolution: {
+					noteId: n,
+					remoteContent: '',
+					remoteHash: '',
+					remote: entry('r', 'a.md'),
+					copyId: copy,
+					copyPath: 'a (conflict).md',
+					copyContent: '',
+				},
+			},
+			notes: [n, copy],
+			folders: [],
+			decided: [n, copy],
+			apart: [n, copy],
+		},
+		{
+			change: {
+				kind: 'upsert-file',
+				fileId: 'f',
+				path: 'a.png',
+				remote: entry('r', 'a.png'),
+			},
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'displace-file', fileId: 'f', path: 'b.png' },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'delete-file', fileId: 'f' },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+		{
+			change: { kind: 'reupload-file', fileId: 'f' },
+			notes: [],
+			folders: [],
+			decided: [],
+			apart: [],
+		},
+	];
+};
+
+const ROWS = rowsAbout('n', 'Work');
+const ELSEWHERE = rowsAbout('m', 'Home');
 
 describe('one change of every kind', () => {
 	it('has a row for every kind', () => {
@@ -212,33 +228,39 @@ describe('one change of every kind', () => {
 
 	it.each(ROWS.map((row) => [row.change.kind, row] as const))('%s', (_kind, row) => {
 		const written = reestablished([row.change]);
-		expect([...written.notes]).toEqual(row.notes);
-		expect([...written.folders]).toEqual(row.folders);
-		expect([...decidedNotes([row.change])]).toEqual(row.decided);
-		expect([...decidedApartFromMoves([row.change])]).toEqual(row.apart);
+		expect(written.notes).toEqual(new Set(row.notes));
+		expect(written.folders).toEqual(new Set(row.folders));
+		expect(decidedNotes([row.change])).toEqual(new Set(row.decided));
+		expect(decidedApartFromMoves([row.change])).toEqual(new Set(row.apart));
 	});
 });
 
 describe('changes together', () => {
-	const pairs = ROWS.flatMap((first) => ROWS.map((second) => [first.change, second.change]));
+	const union = (first: readonly string[], second: readonly string[]) =>
+		new Set([...first, ...second]);
 
-	it('counts as decided every note it writes back, and every one it counts apart from moves', () => {
-		pairs.forEach((changes) => {
-			const decided = decidedNotes(changes);
-			[...reestablished(changes).notes].forEach((id) => {
-				expect(decided.has(id)).toBe(true);
-			});
-			[...decidedApartFromMoves(changes)].forEach((id) => {
-				expect(decided.has(id)).toBe(true);
+	/**
+	 * What a pair answers is what its two changes answer alone, together:
+	 * nothing one says hides what the other says, in either order, about the
+	 * same note or another. So a note moved aside and also written back or
+	 * taken away still counts apart from moves.
+	 */
+	it.each([
+		['the same note and folder', ROWS],
+		['another note and folder', ELSEWHERE],
+	] as const)('answers for a pair what each answers alone, about %s', (_about, seconds) => {
+		ROWS.forEach((first) => {
+			seconds.forEach((second) => {
+				const changes = [first.change, second.change];
+				const pair = `${first.change.kind} then ${second.change.kind}`;
+				const written = reestablished(changes);
+				expect(written.notes, pair).toEqual(union(first.notes, second.notes));
+				expect(written.folders, pair).toEqual(union(first.folders, second.folders));
+				expect(decidedNotes(changes), pair).toEqual(union(first.decided, second.decided));
+				expect(decidedApartFromMoves(changes), pair).toEqual(
+					union(first.apart, second.apart)
+				);
 			});
 		});
-	});
-
-	it('still counts a note moved aside that the batch also said something else about', () => {
-		const changes: PullChange[] = [
-			{ kind: 'displace-note', id: 'n', path: 'a (moved).md' },
-			{ kind: 'delete-note', id: 'n' },
-		];
-		expect([...decidedApartFromMoves(changes)]).toEqual(['n']);
 	});
 });
