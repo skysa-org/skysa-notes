@@ -7,10 +7,11 @@ import type { OAuthProviderKind } from '../oauth/providers.js';
 import { type Database, schema } from './client.js';
 
 /**
- * The writes to `connections` and `grants` that the routes make, kept here
- * with the races they are written against (#450). A route says when one
- * happens and why; this says how it stays right with another request in
- * between.
+ * The writes to `connections` and `grants` that have a race to get right, kept
+ * here with the reasoning about it (#450). A route says when one happens and
+ * why; this says how it stays right with another request in between. Writes
+ * with nothing to race stay where they are: a credential's use (`touch`, in
+ * `credentials.ts`) and Disconnect's delete of the whole row.
  */
 
 interface CommitInput {
@@ -209,10 +210,11 @@ export const revokeGrant = async (db: Database, grantId: string): Promise<void> 
  * it did.
  *
  * One statement, asking and deleting together. Asked first and deleted
- * afterwards — with two provider calls in between, up to twenty seconds —
- * another device's callback can commit its grant to this row in the gap
- * and then watch the row deleted from under it: told `ok`, holding a
- * credential that reaches nothing, its hash spent. The callback's batch
+ * afterwards, another device's callback can commit its grant to this row in
+ * the gap — which a caller that talks to the provider in between, as
+ * revoking a device does, makes up to twenty seconds long — and then watch
+ * the row deleted from under it: told `ok`, holding a credential that
+ * reaches nothing, its hash spent. The callback's batch
  * is atomic too, so it lands wholly before this, and the row stays, or
  * wholly after, and it makes a fresh one.
  */

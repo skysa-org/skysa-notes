@@ -142,6 +142,9 @@ export const connectionRoutes = (deps: RouteDeps) => {
 		// row, and the device knows its notes by the account's id, not the row's
 		// (docs/ARCHITECTURE.md §6).
 		//
+		// Asked and deleted in one statement, for the race `deleteIfOrphaned`
+		// describes.
+		//
 		// And the row before the provider. The grant is already nulled, so a
 		// request cut off during the provider's calls — a tab closed on signing
 		// out — would leave exactly the row this is here to remove, with no
