@@ -1,10 +1,11 @@
-import { and, eq, notExists } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import type { AppEnv, RouteDeps } from '../context.js';
-import { isIdle, notIdle } from '../credentials.js';
+import { isIdle } from '../credentials.js';
 import { openOAuthSecret, sealedOf } from '../crypto.js';
 import { schema } from '../db/client.js';
+import { deleteIfOrphaned, revokeGrant } from '../db/connections.js';
 import type { Connection } from '../db/schema.js';
 import { fail, requireBearer } from '../http.js';
 import { logFailure } from '../log.js';
@@ -128,15 +129,7 @@ export const connectionRoutes = (deps: RouteDeps) => {
 		});
 		if (target === undefined) return fail(c, 'not_found', 404);
 
-		// Nulled, not deleted. Deleting would free the hash, and a freed hash is
-		// re-claimable: whoever holds the credential this row was for — which is
-		// exactly the thief the user is revoking — could start a fresh flow with
-		// it, consent with storage of their own, and be handed a working grant.
-		// The row stays so the hash stays spent (see apps/api/src/db/schema.ts).
-		await db
-			.update(schema.grants)
-			.set({ connectionId: null })
-			.where(eq(schema.grants.id, target.id));
+		await revokeGrant(db, target.id);
 
 		// The last device that could reach the account has gone, and the account
 		// goes with it. Left behind, the row is a live refresh token, sealed,
@@ -149,43 +142,17 @@ export const connectionRoutes = (deps: RouteDeps) => {
 		// row, and the device knows its notes by the account's id, not the row's
 		// (docs/ARCHITECTURE.md §6).
 		//
-		// One statement, asking and deleting together. Asked first and deleted
-		// afterwards — with two provider calls in between, up to twenty seconds —
-		// another device's callback can commit its grant to this row in the gap
-		// and then watch the row deleted from under it: told `ok`, holding a
-		// credential that reaches nothing, its hash spent. The callback's batch
-		// is atomic too, so it lands wholly before this, and the row stays, or
-		// wholly after, and it makes a fresh one.
-		//
 		// And the row before the provider. The grant is already nulled, so a
 		// request cut off during the provider's calls — a tab closed on signing
 		// out — would leave exactly the row this is here to remove, with no
 		// credential left to try again with.
-		const gone = await db
-			.delete(schema.connections)
-			.where(
-				and(
-					eq(schema.connections.id, connection.id),
-					notExists(
-						db
-							.select({ id: schema.grants.id })
-							.from(schema.grants)
-							.where(
-								and(
-									eq(schema.grants.connectionId, connection.id),
-									notIdle(Date.now())
-								)
-							)
-					)
-				)
-			)
-			.returning({ id: schema.connections.id });
+		const gone = await deleteIfOrphaned(db, connection.id);
 
 		// After the writes, not before: a socket that reconnects in between is
 		// then refused by the upgrade's grant check rather than let back in.
 		// Every device's sockets when the account went with this one.
-		await closeSockets(relay, connection.id, gone.length === 0 ? [target.id] : undefined);
-		if (gone.length === 0) return c.json({ ok: true, disconnected: false });
+		await closeSockets(relay, connection.id, gone ? undefined : [target.id]);
+		if (!gone) return c.json({ ok: true, disconnected: false });
 		return c.json({ ok: true, disconnected: true, revoked: await withdraw(connection) });
 	});
 

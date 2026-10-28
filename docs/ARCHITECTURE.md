@@ -1674,7 +1674,7 @@ apps/
         token.ts              # /token
         relay.ts              # /connection/relay/ticket, /relay (the change relay)
       relay/                  # the relay's hub seam, Durable Object, rooms and tickets
-      db/                     # drizzle schema, client, migrations
+      db/                     # drizzle schema, client, migrations; connections.ts: the race-sensitive writes (commitConnection, revokeGrant, deleteIfOrphaned, recordRefresh)
       context.ts              # AppEnv (a request's bindings and db), AuthedEnv (+ bearer), RouteDeps (what createApp hands every router)
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
       flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
