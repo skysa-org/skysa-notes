@@ -1,7 +1,7 @@
 /**
- * Core's test doubles, for the apps' tests: `@skysa/core/testing`. Kept out of
- * the main entry so nothing the app ships can reach them, and the lint rule in
- * `eslint.config.js` keeps it that way.
+ * Core's test doubles and helpers, for the apps' tests: `@skysa/core/testing`.
+ * Kept out of the main entry so nothing the app ships can reach them, and the
+ * lint rule in `eslint.config.js` keeps it that way.
  */
 export {
 	createFakeProvider,
@@ -23,3 +23,4 @@ export {
 	type OneDriveStubOptions,
 } from './providers/onedriveStub.js';
 export { describeSyncStoreContract, type StoreHarness } from './sync/storeContract.js';
+export { mulberry32 } from './support/random.js';
