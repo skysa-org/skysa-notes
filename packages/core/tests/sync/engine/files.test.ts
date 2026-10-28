@@ -8,6 +8,7 @@ import {
 	type ChangeEntry,
 	ConflictError,
 	CursorResetError,
+	NotFoundError,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
@@ -21,8 +22,8 @@ import { syncWorld } from '../kit/world.js';
 
 /**
  * Files that are not notes — pictures and attachments beside them, and text
- * that is not UTF-8: pushed, moved, pulled, duplicated, and gone by the time
- * they are read (`pull/files`, `push/files`, `pull/attachments`).
+ * that is not UTF-8: pushed, moved, deleted, pulled, duplicated, and gone by
+ * the time they are read (`pull/files`, `push/files`, `pull/attachments`).
  */
 const { world, engineWith, pullNow, remoteFile, killTheCursor, noteAt, pulledNote } = syncWorld();
 
@@ -2926,5 +2927,51 @@ describe('a file that is not UTF-8 text', () => {
 			expect(world.store.notes()).toEqual([]);
 			expect(await listed()).toEqual([`${file.remoteId} a.md`]);
 		});
+	});
+});
+
+describe('deleting a file', () => {
+	it('deletes it by the id the queue recorded', async () => {
+		const file = await world.provider.createFile('a.png', new Uint8Array([1, 2, 3]));
+		world.store.queue({ op: 'delete-file', path: 'elsewhere.png', remoteId: file.remoteId });
+
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(1);
+		expect(world.store.ops()).toEqual([]);
+	});
+
+	it('fails a delete the provider refused for any other reason', async () => {
+		const file = await world.provider.createFile('a.png', new Uint8Array([1, 2, 3]));
+		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+		world.provider.setFault((call) =>
+			call.op === 'delete' ? new Error('offline') : undefined
+		);
+
+		expect((await world.engine.push()).status).toBe('retry');
+		expect(world.store.ops()).toEqual([
+			expect.objectContaining({ op: 'delete-file', attempts: 1 }),
+		]);
+	});
+
+	it('counts a file already gone as deleted', async () => {
+		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: 'id:gone' });
+		world.provider.setFault((call) =>
+			call.op === 'delete' ? new NotFoundError('a.png') : undefined
+		);
+
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.store.ops()).toEqual([]);
+	});
+
+	it('keeps the directory of a notebook a file row is still under', async () => {
+		// A file added there and not sent yet: the notebook is the user's still,
+		// though the remote holds nothing in it.
+		const made = await world.provider.createFolder('Work');
+		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: 3 });
+		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		world.store.removeFolder('Work');
+
+		expect((await world.engine.push()).status).toBe('ok');
+		expect(world.provider.snapshot().map((entry) => entry.path)).toContain('Work');
 	});
 });

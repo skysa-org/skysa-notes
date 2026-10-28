@@ -24,7 +24,7 @@ import { createMemoryStore } from './memoryStore.js';
 
 /**
  * docs/ARCHITECTURE.md §7's branch table, one test per branch, plus the cases §7 leaves
- * open. The rule every one of them is really checking is the one in
+ * open — here and, by area, in `engine/*.test.ts`. The rule every one of them is really checking is the one in
  * `CLAUDE.md`: never lose user data. A sync that drops an edit is worse than a
  * sync that does nothing, so where a branch could go either way these assert
  * the timid answer.
@@ -1093,52 +1093,6 @@ describe('push', () => {
 
 		expect(result.status).toBe('ok');
 		expect(world.store.ops()).toEqual([]);
-	});
-});
-
-describe('deleting a file', () => {
-	it('deletes it by the id the queue recorded', async () => {
-		const file = await world.provider.createFile('a.png', new Uint8Array([1, 2, 3]));
-		world.store.queue({ op: 'delete-file', path: 'elsewhere.png', remoteId: file.remoteId });
-
-		expect((await world.engine.push()).status).toBe('ok');
-		expect(world.provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(1);
-		expect(world.store.ops()).toEqual([]);
-	});
-
-	it('fails a delete the provider refused for any other reason', async () => {
-		const file = await world.provider.createFile('a.png', new Uint8Array([1, 2, 3]));
-		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
-		world.provider.setFault((call) =>
-			call.op === 'delete' ? new Error('offline') : undefined
-		);
-
-		expect((await world.engine.push()).status).toBe('retry');
-		expect(world.store.ops()).toEqual([
-			expect.objectContaining({ op: 'delete-file', attempts: 1 }),
-		]);
-	});
-
-	it('counts a file already gone as deleted', async () => {
-		world.store.queue({ op: 'delete-file', path: 'a.png', remoteId: 'id:gone' });
-		world.provider.setFault((call) =>
-			call.op === 'delete' ? new NotFoundError('a.png') : undefined
-		);
-
-		expect((await world.engine.push()).status).toBe('ok');
-		expect(world.store.ops()).toEqual([]);
-	});
-
-	it('keeps the directory of a notebook a file row is still under', async () => {
-		// A file added there and not sent yet: the notebook is the user's still,
-		// though the remote holds nothing in it.
-		const made = await world.provider.createFolder('Work');
-		world.store.putFile({ id: 'x1', path: 'Work/a.png', size: 3 });
-		world.store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
-		world.store.removeFolder('Work');
-
-		expect((await world.engine.push()).status).toBe('ok');
-		expect(world.provider.snapshot().map((entry) => entry.path)).toContain('Work');
 	});
 });
 
