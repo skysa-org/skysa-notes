@@ -6,10 +6,6 @@ import { type SyncProgress } from '../../../src/sync/engine.js';
 import { boundTo } from '../kit/seed.js';
 import { syncWorld } from '../kit/world.js';
 
-/**
- * What a round says of itself while it runs (`progress`).
- * Moved out of `engine.test.ts` as they were (#460).
- */
 const { world, engineWith, remoteFile } = syncWorld();
 
 /**

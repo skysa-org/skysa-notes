@@ -6,7 +6,6 @@ import { syncWorld } from '../kit/world.js';
  * The hidden folders a round meets — the clipboard's, the secrets key file,
  * the scratchpad's and the vault's — and what the engine makes of them
  * (`names`).
- * Moved out of `engine.test.ts` as they were (#460).
  */
 const { world, pullNow, remoteFile, noteAt } = syncWorld();
 

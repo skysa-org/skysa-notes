@@ -9,7 +9,6 @@ import { syncWorld } from '../kit/world.js';
 /**
  * A provider that stops taking the token part-way, and the one
  * refresh-and-retry the engine allows it (`pull/run`).
- * Moved out of `engine.test.ts` as they were (#460).
  */
 const { world, engineWith, remoteFile, noteAt, pulledNote } = syncWorld();
 

@@ -4,10 +4,6 @@ import { type ChangeEntry } from '../../../src/providers/types.js';
 import { renameHere } from '../kit/userActions.js';
 import { syncWorld } from '../kit/world.js';
 
-/**
- * Two devices doing random work against one remote, and agreeing at the end.
- * Moved out of `engine.test.ts` as they were (#460).
- */
 const { world, pullNow, remoteFile, killTheCursor, noteAt, pulledNote } = syncWorld();
 
 /**
