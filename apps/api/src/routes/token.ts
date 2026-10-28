@@ -1,9 +1,8 @@
-import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import type { AppEnv, RouteDeps } from '../context.js';
-import { openOAuthSecret, sealedOf, sealOAuthSecret, secretColumns } from '../crypto.js';
-import { schema } from '../db/client.js';
+import { openOAuthSecret, sealedOf, sealOAuthSecret } from '../crypto.js';
+import { recordRefresh } from '../db/connections.js';
 import { knownCode } from '../gate.js';
 import { fail, requireBearer, tooMany } from '../http.js';
 import { logFailure } from '../log.js';
@@ -97,13 +96,7 @@ export const tokenRoutes = (deps: RouteDeps) => {
 						refreshToken: tokens.refreshToken,
 					});
 
-		await db
-			.update(schema.connections)
-			.set({
-				lastUsedAt: new Date(),
-				...(rotated === undefined ? {} : secretColumns(rotated)),
-			})
-			.where(eq(schema.connections.id, connection.id));
+		await recordRefresh(db, connection.id, rotated);
 
 		return c.json({ accessToken: tokens.accessToken, expiresAt: tokens.expiresAt });
 	});
