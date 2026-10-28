@@ -21,6 +21,7 @@ import { type ConnectOutcome } from '../search.js';
  * What the app says on the way back from connecting storage (`?connect=…`),
  * and asking again for a connect code the operator's gate turned down.
  */
+
 /**
  * What to tell the user on the way back from connecting a storage account, or
  * `undefined` for a value this build has no message for.

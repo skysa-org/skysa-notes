@@ -18,6 +18,7 @@ import { type AppSearch } from '../search.js';
  * that need no more of it than what they are handed: a code to enter, a note
  * to move, a source to download, and keeping the store on install.
  */
+
 /**
  * The shell's chords. `Mod` is Cmd or Ctrl, whichever the keyboard has, and
  * every one of these is printed in the palette from this same value — the
