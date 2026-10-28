@@ -15,8 +15,9 @@ import type { PullChange, SyncNote, UnreadableFile } from '../../../src/sync/sto
 
 /**
  * The replays on their own (`pull/replay.ts`). The engine's tests
- * (`engine.test.ts`, `engine/*.test.ts`) reach them through whole pulls; these say what each answers, and that `placements`,
- * which replays only what can move a note, agrees with `placement`.
+ * (`engine.test.ts`, `engine/*.test.ts`) reach them through whole pulls;
+ * these say what each answers, and that `placements`, which replays only
+ * what can move a note, agrees with `placement`.
  */
 
 const entry = (remoteId: string, path: string): RemoteEntry => ({
