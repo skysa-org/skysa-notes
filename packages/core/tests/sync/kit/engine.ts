@@ -54,9 +54,10 @@ interface World {
 }
 
 /**
- * Engines over the provider and store a test file holds, read each time one
- * is made, so a test that puts a new provider in place gets engines over it.
- * Called once, at the top of the file: it resets its ids before each test.
+ * Engines over the provider and store `world` answers, read each time one is
+ * made, so a test that puts a new provider in place gets engines over it.
+ * `syncWorld` (`kit/world.ts`) is its one caller, once per test file — a file
+ * calls that, not this: it resets its ids before each test.
  */
 export const engineFixture = (world: () => World) => {
 	const fresh = { count: 0 };
