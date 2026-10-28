@@ -62,7 +62,7 @@ export const KEEPS_PANEL = 'data-keeps-panel';
  * Which way along the bar a panel is left for another: onward, from the
  * sources towards the notes, or back.
  */
-export type Slide = 'onward' | 'back';
+type Slide = 'onward' | 'back';
 
 const slide = (from: Pane, to: Pane): Slide =>
 	PANES.indexOf(to) > PANES.indexOf(from) ? 'onward' : 'back';
@@ -163,7 +163,7 @@ const holdPanel = (history: RouterHistory, next: Pane | null): Promise<void> => 
  * window. Nothing is a dropdown in a wide window, where an entry's is not
  * shown, and nothing opens one.
  */
-export const usePanel = (compact: boolean) => {
+const usePanel = (compact: boolean) => {
 	const router = useRouter();
 	const held = useRouterState({ select: (state) => heldPanel(state.location.state) });
 	const [rest, setRest] = useState<Pane | null>(null);
