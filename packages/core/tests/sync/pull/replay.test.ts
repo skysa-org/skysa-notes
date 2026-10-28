@@ -14,8 +14,8 @@ import {
 import type { PullChange, SyncNote, UnreadableFile } from '../../../src/sync/store.js';
 
 /**
- * The replays on their own (`pull/replay.ts`). `engine.test.ts` reaches them
- * through whole pulls; these say what each answers, and that `placements`,
+ * The replays on their own (`pull/replay.ts`). The engine's tests
+ * (`engine.test.ts`, `engine/*.test.ts`) reach them through whole pulls; these say what each answers, and that `placements`,
  * which replays only what can move a note, agrees with `placement`.
  */
 
