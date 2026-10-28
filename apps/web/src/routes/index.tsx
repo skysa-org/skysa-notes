@@ -1,16 +1,13 @@
 import {
 	basename,
-	isScratchPath,
 	isVaultPath,
-	isWithin,
 	parentPath,
-	rebasePath,
 	ROOT,
 	SCRATCHPAD_FOLDER,
 	VAULT_FOLDER,
 } from '@skysa/core';
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
@@ -22,12 +19,7 @@ import { HeldImport } from '../components/ImportProgress.js';
 import { NameDialog } from '../components/NameDialog.js';
 import { NoteList } from '../components/NoteList.js';
 import { noteMenuItems } from '../components/noteMenu.js';
-import {
-	type DisplacedText,
-	NoteView,
-	type NoteViewHandle,
-	type ScratchEditing,
-} from '../components/NoteView.js';
+import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
 import { type Notice, NotifyContext } from '../components/notify.js';
 import { PasswordItem } from '../components/PasswordItem.js';
 import { Passwords } from '../components/Passwords.js';
@@ -43,21 +35,7 @@ import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
 import { showConnection } from '../store/connection.js';
-import {
-	activeConnectionId,
-	db,
-	type NoteRecord,
-	noteRef,
-	type SyncStateRecord,
-} from '../store/db.js';
-import {
-	createFolder,
-	deleteFolder,
-	FolderExistsError,
-	moveFolder,
-	renameFolder,
-} from '../store/folders.js';
-import { settleEditors } from '../store/heldEdits.js';
+import { db, type NoteRecord, noteRef, type SyncStateRecord } from '../store/db.js';
 import {
 	useActiveConnectionId,
 	useActiveSource,
@@ -71,10 +49,9 @@ import {
 } from '../store/hooks.js';
 import { noteIsUnder, rememberOpen } from '../store/lastOpen.js';
 import { createLiveEdits } from '../store/liveEdits.js';
-import { deleteNote, getNote, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
+import { deleteNote, getNote } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { setNotebookPin, setNotePinned } from '../store/pins.js';
-import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings } from '../store/renaming.js';
 import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
@@ -94,7 +71,10 @@ import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
 import { canMakeNote, covered, emptyPaneOffers, isNotebook, placeRow } from './-home/rules.js';
 import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
-import { canBegin, useOpenPlace } from './-home/useOpenPlace.js';
+import { useEscapePutsDown, useMoving } from './-home/useMoving.js';
+import { useNotebookActions } from './-home/useNotebookActions.js';
+import { canBegin, type Select, useOpenPlace } from './-home/useOpenPlace.js';
+import { useUndoDelete } from './-home/useUndoDelete.js';
 import { type Pane, useCompactLayout } from './panel.js';
 import { type Place, placeFolder } from './place.js';
 import { parseSearch } from './search.js';
@@ -107,15 +87,6 @@ import { parseSearch } from './search.js';
  * reopening the PWA at its start URL, or showing a source again, lands them
  * where they were. The matching is `-home/useOpenPlace.ts`.
  */
-
-/**
- * A deleted note brought back into a source that has been disconnected, which
- * is said by name where it has one (`sourceName`).
- */
-const backDisconnected = (title: string, source: string | undefined): string =>
-	source === undefined
-		? t('shell.note.backDisconnectedUnnamed', { title })
-		: t('shell.note.backDisconnected', { title, source });
 
 /**
  * What the banner across the top says while a disconnected source is showing:
@@ -272,14 +243,7 @@ const Home = () => {
 	 * renamed or moved, a delete, an undo. `note` is the note going to, where
 	 * the caller has it, so the hash can name it at once.
 	 */
-	const select = (
-		next: Place,
-		{
-			replace = false,
-			note,
-			panel,
-		}: { replace?: boolean; note?: NoteRecord; panel?: Pane | null } = {}
-	) => {
+	const select: Select = (next, { replace = false, note, panel } = {}) => {
 		// Anything else the user does answers the banner: it is about the name they
 		// just tried, not about the app, and leaving it up means a message about a
 		// notebook they have since moved on from sits there for the session.
@@ -347,91 +311,11 @@ const Home = () => {
 			.then(() => showConnection(db, note.connectionId));
 	};
 
-	/**
-	 * The note just deleted, as it was, for as long as the delete can be taken
-	 * back. Here rather than in `NoteView`, which stops showing a note the moment
-	 * it is a tombstone. One at a time: a second delete takes the notice over and
-	 * the first note simply stays deleted.
-	 */
-	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
-	/** The note (`noteRef`) whose undo failed: its notice waits to be dismissed. */
-	const [undoFailed, setUndoFailed] = useState<string | null>(null);
-	/** Text that goes back beside the deleted note, not into it (`NoteView`). */
-	const [beside, setBeside] = useState<DisplacedText | null>(null);
-	const dismissDeleted = useCallback(() => {
-		setDeleted(null);
-	}, []);
+	const { deleted, setDeleted, undoFailed, setBeside, dismissDeleted, undoDelete } =
+		useUndoDelete({ select, setProblem });
 	const dismissProblem = useCallback(() => {
 		setProblem(null);
 	}, []);
-
-	const undoDelete = () => {
-		if (deleted === null) return;
-		void undeleteNote(db, deleted)
-			.then(async (restored) => {
-				setUndoFailed(null);
-				if (beside !== null) {
-					await saveNoteBody(db, restored.id, beside.body, {
-						origin: beside.origin,
-						note: restored,
-						displaced: true,
-					});
-				}
-				setDeleted((current) =>
-					current !== null && noteRef(current) === noteRef(deleted) ? null : current
-				);
-				// It goes back to the source it was deleted from, which need not be
-				// the one showing by now: the notice outlives a change of source.
-				// Nor need it still be connected. A note is never brought back into
-				// the device's own pile or into another account (`homeOf`), so one
-				// whose source was let go meanwhile is in that source, detached, and
-				// the user is told where to look and what can be done with it there.
-				if (restored.connectionId !== (await activeConnectionId(db))) {
-					const home = await db.syncState.get(restored.connectionId);
-					// Not every one of these is a problem, and with a colour on
-					// them that stops being a detail: the note came back, which
-					// is what was asked for. It is a warning only where it came
-					// back somewhere the user cannot sync it from.
-					setProblem(
-						home?.detached === undefined
-							? {
-									message: t('shell.note.back', {
-										title: nameShown(restored),
-									}),
-									tone: 'success',
-								}
-							: {
-									message: backDisconnected(
-										nameShown(restored),
-										sourceName(home)
-									),
-									tone: 'warning',
-								}
-					);
-					return;
-				}
-				// Back where it was, open. By the row's own path, not the one it
-				// was deleted at: once sync has purged the row the note is made
-				// again, under a conflict name if something took the old one. A
-				// scratch note is back on the wall, its card not opened over it,
-				// and a password in the passwords, however deep in their folder.
-				select(
-					isScratchPath(restored.path)
-						? { folder: SCRATCHPAD_FOLDER, note: undefined }
-						: { note: restored.id, folder: placeFolder(restored.path) },
-					{ replace: true, note: restored }
-				);
-			})
-			// The notice stays, and for as long as it takes: the note is still
-			// deleted, still offered, and what it holds may be in no other place.
-			.catch(() => {
-				setUndoFailed(noteRef(deleted));
-				setProblem({
-					message: t('shell.note.notBack'),
-					tone: 'error',
-				});
-			});
-	};
 
 	/**
 	 * Begin a note in the open notebook: on screen, named "Untitled" with the
@@ -457,109 +341,24 @@ const Home = () => {
 		if (made !== undefined) select({ folder, note: made.id }, { note: made });
 	};
 
-	const onCreateFolder = (parentPath: string | undefined, name: string) => {
-		// `createFolder` throws on a duplicate name, and the field has already
-		// closed by the time it does: without this the user types a name, presses
-		// Enter, and nothing whatsoever happens — plus an unhandled rejection.
-		setProblem(null);
-		void createFolder(db, { parentPath, name })
-			.then((created) => {
-				openFolder(created.path);
-			})
-			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsHere', { name: error.folderName }),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notMade'), tone: 'error' }
-				);
-			});
-	};
+	const { onCreateFolder, onRenameFolder, onDeleteFolder } = useNotebookActions({
+		folder,
+		openNote,
+		select,
+		openFolder,
+		setProblem,
+		renamings,
+	});
 
-	// A notebook's new name, given, is shown until the open notebook is no
-	// longer at the old path: then the URL names it by the new one, and the
-	// store does too (`store/renaming.ts`). Listened to rather than read, so a
-	// keystroke in the field does not redraw the route.
-	useEffect(() => {
-		const settle = () => {
-			const renaming = renamings.get();
-			if (renaming?.kind !== 'notebook' || renaming.given === undefined) return;
-			if (folder === undefined || !isWithin(folder, renaming.key))
-				renamings.clear('notebook', renaming.key);
-		};
-		settle();
-		return renamings.subscribe(settle);
-	}, [renamings, folder]);
-
-	const onRenameFolder = (path: string, name: string) => {
-		setProblem(null);
-		void renameFolder(db, path, name)
-			.catch((error: unknown) => {
-				// Not renamed: the name it had is the one to show.
-				renamings.clear('notebook', path);
-				throw error;
-			})
-			.then((to) => {
-				// Same reason the move below rebases: the URL names the open
-				// notebook by path, and this has changed it.
-				if (folder !== undefined && isWithin(folder, path)) {
-					select({ folder: rebasePath(folder, path, to) }, { replace: true });
-				}
-			})
-			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsHere', { name: error.folderName }),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notRenamed'), tone: 'error' }
-				);
-			});
-	};
-
-	const onDeleteFolder = (path: string) => {
-		setProblem(null);
-		// Asked about before this is called: the sidebar puts the question, with
-		// the count of what goes with it, because everything beneath a notebook
-		// is tombstoned and pushed as a deletion.
-		void deleteFolder(db, path)
-			.then(() => {
-				const goneFolder = folder !== undefined && isWithin(folder, path);
-				const goneNote = openNote !== undefined && isWithin(openNote.path, path);
-				// Both are named in the URL and neither is there any more. Left
-				// alone the app opens a notebook that has gone — `selectedFolderPath`
-				// falls back to the first one, but only once something asks it to.
-				if (goneFolder || goneNote) {
-					select(
-						{
-							...(goneFolder ? { folder: undefined } : {}),
-							...(goneNote ? { note: undefined } : {}),
-						},
-						{ replace: true }
-					);
-				}
-			})
-			.catch(() => {
-				setProblem({ message: t('shell.notebook.notDeleted'), tone: 'error' });
-			});
-	};
-
-	/**
-	 * What the user has picked up, by dragging it or by running the command.
-	 *
-	 * One piece of state for both, and it lives here rather than in either pane
-	 * because the two ends of a note's move are in different ones: the row is in
-	 * the note list and every destination is in the sidebar. What is allowed to
-	 * land where is in `store/rearrange.ts`, which knows nothing about React.
-	 */
-	const [moving, setMoving] = useState<Moving | null>(null);
-
-	const cancelMove = useCallback(() => {
-		setMoving(null);
-	}, []);
+	const { moving, setMoving, cancelMove, pickUp, onDropInto } = useMoving({
+		compact,
+		setPanel,
+		shutPanel,
+		select,
+		setProblem,
+		folder,
+		noteIdRef,
+	});
 
 	/**
 	 * What a compact window shows once a notebook is chosen: its notes, to
@@ -586,16 +385,6 @@ const Home = () => {
 	const [newNotebookAsked, setNewNotebookAsked] = useState(0);
 	const askNewNotebook = () => {
 		setNewNotebookAsked((times) => times + 1);
-		if (compact) setPanel('notebooks');
-	};
-
-	/**
-	 * Every destination is a sidebar row, and in a compact window the sidebar
-	 * is a dropdown that may be shut — so picking something up opens it, or a
-	 * move begun from the palette would be a mode with nowhere to finish it.
-	 */
-	const pickUp = (what: Moving) => {
-		setMoving(what);
 		if (compact) setPanel('notebooks');
 	};
 
@@ -654,91 +443,7 @@ const Home = () => {
 			});
 	};
 
-	/**
-	 * Escape puts down whatever is being moved, from wherever the focus is. On
-	 * the document rather than on the sidebar: a move started from the palette
-	 * leaves the focus where the palette had it, which may be nowhere near the
-	 * destinations, and a mode with no way out is worse than no mode.
-	 */
-	useEffect(() => {
-		if (moving === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') setMoving(null);
-		};
-		document.addEventListener('keydown', onKey);
-		return () => {
-			document.removeEventListener('keydown', onKey);
-		};
-	}, [moving]);
-
-	const onDropInto = (into: string) => {
-		if (moving === null) return;
-		const move = dropMove(moving, into);
-		// Put down first: the move is a round trip through the store and a mode
-		// left standing over it is one the user can drop a second copy of.
-		setMoving(null);
-		// And the dropdown shut before the move goes on: shutting it may be
-		// Back, which a step taken before it lands would be the one undone.
-		const shut = shutPanel();
-		if (move === undefined) return;
-		setProblem(null);
-
-		if (move.kind === 'note') {
-			// A scratch note made a note is followed into its notebook: making
-			// it one was the point (docs/ARCHITECTURE.md §7, "The scratchpad").
-			const promoted = moving.kind === 'note' && isScratchPath(moving.path);
-			// What the editor holds is saved first: a file pasted into the note
-			// a moment ago is carried by the links its body has stored
-			// (`carryLinkedFiles`), and left behind by one that has not been.
-			void shut
-				.then(settleEditors)
-				.then(() => moveNote(db, move.id, move.into))
-				.then(() => {
-					if (promoted) {
-						select({ folder: move.into, note: move.id });
-						return;
-					}
-					// Only when it is the note in front. A note dragged out of the
-					// list the user is reading leaves it, which is the whole of what
-					// they asked for; the one they are *writing in* would otherwise
-					// be open beside a sidebar highlighting the notebook it has just
-					// left, which is the disagreement opening a search result also
-					// has to avoid.
-					if (noteIdRef.current === move.id) {
-						select({ folder: move.into }, { replace: true });
-					}
-				})
-				.catch(() => {
-					setProblem({ message: t('shell.note.notMoved'), tone: 'error' });
-				});
-			return;
-		}
-
-		void shut
-			.then(() => moveFolder(db, move.from, move.to))
-			.then(() => {
-				// The open notebook is named by path in the URL, and the move has
-				// just changed it — for the notebook itself and for everything
-				// under it. Left alone, the URL names a notebook that is no longer
-				// there and `selectedFolderPath` falls back to the first one, so
-				// moving the notebook you are in throws you out of it.
-				if (folder !== undefined && isWithin(folder, move.from)) {
-					select({ folder: rebasePath(folder, move.from, move.to) }, { replace: true });
-				}
-			})
-			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsThere', {
-									name: error.folderName,
-								}),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notMoved'), tone: 'error' }
-				);
-			});
-	};
+	useEscapePutsDown(moving, setMoving);
 
 	useCommand({
 		id: 'app.palette',

@@ -149,6 +149,17 @@ type Go = (
 ) => void;
 
 /**
+ * Going somewhere in the source showing, as the shell does over `Go`
+ * (`select` in `routes/index.tsx`): `next` over the notebook and note open,
+ * pushed as a step of the user's own unless `replace` keeps the URL true to
+ * what has changed under it.
+ */
+export type Select = (
+	next: Place,
+	options?: { replace?: boolean; note?: NoteRecord; panel?: Pane | null }
+) => void;
+
+/**
  * An entry with no place of its own — a link, or an address typed — is read by
  * name, once (`findNamedPlace`). What it names is written into the entry by id
  * (`place.ts`), and the entry goes by that from then on. Until then
