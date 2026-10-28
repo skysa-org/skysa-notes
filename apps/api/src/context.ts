@@ -23,8 +23,9 @@ export type AppEnv = { Bindings: Bindings; Variables: Variables };
  * A request behind `requireBearer`, and only one: it is the one writer of
  * `bearer`, and answers 401 rather than calling `next()` when there is nothing
  * to put there, so a handler typed with this always finds one. A handler that
- * forgot the middleware is typed `AppEnv`, has no `bearer` to read, and does
- * not compile (#450).
+ * reads `bearer` without the middleware is typed `AppEnv` and does not compile
+ * (#450); one that never reads it is caught by the test that asks every
+ * `/connection*` route without a credential (`connections.test.ts`).
  */
 export type AuthedEnv = {
 	Bindings: Bindings;
@@ -58,9 +59,9 @@ export interface RouteDeps {
 	/** How a route reaches a provider, with the app's deadline on every call. */
 	readonly fetch: FetchLike;
 	/**
-	 * The keys, imported once and handed over as a promise: key import is async
-	 * and `createApp` is not, so every request after the first awaits one that
-	 * has already settled.
+	 * The keys. A function, since key import is async and `createApp` is not,
+	 * and it answers the same promise every time: imported on the first
+	 * request, already settled for every one after.
 	 */
 	readonly keys: () => Promise<Keys>;
 }

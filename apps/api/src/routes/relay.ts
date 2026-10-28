@@ -21,20 +21,20 @@ import { issueTicket, readTicket, TICKET_SECONDS } from '../relay/ticket.js';
  * whether there is one.
  */
 export const relayRoutes = (deps: RouteDeps) => {
-	const { relay } = deps;
+	const { config, rateLimiter, relay, keys } = deps;
 	const app = new Hono<AppEnv>();
 	/** Refuses a request from any page but this deployment's own. */
-	const ownOrigin = requireSameOrigin(deps.config.appOrigin);
+	const ownOrigin = requireSameOrigin(config.appOrigin);
 
 	app.post('/connection/relay/ticket', requireBearer, async (c) => {
 		if (relay === undefined) return fail(c, 'relay_disabled', 404);
 		const { connection, grant } = c.get('bearer');
 
-		const limit = await deps.rateLimiter.check(`relay-ticket:${connection.id}`);
+		const limit = await rateLimiter.check(`relay-ticket:${connection.id}`);
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		const ticket = await issueTicket(
-			(await deps.keys()).ticketKey,
+			(await keys()).ticketKey,
 			{ grantId: grant.id, connectionId: connection.id },
 			Date.now()
 		);
@@ -49,7 +49,7 @@ export const relayRoutes = (deps: RouteDeps) => {
 			return fail(c, 'upgrade_required', 426);
 		}
 		const now = Date.now();
-		const holder = await readTicket((await deps.keys()).ticketKey, c.req.query('ticket'), now);
+		const holder = await readTicket((await keys()).ticketKey, c.req.query('ticket'), now);
 		if (holder === undefined) return fail(c, 'ticket_invalid', 401);
 
 		// The ticket says who it was given to, not whether they still may: a
@@ -59,7 +59,7 @@ export const relayRoutes = (deps: RouteDeps) => {
 			return fail(c, 'credential_revoked', 401);
 		}
 
-		const limit = await deps.rateLimiter.check(`relay:${holder.connectionId}`);
+		const limit = await rateLimiter.check(`relay:${holder.connectionId}`);
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		// Without its query: the hub has no use for the ticket, and what it never

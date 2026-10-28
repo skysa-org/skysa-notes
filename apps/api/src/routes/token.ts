@@ -21,23 +21,22 @@ import { isGrantRefused } from '../oauth/types.js';
  */
 
 export const tokenRoutes = (deps: RouteDeps) => {
-	const { fetch: doFetch } = deps;
+	const { config, entitlements, rateLimiter, fetch: doFetch, keys } = deps;
 	const app = new Hono<AppEnv>();
 
 	app.post('/token', requireBearer, async (c) => {
 		const db = c.get('db');
-		const config = deps.config;
 		const { connection } = c.get('bearer');
 
 		// A refresh is an outbound provider call, so it is throttleable too —
 		// keyed on the connection, since holding a credential is already the
 		// price of asking.
-		const limit = await deps.rateLimiter.check(`token:${connection.id}`);
+		const limit = await rateLimiter.check(`token:${connection.id}`);
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		// The entitlement seam: an operator of a shared instance decides which
 		// accounts may sync here. This repo always says yes. See docs/ARCHITECTURE.md §6.
-		const decision = await deps.entitlements.check({
+		const decision = await entitlements.check({
 			connectionId: connection.id,
 			provider: connection.provider,
 			accountId: connection.accountId,
@@ -62,10 +61,10 @@ export const tokenRoutes = (deps: RouteDeps) => {
 		// A row sealed under a key this deployment no longer holds cannot be
 		// recovered here, and the client can do nothing about it by retrying. It
 		// is the same answer as a revoked grant: reconnect.
-		const secret = await openOAuthSecret(
-			(await deps.keys()).secretKey,
-			sealedOf(connection)
-		).catch(() => undefined);
+		const { secretKey } = await keys();
+		const secret = await openOAuthSecret(secretKey, sealedOf(connection)).catch(
+			() => undefined
+		);
 		if (secret === undefined) return fail(c, 'reauthorize_required', 401);
 
 		const refreshed = await client
@@ -94,7 +93,7 @@ export const tokenRoutes = (deps: RouteDeps) => {
 		const rotated =
 			tokens.refreshToken === undefined || tokens.refreshToken === secret.refreshToken
 				? undefined
-				: await sealOAuthSecret((await deps.keys()).secretKey, {
+				: await sealOAuthSecret(secretKey, {
 						refreshToken: tokens.refreshToken,
 					});
 

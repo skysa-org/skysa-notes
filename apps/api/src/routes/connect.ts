@@ -97,13 +97,12 @@ const callerKey = (c: Context<AppEnv>, what: string): string =>
 	`${what}:${c.req.header('cf-connecting-ip') ?? 'unknown'}`;
 
 export const connectRoutes = (deps: RouteDeps) => {
-	const { fetch: doFetch } = deps;
+	const { config, entitlements, rateLimiter, relay, fetch: doFetch, keys } = deps;
 	const app = new Hono<AppEnv>();
 	/** Refuses a request from any page but this deployment's own. */
-	const ownOrigin = requireSameOrigin(deps.config.appOrigin);
+	const ownOrigin = requireSameOrigin(config.appOrigin);
 
 	app.post('/auth/connect/:provider/start', ownOrigin, async (c) => {
-		const config = deps.config;
 		const cookies = { secure: config.cookiesSecure };
 
 		const resolved = oauthFor(config, c.req.param('provider'));
@@ -113,7 +112,7 @@ export const connectRoutes = (deps: RouteDeps) => {
 		// Before anything is minted or written: an attacker who can start flows
 		// freely makes this deployment pay for a provider round trip per attempt
 		// at the callback, and fills the cookie jar in the meantime.
-		const limit = await deps.rateLimiter.check(callerKey(c, 'connect'));
+		const limit = await rateLimiter.check(callerKey(c, 'connect'));
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		const body = await jsonBody(c, startBody);
@@ -124,7 +123,7 @@ export const connectRoutes = (deps: RouteDeps) => {
 		const device = deviceLabel(c.req.header('user-agent'));
 		await setFlowState(
 			c,
-			(await deps.keys()).signingKey,
+			(await keys()).signingKey,
 			{
 				state,
 				verifier,
@@ -161,13 +160,12 @@ export const connectRoutes = (deps: RouteDeps) => {
 	 * an answer, is the operator's fault and a 500, never passed on.
 	 */
 	app.post('/connect-code', ownOrigin, async (c) => {
-		const entitlements = deps.entitlements;
 		const checkCode = entitlements.checkCode;
 		if (entitlements.gate?.connectCode === undefined || checkCode === undefined) {
 			return fail(c, 'not_found', 404);
 		}
 
-		const limit = await deps.rateLimiter.check(callerKey(c, 'connect-code'));
+		const limit = await rateLimiter.check(callerKey(c, 'connect-code'));
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		const code = (await jsonBody(c, codeBody))?.code;
@@ -193,10 +191,9 @@ export const connectRoutes = (deps: RouteDeps) => {
 	});
 
 	app.get('/auth/connect/:provider/callback', async (c) => {
-		const config = deps.config;
 		const db = c.get('db');
 		const cookies = { secure: config.cookiesSecure };
-		const key = (await deps.keys()).signingKey;
+		const key = (await keys()).signingKey;
 		const state = c.req.query('state');
 
 		// The same callback asked for again, after this browser was answered: sent
@@ -254,7 +251,7 @@ export const connectRoutes = (deps: RouteDeps) => {
 		// for one.
 		// Throttled is a failed connect to the person waiting, and only the log
 		// tells the operator why.
-		const limit = await deps.rateLimiter.check(callerKey(c, 'callback'));
+		const limit = await rateLimiter.check(callerKey(c, 'callback'));
 		if (!limit.allowed) {
 			logFailure(`${provider} callback`, new Error('rate_limited'));
 			return answer('failed');
@@ -320,7 +317,7 @@ export const connectRoutes = (deps: RouteDeps) => {
 				return null;
 			});
 		if (known === null) return answer('failed');
-		const decision = await deps.entitlements
+		const decision = await entitlements
 			.check(
 				{
 					...(known === undefined ? {} : { connectionId: known.id }),
@@ -359,7 +356,7 @@ export const connectRoutes = (deps: RouteDeps) => {
 			provider,
 			accountId: tokens.accountId,
 			displayName,
-			sealed: await sealOAuthSecret((await deps.keys()).secretKey, {
+			sealed: await sealOAuthSecret((await keys()).secretKey, {
 				refreshToken: tokens.refreshToken,
 			}),
 			credentialHash: flow.credentialHash,
@@ -374,7 +371,7 @@ export const connectRoutes = (deps: RouteDeps) => {
 
 		// A device the cap just evicted may have a relay socket open; it closes
 		// now rather than within the hour.
-		await closeSockets(deps.relay, committed.connectionId, committed.pruned);
+		await closeSockets(relay, committed.connectionId, committed.pruned);
 		return answer('ok');
 	});
 

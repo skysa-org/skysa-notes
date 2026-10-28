@@ -25,7 +25,7 @@ import { closeSockets } from '../relay/hub.js';
  */
 
 export const connectionRoutes = (deps: RouteDeps) => {
-	const { fetch: doFetch } = deps;
+	const { config, relay, fetch: doFetch, keys } = deps;
 	const app = new Hono<AppEnv>();
 
 	/**
@@ -37,15 +37,14 @@ export const connectionRoutes = (deps: RouteDeps) => {
 	 * read it, so it works on a row that has already been deleted.
 	 */
 	const withdraw = async (connection: Connection): Promise<boolean> => {
-		const resolved = oauthFor(deps.config, connection.provider);
+		const resolved = oauthFor(config, connection.provider);
 		if (!resolved.ok) return false;
 		const { client, credentials } = resolved;
 		if (client.revokeToken === undefined) return false;
 
-		const secret = await openOAuthSecret(
-			(await deps.keys()).secretKey,
-			sealedOf(connection)
-		).catch(() => undefined);
+		const secret = await openOAuthSecret((await keys()).secretKey, sealedOf(connection)).catch(
+			() => undefined
+		);
 		if (secret === undefined) return false;
 
 		// Logged: an expired client secret would otherwise make every
@@ -185,7 +184,7 @@ export const connectionRoutes = (deps: RouteDeps) => {
 		// After the writes, not before: a socket that reconnects in between is
 		// then refused by the upgrade's grant check rather than let back in.
 		// Every device's sockets when the account went with this one.
-		await closeSockets(deps.relay, connection.id, gone.length === 0 ? [target.id] : undefined);
+		await closeSockets(relay, connection.id, gone.length === 0 ? [target.id] : undefined);
 		if (gone.length === 0) return c.json({ ok: true, disconnected: false });
 		return c.json({ ok: true, disconnected: true, revoked: await withdraw(connection) });
 	});
@@ -207,7 +206,7 @@ export const connectionRoutes = (deps: RouteDeps) => {
 			.get('db')
 			.delete(schema.connections)
 			.where(eq(schema.connections.id, connection.id));
-		await closeSockets(deps.relay, connection.id);
+		await closeSockets(relay, connection.id);
 		return c.json({ ok: true, revoked });
 	});
 
