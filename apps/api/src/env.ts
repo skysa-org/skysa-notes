@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 import { fromBase64Url } from './crypto.js';
 import { formatIssues } from './json.js';
+import type { OAuthProviderKind } from './oauth/providers.js';
+import type { OAuthCredentials } from './oauth/types.js';
 
 /**
  * Validation for the operator's environment. This module never reads the
@@ -27,6 +29,31 @@ const providerList = z
 			.array(z.enum(PROVIDER_KINDS))
 			.nonempty('ENABLED_PROVIDERS must name at least one provider')
 	);
+
+/**
+ * Each OAuth provider's settings, by name: the one place they are spelled out
+ * (#450). Keyed by the flows in `oauth/providers.ts`, so a provider with a
+ * flow and no settings here, or settings and no flow, does not compile; the
+ * schema, the check that an enabled provider has its settings, and the
+ * credentials `createApp` is handed all read it.
+ */
+const OAUTH_ENV = {
+	gdrive: { id: 'GOOGLE_CLIENT_ID', secret: 'GOOGLE_CLIENT_SECRET' },
+	onedrive: { id: 'MICROSOFT_CLIENT_ID', secret: 'MICROSOFT_CLIENT_SECRET' },
+	dropbox: { id: 'DROPBOX_CLIENT_ID', secret: 'DROPBOX_CLIENT_SECRET' },
+} as const satisfies Record<OAuthProviderKind, { id: string; secret: string }>;
+
+type CredentialVar = (typeof OAUTH_ENV)[OAuthProviderKind]['id' | 'secret'];
+
+/** Every provider's two settings, optional here: whether one is required is `missingCredentialIssues`'s to say. */
+const credentialVars = Object.fromEntries(
+	Object.values(OAUTH_ENV)
+		.flatMap(({ id, secret }) => [id, secret])
+		.map((name) => [name, z.string().optional()])
+) as Record<CredentialVar, z.ZodOptional<z.ZodString>>;
+
+const isOAuthProvider = (provider: ProviderKind): provider is OAuthProviderKind =>
+	Object.hasOwn(OAUTH_ENV, provider);
 
 const oauthCredentials = z.object({
 	clientId: z.string().min(1),
@@ -84,14 +111,9 @@ const rawEnvSchema = z.object({
 	 */
 	RELAY: booleanish.default(false),
 
-	GOOGLE_CLIENT_ID: z.string().optional(),
-	GOOGLE_CLIENT_SECRET: z.string().optional(),
-	MICROSOFT_CLIENT_ID: z.string().optional(),
-	MICROSOFT_CLIENT_SECRET: z.string().optional(),
+	...credentialVars,
 	/** Entra tenant; `common` covers personal and work accounts. */
 	MICROSOFT_TENANT: z.string().min(1).default('common'),
-	DROPBOX_CLIENT_ID: z.string().optional(),
-	DROPBOX_CLIENT_SECRET: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -106,19 +128,9 @@ export type AppConfig = {
 	webdavAllowPrivate: boolean;
 	/** Whether the operator turned the change relay on. The entry decides what carries it. */
 	relay: boolean;
-	oauth: {
-		gdrive?: { clientId: string; clientSecret: string };
-		onedrive?: { clientId: string; clientSecret: string; tenant: string };
-		dropbox?: { clientId: string; clientSecret: string };
-	};
+	/** Each enabled OAuth provider's app; OneDrive's carries its tenant. */
+	oauth: Partial<Record<OAuthProviderKind, OAuthCredentials>>;
 };
-
-/** Which env vars a given storage provider needs before it can be enabled. */
-const OAUTH_ENV_KEYS = {
-	gdrive: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
-	onedrive: ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'],
-	dropbox: ['DROPBOX_CLIENT_ID', 'DROPBOX_CLIENT_SECRET'],
-} as const satisfies Record<string, readonly string[]>;
 
 /**
  * Cross-field rules, checked separately from the object schema.
@@ -132,9 +144,9 @@ const missingCredentialIssues = (raw: Record<string, unknown>): string[] => {
 	if (!providers.success) return [];
 
 	return providers.data
-		.filter((provider): provider is keyof typeof OAUTH_ENV_KEYS => provider !== 'webdav')
+		.filter(isOAuthProvider)
 		.flatMap((provider) =>
-			OAUTH_ENV_KEYS[provider]
+			[OAUTH_ENV[provider].id, OAUTH_ENV[provider].secret]
 				.filter((key) => !raw[key])
 				.map((key) => `${key}: required because ENABLED_PROVIDERS includes "${provider}"`)
 		);
@@ -183,29 +195,20 @@ export const parseEnv = (raw: unknown): AppConfig => {
 
 	const env = result.data;
 
-	const oauth: AppConfig['oauth'] = {
-		...(env.ENABLED_PROVIDERS.includes('gdrive') && {
-			gdrive: oauthCredentials.parse({
-				clientId: env.GOOGLE_CLIENT_ID,
-				clientSecret: env.GOOGLE_CLIENT_SECRET,
-			}),
-		}),
-		...(env.ENABLED_PROVIDERS.includes('onedrive') && {
-			onedrive: {
+	const oauth = env.ENABLED_PROVIDERS.filter(isOAuthProvider).reduce<AppConfig['oauth']>(
+		(built, provider) => ({
+			...built,
+			[provider]: {
 				...oauthCredentials.parse({
-					clientId: env.MICROSOFT_CLIENT_ID,
-					clientSecret: env.MICROSOFT_CLIENT_SECRET,
+					clientId: env[OAUTH_ENV[provider].id],
+					clientSecret: env[OAUTH_ENV[provider].secret],
 				}),
-				tenant: env.MICROSOFT_TENANT,
+				// Microsoft's alone: which accounts may sign in.
+				...(provider === 'onedrive' && { tenant: env.MICROSOFT_TENANT }),
 			},
 		}),
-		...(env.ENABLED_PROVIDERS.includes('dropbox') && {
-			dropbox: oauthCredentials.parse({
-				clientId: env.DROPBOX_CLIENT_ID,
-				clientSecret: env.DROPBOX_CLIENT_SECRET,
-			}),
-		}),
-	};
+		{}
+	);
 
 	return {
 		authMode: env.AUTH_MODE,

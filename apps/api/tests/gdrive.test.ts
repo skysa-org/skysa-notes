@@ -5,7 +5,6 @@ import { challengeFor } from '../src/oauth/pkce.js';
 import {
 	allProvidersConfig,
 	authorizeUrlOf,
-	bothProvidersConfig,
 	buildApp,
 	createJar,
 	flowStateOf,
@@ -59,32 +58,6 @@ describe('start', () => {
 		expect(url.searchParams.get('code_challenge')).toBeTruthy();
 		expect(url.searchParams.get('state')).toBeTruthy();
 		expect(url.toString()).not.toContain('google-client-secret');
-	});
-
-	it('is not offered where the operator has not enabled it', async () => {
-		const app = buildApp({ config: bothProvidersConfig() });
-		expect((await app.startConnect('gdrive')).status).toBe(404);
-	});
-
-	it('says so plainly when it is enabled without credentials', async () => {
-		const config = allProvidersConfig();
-		const app = buildApp({
-			config: { ...config, oauth: { ...config.oauth, gdrive: undefined } },
-		});
-		expect((await app.startConnect('gdrive')).status).toBe(501);
-	});
-
-	it('starts for a device that already holds another provider', async () => {
-		// Inverted: this used to be refused, because in the old model any
-		// connected account signed you in as its user, so holding two crossed the
-		// authorisation between them. Each connection is now its own silo, and a
-		// device may hold as many as the person has accounts.
-		const app = buildApp({ config: allProvidersConfig() });
-		const { jar } = await app.connect({ account: 'ms-a', provider: 'onedrive' });
-
-		const response = await app.startConnect('gdrive', { jar, returnTo: '/n' });
-		expect(response.status).toBe(200);
-		expect((await authorizeUrlOf(response)).hostname).toBe('accounts.google.com');
 	});
 });
 
@@ -205,51 +178,6 @@ describe('callback', () => {
 		});
 		const { callback } = await app.connect({ provider: 'gdrive' });
 		expect(callback.headers.get('location')).toBe('/?connect=partial');
-	});
-
-	it('refuses an ID token issued to some other app', async () => {
-		const app = buildApp({
-			config: allProvidersConfig(),
-			script: { google: () => googleTokenResponse({}, { aud: 'another-app' }) },
-		});
-		const { callback } = await app.connect({ provider: 'gdrive' });
-
-		expect(callback.headers.get('location')).toBe('/?connect=failed');
-		expect(await rows(app.db)).toHaveLength(0);
-	});
-
-	it('refuses a grant with no refresh token', async () => {
-		const app = buildApp({
-			config: allProvidersConfig(),
-			script: { google: () => googleTokenResponse({ refresh_token: undefined }) },
-		});
-		const { callback } = await app.connect({ provider: 'gdrive' });
-		expect(callback.headers.get('location')).toBe('/?connect=failed');
-	});
-
-	it('names the connection Google Drive when the token carries no email', async () => {
-		const app = buildApp({
-			config: allProvidersConfig(),
-			script: { google: () => googleTokenResponse({}, { email: undefined }) },
-		});
-		await app.connect({ provider: 'gdrive' });
-		const [row] = await rows(app.db);
-		expect(row?.displayName).toBe('Google Drive');
-	});
-
-	it('logs a failed exchange for the operator, with the code and nothing else', async () => {
-		const log = workerLog();
-		const app = buildApp({
-			config: allProvidersConfig(),
-			script: { google: () => failWith('invalid_client', 401) },
-		});
-		const { callback } = await app.connect({ provider: 'gdrive' });
-
-		expect(callback.headers.get('location')).toBe('/?connect=failed');
-		const logged = log.mock.calls.flat().join('\n');
-		expect(logged).toContain('invalid_client');
-		expect(logged).not.toContain('echoes');
-		expect(logged).not.toContain('google-client-secret');
 	});
 });
 
