@@ -1,22 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import { contentHash } from '../../src/hash.js';
-import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
-import { AuthError, type ChangeEntry, type StorageProvider } from '../../src/providers/types.js';
-import { type SyncEngine } from '../../src/sync/engine.js';
-import type { SyncStore } from '../../src/sync/store.js';
-import { reporting } from './kit/engine.js';
-import { entryAt, remoteAt } from './kit/remote.js';
-import { boundTo } from './kit/seed.js';
-import { syncWorld } from './kit/world.js';
-import { createMemoryStore } from './memoryStore.js';
+import { contentHash } from '../../../src/hash.js';
+import { createFakeProvider, type FakeProvider } from '../../../src/providers/fake.js';
+import { AuthError, type ChangeEntry, type StorageProvider } from '../../../src/providers/types.js';
+import { type SyncEngine } from '../../../src/sync/engine.js';
+import type { SyncStore } from '../../../src/sync/store.js';
+import { reporting } from '../kit/engine.js';
+import { entryAt, remoteAt } from '../kit/remote.js';
+import { boundTo } from '../kit/seed.js';
+import { syncWorld } from '../kit/world.js';
+import { createMemoryStore } from '../memoryStore.js';
 
 /**
- * docs/ARCHITECTURE.md §7's branch table, one test per branch, plus the cases §7 leaves
- * open — here and, by area, in `engine/*.test.ts`. The rule every one of them is really checking is the one in
- * `CLAUDE.md`: never lose user data. A sync that drops an edit is worse than a
- * sync that does nothing, so where a branch could go either way these assert
- * the timid answer.
+ * A pull, and a sync, as a whole: a cursor that has died and the rescan
+ * after it, a round over several pages, a pull that fails part-way, an
+ * entry sent twice, a note that carries its own id, and a store that cannot
+ * answer (`pull/run`, `pull/batch`). Then the bytes a note last synced, as a
+ * pull, a push and a conflict each record them (`pull/notes`, `push/notes`,
+ * `push/conflicts`). What every file in `engine/` is checking, and why the
+ * answers are timid, is in `kit/world.ts`.
  */
 
 const {
@@ -323,60 +325,6 @@ describe('pull', () => {
 		await world.engine.pull();
 
 		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md', 'b.md', 'c.md']);
-	});
-});
-
-describe('a rescan of a remote that changed while the cursor was dead', () => {
-	it('does not delete the note it has just imported', async () => {
-		// The file was replaced at the same path, so the row still carries the
-		// old `remoteId` — which the scan never mentions, because the old file
-		// no longer exists. Reconciling against the store as it was deletes the
-		// note the same batch just brought in, reports `ok`, and stores the
-		// cursor, so it never comes back.
-		const first = await remoteFile('a.md', 'one\n');
-		await world.engine.pull();
-		killTheCursor();
-		await world.provider.delete(first);
-		await remoteFile('a.md', 'two\n');
-
-		const result = await world.engine.pull();
-
-		expect(result.status).toBe('ok');
-		expect(noteAt('a.md')?.content).toBe('two\n');
-		expect(world.store.notes()).toHaveLength(1);
-	});
-
-	it('does not delete a notebook that was recreated under the same name', async () => {
-		await world.provider.createFolder('Work');
-		await remoteFile('Work/a.md', 'one\n');
-		await world.engine.pull();
-		killTheCursor();
-		const folder = remoteAt(world.provider, 'Work');
-		if (folder === undefined) throw new Error('no folder');
-		await world.provider.delete(folder);
-		await world.provider.createFolder('Work');
-		await remoteFile('Work/a.md', 'again\n');
-
-		const result = await world.engine.pull();
-
-		expect(result.status).toBe('ok');
-		expect(world.store.folders().map((each) => each.path)).toEqual(['Work']);
-		expect(noteAt('Work/a.md')?.content).toBe('again\n');
-	});
-
-	it('still deletes what the rescan really did not find', async () => {
-		// The guard above must not turn reconciling off.
-		await remoteFile('a.md', 'one\n');
-		await world.engine.pull();
-		killTheCursor();
-		world.store.put({ id: 'ghost', path: 'ghost.md', content: 'x\n', remoteId: 'no-such-id' });
-		world.store.putFolder({ path: 'Ghost', remoteId: 'no-such-folder' });
-
-		await world.engine.pull();
-
-		expect(noteAt('ghost.md')).toBeUndefined();
-		expect(world.store.folders()).toEqual([]);
-		expect(noteAt('a.md')).toBeDefined();
 	});
 });
 
@@ -1139,6 +1087,60 @@ describe('a dead cursor', () => {
 		await world.engine.pull();
 
 		expect(world.store.folders().map((folder) => folder.path)).toContain('Fresh');
+	});
+});
+
+describe('a rescan of a remote that changed while the cursor was dead', () => {
+	it('does not delete the note it has just imported', async () => {
+		// The file was replaced at the same path, so the row still carries the
+		// old `remoteId` — which the scan never mentions, because the old file
+		// no longer exists. Reconciling against the store as it was deletes the
+		// note the same batch just brought in, reports `ok`, and stores the
+		// cursor, so it never comes back.
+		const first = await remoteFile('a.md', 'one\n');
+		await world.engine.pull();
+		killTheCursor();
+		await world.provider.delete(first);
+		await remoteFile('a.md', 'two\n');
+
+		const result = await world.engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('a.md')?.content).toBe('two\n');
+		expect(world.store.notes()).toHaveLength(1);
+	});
+
+	it('does not delete a notebook that was recreated under the same name', async () => {
+		await world.provider.createFolder('Work');
+		await remoteFile('Work/a.md', 'one\n');
+		await world.engine.pull();
+		killTheCursor();
+		const folder = remoteAt(world.provider, 'Work');
+		if (folder === undefined) throw new Error('no folder');
+		await world.provider.delete(folder);
+		await world.provider.createFolder('Work');
+		await remoteFile('Work/a.md', 'again\n');
+
+		const result = await world.engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(world.store.folders().map((each) => each.path)).toEqual(['Work']);
+		expect(noteAt('Work/a.md')?.content).toBe('again\n');
+	});
+
+	it('still deletes what the rescan really did not find', async () => {
+		// The guard above must not turn reconciling off.
+		await remoteFile('a.md', 'one\n');
+		await world.engine.pull();
+		killTheCursor();
+		world.store.put({ id: 'ghost', path: 'ghost.md', content: 'x\n', remoteId: 'no-such-id' });
+		world.store.putFolder({ path: 'Ghost', remoteId: 'no-such-folder' });
+
+		await world.engine.pull();
+
+		expect(noteAt('ghost.md')).toBeUndefined();
+		expect(world.store.folders()).toEqual([]);
+		expect(noteAt('a.md')).toBeDefined();
 	});
 });
 

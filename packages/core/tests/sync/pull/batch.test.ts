@@ -14,8 +14,8 @@ import {
 
 /**
  * A batch's readings on their own (`pull/batch.ts`). The engine's tests
- * (`engine.test.ts`, `engine/*.test.ts`) reach them through whole pulls; these
- * say what each answers.
+ * (`engine/*.test.ts`) reach them through whole pulls; these say what each
+ * answers.
  */
 
 const file = (remoteId: string, path: string): RemoteEntry => ({
