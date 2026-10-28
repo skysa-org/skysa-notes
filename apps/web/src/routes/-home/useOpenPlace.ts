@@ -35,7 +35,7 @@ import { useDrafts } from './useDrafts.js';
 
 /**
  * Matching the URL to the store: which notebook and note are open, as the
- * address and the history entry say (`../place.ts`) or as the device
+ * address and the history entry say (`routes/place.ts`) or as the device
  * remembers (`store/lastOpen.ts`); whether the source shown is still the one
  * they were for; and the page's title.
  */

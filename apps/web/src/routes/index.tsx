@@ -104,7 +104,7 @@ import { parseSearch } from './search.js';
  * (`place.ts`) — so reloading, following a link, or going Back or Forward
  * lands the user where it says; and on the device (`store/lastOpen.ts`), so
  * reopening the PWA at its start URL, or showing a source again, lands them
- * where they were.
+ * where they were. The matching is `-home/useOpenPlace.ts`.
  */
 
 /**

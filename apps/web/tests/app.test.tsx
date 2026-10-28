@@ -19,10 +19,11 @@ import { hashIn, placeIn } from './entry.js';
 /**
  * The whole app, through the real router, because the pieces below it are each
  * tested in isolation and the wiring between them is not. Every part of the
- * loose-notes feature can be disconnected in `routes/index.tsx` — the count not
- * passed to `selectedFolderPath`, the URL sentinel not applied — without a
- * single unit test noticing, and the result is a row the user can click that
- * does nothing, or a folder that cannot survive a reload.
+ * loose-notes feature can be disconnected in the shell (`routes/index.tsx`,
+ * `routes/-home/useOpenPlace.ts`) — the count not passed to
+ * `selectedFolderPath`, the URL sentinel not applied — without a single unit
+ * test noticing, and the result is a row the user can click that does
+ * nothing, or a folder that cannot survive a reload.
  */
 
 afterEach(() => {
