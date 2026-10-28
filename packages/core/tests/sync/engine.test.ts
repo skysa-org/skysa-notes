@@ -34,6 +34,7 @@ import { createMemoryStore } from './memoryStore.js';
 
 const {
 	world,
+	copyId,
 	engineWith,
 	pullNow,
 	pullPages,
@@ -5855,10 +5856,7 @@ describe('a dead cursor', () => {
 		world.engine = engineWith({
 			// One id per note. A constant here would have all three land on one
 			// row, and the test would fail for a reason of its own making.
-			newId: () => {
-				world.ids += 1;
-				return `copy-${String(world.ids)}`;
-			},
+			newId: copyId,
 		});
 
 		await world.engine.pull();

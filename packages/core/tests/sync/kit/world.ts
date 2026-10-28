@@ -17,8 +17,6 @@ interface SyncWorld {
 	store: MemoryStore;
 	/** The file's engine, over the world as `beforeEach` left it. */
 	engine: SyncEngine;
-	/** How many `copy-N` ids the file's engine has given out. */
-	ids: number;
 }
 
 /**
@@ -30,21 +28,28 @@ interface SyncWorld {
 export const syncWorld = () => {
 	// Filled in before the first test runs, and again before every one after.
 	const world = {} as SyncWorld;
+	/** How many `copy-N` ids the file's engine has given out. */
+	const ids = { count: 0 };
 
 	beforeEach(async () => {
-		world.ids = 0;
+		ids.count = 0;
 		world.provider = createFakeProvider({ startAt: new Date('2026-01-01T00:00:00Z') });
 		await world.provider.ensureRoot();
 		world.store = createMemoryStore();
-		world.engine = engineWith({
-			newId: () => {
-				world.ids += 1;
-				return `copy-${String(world.ids)}`;
-			},
-		});
+		world.engine = engineWith({ newId: copyId });
 	});
 
-	const { engineWith, pullNow, pullPages } = engineFixture(() => world);
+	// The provider and store alone: the rest of the world is not an engine's option.
+	const { engineWith, pullNow, pullPages } = engineFixture(() => ({
+		provider: world.provider,
+		store: world.store,
+	}));
+
+	/** The file engine's ids, `copy-N`, for a test that builds that engine again. */
+	const copyId = (): string => {
+		ids.count += 1;
+		return `copy-${String(ids.count)}`;
+	};
 
 	afterEach(() => {
 		expectSoundStore(world.store);
@@ -95,6 +100,7 @@ export const syncWorld = () => {
 
 	return {
 		world,
+		copyId,
 		engineWith,
 		pullNow,
 		pullPages,
