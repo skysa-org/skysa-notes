@@ -1,22 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import { contentHash } from '../../src/hash.js';
-import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
-import { AuthError, type ChangeEntry, type StorageProvider } from '../../src/providers/types.js';
-import { type SyncEngine } from '../../src/sync/engine.js';
-import type { SyncStore } from '../../src/sync/store.js';
-import { reporting } from './kit/engine.js';
-import { entryAt, remoteAt } from './kit/remote.js';
-import { boundTo } from './kit/seed.js';
-import { syncWorld } from './kit/world.js';
-import { createMemoryStore } from './memoryStore.js';
+import { contentHash } from '../../../src/hash.js';
+import { createFakeProvider, type FakeProvider } from '../../../src/providers/fake.js';
+import { AuthError, type ChangeEntry, type StorageProvider } from '../../../src/providers/types.js';
+import { type SyncEngine } from '../../../src/sync/engine.js';
+import type { SyncStore } from '../../../src/sync/store.js';
+import { reporting } from '../kit/engine.js';
+import { entryAt, remoteAt } from '../kit/remote.js';
+import { boundTo } from '../kit/seed.js';
+import { syncWorld } from '../kit/world.js';
+import { createMemoryStore } from '../memoryStore.js';
 
 /**
- * docs/ARCHITECTURE.md §7's branch table, one test per branch, plus the cases §7 leaves
- * open — here and, by area, in `engine/*.test.ts`. The rule every one of them is really checking is the one in
- * `CLAUDE.md`: never lose user data. A sync that drops an edit is worse than a
- * sync that does nothing, so where a branch could go either way these assert
- * the timid answer.
+ * A pull, and a sync, as a whole: a cursor that has died and the rescan
+ * after it, a round over several pages, a pull that fails part-way, an
+ * entry sent twice, a store that cannot answer, and the bytes a note last
+ * synced (`pull/run`, `pull/batch`).
+ *
+ * This file and the others in `engine/` hold docs/ARCHITECTURE.md §7's
+ * branch table, one test per branch, plus the cases §7 leaves open. The rule
+ * every one of them is really checking is the one in `CLAUDE.md`: never lose
+ * user data. A sync that drops an edit is worse than a sync that does
+ * nothing, so where a branch could go either way these assert the timid
+ * answer.
  */
 
 const {

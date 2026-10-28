@@ -29,11 +29,10 @@ import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 /**
  * docs/ARCHITECTURE.md §7's conflict rule, and the engine as a whole, over every
  * provider: the in-memory fake in both of its folder modes and each adapter
- * over its wire stub. The engine's own tests (`engine.test.ts` and
- * `engine/*.test.ts`) pin every branch against the fake; this
- * asks whether the answers survive what each provider actually reports — a
- * move as a deletion and an entry, a feed with no paths, a version that changes
- * on a move.
+ * over its wire stub. The engine's own tests (`engine/*.test.ts`) pin every
+ * branch against the fake; this asks whether the answers survive what each
+ * provider actually reports — a move as a deletion and an entry, a feed with
+ * no paths, a version that changes on a move.
  *
  * Two devices share one remote. Each is an engine over its own store and its
  * own adapter, as two browsers would be, and the user's actions are made the
