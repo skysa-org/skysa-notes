@@ -1,8 +1,6 @@
 import {
 	basename,
 	cell,
-	type ConnectGate,
-	type EntitlementCode,
 	isScratchPath,
 	isVaultPath,
 	isWithin,
@@ -15,9 +13,6 @@ import {
 import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { api } from '../api/client.js';
-import { answer, useInstanceConfig } from '../api/instanceConfig.js';
-import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
@@ -48,7 +43,7 @@ import { Passwords } from '../components/Passwords.js';
 import { CardSheet, ScratchModal, Scratchpad } from '../components/Scratchpad.js';
 import { NoteSearchField, SearchQuery } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
+import { SourceTabs } from '../components/SourceTabs.js';
 import { Toast } from '../components/Toast.js';
 import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
@@ -56,13 +51,6 @@ import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
-import {
-	connectCodeAskedAt,
-	dropConnectCode,
-	heldConnectCode,
-	heldConnectCodeShown,
-	holdAcceptedCode,
-} from '../store/connectCode.js';
 import { type ConnectedSource, showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -72,7 +60,6 @@ import {
 	noteRef,
 	type SyncStateRecord,
 } from '../store/db.js';
-import { downloadNotice, downloadProblem, downloadSource } from '../store/exportNotes.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -85,9 +72,7 @@ import {
 	type NoteToOpen,
 	useActiveConnectionId,
 	useActiveSource,
-	useClaimingConnection,
 	useHeldImport,
-	useHoldsAnything,
 	useLastOpen,
 	useLooseNoteCount,
 	useNoteRead,
@@ -118,7 +103,7 @@ import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { type Pins, setNotebookPin, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { rememberRecent } from '../store/recentNotes.js';
-import { createRenamings, type Renamings } from '../store/renaming.js';
+import { createRenamings } from '../store/renaming.js';
 import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { nameShown, titleShown } from '../store/titles.js';
@@ -130,6 +115,17 @@ import {
 	selectedFolderPath,
 } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
+import {
+	FIND,
+	NEW_NOTE,
+	PALETTE,
+	useDownloadCommand,
+	useEnterCode,
+	useKeepOnInstall,
+	useNoteMove,
+} from './-home/commands.js';
+import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
+import { SourceDropdown } from './-home/SourceDropdown.js';
 import {
 	findNamedPlace,
 	fragmentOf,
@@ -144,7 +140,7 @@ import {
 	readPlaceHash,
 	samePlace,
 } from './place.js';
-import { type AppSearch, type ConnectOutcome, parseSearch } from './search.js';
+import { parseSearch } from './search.js';
 
 /**
  * The app. Which folder and note are open lives in the URL rather than in
@@ -154,262 +150,6 @@ import { type AppSearch, type ConnectOutcome, parseSearch } from './search.js';
  * reopening the PWA at its start URL, or showing a source again, lands them
  * where they were.
  */
-
-/**
- * What to tell the user on the way back from connecting a storage account, or
- * `undefined` for a value this build has no message for.
- *
- * The `default` is what stopped an **empty** alert banner — a red bar saying
- * nothing — when a hand-typed or bookmarked `?connect=signin` arrived here
- * intact, returning `undefined` through a `string` signature. It arrived
- * because `parseSearch` left a refused key out instead of overriding it, and
- * the router's spread put the raw one back (see `parseSearch`). That is fixed
- * there; this stays, because a build older than the API it talks to can still
- * be sent an outcome it has no words for.
- *
- * Found on 2026-09-18 by removing `signin`, `conflict` and `occupied` — the
- * three outcomes Phase 7 retired server-side — which is when a value outside
- * the union first became reachable.
- *
- * `codeRefused` is a plain no to a connect that carried the gate's code
- * (`codeWasRefused`), which is said to be about the code.
- */
-const connectMessage = (
-	outcome: ConnectOutcome,
-	code?: EntitlementCode,
-	gate?: ConnectGate,
-	codeRefused = false
-): Notice | undefined => {
-	switch (outcome) {
-		case 'ok':
-			return { message: t('shell.connect.ok'), tone: 'success' };
-		// The user's own choice, and nothing is broken — but nothing is
-		// connected either, which is not what they will assume from a screen
-		// that looks the same as before they started.
-		case 'denied':
-			return { message: t('shell.connect.denied'), tone: 'warning' };
-		case 'failed':
-			return {
-				message: t('shell.connect.failed'),
-				tone: 'error',
-			};
-		// A warning rather than an error: this one worked exactly as it was
-		// asked to, and what to do about it is a tickbox away.
-		case 'partial':
-			return {
-				message: t('shell.connect.partial'),
-				tone: 'warning',
-			};
-		// Trying again will not help: this server will not have the account.
-		// What might is whatever its operator offers instead, when they do.
-		case 'refused':
-			return {
-				message: codeRefused ? t('shell.connect.refused.code') : refusedText(code),
-				tone: 'error',
-				action: gate?.action,
-			};
-		// The browser came back from the provider with no flow of its own for the
-		// server to finish: one that took too long, or a callback opened again
-		// long after it was answered. Whether anything was connected by then is
-		// not known there, and the storage tabs already say, so it is not guessed.
-		case 'expired':
-			return {
-				message: t('shell.connect.expired'),
-				tone: 'warning',
-			};
-		default:
-			return undefined;
-	}
-};
-
-/**
- * A refused connect, by the kind of no the operator's policy gave. The storage
- * panel says the same reasons in its own sentences (`refusedSentence` in
- * `AccountPanel.tsx`); here each is a whole one about the connect.
- */
-const refusedText = (code: EntitlementCode | undefined): string => {
-	switch (code) {
-		case 'not_allowed':
-			return t('shell.connect.refused.notAllowed');
-		case 'lapsed':
-			return t('shell.connect.refused.lapsed');
-		case 'limit_reached':
-			return t('shell.connect.refused.limitReached');
-		case undefined:
-			return t('shell.connect.refused.cannotSync');
-	}
-};
-
-/**
- * The shell's chords. `Mod` is Cmd or Ctrl, whichever the keyboard has, and
- * every one of these is printed in the palette from this same value — the
- * shortcut and its label cannot drift apart because there is only one of them.
- */
-const PALETTE = parseChord('Mod+K');
-/**
- * A bare key, because in a browser there is nothing else left. `Mod+N` opens a
- * window and `Mod+Shift+N` a private one, in Chrome, Edge and Safari alike, and
- * the page is never asked: printing either in the palette would advertise a
- * shortcut that cannot fire, which is the drift this registry exists to stop.
- *
- * Bare keys are the reason `reachable` is there: this one is ignored while the
- * user is in a field or an editor, which is where an `n` means the letter.
- */
-const NEW_NOTE = parseChord('n');
-const FIND = parseChord('Mod+Shift+F');
-
-/**
- * What the source dropdown opens, in a compact window only: the sources, the
- * way to another account, and the storage panel a wide window keeps under the
- * notebooks, with its actions in the dropdown's `⋯`.
- */
-const SourceDropdown = ({
-	compact,
-	returnTo,
-	onChosen,
-	renamings,
-	enterCode,
-}: {
-	compact: boolean;
-	returnTo: string;
-	onChosen: () => void;
-	renamings: Renamings;
-	enterCode: number;
-}) =>
-	compact ? (
-		<SourcePanel
-			returnTo={returnTo}
-			renamings={renamings}
-			enterCode={enterCode}
-			account={(slot) => <AccountPanel slot={slot} />}
-			onChosen={onChosen}
-		/>
-	) : null;
-
-/**
- * `?enter=code`, from an operator's page once the user has a code: the way to
- * connect storage, opened at the gate's code field. Counted, so that each
- * arrival opens it once (`useAdding` in `SourceTabs.tsx`), and taken out of
- * the URL at once, so that a reload does not open it again. In a compact
- * window the `+` is in the sources dropdown, which opens first.
- */
-const useEnterCode = (enter: AppSearch['enter'], compact: boolean): number => {
-	const navigate = useNavigate({ from: Route.fullPath });
-	const [asked, setAsked] = useState(0);
-	// Counted in render, as React has state follow a prop: the URL arriving
-	// with it is the change, and the effect below takes it out again.
-	const [seen, setSeen] = useState<AppSearch['enter']>();
-	if (enter !== seen) {
-		setSeen(enter);
-		if (enter !== undefined) setAsked(asked + 1);
-	}
-	useEffect(() => {
-		if (enter === undefined) return;
-		void navigate({
-			search: ({ enter: _enter, ...rest }) => rest,
-			// Where the user is stays as it was (`place.ts`), with the sources
-			// open over it in one step, not a second after it (`usePanel`).
-			hash: true,
-			state: (held) => (compact ? { ...held, panel: 'sources' } : held),
-			replace: true,
-		});
-	}, [enter, compact, navigate]);
-	return asked;
-};
-
-/**
- * Picking the open note up to move it, from the palette — offered only while
- * nothing else is in the air. The note's menu offers it through `menuFor`, as
- * a right-click on its row does.
- */
-const useNoteMove = (
-	openNote: NoteRecord | undefined,
-	moving: Moving | null,
-	pickUp: (what: Moving) => void,
-	/** A scratch note's way into a notebook, which names it first (`useScratchpad`). */
-	promote: ((note: NoteRecord) => void) | undefined
-): void => {
-	const offered = openNote !== undefined && moving === null;
-	const move = () => {
-		if (openNote === undefined) return;
-		if (promote !== undefined) {
-			promote(openNote);
-			return;
-		}
-		pickUp({
-			kind: 'note',
-			id: openNote.id,
-			path: openNote.path,
-			name: titleShown(openNote.title),
-		});
-	};
-
-	useCommand({
-		id: 'note.move',
-		label: t('shell.commands.moveNote'),
-		group: t('shell.commands.group.note'),
-		enabled: offered,
-		run: move,
-	});
-};
-
-/**
- * The source showing, whole, as an archive of markdown (docs/ARCHITECTURE.md
- * §7, "Getting a library out"). For a device with nothing connected it is the
- * one copy of the notes that can leave this browser; for a source that syncs it
- * is what this device holds of its folder, without a trip to the provider's
- * own client. Unavailable while the source holds nothing, which would be an
- * empty archive, and while a source's first import is still filling it,
- * which would be whatever part had arrived under a name that says "all" — the
- * storage panel holds its button back then too.
- */
-const useDownloadCommand = ({
-	connectionId,
-	source,
-	onProblem,
-}: {
-	connectionId: string | undefined;
-	/** The source showing: `null` for the device's own, `undefined` until read. */
-	source: SyncStateRecord | null | undefined;
-	onProblem: (notice: Notice) => void;
-}) => {
-	const holds = useHoldsAnything(connectionId);
-	useCommand({
-		id: 'app.download',
-		label: t('shell.commands.download'),
-		group: t('shell.commands.group.app'),
-		enabled: connectionId !== undefined && source?.importing === undefined && holds === true,
-		run: () => {
-			if (connectionId === undefined) return;
-			void downloadSource(db, connectionId)
-				.then((answer) => {
-					const notice = downloadNotice(answer);
-					if (notice !== null) onProblem({ message: notice, tone: 'warning' });
-				})
-				.catch((error: unknown) => {
-					onProblem({ message: downloadProblem(error), tone: 'error' });
-				});
-		},
-	});
-};
-
-/**
- * Installing the app is one of the things Chromium weighs when it decides
- * whether to keep a site's storage, so the question is put again then,
- * whatever it said before (`store/keeping.ts`). Silent there; the event is
- * Chromium's alone.
- */
-const useKeepOnInstall = () => {
-	useEffect(() => {
-		const installed = () => {
-			void keeping.ask(db, 'installed');
-		};
-		window.addEventListener('appinstalled', installed);
-		return () => {
-			window.removeEventListener('appinstalled', installed);
-		};
-	}, []);
-};
 
 /**
  * What the empty note pane offers to make. A note where there is a notebook to
@@ -429,150 +169,6 @@ const emptyPaneOffers = ({
 }): { onCreateNote?: () => void; onCreateNotebook?: () => void } => {
 	if (folder !== undefined && folder !== ROOT) return { onCreateNote };
 	return nothingYet ? { onCreateNotebook } : {};
-};
-
-/**
- * Whether a refusal is the operator's policy turning down the code typed into
- * its gate (`ConnectGate.connectCode`): a plain no — `not_allowed`, or no code
- * at all — to a connect made while this tab held one. The code is what the
- * person offered, and what they can put right. A `lapsed` or a `limit_reached`
- * is about the account or the instance, whatever was typed, and is said as it
- * is.
- *
- * Not a value the policy gave to hold in a code's place: nothing was typed
- * this time, and a pass that cost an email to get is not thrown away on a no
- * that may be about the account. The policy is asked about it instead
- * (`useCodeAskedAgain`), and lets it go if it no longer takes it.
- */
-const codeWasRefused = (
-	connect: ConnectOutcome | undefined,
-	code: EntitlementCode | undefined
-): boolean =>
-	connect === 'refused' &&
-	(code === undefined || code === 'not_allowed') &&
-	heldConnectCode() !== undefined &&
-	heldConnectCodeShown();
-
-/** How long the policy's word on a held value stands before the app asks again as it loads. */
-const ASK_AGAIN_MS = 60 * 60_000;
-
-/**
- * What the operator's policy gave to hold in place of the gate's code
- * (`ConnectCodeCheck.hold`), asked about again once as the app loads, where
- * the instance's gate asks for a code: at most once an hour, since the policy
- * last answered, and at once after a refused connect.
- *
- * A typed code is not asked about again: it is good for as long as the policy
- * said when it took it, minutes as a rule, and an answer would add nothing.
- * Nor is a held value the policy answered about within the hour. Each asking
- * costs one of the guesses the instance allows an address
- * (`connect-code:<ip>`), which the people behind one carrier's or one office's
- * address share, and someone typing a fresh code must not find them spent by
- * the others opening the app.
- *
- * A policy that hands a device a pass to keep says each time whether it still
- * takes it, and may answer with a fresh one, so a pass lives as long as the
- * device is used rather than from the day it was given. One it no longer takes
- * — the subscription behind it ended, say — is let go of here, and the gate
- * asks for a code again before any consent screen rather than after one. Not
- * asked, or not answered, it is kept: the callback still decides, as it always
- * did. An answer about a value no longer held, because a new code was typed
- * meanwhile, is not the answer about this one, and changes nothing.
- *
- * After the refusal of a connect that carried a typed code, which lets go of
- * the code first (`useConnectNotice`), there is nothing left to ask about; a
- * held value is kept through a refusal (`codeWasRefused`) and asked about here.
- */
-const useCodeAskedAgain = (connect: ConnectOutcome | undefined) => {
-	const config = useInstanceConfig(api);
-	const asksForCode = answer(config)?.connectGate?.connectCode !== undefined;
-	const asked = useRef(false);
-	const [refused] = useState(connect === 'refused');
-	useEffect(() => {
-		if (!asksForCode || asked.current) return;
-		asked.current = true;
-		const held = heldConnectCode();
-		if (held === undefined || heldConnectCodeShown()) return;
-		if (!refused && Date.now() - (connectCodeAskedAt() ?? 0) < ASK_AGAIN_MS) return;
-		void api.checkConnectCode(held).then(
-			(result) => {
-				if (!result.ok || heldConnectCode() !== held) return;
-				if (result.value.accepted) holdAcceptedCode(held, result.value);
-				else dropConnectCode();
-			},
-			() => {
-				// A limit reached or no answer at all: kept, as it was.
-			}
-		);
-	}, [asksForCode, refused]);
-};
-
-/**
- * The toast for how a connect went, read once as the app opens on the way back
- * from the provider and taken out of the URL straight away: left there, a
- * reload or a bookmark would say "connected" again about a connection that may
- * since have gone.
- *
- * Except that a new source's "connected" is the import dialog's to say, and
- * a toast behind it — under a held app, where it cannot be dismissed — says it
- * twice. Whether the app will be held is not known on arrival: the bind that
- * decides it comes after a round trip to the server (`claimConnection`), so
- * "connected" waits while the credential brought back is still being taken up,
- * and is dropped once an import holds the app. Every other outcome says
- * something went wrong, and is shown at once.
- */
-const useConnectNotice = (
-	connect: ConnectOutcome | undefined,
-	code: EntitlementCode | undefined,
-	held: SyncStateRecord | undefined
-) => {
-	const navigate = useNavigate({ from: Route.fullPath });
-	const [outcome, setOutcome] = useState(connect);
-	const [refusedAs] = useState(code);
-	const [codeRefused] = useState(() => codeWasRefused(connect, code));
-	// So the field is empty for the next code, rather than offering again the one
-	// just turned down.
-	useEffect(() => {
-		if (codeRefused) dropConnectCode();
-	}, [codeRefused]);
-	// The operator's gate, whose action is the one thing a refused toast can
-	// offer to do. The same request the connect buttons make (`instanceConfig`).
-	const config = useInstanceConfig(api);
-	const gate = answer(config)?.connectGate;
-	useEffect(() => {
-		if (connect === undefined && code === undefined) return;
-		void navigate({
-			search: ({ connect: _outcome, code: _code, ...rest }) => rest,
-			hash: true,
-			state: true,
-			replace: true,
-		});
-	}, [connect, code, navigate]);
-
-	const claiming = useClaimingConnection();
-	// Dropped for good, in render rather than an effect (React's "adjusting
-	// state when a prop changes"): the import finishing must not bring it back.
-	if (outcome === 'ok' && held !== undefined) setOutcome(undefined);
-
-	const dismissConnect = useCallback(() => {
-		setOutcome(undefined);
-	}, []);
-	// Whether there is a message at all decides whether a toast is rendered, and
-	// `connectMessage` answers `undefined` for an outcome this build has no
-	// words for (see above).
-	//
-	// A refusal waits for the instance's config, answered or not: its link is
-	// part of the message, and an alert that grows a link a moment after it
-	// appears is an alert a screen reader reads twice. Never for long — the
-	// server has only just sent the browser here.
-	const waiting =
-		(outcome === 'ok' && (claiming || held !== undefined)) ||
-		(outcome === 'refused' && config.kind === 'asking');
-	const connectNotice =
-		outcome === undefined || waiting
-			? undefined
-			: connectMessage(outcome, refusedAs, gate, codeRefused);
-	return { connectNotice, dismissConnect };
 };
 
 /**
