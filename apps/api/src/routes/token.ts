@@ -96,7 +96,7 @@ export const tokenRoutes = (deps: RouteDeps) => {
 						refreshToken: tokens.refreshToken,
 					});
 
-		await recordRefresh(db, connection.id, rotated);
+		await recordRefresh(db, connection.id, rotated, Date.now());
 
 		return c.json({ accessToken: tokens.accessToken, expiresAt: tokens.expiresAt });
 	});

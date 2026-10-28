@@ -193,64 +193,84 @@ const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
 };
 
 /**
- * Take one device's grant off its connection.
+ * Take one device's grant off its connection, and the connection with it if
+ * that was the last live grant. Answers whether the connection went.
  *
  * Nulled, not deleted. Deleting would free the hash, and a freed hash is
  * re-claimable: whoever holds the credential this row was for — which is
  * exactly the thief the user is revoking — could start a fresh flow with
  * it, consent with storage of their own, and be handed a working grant.
  * The row stays so the hash stays spent (see apps/api/src/db/schema.ts).
- */
-export const revokeGrant = async (db: Database, grantId: string): Promise<void> => {
-	await db.update(schema.grants).set({ connectionId: null }).where(eq(schema.grants.id, grantId));
-};
-
-/**
- * Delete the connection if no live grant reaches it any more. Answers whether
- * it did.
  *
- * One statement, asking and deleting together. Asked first and deleted
+ * One batch, which D1 runs as one transaction. As two statements, a request
+ * cut off between them — a tab closed on signing out — nulls the last grant
+ * and leaves the row: a sealed refresh token no credential reaches, which
+ * nothing can use and nothing can revoke, since disconnecting takes a
+ * credential.
+ *
+ * And the delete asks and deletes in one statement. Asked first and deleted
  * afterwards, another device's callback can commit its grant to this row in
  * the gap — which a caller that talks to the provider in between, as
  * revoking a device does, makes up to twenty seconds long — and then watch
  * the row deleted from under it: told `ok`, holding a credential that
- * reaches nothing, its hash spent. The callback's batch
- * is atomic too, so it lands wholly before this, and the row stays, or
- * wholly after, and it makes a fresh one.
+ * reaches nothing, its hash spent. The callback's batch is atomic too, so it
+ * lands wholly before this, and the row stays, or wholly after, and it makes
+ * a fresh one.
  */
-export const deleteIfOrphaned = async (db: Database, connectionId: string): Promise<boolean> => {
-	const gone = await db
-		.delete(schema.connections)
-		.where(
-			and(
-				eq(schema.connections.id, connectionId),
-				notExists(
-					db
-						.select({ id: schema.grants.id })
-						.from(schema.grants)
-						.where(
-							and(eq(schema.grants.connectionId, connectionId), notIdle(Date.now()))
-						)
+export const revokeGrant = async (
+	db: Database,
+	grant: Readonly<{ id: string; connectionId: string }>,
+	now: number
+): Promise<boolean> => {
+	const [, gone] = await db.batch([
+		// By the pair, so the grant nulled and the connection asked about are the
+		// same one's, whatever a caller hands in.
+		db
+			.update(schema.grants)
+			.set({ connectionId: null })
+			.where(
+				and(
+					eq(schema.grants.id, grant.id),
+					eq(schema.grants.connectionId, grant.connectionId)
+				)
+			),
+		db
+			.delete(schema.connections)
+			.where(
+				and(
+					eq(schema.connections.id, grant.connectionId),
+					notExists(
+						db
+							.select({ id: schema.grants.id })
+							.from(schema.grants)
+							.where(
+								and(
+									eq(schema.grants.connectionId, grant.connectionId),
+									notIdle(now)
+								)
+							)
+					)
 				)
 			)
-		)
-		.returning({ id: schema.connections.id });
+			.returning({ id: schema.connections.id }),
+	]);
 	return gone.length > 0;
 };
 
 /**
- * A refresh went through: the connection was used just now, and holds the
+ * A refresh went through: the connection was used at `now`, and holds the
  * refresh token the provider rotated to, where it rotated one.
  */
 export const recordRefresh = async (
 	db: Database,
 	connectionId: string,
-	rotated: SealedSecret | undefined
+	rotated: SealedSecret | undefined,
+	now: number
 ): Promise<void> => {
 	await db
 		.update(schema.connections)
 		.set({
-			lastUsedAt: new Date(),
+			lastUsedAt: new Date(now),
 			...(rotated === undefined ? {} : secretColumns(rotated)),
 		})
 		.where(eq(schema.connections.id, connectionId));
