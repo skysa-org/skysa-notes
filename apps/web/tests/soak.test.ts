@@ -13,6 +13,7 @@ import {
 	createGDriveStub,
 	createOneDriveStub,
 	type FakeProvider,
+	mulberry32,
 } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -847,18 +848,6 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 
 // ---------------------------------------------------------------- the soak
 
-/** mulberry32: small, seedable, and the same on every machine. */
-const random = (seed: number): (() => number) => {
-	const state = { value: seed >>> 0 };
-	return () => {
-		state.value = (state.value + 0x6d2b79f5) >>> 0;
-		let t = state.value;
-		t = Math.imul(t ^ (t >>> 15), t | 1);
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-	};
-};
-
 const NOTEBOOKS = ['Work', 'Play'];
 const TITLES = ['Plans', 'Ideas', 'Notes', 'Today'];
 
@@ -871,7 +860,7 @@ const TITLES = ['Plans', 'Ideas', 'Notes', 'Today'];
  * when the two of them have finished talking.
  */
 const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) => {
-	const next = random(seed);
+	const next = mulberry32(seed);
 	const tokens: string[] = [];
 	const doomed = new Set<string>();
 	const log: string[] = [];

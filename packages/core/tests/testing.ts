@@ -23,3 +23,4 @@ export {
 	type OneDriveStubOptions,
 } from './providers/onedriveStub.js';
 export { describeSyncStoreContract, type StoreHarness } from './sync/storeContract.js';
+export { mulberry32 } from './support/random.js';
