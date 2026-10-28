@@ -348,6 +348,8 @@ export const useAutosave = <T>({
 	const gone = useRef(false);
 	const again = useRef<() => void>(() => undefined);
 	const [failing, setFailing] = useState(false);
+	// Every ref here is read inside a closure that runs after render; the rule
+	// reports the call as a whole, so keep it that way: no `.current` as an argument.
 	// eslint-disable-next-line react-hooks/refs -- read when a save settles, never while rendering
 	const [held] = useState(() =>
 		createHeld<T>({
