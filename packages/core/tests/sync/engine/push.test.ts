@@ -20,7 +20,8 @@ import { syncWorld } from '../kit/world.js';
  * Sending the queue: writes, moves and deletes, and what a push does when one
  * is interrupted, withdrawn, or finds its file or folder not where it was;
  * then our own changes coming back to us in the next pull (`push/drain`,
- * `push/notes`).
+ * `push/notes`, and the folders and conflict names a write needs:
+ * `push/folders`, `push/conflicts`).
  */
 const { world, engineWith, pullNow, remoteFile, noteAt } = syncWorld();
 
