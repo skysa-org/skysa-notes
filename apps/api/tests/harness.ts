@@ -1,3 +1,5 @@
+import { vi } from 'vitest';
+
 import { createApp, type CreateAppOptions } from '../src/app.js';
 import { CREDENTIAL_PREFIX, hashCredential } from '../src/credentials.js';
 import {
@@ -85,6 +87,19 @@ const idToken = (claims: Record<string, unknown>): string => {
 	const part = (value: unknown) => toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
 	return `${part({ typ: 'JWT', alg: 'RS256' })}.${part(claims)}.c2lnbmF0dXJl`;
 };
+
+/** The Worker log, silenced and kept for the test to read. Restored by `vi.restoreAllMocks`. */
+export const workerLog = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+/**
+ * A token endpoint's refusal. Its description echoes the request, as
+ * Microsoft's `AADSTS…` ones do, which is what a test of the log checks never
+ * reaches it.
+ */
+export const failWith = (error: string, status = 400): Response =>
+	new Response(JSON.stringify({ error, error_description: 'AADSTS000: echoes the-code' }), {
+		status,
+	});
 
 export const MICROSOFT_ACCOUNT = 'AAAAAAAAAAAAAAAAAAAAAIkzqFVrSaSaFHy782bbtaQ';
 

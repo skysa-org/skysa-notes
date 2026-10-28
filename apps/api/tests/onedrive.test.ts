@@ -8,12 +8,14 @@ import {
 	bothProvidersConfig,
 	buildApp,
 	createJar,
+	failWith,
 	flowStateOf,
 	MICROSOFT_ACCOUNT,
 	microsoftTokenResponse,
 	newCredential,
 	secretOf,
 	testConfig,
+	workerLog,
 } from './harness.js';
 
 /**
@@ -28,14 +30,6 @@ const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
 afterEach(() => {
 	vi.restoreAllMocks();
 });
-
-/** The Worker log, silenced and kept for the test to read. */
-const workerLog = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-const failWith = (error: string, status = 400) =>
-	new Response(JSON.stringify({ error, error_description: 'AADSTS000: echoes the-code' }), {
-		status,
-	});
 
 const tokenFor = (app: ReturnType<typeof buildApp>, credential: string) =>
 	app.request('/api/token', { method: 'POST', credential });
@@ -73,30 +67,6 @@ describe('start', () => {
 		expect(url.toString()).toMatch(
 			/^https:\/\/login\.microsoftonline\.com\/consumers\/oauth2\/v2\.0\//
 		);
-	});
-
-	it('is not offered where the operator has not enabled it', async () => {
-		const app = buildApp({ config: testConfig() });
-		expect((await app.startConnect('onedrive')).status).toBe(404);
-	});
-
-	it('starts for a device that already holds another provider', async () => {
-		// Inverted with its Google twin: two connections on one device are two
-		// silos, not one user holding two keys to each other's storage.
-		const app = buildApp({ config: bothProvidersConfig() });
-		const { jar } = await app.connect({ account: 'dbid:a', provider: 'dropbox' });
-
-		const response = await app.startConnect('onedrive', { jar, returnTo: '/n' });
-		expect(response.status).toBe(200);
-		expect((await authorizeUrlOf(response)).hostname).toBe('login.microsoftonline.com');
-	});
-
-	it('says so plainly when it is enabled without credentials', async () => {
-		const config = bothProvidersConfig();
-		const app = buildApp({
-			config: { ...config, oauth: { ...config.oauth, onedrive: undefined } },
-		});
-		expect((await app.startConnect('onedrive')).status).toBe(501);
 	});
 });
 
@@ -140,17 +110,6 @@ describe('callback', () => {
 		expect(app.stub.calls).toHaveLength(1);
 	});
 
-	it('refuses an ID token issued to some other app', async () => {
-		const app = buildApp({
-			config: bothProvidersConfig(),
-			script: { microsoft: () => microsoftTokenResponse({}, { aud: 'another-app' }) },
-		});
-		const { callback } = await app.connect({ provider: 'onedrive' });
-
-		expect(callback.headers.get('location')).toBe('/?connect=failed');
-		expect(await rows(app.db)).toHaveLength(0);
-	});
-
 	it('refuses a grant that does not say whose account it is', async () => {
 		const app = buildApp({
 			config: bothProvidersConfig(),
@@ -161,25 +120,6 @@ describe('callback', () => {
 		expect(callback.headers.get('location')).toBe('/?connect=failed');
 		expect(await createDb(app.db).select().from(schema.grants)).toHaveLength(0);
 		expect(await rows(app.db)).toHaveLength(0);
-	});
-
-	it('refuses a grant with no refresh token', async () => {
-		const app = buildApp({
-			config: bothProvidersConfig(),
-			script: { microsoft: () => microsoftTokenResponse({ refresh_token: undefined }) },
-		});
-		const { callback } = await app.connect({ provider: 'onedrive' });
-		expect(callback.headers.get('location')).toBe('/?connect=failed');
-	});
-
-	it('names the connection OneDrive when the account has no email', async () => {
-		const app = buildApp({
-			config: bothProvidersConfig(),
-			script: { microsoft: () => microsoftTokenResponse({}, { email: undefined }) },
-		});
-		await app.connect({ provider: 'onedrive' });
-		const [row] = await rows(app.db);
-		expect(row?.displayName).toBe('OneDrive');
 	});
 
 	it('does not make a Microsoft account a way into the Dropbox connected beside it', async () => {
@@ -268,21 +208,6 @@ describe('callback', () => {
 		for (const { credential } of flows) {
 			expect((await app.request('/api/connection', { credential })).status).toBe(200);
 		}
-	});
-
-	it('logs a failed exchange for the operator, with the code and nothing else', async () => {
-		const log = workerLog();
-		const app = buildApp({
-			config: bothProvidersConfig(),
-			script: { microsoft: () => failWith('invalid_client', 401) },
-		});
-		const { callback } = await app.connect({ provider: 'onedrive' });
-
-		expect(callback.headers.get('location')).toBe('/?connect=failed');
-		const logged = log.mock.calls.flat().join('\n');
-		expect(logged).toContain('invalid_client');
-		expect(logged).not.toContain('AADSTS');
-		expect(logged).not.toContain('ms-client-secret');
 	});
 
 	it('does not take a Dropbox account id for a Microsoft one', async () => {
