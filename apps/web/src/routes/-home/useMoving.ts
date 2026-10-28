@@ -143,5 +143,5 @@ export const useEscapePutsDown = (
 		return () => {
 			document.removeEventListener('keydown', onKey);
 		};
-	}, [moving]);
+	}, [moving, setMoving]);
 };

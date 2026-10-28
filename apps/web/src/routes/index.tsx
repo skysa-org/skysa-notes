@@ -73,7 +73,7 @@ import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
 import { useEscapePutsDown, useMoving } from './-home/useMoving.js';
 import { useNotebookActions } from './-home/useNotebookActions.js';
-import { canBegin, useOpenPlace } from './-home/useOpenPlace.js';
+import { canBegin, type Select, useOpenPlace } from './-home/useOpenPlace.js';
 import { useUndoDelete } from './-home/useUndoDelete.js';
 import { type Pane, useCompactLayout } from './panel.js';
 import { type Place, placeFolder } from './place.js';
@@ -243,14 +243,7 @@ const Home = () => {
 	 * renamed or moved, a delete, an undo. `note` is the note going to, where
 	 * the caller has it, so the hash can name it at once.
 	 */
-	const select = (
-		next: Place,
-		{
-			replace = false,
-			note,
-			panel,
-		}: { replace?: boolean; note?: NoteRecord; panel?: Pane | null } = {}
-	) => {
+	const select: Select = (next, { replace = false, note, panel } = {}) => {
 		// Anything else the user does answers the banner: it is about the name they
 		// just tried, not about the app, and leaving it up means a message about a
 		// notebook they have since moved on from sits there for the session.
