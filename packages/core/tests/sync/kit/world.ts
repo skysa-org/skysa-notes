@@ -24,6 +24,13 @@ interface SyncWorld {
  * once at the top. Registers the hooks that make the world before each test
  * and check the store after it (`expectSoundStore`), so every file that takes
  * it is held to the same invariants.
+ *
+ * Between them, those files (`engine/*.test.ts`) hold docs/ARCHITECTURE.md
+ * §7's branch table, one test per branch, plus the cases §7 leaves open. The
+ * rule every one of them is really checking is the one in `CLAUDE.md`: never
+ * lose user data. A sync that drops an edit is worse than a sync that does
+ * nothing, so where a branch could go either way they assert the timid
+ * answer.
  */
 export const syncWorld = () => {
 	// Filled in before the first test runs, and again before every one after.
