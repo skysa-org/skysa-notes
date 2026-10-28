@@ -11,8 +11,8 @@ import {
 import type { PullChange, SyncFile } from '../../../src/sync/store.js';
 
 /**
- * The files' replay on its own (`pull/files.ts`). `engine.test.ts` reaches
- * every branch through whole pulls; these say what one step does.
+ * The files' replay on its own (`pull/files.ts`). `engine/files.test.ts`
+ * reaches every branch through whole pulls; these say what one step does.
  */
 
 const row = (id: string, path: string, bound = true): SyncFile => ({
