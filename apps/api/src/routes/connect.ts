@@ -3,7 +3,7 @@ import { and, desc, eq, notInArray } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 
-import type { AppEnv } from '../context.js';
+import type { AppEnv, RouteDeps } from '../context.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret, secretColumns } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
@@ -21,7 +21,7 @@ import { fail, jsonBody, requireSameOrigin, tooMany } from '../http.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
-import { type FetchLike, ScopeNotGrantedError } from '../oauth/types.js';
+import { ScopeNotGrantedError } from '../oauth/types.js';
 import { closeSockets } from '../relay/hub.js';
 
 /**
@@ -96,11 +96,13 @@ const codeBody = z.object({ code: connectCodeSchema });
 const callerKey = (c: Context<AppEnv>, what: string): string =>
 	`${what}:${c.req.header('cf-connecting-ip') ?? 'unknown'}`;
 
-export const connectRoutes = (doFetch: FetchLike) => {
+export const connectRoutes = (deps: RouteDeps) => {
+	const { config, entitlements, rateLimiter, relay, fetch: doFetch, keys } = deps;
 	const app = new Hono<AppEnv>();
+	/** Refuses a request from any page but this deployment's own. */
+	const ownOrigin = requireSameOrigin(config.appOrigin);
 
-	app.post('/auth/connect/:provider/start', requireSameOrigin, async (c) => {
-		const config = c.get('config');
+	app.post('/auth/connect/:provider/start', ownOrigin, async (c) => {
 		const cookies = { secure: config.cookiesSecure };
 
 		const resolved = oauthFor(config, c.req.param('provider'));
@@ -110,7 +112,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// Before anything is minted or written: an attacker who can start flows
 		// freely makes this deployment pay for a provider round trip per attempt
 		// at the callback, and fills the cookie jar in the meantime.
-		const limit = await c.get('rateLimiter').check(callerKey(c, 'connect'));
+		const limit = await rateLimiter.check(callerKey(c, 'connect'));
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		const body = await jsonBody(c, startBody);
@@ -121,7 +123,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const device = deviceLabel(c.req.header('user-agent'));
 		await setFlowState(
 			c,
-			c.get('signingKey'),
+			(await keys()).signingKey,
 			{
 				state,
 				verifier,
@@ -157,14 +159,13 @@ export const connectRoutes = (doFetch: FetchLike) => {
 	 * code is never logged. A policy that throws, or says something that is not
 	 * an answer, is the operator's fault and a 500, never passed on.
 	 */
-	app.post('/connect-code', requireSameOrigin, async (c) => {
-		const entitlements = c.get('entitlements');
+	app.post('/connect-code', ownOrigin, async (c) => {
 		const checkCode = entitlements.checkCode;
 		if (entitlements.gate?.connectCode === undefined || checkCode === undefined) {
 			return fail(c, 'not_found', 404);
 		}
 
-		const limit = await c.get('rateLimiter').check(callerKey(c, 'connect-code'));
+		const limit = await rateLimiter.check(callerKey(c, 'connect-code'));
 		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		const code = (await jsonBody(c, codeBody))?.code;
@@ -190,10 +191,9 @@ export const connectRoutes = (doFetch: FetchLike) => {
 	});
 
 	app.get('/auth/connect/:provider/callback', async (c) => {
-		const config = c.get('config');
 		const db = c.get('db');
 		const cookies = { secure: config.cookiesSecure };
-		const key = c.get('signingKey');
+		const key = (await keys()).signingKey;
 		const state = c.req.query('state');
 
 		// The same callback asked for again, after this browser was answered: sent
@@ -251,7 +251,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// for one.
 		// Throttled is a failed connect to the person waiting, and only the log
 		// tells the operator why.
-		const limit = await c.get('rateLimiter').check(callerKey(c, 'callback'));
+		const limit = await rateLimiter.check(callerKey(c, 'callback'));
 		if (!limit.allowed) {
 			logFailure(`${provider} callback`, new Error('rate_limited'));
 			return answer('failed');
@@ -317,8 +317,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				return null;
 			});
 		if (known === null) return answer('failed');
-		const decision = await c
-			.get('entitlements')
+		const decision = await entitlements
 			.check(
 				{
 					...(known === undefined ? {} : { connectionId: known.id }),
@@ -357,7 +356,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			provider,
 			accountId: tokens.accountId,
 			displayName,
-			sealed: await sealOAuthSecret(c.get('secretKey'), {
+			sealed: await sealOAuthSecret((await keys()).secretKey, {
 				refreshToken: tokens.refreshToken,
 			}),
 			credentialHash: flow.credentialHash,
@@ -372,7 +371,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 
 		// A device the cap just evicted may have a relay socket open; it closes
 		// now rather than within the hour.
-		await closeSockets(c.get('relay'), committed.connectionId, committed.pruned);
+		await closeSockets(relay, committed.connectionId, committed.pruned);
 		return answer('ok');
 	});
 

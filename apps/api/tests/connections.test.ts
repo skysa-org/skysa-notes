@@ -681,3 +681,57 @@ describe('recording that a device is still in use', () => {
 		expect((await app.request('/api/connection', { credential })).status).toBe(200);
 	});
 });
+
+/**
+ * Each route that acts on a connection mounts `requireBearer` itself (#450),
+ * where one app-wide guard used to cover the paths. A handler that reads
+ * `bearer` without it does not compile; this is the rule for one that never
+ * reads it. The routes come from the app, not from a list here, so one added
+ * under `/connection` is asked without anybody remembering to add it.
+ */
+describe('every route behind the credential', () => {
+	// Once each: Hono lists a route's middleware and its handler as two entries.
+	const guarded = [
+		...new Set(
+			buildApp()
+				.app.routes.filter(
+					({ method, path }) =>
+						method !== 'ALL' &&
+						(path === '/api/token' || path.startsWith('/api/connection'))
+				)
+				.map(({ method, path }) => `${method} ${path.replaceAll(/:\w+/g, 'some-id')}`)
+		),
+	].map((route) => route.split(' ') as [string, string]);
+
+	it('finds the routes it asks', () => {
+		// The six there are today; a seventh belongs here and needs nothing else.
+		expect(guarded.map((route) => route.join(' ')).sort()).toEqual([
+			'DELETE /api/connection',
+			'DELETE /api/connection/grants/some-id',
+			'GET /api/connection',
+			'GET /api/connection/grants',
+			'POST /api/connection/relay/ticket',
+			'POST /api/token',
+		]);
+	});
+
+	it.each(guarded)('%s %s refuses a caller with no credential', async (method, path) => {
+		const response = await buildApp().request(path, { method });
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'credential_required' });
+	});
+
+	it.each(guarded)('%s %s refuses a credential not known here', async (method, path) => {
+		const app = buildApp();
+		await app.connect();
+		const response = await app.request(path, { method, credential: newCredential() });
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'credential_revoked' });
+	});
+
+	it('answers a path that is not a route as one, credential or not', async () => {
+		const response = await buildApp().request('/api/connection/nothing-here');
+		expect(response.status).toBe(404);
+		expect(await response.json()).toEqual({ error: 'not_found' });
+	});
+});

@@ -1,15 +1,14 @@
 import { and, eq, notExists } from 'drizzle-orm';
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
 
-import type { AppEnv } from '../context.js';
+import type { AppEnv, RouteDeps } from '../context.js';
 import { isIdle, notIdle } from '../credentials.js';
 import { openOAuthSecret, sealedOf } from '../crypto.js';
 import { schema } from '../db/client.js';
 import type { Connection } from '../db/schema.js';
-import { fail } from '../http.js';
+import { fail, requireBearer } from '../http.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
-import type { FetchLike } from '../oauth/types.js';
 import { closeSockets } from '../relay/hub.js';
 
 /**
@@ -25,7 +24,8 @@ import { closeSockets } from '../relay/hub.js';
  * key id, and not another device's credential hash.
  */
 
-export const connectionRoutes = (doFetch: FetchLike) => {
+export const connectionRoutes = (deps: RouteDeps) => {
+	const { config, relay, fetch: doFetch, keys } = deps;
 	const app = new Hono<AppEnv>();
 
 	/**
@@ -36,13 +36,13 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	 * has to remove the app from their account page. From the row as the caller
 	 * read it, so it works on a row that has already been deleted.
 	 */
-	const withdraw = async (c: Context<AppEnv>, connection: Connection): Promise<boolean> => {
-		const resolved = oauthFor(c.get('config'), connection.provider);
+	const withdraw = async (connection: Connection): Promise<boolean> => {
+		const resolved = oauthFor(config, connection.provider);
 		if (!resolved.ok) return false;
 		const { client, credentials } = resolved;
 		if (client.revokeToken === undefined) return false;
 
-		const secret = await openOAuthSecret(c.get('secretKey'), sealedOf(connection)).catch(
+		const secret = await openOAuthSecret((await keys()).secretKey, sealedOf(connection)).catch(
 			() => undefined
 		);
 		if (secret === undefined) return false;
@@ -60,7 +60,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		return client.revokeToken(doFetch, tokens.accessToken);
 	};
 
-	app.get('/connection', (c) => {
+	app.get('/connection', requireBearer, (c) => {
 		const { connection, grant } = c.get('bearer');
 		return c.json({
 			id: connection.id,
@@ -86,7 +86,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	 * cause. The hashes are not returned — they are the lookup key, and a leaked
 	 * one lets its holder re-point that device at storage of their own.
 	 */
-	app.get('/connection/grants', async (c) => {
+	app.get('/connection/grants', requireBearer, async (c) => {
 		const { connection, grant } = c.get('bearer');
 		const rows = await c
 			.get('db')
@@ -118,7 +118,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	 * — a grant id from somewhere else answers `not_found`, so the endpoint
 	 * cannot be used to discover which ids exist.
 	 */
-	app.delete('/connection/grants/:id', async (c) => {
+	app.delete('/connection/grants/:id', requireBearer, async (c) => {
 		const { connection } = c.get('bearer');
 		const db = c.get('db');
 		const id = c.req.param('id');
@@ -184,13 +184,9 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		// After the writes, not before: a socket that reconnects in between is
 		// then refused by the upgrade's grant check rather than let back in.
 		// Every device's sockets when the account went with this one.
-		await closeSockets(
-			c.get('relay'),
-			connection.id,
-			gone.length === 0 ? [target.id] : undefined
-		);
+		await closeSockets(relay, connection.id, gone.length === 0 ? [target.id] : undefined);
 		if (gone.length === 0) return c.json({ ok: true, disconnected: false });
-		return c.json({ ok: true, disconnected: true, revoked: await withdraw(c, connection) });
+		return c.json({ ok: true, disconnected: true, revoked: await withdraw(connection) });
 	});
 
 	/**
@@ -201,16 +197,16 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	 * (`DELETE /connection/grants/:id`, which takes the account with the last),
 	 * and a stolen credential is one device to Remove from the list.
 	 */
-	app.delete('/connection', async (c) => {
+	app.delete('/connection', requireBearer, async (c) => {
 		const { connection } = c.get('bearer');
 		// Best effort, and the row goes either way: a user who asked to
 		// disconnect must not be left connected by a network error.
-		const revoked = await withdraw(c, connection);
+		const revoked = await withdraw(connection);
 		await c
 			.get('db')
 			.delete(schema.connections)
 			.where(eq(schema.connections.id, connection.id));
-		await closeSockets(c.get('relay'), connection.id);
+		await closeSockets(relay, connection.id);
 		return c.json({ ok: true, revoked });
 	});
 
