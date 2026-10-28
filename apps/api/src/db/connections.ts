@@ -223,7 +223,17 @@ export const revokeGrant = async (
 	now: number
 ): Promise<boolean> => {
 	const [, gone] = await db.batch([
-		db.update(schema.grants).set({ connectionId: null }).where(eq(schema.grants.id, grant.id)),
+		// By the pair, so the grant nulled and the connection asked about are the
+		// same one's, whatever a caller hands in.
+		db
+			.update(schema.grants)
+			.set({ connectionId: null })
+			.where(
+				and(
+					eq(schema.grants.id, grant.id),
+					eq(schema.grants.connectionId, grant.connectionId)
+				)
+			),
 		db
 			.delete(schema.connections)
 			.where(

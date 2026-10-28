@@ -72,6 +72,18 @@ describe('revokeGrant', () => {
 		expect(await connectionCount(db)).toBe(gone ? 0 : 1);
 	});
 
+	it('leaves a grant alone that is on a connection other than the one it is named with', async () => {
+		const { db, mine } = await connected(1);
+
+		expect(await revokeGrant(db, { ...mine, connectionId: 'elsewhere' }, Date.now())).toBe(
+			false
+		);
+
+		const [row] = await db.select().from(schema.grants).where(eq(schema.grants.id, mine.id));
+		expect(row?.connectionId).toBe(mine.connectionId);
+		expect(await connectionCount(db)).toBe(1);
+	});
+
 	it('nulls nothing when the delete fails: one transaction, not two statements', async () => {
 		const { app, mine } = await connected(1);
 		// The database as it is, except that deleting a connection fails when it
