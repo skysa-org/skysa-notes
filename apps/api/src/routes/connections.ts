@@ -5,7 +5,7 @@ import type { AppEnv, RouteDeps } from '../context.js';
 import { isIdle } from '../credentials.js';
 import { openOAuthSecret, sealedOf } from '../crypto.js';
 import { schema } from '../db/client.js';
-import { deleteIfOrphaned, revokeGrant } from '../db/connections.js';
+import { revokeGrant } from '../db/connections.js';
 import type { Connection } from '../db/schema.js';
 import { fail, requireBearer } from '../http.js';
 import { logFailure } from '../log.js';
@@ -129,8 +129,6 @@ export const connectionRoutes = (deps: RouteDeps) => {
 		});
 		if (target === undefined) return fail(c, 'not_found', 404);
 
-		await revokeGrant(db, target.id);
-
 		// The last device that could reach the account has gone, and the account
 		// goes with it. Left behind, the row is a live refresh token, sealed,
 		// that no credential reaches: nothing can use it, and nothing can revoke
@@ -142,14 +140,18 @@ export const connectionRoutes = (deps: RouteDeps) => {
 		// row, and the device knows its notes by the account's id, not the row's
 		// (docs/ARCHITECTURE.md §6).
 		//
-		// Asked and deleted in one statement, for the race `deleteIfOrphaned`
-		// describes.
+		// With the revoke in one transaction, and asked and deleted in one
+		// statement, for the races `revokeGrant` describes.
 		//
-		// And the row before the provider. The grant is already nulled, so a
+		// And the row before the provider. The grant is nulled by then, so a
 		// request cut off during the provider's calls — a tab closed on signing
 		// out — would leave exactly the row this is here to remove, with no
 		// credential left to try again with.
-		const gone = await deleteIfOrphaned(db, connection.id);
+		const gone = await revokeGrant(
+			db,
+			{ id: target.id, connectionId: connection.id },
+			Date.now()
+		);
 
 		// After the writes, not before: a socket that reconnects in between is
 		// then refused by the upgrade's grant check rather than let back in.
