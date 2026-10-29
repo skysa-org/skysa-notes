@@ -56,10 +56,10 @@ export const useNoteSession = ({
 	liveEdits,
 	onDeleted,
 	onProblem,
-	scratch,
+	isScratch,
 }: Pick<NoteViewProps, 'note' | 'draft' | 'liveEdits' | 'onDeleted' | 'onProblem'> & {
 	/** A scratch note, whose editor is always the rich one. */
-	scratch: boolean;
+	isScratch: boolean;
 }) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
@@ -211,7 +211,7 @@ export const useNoteSession = ({
 		[flush, forget, onDeleted, onProblem, settle]
 	);
 
-	const mode = editorModeOf(note, locked, scratch, defaultMode);
+	const mode = editorModeOf(note, locked, isScratch, defaultMode);
 
 	const { retry } = unsupported;
 	const toggleMode = useCallback(() => {
@@ -236,9 +236,7 @@ export const useNoteSession = ({
 	}, [rebased, mode, noteId, note?.connectionId, locked, retry, draft]);
 
 	return {
-		noteId,
 		mode,
-		locked,
 		/** The rich editor's check, and what it found it could not represent. */
 		unsupported,
 		/** Edits the store has not taken: the save is failing. */

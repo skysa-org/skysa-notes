@@ -151,10 +151,10 @@ export const NoteView = ({
 	scratch,
 	ref: handle,
 }: NoteViewProps) => {
+	const noteId = note?.id;
+	const isScratch = scratch !== undefined;
 	const {
-		noteId,
 		mode,
-		locked,
 		unsupported,
 		failing,
 		overtaken,
@@ -169,16 +169,17 @@ export const NoteView = ({
 		liveEdits,
 		onDeleted,
 		onProblem,
-		scratch: scratch !== undefined,
+		isScratch,
 	});
 	useImperativeHandle(handle, () => ({ deleteNote: deleteOne }), [deleteOne]);
 	const { retryable } = unsupported;
+	const locked = unsupported.lost !== undefined;
 	const mark = useScratchMarking(note, draft);
 
 	// The element the outline shares the room of, as state rather than a ref:
 	// a note opening mounts it, and the width has to be asked of the new one.
 	const [body, setBody] = useState<HTMLDivElement | null>(null);
-	const layout = useNoteLayout(noteId, body, scratch !== undefined);
+	const layout = useNoteLayout(noteId, body, isScratch);
 	useFocusBody(scratch?.focusBody === true, noteId, body);
 
 	// A count of askings rather than a boolean: asking again with the bar already
@@ -210,7 +211,7 @@ export const NoteView = ({
 		enabled:
 			noteId !== undefined &&
 			mode !== undefined &&
-			(scratch === undefined ? !locked || retryable : locked && retryable),
+			(isScratch ? locked && retryable : !locked || retryable),
 		run: toggleMode,
 	});
 

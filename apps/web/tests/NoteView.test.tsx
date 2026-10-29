@@ -255,7 +255,8 @@ describe('what was typed, around a switch and a save', () => {
 		});
 	});
 
-	it('tells the list the row has it, once the row does', async () => {
+	// Waits out autosave's two seconds, so more than the default five in all.
+	it('tells the list the row has it, once the row does', { timeout: 10_000 }, async () => {
 		// The list shows what is typed until the row has it, and the row again
 		// after (`store/liveEdits.ts`), so the save has to say when it landed.
 		await setDefaultEditorMode(db, 'raw');
