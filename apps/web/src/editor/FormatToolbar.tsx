@@ -14,7 +14,7 @@ import {
 } from 'react';
 import { flushSync } from 'react-dom';
 
-import { DialogActions } from '../components/Dialog.js';
+import { DialogActions } from '../components/ui/Dialog.js';
 import { t } from '../i18n/t.js';
 import {
 	clearLink,

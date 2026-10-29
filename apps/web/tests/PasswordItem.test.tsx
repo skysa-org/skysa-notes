@@ -12,9 +12,9 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { editedAt } from '../src/components/editedAt.js';
 import type { NoteDraft } from '../src/components/note/types.js';
 import { PasswordItem } from '../src/components/PasswordItem.js';
+import { editedAt } from '../src/components/ui/editedAt.js';
 import type { SecretHost } from '../src/editor/secretHost.js';
 import { openSecret } from '../src/secrets/age.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';

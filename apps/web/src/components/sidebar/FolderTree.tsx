@@ -15,10 +15,10 @@ import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
 import { canDrop, type Moving } from '../../store/rearrange.js';
 import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../../store/tree.js';
-import type { MenuPoint, OptionsMenuItem } from '../OptionsMenu.js';
-import { pickUpProps } from '../pickUpProps.js';
-import { RowOptions } from '../RowOptions.js';
-import { rowIndent, RowRename } from '../RowRename.js';
+import type { MenuPoint, OptionsMenuItem } from '../ui/OptionsMenu.js';
+import { pickUpProps } from '../ui/pickUpProps.js';
+import { RowOptions } from '../ui/RowOptions.js';
+import { rowIndent, RowRename } from '../ui/RowRename.js';
 
 /**
  * The notebook tree's rows: each notebook's, with its disclosure and its `⋯`,

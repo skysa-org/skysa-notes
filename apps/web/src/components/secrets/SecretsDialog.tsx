@@ -5,7 +5,7 @@ import { loadAge } from '../../secrets/loadAge.js';
 import type { KeyFileRecord } from '../../store/db.js';
 import { PBKDF2_ROUNDS } from '../../store/secretKeys.js';
 import { setPasswordsShown } from '../../store/vault.js';
-import { Dialog, DialogActions } from '../Dialog.js';
+import { Dialog, DialogActions } from '../ui/Dialog.js';
 import { PasteKey } from './PasteKey.js';
 import { Device, Lost, RemoveKey } from './steps/Device.js';
 import { Different } from './steps/Different.js';

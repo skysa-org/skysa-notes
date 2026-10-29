@@ -1,5 +1,5 @@
-import { NameDialog } from '../../components/NameDialog.js';
 import { ScratchModal, Scratchpad } from '../../components/Scratchpad.js';
+import { NameDialog } from '../../components/ui/NameDialog.js';
 import type { useScratchpad } from '../../components/useScratchpad.js';
 import { t } from '../../i18n/t.js';
 import type { LiveEdits } from '../../store/liveEdits.js';

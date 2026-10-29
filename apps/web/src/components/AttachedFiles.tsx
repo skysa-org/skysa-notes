@@ -12,7 +12,7 @@ import {
 	everyNoteHeld,
 } from '../store/fileLinks.js';
 import { titleShown } from '../store/titles.js';
-import { Dialog, DialogActions, InlineDialog } from './Dialog.js';
+import { Dialog, DialogActions, InlineDialog } from './ui/Dialog.js';
 
 /**
  * The files in a notebook, each with the notes that link it under its name,

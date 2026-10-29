@@ -974,7 +974,7 @@ code {
    otherwise lose for as long as it can: each `vw` is its column's width over
    1250px, which is where the two terms of its `clamp` meet. The floors are
    under anything the columns reach before the window turns compact
-   (`components/layout.ts`); they are for a root font size other than 16px,
+   (`components/ui/layout.ts`); they are for a root font size other than 16px,
    not a width the layout expects to hit. */
 .app-shell {
 	display: grid;
@@ -1510,7 +1510,7 @@ button.danger {
  * A container, so that the note's header and outline are laid out by the room
  * the note has rather than the room the window has — the same window gives
  * the note very different room with the columns beside it and without them.
- * `components/layout.ts` says which widths are decided where.
+ * `components/ui/layout.ts` says which widths are decided where.
  */
 .note-view {
 	display: flex;
@@ -4478,7 +4478,7 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 
 /*
  * Too narrow for three panes. The width is decided once, in
- * `components/layout.ts`, and arrives here as `.compact` on the frame rather
+ * `components/ui/layout.ts`, and arrives here as `.compact` on the frame rather
  * than as a media query of this file's own: it also decides which bar is
  * rendered, and two answers to "is this compact" could disagree by a pixel.
  *

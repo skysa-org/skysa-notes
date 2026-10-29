@@ -2,8 +2,8 @@ import type { ReactNode, RefObject } from 'react';
 
 import { t } from '../../i18n/t.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
-import { InfoDialog } from '../InfoDialog.js';
-import { RunProgress } from '../RunProgress.js';
+import { InfoDialog } from '../ui/InfoDialog.js';
+import { RunProgress } from '../ui/RunProgress.js';
 import { lineStatus, statusMessage, type SyncCount } from './statusWords.js';
 
 /**

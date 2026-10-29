@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type * as RowOptionsModule from '../src/components/RowOptions.js';
 import { Sidebar, type SidebarProps } from '../src/components/sidebar/Sidebar.js';
+import type * as RowOptionsModule from '../src/components/ui/RowOptions.js';
 import { buildFolderTree, keptTree } from '../src/store/tree.js';
 
 /**
@@ -13,7 +13,7 @@ import { buildFolderTree, keptTree } from '../src/store/tree.js';
  */
 const drawn = vi.hoisted(() => ({ names: [] as string[] }));
 
-vi.mock('../src/components/RowOptions.js', async (importOriginal) => {
+vi.mock('../src/components/ui/RowOptions.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof RowOptionsModule>();
 	return {
 		...actual,

@@ -13,9 +13,9 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { useSuspendShortcuts } from '../commands/context.js';
-import { Icon } from '../editor/icons.js';
-import { t } from '../i18n/t.js';
+import { useSuspendShortcuts } from '../../commands/context.js';
+import { Icon } from '../../editor/icons.js';
+import { t } from '../../i18n/t.js';
 import { rems } from './layout.js';
 
 /**

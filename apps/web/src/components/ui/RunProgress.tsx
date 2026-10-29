@@ -1,4 +1,4 @@
-import type { SchedulerStatus } from '../sync/scheduler.js';
+import type { SchedulerStatus } from '../../sync/scheduler.js';
 
 /**
  * How far a run has got, drawn: a bar, and under it, lightly, the file it is

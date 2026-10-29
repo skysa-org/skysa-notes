@@ -1,8 +1,8 @@
 import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { useEffect, useRef, useState } from 'react';
 
-import { ConfirmDialog } from '../components/ConfirmDialog.js';
-import { InfoDialog } from '../components/InfoDialog.js';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog.js';
+import { InfoDialog } from '../components/ui/InfoDialog.js';
 import { LOCALE, t } from '../i18n/t.js';
 import { addClips, setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import type { ConnectedSource } from '../store/connection.js';

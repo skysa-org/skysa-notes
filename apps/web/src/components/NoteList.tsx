@@ -20,10 +20,15 @@ import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { titleShown } from '../store/titles.js';
 import { byParent, folderLabel } from '../store/tree.js';
 import { noteOpening, openingLines } from '../store/visibleText.js';
-import { editedAt } from './editedAt.js';
-import { FloatingMenu, type MenuPoint, type OptionsMenuItem, useRowMenu } from './OptionsMenu.js';
-import { pickUpProps } from './pickUpProps.js';
-import { RowOptions } from './RowOptions.js';
+import { editedAt } from './ui/editedAt.js';
+import {
+	FloatingMenu,
+	type MenuPoint,
+	type OptionsMenuItem,
+	useRowMenu,
+} from './ui/OptionsMenu.js';
+import { pickUpProps } from './ui/pickUpProps.js';
+import { RowOptions } from './ui/RowOptions.js';
 import {
 	besideOf,
 	indicesIn,
@@ -32,7 +37,7 @@ import {
 	useFocusedItem,
 	useHeights,
 	useScrollSpan,
-} from './windowing.js';
+} from './ui/windowing.js';
 
 /**
  * The middle pane: the notes in the selected notebook, newest first by when

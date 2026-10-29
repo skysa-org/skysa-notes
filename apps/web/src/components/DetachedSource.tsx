@@ -15,9 +15,9 @@ import { settleEditors } from '../store/heldEdits.js';
 import { titleShown } from '../store/titles.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../sync/account.js';
-import { DialogActions, InlineDialog } from './Dialog.js';
 import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
-import { useEscape } from './useEscape.js';
+import { DialogActions, InlineDialog } from './ui/Dialog.js';
+import { useEscape } from './ui/useEscape.js';
 
 /**
  * A source this device no longer reaches, which is still here because it holds

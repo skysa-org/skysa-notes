@@ -6,8 +6,8 @@ import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
 import { getScratchpadShown, setScratchpadShown } from '../../store/scratchpad.js';
 import type { Unsynced } from '../../store/unsynced.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
-import type { OptionsMenuItem } from '../OptionsMenu.js';
 import { secretsLabel } from '../secrets/secretsLabel.js';
+import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 import { importingHere, isSyncable } from './SyncState.js';
 
 /**

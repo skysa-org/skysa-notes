@@ -6,7 +6,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { FloatingMenu, OptionsMenu } from '../src/components/OptionsMenu.js';
+import { FloatingMenu, OptionsMenu } from '../src/components/ui/OptionsMenu.js';
 
 /**
  * Everything that moves, moving alike: the stylesheet's motion is spelled in

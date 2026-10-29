@@ -3,7 +3,7 @@ import { useEffect, useId, useState } from 'react';
 
 import { t } from '../../../i18n/t.js';
 import type { SecretsLock } from '../../../secrets/lock.js';
-import { DialogActions } from '../../Dialog.js';
+import { DialogActions } from '../../ui/Dialog.js';
 import { GroupCells, SIZES, spilled } from '../GroupCells.js';
 import { RecoveryQr } from '../RecoveryQr.js';
 

@@ -1,7 +1,7 @@
 import { isWithin, rebasePath } from '@skysa/core';
 import { useEffect } from 'react';
 
-import type { Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/ui/notify.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import {

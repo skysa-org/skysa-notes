@@ -12,10 +12,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
-import { type Notice, NotifyContext } from '../src/components/notify.js';
 import { SourcePanel } from '../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../src/components/sources/SourceTabs.js';
-import { Toast } from '../src/components/Toast.js';
+import { type Notice, NotifyContext } from '../src/components/ui/notify.js';
+import { Toast } from '../src/components/ui/Toast.js';
 import type { pickFiles } from '../src/editor/pickFiles.js';
 import { t } from '../src/i18n/t.js';
 import {

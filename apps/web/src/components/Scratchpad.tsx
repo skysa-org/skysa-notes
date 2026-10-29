@@ -35,10 +35,10 @@ import { titleShown } from '../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
 import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
 import { useCardMotion, useEasedHeight } from './cardMotion.js';
-import { useElementWidth } from './layout.js';
 import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
 import { useOpeningNotice } from './opening.js';
 import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
+import { useElementWidth } from './ui/layout.js';
 import {
 	besideOf,
 	type Measure,
@@ -47,7 +47,7 @@ import {
 	useHeights,
 	useScrollSpan,
 	whenIdle,
-} from './windowing.js';
+} from './ui/windowing.js';
 
 /**
  * The scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"): a box to take a

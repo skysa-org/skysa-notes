@@ -21,9 +21,9 @@ import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { movingNote } from '../store/titles.js';
 import { visibleBlocks } from '../store/visibleText.js';
-import { COARSE_POINTER, useMediaQuery } from './layout.js';
 import type { NoteViewHandle, ScratchEditing } from './note/types.js';
 import type { MarkChange } from './Scratchpad.js';
+import { COARSE_POINTER, useMediaQuery } from './ui/layout.js';
 
 /**
  * What the route does in the scratchpad (docs/ARCHITECTURE.md §7, "The

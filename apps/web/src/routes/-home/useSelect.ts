@@ -1,4 +1,4 @@
-import type { Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/ui/notify.js';
 import { showConnection } from '../../store/connection.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { noteIsUnder, rememberOpen } from '../../store/lastOpen.js';

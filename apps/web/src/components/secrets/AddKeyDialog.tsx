@@ -6,7 +6,7 @@ import { type Age, loadAge } from '../../secrets/loadAge.js';
 import type { SecretsLock } from '../../secrets/lock.js';
 import type { NotesDatabase } from '../../store/db.js';
 import { enrolment, replaceKeys } from '../../store/secretKeys.js';
-import { Dialog } from '../Dialog.js';
+import { Dialog } from '../ui/Dialog.js';
 import { PasteKey } from './PasteKey.js';
 
 export interface AddKeyDialogProps {

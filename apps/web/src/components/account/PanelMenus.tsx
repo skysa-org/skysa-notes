@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 
 import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
-import { OptionsMenu, type OptionsMenuItem } from '../OptionsMenu.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
+import { OptionsMenu, type OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
  * The panel's actions as one `⋯` menu, drawn into the end of the showing

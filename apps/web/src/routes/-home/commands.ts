@@ -4,7 +4,7 @@ import { type RefObject, useCallback, useEffect, useState } from 'react';
 
 import { parseChord } from '../../commands/chord.js';
 import { useCommand } from '../../commands/context.js';
-import type { Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/ui/notify.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord, type SyncStateRecord } from '../../store/db.js';
 import { downloadNotice, downloadProblem, downloadSource } from '../../store/exportNotes.js';

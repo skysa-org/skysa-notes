@@ -14,7 +14,7 @@ import { useSyncStatus } from '../../sync/runtime.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 import { ConnectButton } from '../ConnectButton.js';
-import { DialogActions, InlineDialog } from '../Dialog.js';
+import { DialogActions, InlineDialog } from '../ui/Dialog.js';
 import type { Client, Sync } from './clients.js';
 import { conflictMessage, statusMessage } from './statusWords.js';
 import { UnreadableNotice } from './SyncNotices.js';

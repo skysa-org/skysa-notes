@@ -5,7 +5,7 @@ import { useInstance } from '@milkdown/react';
 import { usePluginViewContext } from '@prosemirror-adapter/react';
 import { useEffect, useRef } from 'react';
 
-import { COARSE_POINTER, mediaMatches } from '../components/layout.js';
+import { COARSE_POINTER, mediaMatches } from '../components/ui/layout.js';
 import { t } from '../i18n/t.js';
 import { codeBlockAround } from './codeTools.js';
 import { INLINE_COMMANDS } from './commands.js';

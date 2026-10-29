@@ -1,5 +1,5 @@
 import { t } from '../../../i18n/t.js';
-import { DialogActions, DialogOption, DialogOptions } from '../../Dialog.js';
+import { DialogActions, DialogOption, DialogOptions } from '../../ui/Dialog.js';
 
 /** Secrets already in the source that the key does not open, said before it is used. */
 export const Different = ({
