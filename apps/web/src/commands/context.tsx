@@ -65,7 +65,8 @@ const useOptionalRegistry = (): CommandRegistry | undefined => useContext(Comman
  * group, chord or whether it can run — and not for a new `run`, which a caller
  * that does not memoise it hands over every render: each registration tells
  * the palette, which would draw itself again for nothing (#455). The command
- * runs the latest `run`, so it never closes over stale state.
+ * runs the latest `run`, taken once the render's effects have run, as a
+ * registration was, so it does not close over stale state.
  */
 export const useCommand = (command: Command): void => {
 	const registry = useOptionalRegistry();
@@ -122,12 +123,11 @@ export const useCommands = (): readonly Command[] => {
  * answer than nothing happening.
  */
 export const useShortcuts = (): void => {
-	// The registry is read when a key is pressed, not subscribed to. Subscribing
-	// would re-render the component that calls this on every registration — and
-	// since a command's `run` is a fresh closure each render, that component
-	// re-registers as it renders, which is a loop: register, notify, render,
-	// register. The keyboard needs the commands as they are at the moment of the
-	// keystroke, which is exactly what asking then gives it.
+	// The registry is read when a key is pressed, not subscribed to. The
+	// keyboard needs the commands as they are at the moment of the keystroke,
+	// which is exactly what asking then gives it, and subscribing would
+	// re-render the component that calls this on every registration for
+	// nothing.
 	const registry = useRegistry();
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
