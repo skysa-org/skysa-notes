@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiClient } from '../../../api/client.js';
 import { t } from '../../../i18n/t.js';
 import { heldConnectCode, heldConnectCodeShown } from '../../../store/connectCode.js';
-import type { NotesDatabase } from '../../../store/db.js';
 import { PROVIDER_LABELS } from '../../../sync/account.js';
 import { ProviderIcon } from '../ProviderIcon.js';
 import { ConnectButton } from './ConnectButton.js';
@@ -17,7 +16,6 @@ import {
 } from './ConnectCode.js';
 
 interface ConnectButtonsProps {
-	db: NotesDatabase;
 	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 	offerable: readonly ProviderKind[];
 	returnTo: string;
@@ -27,7 +25,6 @@ interface ConnectButtonsProps {
 
 /** A button per provider another account can be connected from. */
 const ConnectButtons = ({
-	db,
 	client,
 	offerable,
 	returnTo,
@@ -37,7 +34,6 @@ const ConnectButtons = ({
 	offerable.map((provider) => (
 		<ConnectButton
 			key={provider}
-			db={db}
 			client={client}
 			provider={provider}
 			returnTo={returnTo}

@@ -7,7 +7,7 @@ import { t } from '../../../i18n/t.js';
 import { heldConnectCode } from '../../../store/connectCode.js';
 import { pileContents } from '../../../store/connection.js';
 import { beginConnect } from '../../../store/credentials.js';
-import type { NotesDatabase } from '../../../store/db.js';
+import { useDb } from '../../../store/database.js';
 import { PROVIDER_LABELS } from '../../../sync/account.js';
 import { ConfirmDialog } from '../../ui/ConfirmDialog.js';
 
@@ -41,7 +41,6 @@ import { ConfirmDialog } from '../../ui/ConfirmDialog.js';
  */
 
 export interface ConnectButtonProps {
-	db: NotesDatabase;
 	client: Pick<ApiClient, 'startConnect'>;
 	provider: ProviderKind;
 	/** Where the provider's callback should send the browser back to. */
@@ -73,7 +72,6 @@ const MESSAGES: Partial<Record<string, () => string>> = {
 };
 
 export const ConnectButton = ({
-	db,
 	client,
 	provider,
 	returnTo,
@@ -83,6 +81,7 @@ export const ConnectButton = ({
 		globalThis.location.assign(url);
 	},
 }: ConnectButtonProps) => {
+	const db = useDb();
 	const [busy, setBusy] = useState(false);
 	const [failed, setFailed] = useState<string | null>(null);
 	/** What would move, while the user is being asked about it. */

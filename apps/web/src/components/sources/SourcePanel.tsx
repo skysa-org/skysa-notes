@@ -4,7 +4,8 @@ import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { api, type ApiClient } from '../../api/client.js';
 import { t } from '../../i18n/t.js';
 import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/connection.js';
-import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { holdsAnything } from '../../store/exportNotes.js';
 import type { Renamings } from '../../store/renaming.js';
 import { isLiveSource } from '../../store/rowStates.js';
@@ -48,7 +49,6 @@ export interface AccountSlot {
 }
 
 export interface SourcePanelProps {
-	db?: NotesDatabase;
 	client?: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 	/** Where the provider's callback should send the browser back to. */
 	returnTo: string;
@@ -87,7 +87,6 @@ export interface SourcePanelProps {
  * be how to shut the panel.
  */
 export const SourcePanel = ({
-	db = defaultDb,
 	client = api,
 	returnTo,
 	navigate,
@@ -96,7 +95,8 @@ export const SourcePanel = ({
 	renamings,
 	enterCode,
 }: SourcePanelProps) => {
-	const choices = useSourceChoices(db, client);
+	const db = useDb();
+	const choices = useSourceChoices(client);
 	const { ordered } = choices;
 	// State rather than a ref: the storage panel draws its menu into this, and
 	// has to be drawn again once it is there.
@@ -200,7 +200,6 @@ export const SourcePanel = ({
 					<AddSource
 						choices={choices}
 						enterCode={enterCode}
-						db={db}
 						client={client}
 						returnTo={returnTo}
 						navigate={navigate}
