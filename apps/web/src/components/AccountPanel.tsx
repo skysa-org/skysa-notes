@@ -23,7 +23,6 @@ import {
 	type NotesDatabase,
 	type SyncStateRecord,
 } from '../store/db.js';
-import { holdsTextFor } from '../store/detached.js';
 import {
 	downloadLibrary,
 	downloadNotice,
@@ -33,19 +32,14 @@ import {
 	holdsAnything,
 	type Library,
 } from '../store/exportNotes.js';
-import { settleEditors } from '../store/heldEdits.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
-import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
-import { getScratchpadShown, setScratchpadShown } from '../store/scratchpad.js';
-import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
+import { type Unsynced } from '../store/unsynced.js';
 import {
 	type AccountState,
 	claimConnection,
 	CONNECTABLE,
 	type LetGoInput,
-	letGoOfSource,
-	type LetGoResult,
 	PROVIDER_LABELS,
 	type UnsentAnswer,
 } from '../sync/account.js';
@@ -55,9 +49,18 @@ import { type Client, type Sync } from './account/clients.js';
 import { Devices, stillSignedIn, useGrants } from './account/Devices.js';
 import { ActionsMenu, GearMenu, useMenuButtons } from './account/PanelMenus.js';
 import { StatusLine, SyncBar, SyncDetails } from './account/StatusLine.js';
-import { failureMessage, lineStatus, refusalMessage, syncCount } from './account/statusWords.js';
+import { lineStatus, syncCount } from './account/statusWords.js';
+import {
+	clipboardItem,
+	stoppedBy,
+	storageItems,
+	useScratchpadItem,
+	useSecretsItem,
+	worthPushing,
+} from './account/storageItems.js';
 import { LeftAtProvider, UnseenDialog, unseenItem } from './account/SyncNotices.js';
 import { importingHere, isSyncable, SyncState } from './account/SyncState.js';
+import { type Disconnecting, prepare, useDisconnects } from './account/useDisconnects.js';
 import { ClipboardPanel } from './ClipboardPanel.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
@@ -66,7 +69,7 @@ import { DisconnectDialog } from './DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
-import { SecretsDialog, type SecretsDialogProps, secretsLabel } from './SecretsDialog.js';
+import { SecretsDialog, type SecretsDialogProps } from './SecretsDialog.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
 import { useEscape } from './useEscape.js';
 
@@ -331,53 +334,6 @@ const NotConnected = ({
 };
 
 /**
- * How long the last push before a disconnect is given, before the user is asked
- * anyway.
- *
- * A push still going is not cancelled — whatever it lands is one less thing on
- * the list — but nobody is kept waiting on a provider that is not answering,
- * and the question is the same either way: what is left when it stops.
- */
-const LAST_PUSH_MS = 10_000;
-
-const after = (ms: number): Promise<void> =>
-	new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	});
-
-/**
- * Everything the dialog before a disconnect is about, gathered in the order it
- * has to be gathered in.
- *
- * The editors write first, because text inside the autosave window is in no row
- * and a list taken from the store alone would leave out the sentence just
- * typed. Then, where there is any prospect of it working, one last push: the
- * best answer to "this has not been sent" is to send it. Only then is the list
- * made, and with it the record of what the user is being shown — which is all a
- * discard may ever reach (`seenIn`).
- *
- * The notebooks the source has are part of that record even where they are not
- * listed as unsent. Letting the source go removes the sent notes that are the
- * proof a notebook was made, so a notebook that had nothing done to it reads as
- * unsent afterwards, and would otherwise look like something written since.
- */
-const prepare = async (
-	database: NotesDatabase,
-	connectionId: string,
-	push: (() => Promise<void>) | undefined
-): Promise<{ listed: Unsynced; seen: Seen; failing: boolean }> => {
-	const settled = await settleEditors();
-	if (push !== undefined) {
-		await Promise.race([push().catch(() => undefined), after(LAST_PUSH_MS)]);
-	}
-	const listed = await unsyncedIn(database, connectionId);
-	const standing = (await rowsOf(database.folders, connectionId).toArray()).map(
-		(folder) => folder.path
-	);
-	return { listed, seen: seenIn(listed, standing), failing: holdsTextFor(settled, connectionId) };
-};
-
-/**
  * What the account is called: as the server has just said it, or else as it
  * last did — the panel has to be able to name the account offline too.
  */
@@ -408,291 +364,6 @@ interface ConnectedProps {
 	navigate?: (url: string) => void;
 	slot?: AccountSlot;
 }
-
-/** A disconnect that is under way, or that the server would not or could not do. */
-interface Disconnecting {
-	busy: boolean;
-	problem: string | null;
-	/**
-	 * The device is left bound to a connection it cannot get rid of by asking.
-	 * Any failure counts: a refusal and an unreachable server strand the user the
-	 * same way, and the old rule — only where the credential had stopped working
-	 * — now names a case that cannot happen, because a credential the server no
-	 * longer honours *is* the disconnect and `disconnectAccount` finishes the job.
-	 */
-	stranded: boolean;
-}
-
-/**
- * What is left to say once a source has been let go — or has not been.
- *
- * `released` is the whole of what was asked for, and says nothing. The other
- * three each mean the user's answer was not carried out in full, and each names
- * something that happened while they were deciding, so none of them is a
- * failure to report as one: nothing was lost in any of them.
- */
-const wentAs = (result: LetGoResult): Disconnecting | undefined => {
-	if (!result.ok) {
-		return { busy: false, problem: refusalMessage(result.refusal), stranded: true };
-	}
-	const said = (problem: string): Disconnecting => ({ busy: false, problem, stranded: false });
-	switch (result.outcome) {
-		case 'released':
-			return undefined;
-		case 'detached':
-			return said(t('account.disconnect.outcome.detached'));
-		case 'holding':
-			return said(t('account.disconnect.outcome.holding'));
-		case 'reconnected':
-			return said(t('account.disconnect.outcome.reconnected'));
-		case 'no-target':
-			return said(t('account.disconnect.outcome.noTarget'));
-		case 'unverified':
-			return said(t('account.disconnect.outcome.unverified'));
-		case 'nothing-to-move':
-			return said(t('account.disconnect.outcome.nothingToMove'));
-	}
-};
-
-/**
- * Disconnects, by the source each is for, held by the panel rather than by
- * `Connected`.
- *
- * `Connected` is keyed by source and the switcher stays live while the server
- * is being asked, so the answer can come back to an instance that has gone. Held
- * there, a failure that arrived after "Show other source" was lost: back on the
- * first source there was no error, no way to stop syncing on this device, and
- * nothing to stop a second disconnect being started on top of the first.
- *
- * Every entry names its source, from the moment the user asked — the answer can
- * take seconds, and it is about that source whatever the panel shows by then.
- */
-const useDisconnects = (database: NotesDatabase, client: Client) => {
-	const [disconnects, setDisconnects] = useState<Readonly<Record<string, Disconnecting>>>({});
-	// Read where a second one is refused: state as the last render saw it would
-	// let two clicks in one tick both through.
-	const pending = useRef(new Set<string>());
-
-	const put = useCallback((connectionId: string, next: Disconnecting | undefined) => {
-		setDisconnects(({ [connectionId]: _before, ...rest }) =>
-			next === undefined ? rest : { ...rest, [connectionId]: next }
-		);
-	}, []);
-
-	const disconnect = useCallback(
-		(connectionId: string, answer: Omit<LetGoInput, 'connectionId'>): Promise<void> => {
-			if (pending.current.has(connectionId)) return Promise.resolve();
-			pending.current.add(connectionId);
-			put(connectionId, { busy: true, problem: null, stranded: false });
-			return letGoOfSource(database, client, { connectionId, ...answer })
-				.then((result) => {
-					put(connectionId, wentAs(result));
-				})
-				.catch((error: unknown) => {
-					put(connectionId, {
-						busy: false,
-						// What was asked of whom, which is what decides which outcome
-						// the message may leave open.
-						problem: failureMessage(error, answer.onServer),
-						stranded: true,
-					});
-				})
-				.finally(() => {
-					pending.current.delete(connectionId);
-				});
-		},
-		[client, database, put]
-	);
-
-	return { disconnects, disconnect };
-};
-
-/**
- * Whether one last push before the question is worth waiting for. Not where the
- * scheduler is not syncing this source anyway, not where it has already stopped
- * on something it will stop on again, and not where there is no network: each
- * of those is a delay in front of the same question.
- */
-const worthPushing = (status: SchedulerStatus): boolean =>
-	navigator.onLine &&
-	status.phase !== 'local' &&
-	status.phase !== 'attention' &&
-	status.phase !== 'offline';
-
-/**
- * Why the last push could not clear what is here, where the user would do
- * better to cancel and come back to it. Not a reason to refuse the disconnect:
- * they may have no intention of ever reaching this account again.
- */
-const stoppedBy = (status: SchedulerStatus, listed: Unsynced): 'offline' | 'blocked' | null => {
-	if (status.phase === 'offline' || !navigator.onLine) return 'offline';
-	return listed.blocked ? 'blocked' : null;
-};
-
-/**
- * What can be done to a connected source, beyond what its status offers: the
- * items of the gear's menu at the foot of the sidebar, or of the `⋯` in a
- * compact window's source dropdown, disabled where they cannot be done now.
- * Neither way to let the source go while the disconnect question is open,
- * which is the way on from there.
- */
-const storageItems = ({
-	bound,
-	phase,
-	rescanning,
-	onRescan,
-	download,
-	imports,
-	clipboard,
-	scratchpad,
-	secrets,
-	about,
-	stranded,
-	open,
-	disconnectBlocked,
-	syncNow,
-	ask,
-}: {
-	bound: SyncStateRecord;
-	phase: SchedulerStatus['phase'];
-	rescanning: boolean;
-	onRescan: () => void;
-	download: readonly OptionsMenuItem[];
-	/** The ways to import (`importItems`), or none where an import is held back. */
-	imports: readonly OptionsMenuItem[];
-	/** Showing or hiding the clipboard (`clipboardItem`). */
-	clipboard: readonly OptionsMenuItem[];
-	/** Showing or hiding the scratchpad (`useScratchpadItem`). */
-	scratchpad: readonly OptionsMenuItem[];
-	/** Secrets in the source (`useSecretsItem`). */
-	secrets: readonly OptionsMenuItem[];
-	/** What the provider keeps from the app (`unseenItem`). */
-	about: readonly OptionsMenuItem[];
-	stranded: boolean;
-	/** Whether the disconnect question is open. */
-	open: boolean;
-	disconnectBlocked: boolean;
-	syncNow: () => void;
-	ask: (onServer: boolean) => void;
-}): OptionsMenuItem[] => {
-	const syncing = phase === 'syncing';
-	const syncs = !importingHere(bound) && phase !== 'local';
-	return [
-		...(syncs
-			? [{ label: t('account.menu.syncNow'), onChoose: syncNow, disabled: syncing }]
-			: []),
-		...(syncs && isSyncable(bound) && !rescanning
-			? [{ label: t('account.menu.rescan'), onChoose: onRescan, disabled: syncing }]
-			: []),
-		...download,
-		...imports,
-		...clipboard,
-		...scratchpad,
-		...secrets,
-		...about,
-		...(stranded && !open
-			? [
-					{
-						label: t('account.menu.stopHere'),
-						// The same question again, and nothing asked of the server:
-						// it has already refused, and nothing on it is touched.
-						onChoose: () => {
-							ask(false);
-						},
-					},
-				]
-			: []),
-		...(open
-			? []
-			: [
-					{
-						label: t('account.menu.disconnect'),
-						onChoose: () => {
-							ask(true);
-						},
-						danger: true,
-						disabled: disconnectBlocked,
-					},
-				]),
-	];
-};
-
-/**
- * Show the source's clipboard on this device, or stop (docs/ARCHITECTURE.md
- * §7, "The clipboard"). Said as what choosing it does, as a notebook's "Pin to
- * top" is. Not while a first import holds the source, as "Sync now" is not.
- */
-const clipboardItem = (
-	bound: SyncStateRecord,
-	phase: SchedulerStatus['phase'],
-	onChoose: () => void
-): OptionsMenuItem[] =>
-	importingHere(bound) || phase === 'local'
-		? []
-		: [
-				{
-					label: showsClipboard(bound)
-						? t('account.menu.hideClipboard')
-						: t('account.menu.showClipboard'),
-					onChoose,
-				},
-			];
-
-/**
- * Show the source's scratchpad on this device, or stop (docs/ARCHITECTURE.md
- * §7, "The scratchpad"). Offered for every source, the device's own among
- * them, since a scratch note is a note like any other and needs no sync to be
- * one. Shown, the route opens it (`useOpenWhenShown`); hidden, its notes stay
- * where they are, and come back as they were. With whether it is shown, which
- * the import into it asks (`importItems`).
- */
-const useScratchpadItem = (
-	database: NotesDatabase,
-	connectionId: string
-): { shown: boolean | undefined; items: OptionsMenuItem[] } => {
-	const shown = useLiveQuery(
-		() => getScratchpadShown(database, connectionId),
-		[database, connectionId]
-	);
-	return {
-		shown,
-		items:
-			shown === undefined
-				? []
-				: [
-						{
-							label: shown
-								? t('account.menu.hideScratchpad')
-								: t('account.menu.showScratchpad'),
-							onChoose: () => {
-								void setScratchpadShown(database, connectionId, !shown);
-							},
-						},
-					],
-	};
-};
-
-/**
- * Secrets in the source (docs/ARCHITECTURE.md §7, "Secrets in a note"):
- * setting them up, or, once they are, unlocking and the rest. Only where the
- * source syncs, since the key file is in its folder, and not while a first
- * import holds it, as the clipboard is not.
- */
-const useSecretsItem = (
-	database: NotesDatabase,
-	bound: SyncStateRecord,
-	phase: SchedulerStatus['phase'],
-	onChoose: () => void
-): OptionsMenuItem[] => {
-	const connectionId = bound.connectionId;
-	const read = useLiveQuery(
-		async () => ({ record: await database.keyFiles.get(connectionId) }),
-		[database, connectionId]
-	);
-	return read === undefined || importingHere(bound) || phase === 'local'
-		? []
-		: [{ label: secretsLabel(read.record), onChoose }];
-};
 
 /**
  * Where a connected source's panel ends: the status line (`StatusLine`), with
