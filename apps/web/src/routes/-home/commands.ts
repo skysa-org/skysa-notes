@@ -43,7 +43,7 @@ const FIND = parseChord('Mod+Shift+F');
 /**
  * `?enter=code`, from an operator's page once the user has a code: the way to
  * connect storage, opened at the gate's code field. Counted, so that each
- * arrival opens it once (`useAdding` in `SourceTabs.tsx`), and taken out of
+ * arrival opens it once (`components/sources/useAdding.ts`), and taken out of
  * the URL at once, so that a reload does not open it again. In a compact
  * window the `+` is in the sources dropdown, which opens first.
  */
