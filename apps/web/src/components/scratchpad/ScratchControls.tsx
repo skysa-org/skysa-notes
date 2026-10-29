@@ -1,9 +1,9 @@
 import type { ScratchColor } from '@skysa/core';
 
-import { Icon } from '../editor/icons.js';
-import { t } from '../i18n/t.js';
+import { Icon } from '../../editor/icons.js';
+import { t } from '../../i18n/t.js';
+import { OptionsMenu } from '../ui/OptionsMenu.js';
 import { cardMenuItems, colorItems } from './scratchMenus.js';
-import { OptionsMenu } from './ui/OptionsMenu.js';
 
 /**
  * The controls a scratch note has, on its card and under its editor alike

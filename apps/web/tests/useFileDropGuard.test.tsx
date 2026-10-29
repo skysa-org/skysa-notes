@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { useFileDropGuard } from '../src/components/useFileDropGuard.js';
+import { useFileDropGuard } from '../src/components/clipboard/useFileDropGuard.js';
 
 /**
  * A file dragged over the app where nothing takes it is refused, rather than

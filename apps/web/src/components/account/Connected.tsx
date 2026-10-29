@@ -19,7 +19,7 @@ import {
 } from '../../sync/account.js';
 import { useSyncStatus } from '../../sync/runtime.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
-import { ClipboardPanel } from '../ClipboardPanel.js';
+import { ClipboardPanel } from '../clipboard/ClipboardPanel.js';
 import { DisconnectDialog } from '../DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from '../ImportNotes.js';
 import { otherLiveSources } from '../MoveUnsent.js';

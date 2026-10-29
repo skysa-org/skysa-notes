@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ScratchModal, Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
+import {
+	ScratchModal,
+	Scratchpad,
+	type ScratchpadProps,
+} from '../src/components/scratchpad/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { CARD_WORDS } from '../src/store/scratchpad.js';
 import { linksOpened as opened } from './linksOpened.js';

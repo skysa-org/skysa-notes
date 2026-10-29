@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Passwords } from '../src/components/Passwords.js';
+import { Passwords } from '../src/components/passwords/Passwords.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { draftNote } from '../src/store/notes.js';
 import { byLabel } from '../src/store/vault.js';

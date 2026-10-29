@@ -11,9 +11,9 @@ import {
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/ClipboardPanel.js';
-import type { SystemClipboard, SystemRead } from '../src/components/systemClipboard.js';
-import { useFileDropGuard } from '../src/components/useFileDropGuard.js';
+import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/clipboard/ClipboardPanel.js';
+import type { SystemClipboard, SystemRead } from '../src/components/clipboard/systemClipboard.js';
+import { useFileDropGuard } from '../src/components/clipboard/useFileDropGuard.js';
 import type { FileBrowser } from '../src/editor/fileActions.js';
 import type { ObjectUrlCache } from '../src/editor/objectUrls.js';
 import type { PictureShrinker } from '../src/pictures/shrinker.js';

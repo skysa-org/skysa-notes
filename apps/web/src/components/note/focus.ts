@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 
-import { FOCUS_KEEPER } from '../Scratchpad.js';
+import { FOCUS_KEEPER } from '../scratchpad/Scratchpad.js';
 
 /**
  * Put the cursor in whichever editor is open, where it was — at the start, in

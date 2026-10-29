@@ -11,7 +11,7 @@ import {
 } from '@skysa/core';
 import { useEffect, useMemo, useRef } from 'react';
 
-import { closedProblem } from '../editor/addFiles.js';
+import { closedProblem } from '../../editor/addFiles.js';
 import type {
 	Added,
 	AttachmentHost,
@@ -21,32 +21,36 @@ import type {
 	PictureSize,
 	Shown,
 	ShowOptions,
-} from '../editor/attachHost.js';
-import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../editor/objectUrls.js';
-import { pickFiles } from '../editor/pickFiles.js';
-import { useLatest } from '../hooks/useLatest.js';
-import { copyTurns, nearestCopy } from '../pictures/copies.js';
-import { noShrinker, type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
+} from '../../editor/attachHost.js';
+import {
+	createObjectUrlCache,
+	type HeldUrl,
+	type ObjectUrlCache,
+} from '../../editor/objectUrls.js';
+import { pickFiles } from '../../editor/pickFiles.js';
+import { useLatest } from '../../hooks/useLatest.js';
+import { copyTurns, nearestCopy } from '../../pictures/copies.js';
+import { noShrinker, type PictureShrinker, pictureShrinker } from '../../pictures/shrinker.js';
 import {
 	db as appDb,
 	type FileRecord,
 	type NoteRecord,
 	type NotesDatabase,
 	type PictureRecord,
-} from '../store/db.js';
-import { createEmitter } from '../store/emitter.js';
-import { heldFile, holdsBytes } from '../store/fileCache.js';
+} from '../../store/db.js';
+import { createEmitter } from '../../store/emitter.js';
+import { heldFile, holdsBytes } from '../../store/fileCache.js';
 import {
 	addAttachment,
 	attachmentRefusal,
 	AttachmentRefusedError,
 	fileForLink,
-} from '../store/files.js';
-import { heldCopy, heldPicture, keepPicture, type MadeCopy } from '../store/pictures.js';
-import { watchSourceFiles } from '../store/sourceFiles.js';
-import type { FileRead } from '../sync/fileReads.js';
-import { syncScheduler } from '../sync/runtime.js';
-import type { SyncScheduler } from '../sync/scheduler.js';
+} from '../../store/files.js';
+import { heldCopy, heldPicture, keepPicture, type MadeCopy } from '../../store/pictures.js';
+import { watchSourceFiles } from '../../store/sourceFiles.js';
+import type { FileRead } from '../../sync/fileReads.js';
+import { syncScheduler } from '../../sync/runtime.js';
+import type { SyncScheduler } from '../../sync/scheduler.js';
 
 /**
  * The files beside one open note, for its editor (#187): `AttachmentHost`,

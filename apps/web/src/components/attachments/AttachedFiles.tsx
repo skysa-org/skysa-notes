@@ -2,17 +2,17 @@ import { fileKind } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 
-import { FILE_ICONS, Icon } from '../editor/icons.js';
-import { t } from '../i18n/t.js';
-import { activeConnectionId, db, type NotesDatabase } from '../store/db.js';
+import { FILE_ICONS, Icon } from '../../editor/icons.js';
+import { t } from '../../i18n/t.js';
+import { activeConnectionId, db, type NotesDatabase } from '../../store/db.js';
 import {
 	type AttachedFile,
 	attachedFiles,
 	deleteUnlinkedFiles,
 	everyNoteHeld,
-} from '../store/fileLinks.js';
-import { titleShown } from '../store/titles.js';
-import { Dialog, DialogActions, InlineDialog } from './ui/Dialog.js';
+} from '../../store/fileLinks.js';
+import { titleShown } from '../../store/titles.js';
+import { Dialog, DialogActions, InlineDialog } from '../ui/Dialog.js';
 
 /**
  * The files in a notebook, each with the notes that link it under its name,

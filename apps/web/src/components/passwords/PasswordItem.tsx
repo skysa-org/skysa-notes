@@ -14,12 +14,12 @@ import {
 } from '@skysa/core';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
-import type { AttachmentProblem } from '../editor/attachHost.js';
-import { Icon } from '../editor/icons.js';
-import { linkAddress, openLink } from '../editor/links.js';
-import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
-import { t } from '../i18n/t.js';
-import { db, type NoteRecord } from '../store/db.js';
+import type { AttachmentProblem } from '../../editor/attachHost.js';
+import { Icon } from '../../editor/icons.js';
+import { linkAddress, openLink } from '../../editor/links.js';
+import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
+import { t } from '../../i18n/t.js';
+import { db, type NoteRecord } from '../../store/db.js';
 import {
 	deleteNote,
 	type EditBase,
@@ -28,15 +28,15 @@ import {
 	renameVaultItem,
 	restoreVaultItem,
 	saveVaultItem,
-} from '../store/notes.js';
-import { isTombstone } from '../store/rowStates.js';
-import { titleShown } from '../store/titles.js';
+} from '../../store/notes.js';
+import { isTombstone } from '../../store/rowStates.js';
+import { titleShown } from '../../store/titles.js';
+import type { NoteDraft } from '../note/types.js';
+import { useNoteSecrets } from '../secrets/noteSecrets.js';
+import { editedAt } from '../ui/editedAt.js';
 import { KEEP_OUT } from './keepOut.js';
-import type { NoteDraft } from './note/types.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
 import { labelLink, siteLink } from './passwordLink.js';
-import { useNoteSecrets } from './secrets/noteSecrets.js';
-import { editedAt } from './ui/editedAt.js';
 
 /**
  * A password in the vault, in the note's column (docs/ARCHITECTURE.md §7,

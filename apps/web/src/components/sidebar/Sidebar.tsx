@@ -9,7 +9,7 @@ import type { Renamings } from '../../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../../store/scratchpad.js';
 import { type FolderNode, notesUnder } from '../../store/tree.js';
 import { PASSWORDS_LABEL } from '../../store/vault.js';
-import { AttachedFiles } from '../AttachedFiles.js';
+import { AttachedFiles } from '../attachments/AttachedFiles.js';
 import { FloatingMenu } from '../ui/OptionsMenu.js';
 import { TreeBody } from './FolderTree.js';
 import { DeleteConfirm, MoveHint, NewFolderField } from './NotebookFields.js';

@@ -21,24 +21,25 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Icon } from '../editor/icons.js';
-import { openableLink, openLink } from '../editor/links.js';
-import { useLatest } from '../hooks/useLatest.js';
-import { t } from '../i18n/t.js';
-import type { NoteRecord } from '../store/db.js';
-import { keepRows } from '../store/kept.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
-import { isUnnamed } from '../store/notes.js';
-import { cardLines, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
-import { handBack, SLICE_MS } from '../store/slices.js';
-import { titleShown } from '../store/titles.js';
-import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
-import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
-import { useCardMotion, useEasedHeight } from './cardMotion.js';
-import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
-import { useOpeningNotice } from './opening.js';
-import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
-import { useElementWidth } from './ui/layout.js';
+import { Icon } from '../../editor/icons.js';
+import { openableLink, openLink } from '../../editor/links.js';
+import { useLatest } from '../../hooks/useLatest.js';
+import { t } from '../../i18n/t.js';
+import type { NoteRecord } from '../../store/db.js';
+import { keepRows } from '../../store/kept.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../../store/liveEdits.js';
+import { isUnnamed } from '../../store/notes.js';
+import {
+	cardLines,
+	scratchGroups,
+	scratchMarks,
+	SCRATCHPAD_LABEL,
+} from '../../store/scratchpad.js';
+import { handBack, SLICE_MS } from '../../store/slices.js';
+import { titleShown } from '../../store/titles.js';
+import { noteOpening, openingBlocks, openingLines } from '../../store/visibleText.js';
+import { useOpeningNotice } from '../opening.js';
+import { useElementWidth } from '../ui/layout.js';
 import {
 	besideOf,
 	type Measure,
@@ -47,7 +48,11 @@ import {
 	useHeights,
 	useScrollSpan,
 	whenIdle,
-} from './ui/windowing.js';
+} from '../ui/windowing.js';
+import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
+import { useCardMotion, useEasedHeight } from './cardMotion.js';
+import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
+import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
 
 /**
  * The scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"): a box to take a

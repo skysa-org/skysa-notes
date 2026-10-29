@@ -8,7 +8,7 @@ import { type NoteRecord, noteRef } from '../../store/db.js';
 import type { LiveEdits } from '../../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
-import { PinButton, ScratchBar } from '../ScratchControls.js';
+import { PinButton, ScratchBar } from '../scratchpad/ScratchControls.js';
 import { FindBar } from './FindBar.js';
 import { NoteBody } from './NoteBody.js';
 import { TitleField } from './TitleField.js';

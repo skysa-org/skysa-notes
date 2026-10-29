@@ -1,10 +1,10 @@
 import { basename, VAULT_FOLDER } from '@skysa/core';
 import { useLayoutEffect } from 'react';
 
-import type { Pane } from '../routes/panel.js';
-import type { Place } from '../routes/place.js';
-import type { NoteRecord } from '../store/db.js';
-import { useVaultItems } from '../store/hooks.js';
+import type { Pane } from '../../routes/panel.js';
+import type { Place } from '../../routes/place.js';
+import type { NoteRecord } from '../../store/db.js';
+import { useVaultItems } from '../../store/hooks.js';
 
 type Select = (next: Place, how?: { replace?: boolean; note?: NoteRecord }) => void;
 

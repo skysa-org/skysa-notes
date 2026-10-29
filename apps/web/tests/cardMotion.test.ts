@@ -6,7 +6,7 @@ import {
 	shrinkInto,
 	useCardMotion,
 	useEasedHeight,
-} from '../src/components/cardMotion.js';
+} from '../src/components/scratchpad/cardMotion.js';
 
 /**
  * A card growing into its editor and going back into it, and the box a note

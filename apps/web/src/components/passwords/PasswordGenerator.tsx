@@ -7,9 +7,9 @@ import {
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useId, useState } from 'react';
 
-import { t } from '../i18n/t.js';
-import { db } from '../store/db.js';
-import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../store/vault.js';
+import { t } from '../../i18n/t.js';
+import { db } from '../../store/db.js';
+import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../../store/vault.js';
 
 /**
  * Generate, under a password being edited (docs/ARCHITECTURE.md §7,

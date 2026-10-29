@@ -6,7 +6,7 @@ import {
 	Scratchpad,
 	type ScratchpadProps,
 	WALL_WINDOWED_ABOVE,
-} from '../src/components/Scratchpad.js';
+} from '../src/components/scratchpad/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import type * as Slices from '../src/store/slices.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
