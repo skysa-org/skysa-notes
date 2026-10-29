@@ -442,6 +442,19 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(screen.queryByText(/above to/)).toBeNull();
 	});
 
+	it('asks the server what it offers once, for the bar and the panel together', async () => {
+		// `/api/*` is never cached below the app, so two components asking on
+		// mount would be two round trips on every open (`useInstanceConfig`).
+		const config = vi.fn(() => Promise.resolve(STORAGE_FIRST));
+		renderPanel(clientWith({ config }), freshDatabase());
+
+		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
+		expect(
+			await screen.findByRole('button', { name: 'Connect storage provider' })
+		).toBeTruthy();
+		expect(config).toHaveBeenCalledTimes(1);
+	});
+
 	it('ends in a line saying where the notes are, with the download and the imports behind the gear', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();

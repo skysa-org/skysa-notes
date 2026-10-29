@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { ApiClient, InstanceConfig } from './client.js';
 
@@ -48,25 +48,24 @@ const configFor = (client: Asking): Promise<InstanceConfig> => {
 
 export const useInstanceConfig = (client: Asking): Asked<InstanceConfig> => {
 	const [state, setState] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
-	const mounted = useRef(true);
 
 	useEffect(() => {
-		// The component can go while the request is out, and answering into one
-		// that has is a leak. A ref, which is the one mutable thing this repo
-		// allows and what every other component here uses for exactly this.
-		// Set on the way in as well as the way out: an effect that runs twice
-		// — StrictMode, or a change of client — has already been cleaned up
-		// once by the time it runs again.
-		mounted.current = true;
+		// Each run's own: the component can go while the request is out, and
+		// answering into one that has is a leak; and a new client's run must not
+		// be answered by the old one's request settling late. A flag shared by
+		// every run — the ref this used to be — is set again by the next run as
+		// soon as the last is cleaned up, so it guarded the first and not the
+		// second.
+		const gone = new AbortController();
 		void configFor(client)
 			.then((value) => {
-				if (mounted.current) setState({ kind: 'answered', value });
+				if (!gone.signal.aborted) setState({ kind: 'answered', value });
 			})
 			.catch(() => {
-				if (mounted.current) setState({ kind: 'unreachable' });
+				if (!gone.signal.aborted) setState({ kind: 'unreachable' });
 			});
 		return () => {
-			mounted.current = false;
+			gone.abort();
 		};
 	}, [client]);
 

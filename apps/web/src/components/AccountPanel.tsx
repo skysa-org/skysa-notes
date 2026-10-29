@@ -2,8 +2,8 @@ import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 
-import { api, type InstanceConfig } from '../api/client.js';
-import { answer, type Asked } from '../api/instanceConfig.js';
+import { api } from '../api/client.js';
+import { answer, type Asked, useInstanceConfig } from '../api/instanceConfig.js';
 import type { pickFiles } from '../editor/pickFiles.js';
 import { activeConnectionId, db as defaultDb, type NotesDatabase } from '../store/db.js';
 import { downloadLibrary, downloadUnsent, type Library } from '../store/exportNotes.js';
@@ -108,7 +108,8 @@ export const AccountPanel = ({
 		async () => ({ state: await database.syncState.get(await activeConnectionId(database)) }),
 		[database]
 	);
-	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
+	// The one request per client the bar's own asking shares (`useInstanceConfig`).
+	const config = useInstanceConfig(client);
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
 	const { disconnects, disconnect } = useDisconnects(database, client);
 	// What a source never sent, with the files whose bytes are here. A file it
@@ -142,17 +143,6 @@ export const AccountPanel = ({
 	const released = () => {
 		landing.current = true;
 	};
-
-	useEffect(() => {
-		void client
-			.config()
-			.then((value) => {
-				setConfig({ kind: 'answered', value });
-			})
-			.catch(() => {
-				setConfig({ kind: 'unreachable' });
-			});
-	}, [client]);
 
 	// What the server is asked about: on open, and again whenever the binding
 	// has moved to a connection the answer in hand does not name — another tab
