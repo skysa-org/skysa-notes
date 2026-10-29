@@ -52,8 +52,14 @@ export const runBar = (
 ): { value: number; max: number } | null => {
 	if (progress === undefined) return null;
 	const count = runCount(progress);
-	if ('count' in count || count.total === 0) return null;
-	return { value: count.done, max: count.total };
+	switch (count.kind) {
+		case 'looking':
+		case 'checking':
+			return null;
+		case 'sending':
+		case 'receiving':
+			return count.total === 0 ? null : { value: count.done, max: count.total };
+	}
 };
 
 /**

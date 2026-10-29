@@ -26,6 +26,7 @@ describe('a run’s bar', () => {
 			{ stage: 'scanning', found: 0, done: 0, listing: false },
 			null,
 		],
+		['does not know of nothing to send', { stage: 'uploading', done: 0, total: 0 }, null],
 		[
 			'is as full as a re-scan has read of what it found',
 			{ stage: 'scanning', found: 40, done: 10, listing: false },

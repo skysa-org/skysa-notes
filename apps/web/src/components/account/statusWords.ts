@@ -72,8 +72,9 @@ export const when = (at: number): string => {
 /**
  * How far a long run has got: the status line, with a few words after the
  * source's name, the sentence for its tooltip and for the panel in a compact
- * window, and how full its bar is — `null` while a scan or a round is still
- * listing, which knows how many so far and not of how many.
+ * window, and how full its bar is — `null` where it cannot know (`runBar`):
+ * while a scan or a round is still listing, which knows how many so far and
+ * not of how many.
  */
 export interface SyncCount {
 	text: string;
