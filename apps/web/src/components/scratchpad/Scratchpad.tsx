@@ -40,6 +40,7 @@ import { titleShown } from '../../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../../store/visibleText.js';
 import { useOpeningNotice } from '../note/opening.js';
 import { useElementWidth } from '../ui/layout.js';
+import { usePressAway } from '../ui/usePressAway.js';
 import {
 	besideOf,
 	type Measure,
@@ -114,24 +115,20 @@ export const FOCUS_KEEPER = 'focus-keeper';
 /** The note being taken closes on Escape, and on a press anywhere else. */
 const useCloseTaking = (taking: boolean, box: HTMLElement | null, onClose: () => void) => {
 	const close = useLatest(onClose);
+	usePressAway(
+		[],
+		() => {
+			onClose();
+		},
+		{ enabled: taking && box !== null, inside: INSIDE_TAKING }
+	);
 	useEffect(() => {
 		if (!taking || box === null) return undefined;
-		const onPress = (event: PointerEvent) => {
-			if (
-				!(event.target instanceof Element) ||
-				event.target.closest(INSIDE_TAKING) !== null
-			) {
-				return;
-			}
-			close.current();
-		};
 		const onKey = (event: KeyboardEvent) => {
 			if (closesOnEscape(event)) close.current();
 		};
-		document.addEventListener('pointerdown', onPress);
 		box.addEventListener('keydown', onKey);
 		return () => {
-			document.removeEventListener('pointerdown', onPress);
 			box.removeEventListener('keydown', onKey);
 		};
 	}, [taking, box, close]);

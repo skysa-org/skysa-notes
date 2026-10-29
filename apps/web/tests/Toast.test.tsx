@@ -10,6 +10,28 @@ import { Toast } from '../src/components/ui/Toast.js';
  */
 
 describe('Toast', () => {
+	it('goes on a press anywhere else, and stays through a press in a dialog (#443)', () => {
+		// What is pressed in a dialog answers the dialog, and the toast is still
+		// to be read once it has gone.
+		const onDismiss = vi.fn();
+		render(
+			<>
+				<Toast message="Could not delete the note." tone="error" onDismiss={onDismiss} />
+				<div role="dialog" aria-modal="true">
+					<button type="button">In a dialog</button>
+				</div>
+				<button type="button">Elsewhere</button>
+			</>
+		);
+
+		fireEvent.pointerDown(screen.getByRole('alert'));
+		fireEvent.pointerDown(screen.getByRole('button', { name: 'In a dialog' }));
+		expect(onDismiss).not.toHaveBeenCalled();
+
+		fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }));
+		expect(onDismiss).toHaveBeenCalledTimes(1);
+	});
+
 	it('is the message and a way to dismiss it, and no link, when there is nowhere to go', () => {
 		render(<Toast message="Storage connected." tone="success" onDismiss={() => undefined} />);
 

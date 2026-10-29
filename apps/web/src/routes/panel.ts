@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { COMPACT, useMediaQuery } from '../components/ui/layout.js';
+import { usePressAway } from '../components/ui/usePressAway.js';
 
 /**
  * The compact window's dropdowns as the history holds them: which pane is
@@ -197,29 +198,32 @@ const usePanel = (compact: boolean) => {
 	);
 	const shut = useCallback(() => showPanel(null), [showPanel]);
 
-	useEffect(() => {
-		if (panel === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') void shut();
-		};
-		const away = (event: PointerEvent) => {
-			const target = event.target;
-			if (!(target instanceof Element)) return;
-			if (target.closest(`${PANE_ELEMENT[panel]}, [${KEEPS_PANEL}]`) !== null) return;
+	usePressAway(
+		[],
+		(event) => {
 			// Not in the app at all, but over it: a menu or a dialog, drawn on
 			// the page's body (`createPortal`). Nothing outside the panel can be
 			// pressed to open one without shutting the panel first, so one that
 			// is open came from the panel — the notebook's `⋯`, a right-click
 			// on a row — and what is chosen in it, a rename or a delete, happens
 			// in the panel, which has to stay open for it. Each shuts itself.
-			if (target.closest('.app-frame') === null) return;
+			const target = event.target;
+			if (!(target instanceof Element) || target.closest('.app-frame') === null) return;
 			void shut();
+		},
+		{
+			enabled: panel !== null,
+			inside: panel === null ? undefined : `${PANE_ELEMENT[panel]}, [${KEEPS_PANEL}]`,
+		}
+	);
+	useEffect(() => {
+		if (panel === null) return undefined;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') void shut();
 		};
 		document.addEventListener('keydown', onKey);
-		document.addEventListener('pointerdown', away);
 		return () => {
 			document.removeEventListener('keydown', onKey);
-			document.removeEventListener('pointerdown', away);
 		};
 	}, [panel, shut]);
 

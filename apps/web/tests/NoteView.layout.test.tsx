@@ -8,6 +8,7 @@ import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
+import { updateNote } from './noteRows.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -55,6 +56,7 @@ const openNote = async (width: number, body = HEADED, noteWidth?: number, touch 
 	await waitFor(() => {
 		expect(document.querySelector('.ProseMirror')).not.toBeNull();
 	});
+	return note;
 };
 
 const outline = () => screen.queryByRole('navigation', { name: 'Outline' });
@@ -194,6 +196,26 @@ describe('the outline', () => {
 		expect(outline()).not.toBeNull();
 		await user.click(outlineButton() as HTMLElement);
 		expect(outline()).toBeNull();
+	});
+
+	it('is not shut by a press while it has no headings to draw', async () => {
+		// Its headings gone from under it (a sync), it draws nothing until one is
+		// back; a press meanwhile is not one away from it.
+		const user = userEvent.setup();
+		const note = await openNote(390, HEADED, 390, true);
+		await user.click(outlineButton() as HTMLElement);
+		expect(outline()).not.toBeNull();
+
+		await updateNote(db, note.id, { body: 'No headings here.\n' });
+		await waitFor(() => {
+			expect(outline()).toBeNull();
+		});
+		await user.click(screen.getByDisplayValue('A note'));
+		await updateNote(db, note.id, { body: HEADED });
+
+		await waitFor(() => {
+			expect(outline()).not.toBeNull();
+		});
 	});
 });
 
