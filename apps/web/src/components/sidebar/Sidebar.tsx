@@ -414,8 +414,8 @@ export const Sidebar = ({
 			{menu !== null && (
 				<FloatingMenu
 					at={menu.at}
-					label={t('rows.notebook.menu', { name: basename(menu.path) })}
-					items={itemsFor(menu.path)}
+					label={t('rows.notebook.menu', { name: basename(menu.of) })}
+					items={itemsFor(menu.of)}
 					onClose={closeMenu}
 				/>
 			)}

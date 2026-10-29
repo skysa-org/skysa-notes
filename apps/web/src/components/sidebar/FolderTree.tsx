@@ -15,7 +15,8 @@ import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
 import { canDrop, type Moving } from '../../store/rearrange.js';
 import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../../store/tree.js';
-import { type MenuPoint, menuPoint, type OptionsMenuItem } from '../OptionsMenu.js';
+import type { MenuPoint, OptionsMenuItem } from '../OptionsMenu.js';
+import { pickUpProps } from '../pickUpProps.js';
 import { RowOptions } from '../RowOptions.js';
 import { rowIndent, RowRename } from '../RowRename.js';
 
@@ -129,29 +130,19 @@ const Row = ({
 			// found by, and in words as well as the tint (`.row.pinned`) or the
 			// rule above the bottom's (`.pinned-bottom-rule`).
 			aria-describedby={pinned === undefined ? undefined : pinId}
-			draggable={onPickUp !== undefined}
-			onContextMenu={(event) => {
+			{...pickUpProps({
+				text: name,
+				onPickUp,
+				onCancelMove,
 				// The browser's own menu where this row has none of its own: the
 				// loose notes, the top level, and every row while a move is on.
-				if (onMenu === undefined || moving !== null) return;
-				event.preventDefault();
-				onMenu(menuPoint(event));
-			}}
+				onMenu: moving === null ? onMenu : undefined,
+			})}
 			onClick={() => {
 				if (moving === null) onSelect();
 				else onDrop(path);
 			}}
 			onKeyDown={onKeyDown}
-			onDragStart={(event) => {
-				if (onPickUp === undefined) return;
-				// Firefox starts no drag at all without data on it, and the string
-				// is what another application would receive if the note were
-				// dropped outside the window.
-				event.dataTransfer.effectAllowed = 'move';
-				event.dataTransfer.setData('text/plain', name);
-				onPickUp();
-			}}
-			onDragEnd={onCancelMove}
 			onDragOver={(event) => {
 				// `preventDefault` is what makes a drop possible at all, so it is
 				// also how a row refuses one: without it the pointer shows "no".

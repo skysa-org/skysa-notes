@@ -7,7 +7,7 @@ import type { NotebookPin } from '../../store/pins.js';
 import type { Moving } from '../../store/rearrange.js';
 import type { Renamings } from '../../store/renaming.js';
 import type { FolderNode } from '../../store/tree.js';
-import type { MenuPoint, OptionsMenuItem } from '../OptionsMenu.js';
+import { type OptionsMenuItem, useRowMenu } from '../OptionsMenu.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 
 const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
@@ -61,7 +61,7 @@ export const useNotebookMenu = ({
 	const [deleting, setDeleting] = useState<string | null>(null);
 	const [listing, setListing] = useState<string | null>(null);
 	/** A notebook's row right-clicked, and where: its menu is open there. */
-	const [menu, setMenu] = useState<{ path: string; at: MenuPoint } | null>(null);
+	const { menu, openMenu, closeMenu } = useRowMenu<string>();
 
 	const manageable = open !== undefined && moving === null;
 	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
@@ -180,12 +180,8 @@ export const useNotebookMenu = ({
 			setListing(null);
 		},
 		menu,
-		openMenu: (path: string, at: MenuPoint) => {
-			setMenu({ path, at });
-		},
-		closeMenu: () => {
-			setMenu(null);
-		},
+		openMenu,
+		closeMenu,
 		/** A notebook's menu, for its `⋯` and for a right-click on its row alike. */
 		itemsFor: (path: string): OptionsMenuItem[] =>
 			notebookMenuItems(basename(path), actionsFor(path)),

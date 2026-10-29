@@ -2,6 +2,7 @@ import {
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 	type RefObject,
+	useCallback,
 	useEffect,
 	useLayoutEffect,
 	useRef,
@@ -222,6 +223,22 @@ export const menuPoint = (event: ReactMouseEvent<HTMLElement>): MenuPoint => {
 	if (event.clientX !== 0 || event.clientY !== 0) return { x: event.clientX, y: event.clientY };
 	const row = event.currentTarget.getBoundingClientRect();
 	return { x: row.left + 16, y: row.bottom };
+};
+
+/**
+ * A row's menu, opened where the row was right-clicked (`menuPoint`): which
+ * row's, and where, or null while none is. The note list's and the
+ * notebooks' alike, each drawing a `FloatingMenu` there.
+ */
+export const useRowMenu = <T,>() => {
+	const [menu, setMenu] = useState<{ of: T; at: MenuPoint } | null>(null);
+	const openMenu = useCallback((of: T, at: MenuPoint) => {
+		setMenu({ of, at });
+	}, []);
+	const closeMenu = useCallback(() => {
+		setMenu(null);
+	}, []);
+	return { menu, openMenu, closeMenu };
 };
 
 /** Kept this far inside the window, so the card's shadow is not cut off. */
