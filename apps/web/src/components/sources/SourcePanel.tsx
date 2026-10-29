@@ -2,7 +2,6 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { api, type ApiClient } from '../../api/client.js';
-import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
 import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/connection.js';
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
@@ -16,7 +15,7 @@ import { RowOptions } from '../RowOptions.js';
 import { RowRename } from '../RowRename.js';
 import { secretsLabel } from '../SecretsDialog.js';
 import { AddSource } from './AddSource.js';
-import { storeSourceName } from './SourceName.js';
+import { ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';
 
 /**
@@ -240,11 +239,7 @@ export const SourcePanel = ({
 								<button
 									type="button"
 									className={source.active ? 'row selected' : 'row'}
-									aria-label={
-										isLiveSource(source)
-											? name
-											: t('sources.disconnected.label', { source: name })
-									}
+									aria-label={sourceLabel(source, name)}
 									{...(source.active ? { 'aria-current': 'true' as const } : {})}
 									onClick={() => {
 										onChosen?.();
@@ -255,20 +250,7 @@ export const SourcePanel = ({
 									<span className="row-marked">
 										<ProviderIcon kind={sourceKind(source)} />
 										<span className="row-label">
-											{isLiveSource(source)
-												? name
-												: rich(
-														'sources.disconnected.shown',
-														{
-															name: (words) => words,
-															state: (words) => (
-																<span className="source-tab-detached">
-																	{words}
-																</span>
-															),
-														},
-														{ source: name }
-													)}
+											<ShownSourceName source={source} name={name} />
 										</span>
 									</span>
 								</button>

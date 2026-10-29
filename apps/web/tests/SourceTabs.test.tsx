@@ -366,6 +366,10 @@ describe('the source tabs', () => {
 		await waitFor(() => {
 			expect(tabs()).toEqual(['Dropbox — disconnected']);
 		});
+		// The state set apart from the name, and only the state, for the
+		// stylesheet to say it quietly.
+		const tab = screen.getByRole('button', { name: 'Dropbox — disconnected' });
+		expect(tab.querySelector('.source-tab-detached')?.textContent).toBe(' — disconnected');
 	});
 
 	it('offers the providers this deployment has, and nothing when it cannot ask', async () => {
@@ -571,6 +575,20 @@ describe('the source tabs', () => {
 		const back = screen.getByRole('button', { name: 'Dropbox' });
 		expect(back.querySelector('.provider-icon-badge')).toBeNull();
 		expect(back.hasAttribute('title')).toBe(false);
+	});
+
+	it('asks nothing of a source that syncs nowhere, whatever the scheduler last said', async () => {
+		// A reconnect still said when the source in front is let go of: it is
+		// disconnected now, and that is what its tab says, all three ways.
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await createNote(db, { connectionId: 'c1', title: 'Never sent' });
+		await detachConnection(db, { connectionId: 'c1' });
+		show(db, clientWith(), syncSaying(REAUTHORIZE));
+
+		const tab = await screen.findByRole('button', { name: 'Dropbox — disconnected' });
+		expect(tab.hasAttribute('title')).toBe(false);
+		expect(tab.querySelector('.provider-icon-badge')).toBeNull();
 	});
 
 	it('refuses to name the pile, which has no row to name', async () => {

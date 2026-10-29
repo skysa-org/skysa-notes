@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from 'react';
 
 import { api, type ApiClient } from '../../api/client.js';
-import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
 import { type ConnectedSource, showConnection } from '../../store/connection.js';
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
@@ -11,7 +10,7 @@ import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
 import { AddSource } from './AddSource.js';
-import { RenameField, storeSourceName } from './SourceName.js';
+import { RenameField, ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';
 
 export interface SourceTabsProps {
@@ -179,24 +178,18 @@ const SourceTab = ({
 			<span>{words}</span>
 		</span>
 	);
+	// Only a source that syncs is asked to connect again: one that syncs
+	// nowhere is said as that, in its name, its tooltip and its mark alike.
+	const reconnecting = reconnect && isLiveSource(source);
 	return (
 		<button
 			type="button"
 			className={source.active ? 'source-tab source-tab-active' : 'source-tab'}
-			// Said outright rather than left to be assembled from the two spans
-			// below. The name from contents is not simply their text: it joins the
-			// pieces by its own rules, so "A source" and " — disconnected" came out
-			// as a name no caller could predict — and a test looking for the tab by
-			// what it plainly says could not find it. Exactly the visible words, so
-			// it still satisfies WCAG 2.5.3.
-			aria-label={
-				!isLiveSource(source)
-					? t('sources.disconnected.label', { source: name })
-					: reconnect
-						? t('sources.reconnect', { source: name })
-						: name
-			}
-			{...(reconnect ? { title: t('sources.reconnect', { source: name }) } : {})}
+			// Said outright (`sourceLabel`): the name from contents joins the
+			// spans below by its own rules, so "A source" and " — disconnected"
+			// came out as a name no caller could predict.
+			aria-label={sourceLabel(source, name, reconnecting)}
+			{...(reconnecting ? { title: t('sources.reconnect', { source: name }) } : {})}
 			// The tab the user is on, said once. `aria-current` is what a screen
 			// reader announces; "showing" in the text as well would be read twice.
 			{...(source.active ? { 'aria-current': 'true' as const } : {})}
@@ -204,19 +197,8 @@ const SourceTab = ({
 				onShow(event.currentTarget.offsetWidth);
 			}}
 		>
-			<ProviderIcon kind={sourceKind(source)} alert={reconnect} />
-			{isLiveSource(source)
-				? shownName(name)
-				: // Not an icon alone: a source that syncs nowhere is the one thing
-					// about this bar a user must not have to infer from a colour.
-					rich(
-						'sources.disconnected.shown',
-						{
-							name: shownName,
-							state: (words) => <span className="source-tab-detached">{words}</span>,
-						},
-						{ source: name }
-					)}
+			<ProviderIcon kind={sourceKind(source)} alert={reconnecting} />
+			<ShownSourceName source={source} name={name} shown={shownName} />
 		</button>
 	);
 };
