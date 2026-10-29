@@ -12,21 +12,7 @@ export const HomeBar = ({
 	compact,
 	returnTo,
 	enterCode,
-	folder,
-	note,
-	scratchpad,
-	passwords,
-	liveEdits,
-	renamings,
-	panel,
-	onPanel,
-	onChoose,
-	sourceName,
-	showing,
-	searchOpen,
-	onSearchOpen,
-	fieldRef,
-	onOrigins,
+	...bar
 }: Readonly<
 	Omit<CompactBarProps, 'query' | 'onQuery'> & {
 		compact: boolean;
@@ -40,16 +26,7 @@ export const HomeBar = ({
 		{(query, setQuery) =>
 			compact ? (
 				<CompactBar
-					folder={folder}
-					// In the scratchpad, the card open, named after
-					// "Scratchpad" if it has a name or words to go by.
-					note={note}
-					scratchpad={scratchpad}
-					passwords={passwords}
-					liveEdits={liveEdits}
-					renamings={renamings}
-					panel={panel}
-					onPanel={onPanel}
+					{...bar}
 					query={query}
 					onQuery={(next) => {
 						setQuery(next);
@@ -58,15 +35,8 @@ export const HomeBar = ({
 						// would be a second list behind the first. Only
 						// when one is: shutting none draws the page again,
 						// once, for a letter that changed nothing in it.
-						if (panel !== null) onPanel(null);
+						if (bar.panel !== null) bar.onPanel(null);
 					}}
-					onChoose={onChoose}
-					sourceName={sourceName}
-					showing={showing}
-					searchOpen={searchOpen}
-					onSearchOpen={onSearchOpen}
-					fieldRef={fieldRef}
-					onOrigins={onOrigins}
 				/>
 			) : (
 				<SourceTabs
@@ -76,10 +46,10 @@ export const HomeBar = ({
 						<NoteSearchField
 							query={query}
 							onQuery={setQuery}
-							onChoose={onChoose}
-							sourceName={sourceName}
-							showing={showing}
-							fieldRef={fieldRef}
+							onChoose={bar.onChoose}
+							sourceName={bar.sourceName}
+							showing={bar.showing}
+							fieldRef={bar.fieldRef}
 						/>
 					}
 				/>
