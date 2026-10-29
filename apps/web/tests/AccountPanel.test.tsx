@@ -5354,6 +5354,25 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		).toBeTruthy();
 	});
 
+	it('waits to ask about a re-scan chosen from another source’s `⋯` until that one syncs', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'idle' });
+		const db = await connected(sync);
+		// What the scheduler says of the next source to show, before it has
+		// begun to sync it.
+		sync.say({ phase: 'local' });
+
+		await openOptions(user, 'OneDrive');
+		await user.click(screen.getByRole('button', { name: 'Re-scan from scratch' }));
+		await waitFor(async () => {
+			expect(await activeConnectionId(db)).toBe('c2');
+		});
+		expect(screen.queryByText(/Read everything in OneDrive again\?/)).toBeNull();
+
+		sync.say({ phase: 'idle' });
+		expect(await screen.findByText(/Read everything in OneDrive again\?/)).toBeTruthy();
+	});
+
 	it('points at the `+` above with nothing connected, and has the download in the `⋯`', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();

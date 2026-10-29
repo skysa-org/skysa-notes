@@ -36,6 +36,32 @@ export const stoppedBy = (
 };
 
 /**
+ * Whether a source's panel offers a thing now: yes, no, or not known yet —
+ * what it waits on (the scheduler past `local`, `holdsAnything` read, a
+ * disconnect no longer out) has not arrived (#455). The gear offers what is
+ * `yes`, and an ask from another source's `⋯` (`useAsked`) is done on `yes`,
+ * dropped on `no` and kept on `not yet`, so the two cannot come to differ.
+ * Being disabled (a sync going, a download running) is the gear's alone.
+ */
+export type Offer = 'yes' | 'no' | 'not yet';
+
+/** Download all its notes: where there is anything, and it can be downloaded now. */
+export const offersDownload = (downloadable: boolean, holds: boolean | undefined): Offer =>
+	!downloadable ? 'no' : holds === undefined ? 'not yet' : holds ? 'yes' : 'no';
+
+/** Read everything again: where it syncs, once the scheduler is syncing it. */
+export const offersRescan = (bound: SyncStateRecord, phase: SchedulerStatus['phase']): Offer =>
+	!isSyncable(bound) || importingHere(bound) ? 'no' : phase === 'local' ? 'not yet' : 'yes';
+
+/** Secrets in the source, once the scheduler is syncing it, as the key file is in its folder. */
+export const offersSecrets = (bound: SyncStateRecord, phase: SchedulerStatus['phase']): Offer =>
+	importingHere(bound) ? 'no' : phase === 'local' ? 'not yet' : 'yes';
+
+/** Disconnect it: not while the question is open, and not yet while one is out. */
+export const offersDisconnect = (open: boolean, blocked: boolean): Offer =>
+	open ? 'no' : blocked ? 'not yet' : 'yes';
+
+/**
  * What can be done to a connected source, beyond what its status offers: the
  * items of the gear's menu at the foot of the sidebar, or of the `⋯` in a
  * compact window's source dropdown, disabled where they cannot be done now.
@@ -87,7 +113,7 @@ export const storageItems = ({
 		...(syncs
 			? [{ label: t('account.menu.syncNow'), onChoose: syncNow, disabled: syncing }]
 			: []),
-		...(syncs && isSyncable(bound) && !rescanning
+		...(offersRescan(bound, phase) === 'yes' && !rescanning
 			? [{ label: t('account.menu.rescan'), onChoose: onRescan, disabled: syncing }]
 			: []),
 		...download,
@@ -108,7 +134,7 @@ export const storageItems = ({
 					},
 				]
 			: []),
-		...(open
+		...(offersDisconnect(open, disconnectBlocked) === 'no'
 			? []
 			: [
 					{
@@ -195,7 +221,7 @@ export const useSecretsItem = (
 		async () => ({ record: await database.keyFiles.get(connectionId) }),
 		[database, connectionId]
 	);
-	return read === undefined || importingHere(bound) || phase === 'local'
+	return read === undefined || offersSecrets(bound, phase) !== 'yes'
 		? []
 		: [{ label: secretsLabel(read.record), onChoose }];
 };
