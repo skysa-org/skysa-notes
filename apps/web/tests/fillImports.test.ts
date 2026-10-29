@@ -67,6 +67,9 @@ describe('the fill window', () => {
 		'src/components/secrets/noteSecrets.tsx',
 		'src/secrets/catchUp.ts',
 	])('does not load %s', (module) => {
+		// A module that has moved would never be loaded under its old name, and
+		// the check would pass whatever the window loads.
+		expect(existsSync(join(root, module))).toBe(true);
 		expect(modules).not.toContain(module);
 	});
 
