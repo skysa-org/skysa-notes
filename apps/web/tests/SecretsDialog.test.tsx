@@ -105,6 +105,12 @@ const typeKey = async (h: Harness, text: string) => {
 	await h.user.click(screen.getByRole('button', { name: 'Continue' }));
 };
 
+/** The real `age`, with what a test needs of it changed, given the real one. */
+const ageWith = (overrides: (real: Age) => Partial<Age>) => async (): Promise<Age> => {
+	const real = await loadAge();
+	return { ...real, ...overrides(real) };
+};
+
 /** A secret in one of the source's notes, made with `identity`'s key. */
 const secretIn = async (db: NotesDatabase, identity: Uint8Array) => {
 	const recipient = parseRecipient(recipientOf(identity));
@@ -397,18 +403,14 @@ describe('setting a source up', () => {
 	it('says it is looking while it tries the key, and checks only once', async () => {
 		const h = await setup({ record: { state: 'none' } });
 		const scanned = { release: () => undefined as void };
-		const age = async (): Promise<Age> => {
-			const real = await loadAge();
-			return {
-				...real,
-				scanSecrets: async (...args) => {
-					await new Promise<void>((resolve) => {
-						scanned.release = resolve;
-					});
-					return real.scanSecrets(...args);
-				},
-			};
-		};
+		const age = ageWith((real) => ({
+			scanSecrets: async (...args) => {
+				await new Promise<void>((resolve) => {
+					scanned.release = resolve;
+				});
+				return real.scanSecrets(...args);
+			},
+		}));
 		h.open({ age });
 		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
 		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
@@ -425,17 +427,13 @@ describe('setting a source up', () => {
 
 	it('fills the keys it made with zeros once they are kept, and as it closes', async () => {
 		const made: Uint8Array[] = [];
-		const age = async (): Promise<Age> => {
-			const real = await loadAge();
-			return {
-				...real,
-				generateIdentity: () => {
-					const identity = real.generateIdentity();
-					made.push(identity);
-					return identity;
-				},
-			};
-		};
+		const age = ageWith((real) => ({
+			generateIdentity: () => {
+				const identity = real.generateIdentity();
+				made.push(identity);
+				return identity;
+			},
+		}));
 		const h = await setup({ record: { state: 'none' } });
 		h.open({ age });
 		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
@@ -601,9 +599,19 @@ describe('a source already set up', () => {
 		return unlocked.status === 'unlocked' ? unlocked.keys.identities.map(encodeIdentity) : [];
 	};
 
-	it('keeps the keys the device held beside the new one, unlocking it first', async () => {
+	it('keeps the keys the device held beside the new one, unlocking it first, and fills the key typed in with zeros', async () => {
+		// The typed key's bytes are made inside the paste field; the dialog asks
+		// `age` what each key's recipient is, which is where they can be seen.
+		const seen: { bytes: Uint8Array; recipient: string }[] = [];
+		const age = ageWith((real) => ({
+			recipientOf: (identity: Uint8Array) => {
+				const recipient = real.recipientOf(identity);
+				seen.push({ bytes: identity, recipient });
+				return recipient;
+			},
+		}));
 		const h = await replacedOn();
-		h.open();
+		h.open({ age });
 		await typeKey(h, encodeIdentity(generateIdentity()));
 		expect(screen.getByRole('alert').textContent).toBe(
 			'That is a recovery key, but not this source’s.'
@@ -622,6 +630,14 @@ describe('a source already set up', () => {
 		expect(await heldAfter(h)).toEqual([h.source, h.old, h.extra].map(encodeIdentity));
 		expect(h.lock.isUnlocked('c1')).toBe(true);
 		expect(h.keyFile.write).not.toHaveBeenCalled();
+
+		const typedIn = seen.filter(({ recipient }) => recipient === recipientOf(h.source));
+		expect(typedIn.length).toBeGreaterThan(0);
+		expect(typedIn.every(({ bytes }) => bytes.every((byte) => byte === 0))).toBe(true);
+		// The lock holds copies of its own, which the wipe leaves alone.
+		expect(h.lock.keys('c1')?.identities.map(encodeIdentity)).toEqual(
+			[h.source, h.old, h.extra].map(encodeIdentity)
+		);
 	});
 
 	it('asks nothing more where the device is unlocked, and holds the key once', async () => {
@@ -637,38 +653,6 @@ describe('a source already set up', () => {
 			'This device opens the vault with the new key now, and still with the keys it had.'
 		);
 		expect(await heldAfter(h)).toEqual([h.source, h.old].map(encodeIdentity));
-	});
-
-	it('fills the key typed in with zeros once it is kept', async () => {
-		// The typed key's bytes are made inside the paste field; the dialog asks
-		// `age` what each key's recipient is, which is where they can be seen.
-		const seen: { bytes: Uint8Array; recipient: string }[] = [];
-		const age = async (): Promise<Age> => {
-			const real = await loadAge();
-			return {
-				...real,
-				recipientOf: (identity: Uint8Array) => {
-					const recipient = real.recipientOf(identity);
-					seen.push({ bytes: identity, recipient });
-					return recipient;
-				},
-			};
-		};
-		const h = await replacedOn();
-		h.open({ age });
-		await typeKey(h, encodeIdentity(h.source));
-		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
-		await screen.findByText(
-			'This device opens the vault with the new key now, and still with the keys it had.'
-		);
-
-		const typedIn = seen.filter(
-			({ bytes, recipient }) => bytes !== h.source && recipient === recipientOf(h.source)
-		);
-		expect(typedIn.length).toBeGreaterThan(0);
-		expect(typedIn.every(({ bytes }) => bytes.every((byte) => byte === 0))).toBe(true);
-		// What was kept is the key, not the zeros.
-		expect(await heldAfter(h)).toEqual([h.source, h.old, h.extra].map(encodeIdentity));
 	});
 
 	it('keeps only the new key where the user says so', async () => {
@@ -1089,10 +1073,9 @@ describe('replacing the source’s key', () => {
 	it('says some are left where encrypting them fails', async () => {
 		const h = await ready();
 		await secretIn(h.db, h.identity);
-		const age = async (): Promise<Age> => ({
-			...(await loadAge()),
+		const age = ageWith(() => ({
 			resealSecrets: () => Promise.reject(new Error('the disk is full')),
-		});
+		}));
 		h.open({ age });
 		await pasted(h, generateIdentity());
 		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
@@ -1228,16 +1211,12 @@ describe('replacing the source’s key', () => {
 		const h = await ready();
 		await secretIn(h.db, h.identity);
 		const theirs = generateIdentity();
-		const age = async (): Promise<Age> => {
-			const real = await loadAge();
-			return {
-				...real,
-				resealSecrets: (...args) => {
-					h.lock.lock();
-					return real.resealSecrets(...args);
-				},
-			};
-		};
+		const age = ageWith((real) => ({
+			resealSecrets: (...args) => {
+				h.lock.lock();
+				return real.resealSecrets(...args);
+			},
+		}));
 		h.open({ age });
 		await pasted(h, theirs);
 		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
@@ -1258,25 +1237,21 @@ describe('replacing the source’s key', () => {
 
 	it('fills each copy of a key it used with zeros, and leaves the lock’s own', async () => {
 		const used: Uint8Array[] = [];
-		const age = async (): Promise<Age> => {
-			const real = await loadAge();
-			return {
-				...real,
-				generateIdentity: () => {
-					const made = real.generateIdentity();
-					used.push(made);
-					return made;
-				},
-				scanReplacing: (db, connectionId, fresh, old) => {
-					used.push(...fresh, ...old);
-					return real.scanReplacing(db, connectionId, fresh, old);
-				},
-				resealSecrets: (db, connectionId, input) => {
-					used.push(...input.fresh, ...input.old);
-					return real.resealSecrets(db, connectionId, input);
-				},
-			};
-		};
+		const age = ageWith((real) => ({
+			generateIdentity: () => {
+				const made = real.generateIdentity();
+				used.push(made);
+				return made;
+			},
+			scanReplacing: (db, connectionId, fresh, old) => {
+				used.push(...fresh, ...old);
+				return real.scanReplacing(db, connectionId, fresh, old);
+			},
+			resealSecrets: (db, connectionId, input) => {
+				used.push(...input.fresh, ...input.old);
+				return real.resealSecrets(db, connectionId, input);
+			},
+		}));
 		const h = await ready();
 		await secretIn(h.db, h.identity);
 		h.open({ age });
