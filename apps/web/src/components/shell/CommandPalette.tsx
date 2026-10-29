@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { chordLabel } from '../../commands/chord.js';
 import { useCommands, useSuspendShortcuts } from '../../commands/context.js';
 import type { Command } from '../../commands/registry.js';
 import { t } from '../../i18n/t.js';
+import { useFocusBack } from '../ui/useFocusBack.js';
 import { usePointerMoved } from '../ui/usePointerMoved.js';
+import { usePressOutside } from '../ui/usePressOutside.js';
 
 /**
  * One list of everything the app can be asked to do, opened with a chord and
@@ -78,41 +80,15 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 		field?.focus();
 	}, []);
 
-	// Where focus was when this opened, captured on the first render — before
-	// `takeFocus` has taken it. Removing the focused element does *not* put focus
-	// back where it came from: the browser drops it on `document.body`, which is
-	// nowhere, and a keyboard user who opens the palette and presses Escape has
-	// lost their place in the app.
-	const [opener] = useState(() => document.activeElement);
-	// Unless a command took focus somewhere deliberately — `app.search` puts the
-	// cursor in the search field — in which case putting it back undoes the only
-	// thing the command does.
-	//
-	// The question is where focus actually *is* when this closes, not whether a
-	// command ran. Asking the second gave the right answer for `app.search` and
-	// the wrong one for every command that does not touch focus, which is most of
-	// them: running "Edit as markdown" from the palette dropped the user on
-	// `document.body` exactly as Escape used to.
-	//
-	// Body is the whole test, and it is not an approximation: when the focused
-	// element is removed, HTML's focus fixup rule puts focus on the body, so
-	// landing there means nobody claimed it. Anywhere else is somewhere a command
-	// deliberately put it. (`null` alongside it is belt-and-braces —
-	// `document.activeElement` is typed nullable and there is no document here
-	// without a body.)
-	//
-	// That this is a *passive* effect is load-bearing and invisible: React runs a
-	// deleted component's layout cleanups before it removes that component's DOM,
-	// so as a `useLayoutEffect` this would see its own field still focused,
-	// decline every time, and silently stop restoring anything.
-	useEffect(
-		() => () => {
-			const now = document.activeElement;
-			if (now !== null && now !== document.body) return;
-			if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
-		},
-		[opener]
-	);
+	// Given back as it closes, unless a command took the focus somewhere on
+	// purpose — `app.search` puts the cursor in the search field — in which
+	// case putting it back would undo the only thing the command does. Where the
+	// focus is as it closes is the question, not whether a command ran: most
+	// commands do not touch it, and running "Edit as markdown" from here left
+	// the user on the page's body exactly as Escape used to.
+	useFocusBack(undefined, { onlyIfLost: true });
+	const backdrop = useRef<HTMLDivElement>(null);
+	usePressOutside(backdrop, onClose);
 
 	const shown = useMemo(() => matching(commands, query), [commands, query]);
 	// The highlight is an index, so it has to be pulled back when the list under
@@ -142,14 +118,16 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	};
 
 	return (
-		// The backdrop closes on a click, which is what a click outside a dialog
-		// means. `onMouseDown` rather than `onClick`: a drag that starts on a row
-		// and ends outside it is still a click on the backdrop.
+		// A press begun and let go on the backdrop closes it, as it closes a
+		// dialog (`usePressOutside`). One that is not let go there leaves it
+		// open, and so must not take the focus from the field, where its keys
+		// are heard.
 		<div
+			ref={backdrop}
 			className="palette-backdrop"
 			role="presentation"
 			onMouseDown={(event) => {
-				if (event.target === event.currentTarget) onClose();
+				if (event.target === event.currentTarget) event.preventDefault();
 			}}
 		>
 			<div
@@ -237,10 +215,10 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 							// still sitting in the tab order — which is exactly how
 							// focus used to escape the dialog.
 							//
-							// `onMouseDown` rather than `onClick`, to match the
-							// backdrop: the pointer acts where the press began, and
-							// a press that does not move focus leaves the field
-							// holding it, so the keyboard still works afterwards.
+							// `onMouseDown` rather than `onClick`: the row acts as it
+							// is pressed, and a press that does not move focus
+							// leaves the field holding it, so the keyboard still
+							// works afterwards.
 							<li
 								key={command.id}
 								id={`palette-${command.id}`}
