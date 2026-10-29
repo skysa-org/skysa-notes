@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
-import { Icon } from '../editor/icons.js';
-import { t } from '../i18n/t.js';
+import { Icon } from '../../editor/icons.js';
+import { t } from '../../i18n/t.js';
 
 /**
  * What a toast is about. It decides the colour, the weight of the words, and

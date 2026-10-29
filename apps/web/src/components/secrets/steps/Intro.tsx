@@ -1,5 +1,5 @@
 import { t } from '../../../i18n/t.js';
-import { DialogActions } from '../../Dialog.js';
+import { DialogActions } from '../../ui/Dialog.js';
 
 /** Not set up: what secrets are, and the two ways to begin. */
 export const Intro = ({

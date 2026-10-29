@@ -1,6 +1,6 @@
 import { t } from '../../../i18n/t.js';
 import type { ReplaceScan } from '../../../secrets/age.js';
-import { DialogActions } from '../../Dialog.js';
+import { DialogActions } from '../../ui/Dialog.js';
 
 /** Replacing the source's key: what it does, and the two ways to begin. */
 export const Rekey = ({

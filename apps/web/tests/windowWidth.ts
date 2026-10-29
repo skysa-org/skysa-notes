@@ -1,6 +1,6 @@
 /**
  * A window of a given width, for the parts of the app that ask
- * `matchMedia` how much room there is (`src/components/layout.ts`).
+ * `matchMedia` how much room there is (`src/components/ui/layout.ts`).
  *
  * jsdom has no `matchMedia` at all, which the app reads as a wide window — so
  * every other test gets the layout it always had, and only a test that wants

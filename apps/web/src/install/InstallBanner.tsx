@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSyncExternalStore } from 'react';
 
-import { useMediaQuery } from '../components/layout.js';
+import { useMediaQuery } from '../components/ui/layout.js';
 import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { db as appDatabase, type NotesDatabase } from '../store/db.js';

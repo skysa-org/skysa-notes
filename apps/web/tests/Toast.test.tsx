@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Toast } from '../src/components/Toast.js';
+import { Toast } from '../src/components/ui/Toast.js';
 
 /**
  * A toast with somewhere to go about it: the connect gate's action, beside a

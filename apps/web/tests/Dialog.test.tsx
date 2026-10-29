@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { Dialog, DialogActions, InlineDialog, revealField } from '../src/components/Dialog.js';
+import { Dialog, DialogActions, InlineDialog, revealField } from '../src/components/ui/Dialog.js';
 
 /**
  * Every dialog's frame (docs/ARCHITECTURE.md §7, "Dialogs"; the owner's

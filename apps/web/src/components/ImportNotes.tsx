@@ -18,9 +18,9 @@ import {
 	type Skipped,
 	type SkipReason,
 } from '../store/importLibrary.js';
-import { ConfirmDialog } from './ConfirmDialog.js';
-import { useNotify } from './notify.js';
-import type { OptionsMenuItem } from './OptionsMenu.js';
+import { ConfirmDialog } from './ui/ConfirmDialog.js';
+import { useNotify } from './ui/notify.js';
+import type { OptionsMenuItem } from './ui/OptionsMenu.js';
 
 /**
  * Notes brought in from a folder or a ZIP (docs/ARCHITECTURE.md §7, "Getting a

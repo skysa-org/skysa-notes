@@ -9,7 +9,7 @@ import { pileContents } from '../store/connection.js';
 import { beginConnect } from '../store/credentials.js';
 import type { NotesDatabase } from '../store/db.js';
 import { PROVIDER_LABELS } from '../sync/account.js';
-import { ConfirmDialog } from './ConfirmDialog.js';
+import { ConfirmDialog } from './ui/ConfirmDialog.js';
 
 /**
  * Start connecting a storage account.

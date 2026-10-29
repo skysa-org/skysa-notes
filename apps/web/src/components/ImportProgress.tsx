@@ -8,8 +8,8 @@ import { db, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import type { SchedulerStatus, SyncScheduler } from '../sync/scheduler.js';
-import { Dialog, DialogActions } from './Dialog.js';
-import { RunProgress } from './RunProgress.js';
+import { Dialog, DialogActions } from './ui/Dialog.js';
+import { RunProgress } from './ui/RunProgress.js';
 
 /**
  * A source's first import, as it happens, and the way out of it.

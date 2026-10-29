@@ -3,10 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { Dialog } from '../src/components/Dialog.js';
 import { drawTo, PatternGrid } from '../src/components/secrets/PatternGrid.js';
 import { UnlockDialog, UnlockForm } from '../src/components/secrets/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/secrets/UnlockEntry.js';
+import { Dialog } from '../src/components/ui/Dialog.js';
 import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
 import type { NotesDatabase, UnlockKind } from '../src/store/db.js';

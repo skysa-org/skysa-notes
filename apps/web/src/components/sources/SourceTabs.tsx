@@ -9,7 +9,7 @@ import { CONNECT_FIRST_LABEL, tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
-import { RowRename } from '../RowRename.js';
+import { RowRename } from '../ui/RowRename.js';
 import { AddSource } from './AddSource.js';
 import { ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';

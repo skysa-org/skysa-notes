@@ -1,7 +1,7 @@
 /**
  * Elements of a given width, for the parts of the app that size themselves by
  * the room their own part of the screen has (`useElementWidth` in
- * `src/components/layout.ts`).
+ * `src/components/ui/layout.ts`).
  *
  * jsdom lays nothing out: every element is 0px wide, which the app reads as
  * "plenty of room", and it has no `ResizeObserver`. This gives the elements a

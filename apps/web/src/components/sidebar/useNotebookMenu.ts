@@ -7,7 +7,7 @@ import type { NotebookPin } from '../../store/pins.js';
 import type { Moving } from '../../store/rearrange.js';
 import type { Renamings } from '../../store/renaming.js';
 import type { FolderNode } from '../../store/tree.js';
-import { type OptionsMenuItem, useRowMenu } from '../OptionsMenu.js';
+import { type OptionsMenuItem, useRowMenu } from '../ui/OptionsMenu.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 
 const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>

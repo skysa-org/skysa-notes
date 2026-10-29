@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';
 import type { Moving } from '../../store/rearrange.js';
-import { ConfirmDialog } from '../ConfirmDialog.js';
+import { ConfirmDialog } from '../ui/ConfirmDialog.js';
 
 /**
  * Inline rather than a `prompt()`: a modal browser dialog blocks the page, is

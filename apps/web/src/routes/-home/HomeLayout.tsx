@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 
-import { type Notice, NotifyContext } from '../../components/notify.js';
+import { type Notice, NotifyContext } from '../../components/ui/notify.js';
 import { t } from '../../i18n/t.js';
 import { InstallBanner } from '../../install/InstallBanner.js';
 import type { SyncStateRecord } from '../../store/db.js';

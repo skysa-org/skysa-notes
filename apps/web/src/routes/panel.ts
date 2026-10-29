@@ -8,7 +8,7 @@ import {
 	useState,
 } from 'react';
 
-import { COMPACT, useMediaQuery } from '../components/layout.js';
+import { COMPACT, useMediaQuery } from '../components/ui/layout.js';
 
 /**
  * The compact window's dropdowns as the history holds them: which pane is

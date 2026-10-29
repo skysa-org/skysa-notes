@@ -18,11 +18,11 @@ import { type LiveEdit, type LiveEdits, shownNote, useLiveEdit } from '../store/
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { nameless, shownName } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
-import { rems, useElementWidth, useFontsStatus } from './layout.js';
 import { middleEllipsis } from './middleEllipsis.js';
 import { ProviderIcon } from './ProviderIcon.js';
 import { NoteSearchField, type SearchFieldProps } from './SearchField.js';
 import { useShowingSource } from './sources/useShowingSource.js';
+import { rems, useElementWidth, useFontsStatus } from './ui/layout.js';
 
 /**
  * The bar across the top of a compact window, where the sources, the notebooks

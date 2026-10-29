@@ -14,7 +14,7 @@ import {
 	rems,
 	useElementWidth,
 	useMediaQuery,
-} from '../layout.js';
+} from '../ui/layout.js';
 
 /**
  * What of the note's furniture there is room for: the outline beside it, and

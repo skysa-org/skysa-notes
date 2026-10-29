@@ -1,7 +1,7 @@
 import { isScratchPath, isWithin, rebasePath } from '@skysa/core';
 import { type RefObject, useCallback, useEffect, useState } from 'react';
 
-import type { Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/ui/notify.js';
 import { t } from '../../i18n/t.js';
 import { db } from '../../store/db.js';
 import { moveFolder } from '../../store/folders.js';

@@ -20,14 +20,14 @@ import {
 import { useSyncStatus } from '../../sync/runtime.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { ClipboardPanel } from '../ClipboardPanel.js';
-import { DialogActions, InlineDialog } from '../Dialog.js';
 import { DisconnectDialog } from '../DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from '../ImportNotes.js';
 import { otherLiveSources } from '../MoveUnsent.js';
 import { SecretsDialog } from '../secrets/SecretsDialog.js';
 import type { SecretsDialogProps } from '../secrets/types.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
-import { useEscape } from '../useEscape.js';
+import { DialogActions, InlineDialog } from '../ui/Dialog.js';
+import { useEscape } from '../ui/useEscape.js';
 import type { Client, Sync } from './clients.js';
 import { Devices, stillSignedIn, useGrants } from './Devices.js';
 import { DownloadAll, type Downloading, downloadItem, useDownloadAll } from './DownloadAll.js';

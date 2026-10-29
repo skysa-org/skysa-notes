@@ -6,7 +6,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { COMPACT, useElementWidth, useMediaQuery } from '../src/components/layout.js';
+import { COMPACT, useElementWidth, useMediaQuery } from '../src/components/ui/layout.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 

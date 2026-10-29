@@ -13,7 +13,7 @@ import {
 	unlockKeys,
 	type UnlockResult,
 } from '../../store/secretKeys.js';
-import { Dialog, DialogActions, DialogOption, DialogOptions } from '../Dialog.js';
+import { Dialog, DialogActions, DialogOption, DialogOptions } from '../ui/Dialog.js';
 import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEntry.js';
 
 /**

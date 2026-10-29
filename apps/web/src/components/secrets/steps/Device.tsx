@@ -2,7 +2,7 @@ import { useId } from 'react';
 
 import { t } from '../../../i18n/t.js';
 import type { UnlockKind } from '../../../store/db.js';
-import { DialogActions, DialogOption, DialogOptions } from '../../Dialog.js';
+import { DialogActions, DialogOption, DialogOptions } from '../../ui/Dialog.js';
 
 /**
  * Whether this device shows the source's passwords under its notebooks

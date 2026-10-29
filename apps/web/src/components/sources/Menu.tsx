@@ -1,6 +1,6 @@
 import { type ReactNode, type RefObject, useEffect } from 'react';
 
-import { useEscape } from '../useEscape.js';
+import { useEscape } from '../ui/useEscape.js';
 
 /**
  * What the `+` opens. Closes on Escape and on a press anywhere outside it, which is the whole of

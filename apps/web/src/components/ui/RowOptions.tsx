@@ -1,5 +1,5 @@
-import { Icon } from '../editor/icons.js';
-import { t } from '../i18n/t.js';
+import { Icon } from '../../editor/icons.js';
+import { t } from '../../i18n/t.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
 
 /** Which of the catalog's words are about each kind of row. */

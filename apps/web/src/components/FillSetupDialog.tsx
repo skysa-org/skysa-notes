@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 import { bookmarkletUrl } from '../fill/bookmarklet.js';
 import { t } from '../i18n/t.js';
-import { Dialog } from './Dialog.js';
+import { Dialog } from './ui/Dialog.js';
 
 /**
  * Setting up the bookmarklet that fills in on sites (docs/ARCHITECTURE.md §7,

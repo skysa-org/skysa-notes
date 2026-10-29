@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { pickUpProps } from '../src/components/pickUpProps.js';
+import { pickUpProps } from '../src/components/ui/pickUpProps.js';
 
 /**
  * A row's drag and right-click, a notebook's and a note's alike: where the row

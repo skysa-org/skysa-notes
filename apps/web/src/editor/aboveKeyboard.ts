@@ -3,7 +3,7 @@ import { ViewPlugin } from '@codemirror/view';
 import { Plugin } from '@milkdown/kit/prose/state';
 import { cell } from '@skysa/core';
 
-import { COARSE_POINTER, mediaMatches, rems } from '../components/layout.js';
+import { COARSE_POINTER, mediaMatches, rems } from '../components/ui/layout.js';
 
 /**
  * The caret kept above a phone's keyboard, in both editors.

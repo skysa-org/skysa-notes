@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { besideOf, indicesIn, topsOf } from '../src/components/windowing.js';
+import { besideOf, indicesIn, topsOf } from '../src/components/ui/windowing.js';
 
 /** Which items of a long list are near the screen (#275), worked out without a layout. */
 

@@ -8,7 +8,7 @@ import {
 	downloadSource,
 	type Library,
 } from '../../store/exportNotes.js';
-import type { OptionsMenuItem } from '../OptionsMenu.js';
+import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
  * The whole of one source, as one archive of markdown files: the tree a push
