@@ -509,8 +509,8 @@ const Home = () => {
 						<NotesPane
 							notes={notes}
 							renamings={renamings}
-							noteId={noteId}
-							folder={folder}
+							selectedNoteId={noteId}
+							folderPath={folder}
 							select={select}
 							onCreateNote={onCreateNote}
 							onCreateNotebook={askNewNotebook}

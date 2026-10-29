@@ -15,8 +15,8 @@ import { type Select } from './useOpenPlace.js';
 export const NotesPane = ({
 	notes,
 	renamings,
-	noteId,
-	folder,
+	selectedNoteId,
+	folderPath,
 	select,
 	onCreateNote,
 	onCreateNotebook,
@@ -34,14 +34,14 @@ export const NotesPane = ({
 		NoteListProps,
 		| 'notes'
 		| 'renamings'
+		| 'selectedNoteId'
+		| 'folderPath'
 		| 'onCreateNote'
 		| 'onCreateNotebook'
 		| 'storeLoaded'
 		| 'unsavedNoteId'
 		| 'liveEdits'
 	> & {
-		noteId: string | undefined;
-		folder: string | undefined;
 		select: Select;
 		/** Put a note in the air from its row, as a drag does (`useMoving`). */
 		setMoving: (moving: Moving) => void;
@@ -57,7 +57,7 @@ export const NotesPane = ({
 	<NoteList
 		notes={notes}
 		renamings={renamings}
-		selectedNoteId={noteId}
+		selectedNoteId={selectedNoteId}
 		// A note listed from a notebook inside the open one opens that
 		// notebook with it, as a search result does: the sidebar then
 		// lights the notebook the note is in.
@@ -67,7 +67,7 @@ export const NotesPane = ({
 		}}
 		onCreateNote={onCreateNote}
 		onCreateNotebook={onCreateNotebook}
-		folderPath={folder}
+		folderPath={folderPath}
 		storeLoaded={storeLoaded}
 		onPickUpNote={(note) => {
 			setMoving({
@@ -82,8 +82,7 @@ export const NotesPane = ({
 		unsavedNoteId={unsavedNoteId}
 		liveEdits={liveEdits}
 		// The note's own menu, about the note on the row its `⋯` or
-		// a right-click is on, which need not be the one open. Delete goes through the note pane,
-		// which holds what autosave has not stored yet.
+		// a right-click is on, which need not be the one open.
 		pinnedNoteIds={pins?.notes}
 		menuFor={(note) =>
 			noteMenuItems({
