@@ -1,6 +1,5 @@
 import type { ApiClient, InstanceConfig } from '../../api/client.js';
 import type { Asked } from '../../api/instanceConfig.js';
-import type { NotesDatabase } from '../../store/db.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
 
@@ -18,7 +17,6 @@ export type Sync = Pick<
 
 export interface LocalProps {
 	client: Client;
-	database: NotesDatabase;
 	config: Asked<InstanceConfig>;
 	returnTo: string;
 	navigate?: (url: string) => void;

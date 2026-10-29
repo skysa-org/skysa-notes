@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client.js';
 import { answer, type Asked, useInstanceConfig } from '../../api/instanceConfig.js';
 import type { pickFiles } from '../../editor/pickFiles.js';
-import { activeConnectionId, db as defaultDb, type NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { activeConnectionId } from '../../store/db.js';
 import { downloadLibrary, downloadUnsent, type Library } from '../../store/exportNotes.js';
 import { type Keeping, keeping as browserKeeping } from '../../store/keeping.js';
 import { isLiveSource } from '../../store/rowStates.js';
@@ -37,7 +38,6 @@ import { useDisconnects } from './useDisconnects.js';
 
 export interface AccountPanelProps {
 	client?: Client;
-	database?: NotesDatabase;
 	sync?: Sync;
 	/**
 	 * How to leave for the provider's consent page. Injected like the rest, and
@@ -86,7 +86,6 @@ export const returnPath = (href: string): string => {
 
 export const AccountPanel = ({
 	client = api,
-	database = defaultDb,
 	sync = syncScheduler,
 	navigate,
 	download = downloadLibrary,
@@ -95,6 +94,7 @@ export const AccountPanel = ({
 	pick,
 	slot,
 }: AccountPanelProps) => {
+	const database = useDb();
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
 	// `useLiveQuery` for "not read yet". Unwrapped, the two look the same.
@@ -111,7 +111,7 @@ export const AccountPanel = ({
 	// The one request per client the bar's own asking shares (`useInstanceConfig`).
 	const config = useInstanceConfig(client);
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
-	const { disconnects, disconnect } = useDisconnects(database, client);
+	const { disconnects, disconnect } = useDisconnects(client);
 	// What a source never sent, with the files whose bytes are here. A file it
 	// leaves out is the remote's, which still has it, so nothing is said of it.
 	const downloadListed = (listed: Unsynced): Promise<void> =>
@@ -190,7 +190,6 @@ export const AccountPanel = ({
 			return (
 				<NotConnected
 					client={client}
-					database={database}
 					config={config}
 					returnTo={returnTo}
 					downloadAll={downloadAll}
@@ -207,7 +206,6 @@ export const AccountPanel = ({
 				<Detached
 					key={bound.state.connectionId}
 					client={client}
-					database={database}
 					config={config}
 					bound={bound.state}
 					download={downloadListed}
@@ -234,7 +232,6 @@ export const AccountPanel = ({
 				downloadAll={downloadAll}
 				{...(pick === undefined ? {} : { pick })}
 				client={client}
-				database={database}
 				sync={sync}
 				bound={bound.state}
 				config={config}

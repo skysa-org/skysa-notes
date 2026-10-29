@@ -25,6 +25,7 @@ import {
 	showConnection,
 } from '../src/store/connection.js';
 import { beginConnect, hashCredential } from '../src/store/credentials.js';
+import { DatabaseProvider } from '../src/store/database.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
@@ -293,39 +294,40 @@ const renderPanel = (
 	const Shell = () => {
 		const href = useRouterState({ select: (state) => state.location.href });
 		return (
-			<WithNotices>
-				<SourceTabs
-					db={database}
-					client={client}
-					returnTo={returnPath(href)}
-					navigate={(to) => {
-						went.push(to);
-						go(to);
-					}}
-				/>
-				<AccountPanel
-					client={client}
-					database={database}
-					sync={sync}
-					navigate={(to) => {
-						went.push(to);
-						go(to);
-					}}
-					download={(library) => {
-						downloaded.push(library.notes.map((note) => note.title));
-						downloadedFiles.push(library.files.map((file) => file.path));
-					}}
-					keeping={keep}
-					{...(pick === undefined ? {} : { pick })}
-					downloadAll={(library) => {
-						saveAll(library);
-						downloadedAll.push({
-							notes: library.notes.map((note) => note.title).sort(),
-							folders: library.folders.map((folder) => folder.path),
-						});
-					}}
-				/>
-			</WithNotices>
+			<DatabaseProvider db={database}>
+				<WithNotices>
+					<SourceTabs
+						db={database}
+						client={client}
+						returnTo={returnPath(href)}
+						navigate={(to) => {
+							went.push(to);
+							go(to);
+						}}
+					/>
+					<AccountPanel
+						client={client}
+						sync={sync}
+						navigate={(to) => {
+							went.push(to);
+							go(to);
+						}}
+						download={(library) => {
+							downloaded.push(library.notes.map((note) => note.title));
+							downloadedFiles.push(library.files.map((file) => file.path));
+						}}
+						keeping={keep}
+						{...(pick === undefined ? {} : { pick })}
+						downloadAll={(library) => {
+							saveAll(library);
+							downloadedAll.push({
+								notes: library.notes.map((note) => note.title).sort(),
+								folders: library.folders.map((folder) => folder.path),
+							});
+						}}
+					/>
+				</WithNotices>
+			</DatabaseProvider>
 		);
 	};
 	const router = createRouter({
@@ -399,26 +401,27 @@ const renderDropdown = (
 	sync: FakeSync = fakeSync({ phase: 'local' })
 ) => {
 	const Shell = () => (
-		<WithNotices>
-			<SourcePanel
-				db={database}
-				client={client}
-				returnTo="/"
-				navigate={() => undefined}
-				account={(slot) => (
-					<AccountPanel
-						client={client}
-						database={database}
-						sync={sync}
-						navigate={() => undefined}
-						download={() => undefined}
-						downloadAll={() => undefined}
-						keeping={createKeeping(() => undefined)}
-						slot={slot}
-					/>
-				)}
-			/>
-		</WithNotices>
+		<DatabaseProvider db={database}>
+			<WithNotices>
+				<SourcePanel
+					db={database}
+					client={client}
+					returnTo="/"
+					navigate={() => undefined}
+					account={(slot) => (
+						<AccountPanel
+							client={client}
+							sync={sync}
+							navigate={() => undefined}
+							download={() => undefined}
+							downloadAll={() => undefined}
+							keeping={createKeeping(() => undefined)}
+							slot={slot}
+						/>
+					)}
+				/>
+			</WithNotices>
+		</DatabaseProvider>
 	);
 	const router = createRouter({
 		routeTree: createRootRoute({ component: Shell }),
@@ -3254,13 +3257,14 @@ describe('AccountPanel, when another tab changes the connection', () => {
 		const router = createRouter({
 			routeTree: createRootRoute({
 				component: () => (
-					<WithNotices>
-						<AccountPanel
-							client={clientWith({ connection })}
-							database={db}
-							sync={fakeSync({ phase: 'local' })}
-						/>
-					</WithNotices>
+					<DatabaseProvider db={db}>
+						<WithNotices>
+							<AccountPanel
+								client={clientWith({ connection })}
+								sync={fakeSync({ phase: 'local' })}
+							/>
+						</WithNotices>
+					</DatabaseProvider>
 				),
 			}),
 			history: createMemoryHistory({ initialEntries: ['/'] }),

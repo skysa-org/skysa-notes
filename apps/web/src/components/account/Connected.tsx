@@ -8,7 +8,8 @@ import { t } from '../../i18n/t.js';
 import { tabLock } from '../../secrets/tabLock.js';
 import { setClipboardShown, showsClipboard } from '../../store/clipboard.js';
 import { connectedSources } from '../../store/connection.js';
-import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { holdsAnything, type Library } from '../../store/exportNotes.js';
 import type { Unsynced } from '../../store/unsynced.js';
 import {
@@ -65,7 +66,6 @@ const accountName = (state: AccountState | undefined, bound: SyncStateRecord): s
 
 interface ConnectedProps {
 	client: Client;
-	database: NotesDatabase;
 	sync: Sync;
 	bound: SyncStateRecord;
 	config: Asked<InstanceConfig>;
@@ -99,7 +99,6 @@ const ConnectedFoot = ({
 	displayName,
 	openButton,
 	client,
-	database,
 	grants,
 	onGrantsChanged,
 	downloadable,
@@ -142,10 +141,10 @@ const ConnectedFoot = ({
 	 */
 	openButton: RefObject<HTMLButtonElement | null>;
 	client: Client;
-	database: NotesDatabase;
 	grants: Asked<Grant[]>;
 	onGrantsChanged: () => void;
 }) => {
+	const database = useDb();
 	const [about, setAbout] = useState(false);
 	const [details, setDetails] = useState(false);
 	const detailsButton = useRef<HTMLButtonElement>(null);
@@ -154,8 +153,8 @@ const ConnectedFoot = ({
 	// the source's name and has nothing to open.
 	const tappable = !importingHere(bound) && status.phase !== 'local';
 	const menus = useMenuButtons(openButton);
-	const scratchpad = useScratchpadItem(database, bound.connectionId);
-	const secretsItems = useSecretsItem(database, bound, status.phase, () => {
+	const scratchpad = useScratchpadItem(bound.connectionId);
+	const secretsItems = useSecretsItem(bound, status.phase, () => {
 		onSecrets(true);
 	});
 	const items = storageItems({
@@ -238,7 +237,6 @@ const ConnectedFoot = ({
 			>
 				<Devices
 					client={client}
-					database={database}
 					connectionId={bound.connectionId}
 					grants={grants}
 					onChanged={onGrantsChanged}
@@ -283,7 +281,6 @@ const importInto = (bound: SyncStateRecord, pick: typeof pickFiles | undefined) 
 
 export const Connected = ({
 	client,
-	database,
 	sync,
 	bound,
 	config,
@@ -297,6 +294,7 @@ export const Connected = ({
 	navigate,
 	slot,
 }: ConnectedProps) => {
+	const database = useDb();
 	const [step, setStep] = useState<Step>({ kind: 'closed' });
 	const [rescanning, setRescanning] = useState(false);
 	const [secrets, setSecrets] = useState(false);
@@ -309,13 +307,13 @@ export const Connected = ({
 		() => holdsAnything(database, connectionId),
 		[database, connectionId]
 	);
-	const downloading = useDownloadAll(database, connectionId, downloadAll);
-	const importing = useImportNotes(database, connectionId, importInto(bound, pick));
+	const downloading = useDownloadAll(connectionId, downloadAll);
+	const importing = useImportNotes(connectionId, importInto(bound, pick));
 	// The other live sources, which what this one never sent could go to.
 	const sources = useLiveQuery(() => connectedSources(database), [database]);
 	const targets = otherLiveSources(sources, connectionId);
 	// Here rather than in the list, because the question counts them too.
-	const devices = useGrants(client, database, connectionId);
+	const devices = useGrants(client, connectionId);
 	const disconnecting = disconnects[connectionId];
 	const busy = disconnecting?.busy === true;
 	const problem = disconnecting?.problem ?? null;
@@ -444,7 +442,6 @@ export const Connected = ({
 			<section ref={panel} className="account" aria-label={t('account.region')}>
 				<SyncState
 					client={client}
-					database={database}
 					sync={sync}
 					bound={bound}
 					label={label}
@@ -535,7 +532,6 @@ export const Connected = ({
 					ask={ask}
 					openButton={openButton}
 					client={client}
-					database={database}
 					grants={devices.grants}
 					onGrantsChanged={devices.ask}
 				/>

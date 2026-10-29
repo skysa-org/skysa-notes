@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';
+import { useDb } from '../../store/database.js';
 import type { NotesDatabase } from '../../store/db.js';
 import { holdsTextFor } from '../../store/detached.js';
 import { settleEditors } from '../../store/heldEdits.js';
@@ -115,7 +116,8 @@ const wentAs = (result: LetGoResult): Disconnecting | undefined => {
  * Every entry names its source, from the moment the user asked — the answer can
  * take seconds, and it is about that source whatever the panel shows by then.
  */
-export const useDisconnects = (database: NotesDatabase, client: Client) => {
+export const useDisconnects = (client: Client) => {
+	const database = useDb();
 	const [disconnects, setDisconnects] = useState<Readonly<Record<string, Disconnecting>>>({});
 	// Read where a second one is refused: state as the last render saw it would
 	// let two clicks in one tick both through.

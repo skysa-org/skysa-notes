@@ -4,6 +4,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { answer } from '../../api/instanceConfig.js';
 import type { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
+import { useDb } from '../../store/database.js';
 import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { holdsAnything, type Library } from '../../store/exportNotes.js';
 import type { Keeping } from '../../store/keeping.js';
@@ -42,7 +43,6 @@ const useKept = (keep: Keeping) => {
 
 export const NotConnected = ({
 	config,
-	database,
 	downloadAll,
 	keep,
 	slot,
@@ -52,10 +52,11 @@ export const NotConnected = ({
 	keep: Keeping;
 	pick: typeof pickFiles | undefined;
 }) => {
+	const database = useDb();
 	const settings = answer(config);
 	const holds = useLiveQuery(() => holdsAnything(database, LOCAL_CONNECTION_ID), [database]);
-	const downloading = useDownloadAll(database, LOCAL_CONNECTION_ID, downloadAll);
-	const importing = useImportNotes(database, LOCAL_CONNECTION_ID, {
+	const downloading = useDownloadAll(LOCAL_CONNECTION_ID, downloadAll);
+	const importing = useImportNotes(LOCAL_CONNECTION_ID, {
 		label: t('account.thisDevice'),
 		syncs: false,
 		...(pick === undefined ? {} : { pick }),
@@ -70,7 +71,7 @@ export const NotConnected = ({
 		settings?.authMode === 'storage-first'
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
-	const scratchpad = useScratchpadItem(database, LOCAL_CONNECTION_ID);
+	const scratchpad = useScratchpadItem(LOCAL_CONNECTION_ID);
 	const items = [
 		...downloadItem(offersDownload(true, holds), downloading),
 		...importItems(importing, { scratchpad: scratchpad.shown === true }),
