@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import { api, type ApiClient } from '../../api/client.js';
 import { rich } from '../../i18n/rich.js';
@@ -9,16 +9,14 @@ import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../../
 import { holdsAnything } from '../../store/exportNotes.js';
 import type { Renamings } from '../../store/renaming.js';
 import { isLiveSource } from '../../store/rowStates.js';
-import { CONNECT_FIRST_LABEL, CONNECTABLE, tabName } from '../../sync/account.js';
+import { CONNECTABLE, tabName } from '../../sync/account.js';
 import type { OptionsMenuItem } from '../OptionsMenu.js';
 import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
 import { RowOptions } from '../RowOptions.js';
 import { RowRename } from '../RowRename.js';
 import { secretsLabel } from '../SecretsDialog.js';
-import { ConnectChoice } from './connect/ConnectChoice.js';
-import { Menu } from './Menu.js';
+import { AddSource } from './AddSource.js';
 import { storeSourceName } from './SourceName.js';
-import { useAdding } from './useAdding.js';
 import { useSourceChoices } from './useSourceChoices.js';
 
 /**
@@ -99,10 +97,8 @@ export const SourcePanel = ({
 	renamings,
 	enterCode,
 }: SourcePanelProps) => {
-	const { ordered, offerable, gate, live, connectLabel } = useSourceChoices(db, client);
-	const first = connectLabel === CONNECT_FIRST_LABEL;
-	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offerable.length > 0);
-	const addFrame = useRef<HTMLDivElement>(null);
+	const choices = useSourceChoices(db, client);
+	const { ordered, offerable, connectLabel } = choices;
 	// State rather than a ref: the storage panel draws its menu into this, and
 	// has to be drawn again once it is there.
 	const [actions, setActions] = useState<HTMLDivElement | null>(null);
@@ -193,42 +189,28 @@ export const SourcePanel = ({
 			<div className="pane-header">
 				<h2>{t('sources.title')}</h2>
 				<div className="pane-actions">
-					<div className="source-add" ref={addFrame}>
-						<button
-							type="button"
-							className="icon"
-							title={connectLabel}
-							aria-label={connectLabel}
-							aria-haspopup="true"
-							aria-expanded={adding}
-							disabled={offerable.length === 0}
-							onClick={toggle}
-						>
-							+
-						</button>
-						{adding && offerable.length > 0 && (
-							<Menu
-								className="source-add-menu"
-								label={t('sources.providers')}
-								frame={addFrame}
-								onClose={stopAdding}
+					<AddSource
+						choices={choices}
+						enterCode={enterCode}
+						db={db}
+						client={client}
+						returnTo={returnTo}
+						navigate={navigate}
+						button={({ adding, toggle }) => (
+							<button
+								type="button"
+								className="icon"
+								title={connectLabel}
+								aria-label={connectLabel}
+								aria-haspopup="true"
+								aria-expanded={adding}
+								disabled={offerable.length === 0}
+								onClick={toggle}
 							>
-								<p className="source-add-heading">
-									{first ? t('sources.chooseProvider') : connectLabel}
-								</p>
-								<ConnectChoice
-									gate={gate}
-									live={live}
-									openAt={openAt}
-									db={db}
-									client={client}
-									offerable={offerable}
-									returnTo={returnTo}
-									navigate={navigate}
-								/>
-							</Menu>
+								+
+							</button>
 						)}
-					</div>
+					/>
 				</div>
 			</div>
 			{ordered.length > 0 && (

@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import { api, type ApiClient } from '../../api/client.js';
 import { rich } from '../../i18n/rich.js';
@@ -10,10 +10,8 @@ import { CONNECT_FIRST_LABEL, tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
-import { ConnectChoice } from './connect/ConnectChoice.js';
-import { Menu } from './Menu.js';
+import { AddSource } from './AddSource.js';
 import { RenameField, storeSourceName } from './SourceName.js';
-import { useAdding } from './useAdding.js';
 import { useSourceChoices } from './useSourceChoices.js';
 
 export interface SourceTabsProps {
@@ -67,17 +65,12 @@ export const SourceTabs = ({
 	enterCode,
 	sync = syncScheduler,
 }: SourceTabsProps) => {
-	const { ordered, offerable, gate, live, connectLabel, nothingToShow } = useSourceChoices(
-		db,
-		client
-	);
+	const choices = useSourceChoices(db, client);
+	const { ordered, offerable, connectLabel, nothingToShow } = choices;
 	// The scheduler syncs the showing source only, so it is the only one
 	// known to need connecting again.
 	const reconnect = useNeedsReconnect(sync);
-	const first = connectLabel === CONNECT_FIRST_LABEL;
 	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
-	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offerable.length > 0);
-	const addFrame = useRef<HTMLDivElement>(null);
 
 	if (nothingToShow && search === undefined) return null;
 
@@ -127,51 +120,39 @@ export const SourceTabs = ({
 				</ul>
 			</nav>
 			{offerable.length > 0 && (
-				<div className="source-add" ref={addFrame}>
-					<button
-						type="button"
-						className={
-							adding ? 'source-add-button source-add-button-on' : 'source-add-button'
-						}
-						// Named by its words where it has them, which is when nothing is
-						// connected; a bare `+` beside the tabs is named for what it does.
-						{...(first ? {} : { 'aria-label': connectLabel })}
-						aria-haspopup="true"
-						aria-expanded={adding}
-						onClick={toggle}
-					>
-						{first ? (
-							<>
-								<span aria-hidden="true">+</span>{' '}
-								<span className="source-add-label">{CONNECT_FIRST_LABEL}</span>
-							</>
-						) : (
-							'+'
-						)}
-					</button>
-					{adding && (
-						<Menu
-							className="source-add-menu"
-							label={t('sources.providers')}
-							frame={addFrame}
-							onClose={stopAdding}
+				<AddSource
+					choices={choices}
+					enterCode={enterCode}
+					db={db}
+					client={client}
+					returnTo={returnTo}
+					navigate={navigate}
+					button={({ adding, toggle, first }) => (
+						<button
+							type="button"
+							className={
+								adding
+									? 'source-add-button source-add-button-on'
+									: 'source-add-button'
+							}
+							// Named by its words where it has them, which is when nothing is
+							// connected; a bare `+` beside the tabs is named for what it does.
+							{...(first ? {} : { 'aria-label': connectLabel })}
+							aria-haspopup="true"
+							aria-expanded={adding}
+							onClick={toggle}
 						>
-							<p className="source-add-heading">
-								{first ? t('sources.chooseProvider') : connectLabel}
-							</p>
-							<ConnectChoice
-								gate={gate}
-								live={live}
-								openAt={openAt}
-								db={db}
-								client={client}
-								offerable={offerable}
-								returnTo={returnTo}
-								navigate={navigate}
-							/>
-						</Menu>
+							{first ? (
+								<>
+									<span aria-hidden="true">+</span>{' '}
+									<span className="source-add-label">{CONNECT_FIRST_LABEL}</span>
+								</>
+							) : (
+								'+'
+							)}
+						</button>
 					)}
-				</div>
+				/>
 			)}
 			{search !== undefined && <div className="source-search">{search}</div>}
 		</div>

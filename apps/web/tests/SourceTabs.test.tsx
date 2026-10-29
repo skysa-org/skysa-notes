@@ -400,6 +400,27 @@ describe('the source tabs', () => {
 		).toHaveLength(0);
 	});
 
+	it('heads its menu by what it asks: a provider at first, another account after', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		const { unmount } = show(db);
+
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+		const heading = () =>
+			within(screen.getByRole('group', { name: 'Storage providers' })).getByText(
+				/^(Choose a storage provider|Connect another account)$/
+			).textContent;
+		await screen.findByRole('group', { name: 'Storage providers' });
+		expect(heading()).toBe('Choose a storage provider');
+		unmount();
+
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		show(db);
+		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+		await screen.findByRole('group', { name: 'Storage providers' });
+		expect(heading()).toBe('Connect another account');
+	});
+
 	it('does not call a source of unknown provider "This device" as well', async () => {
 		// A save landing after the connection went brings a row back with no
 		// provider on it (`ensureDetached`). It is not the pile — it holds an
