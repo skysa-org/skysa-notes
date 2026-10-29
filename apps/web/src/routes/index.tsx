@@ -1,11 +1,4 @@
-import {
-	basename,
-	isVaultPath,
-	parentPath,
-	ROOT,
-	SCRATCHPAD_FOLDER,
-	VAULT_FOLDER,
-} from '@skysa/core';
+import { basename, parentPath, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback, useRef, useState } from 'react';
 
@@ -16,14 +9,11 @@ import { CompactBar } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
-import { NameDialog } from '../components/NameDialog.js';
 import { NoteList } from '../components/NoteList.js';
 import { noteMenuItems } from '../components/noteMenu.js';
 import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
 import { type Notice, NotifyContext } from '../components/notify.js';
-import { PasswordItem } from '../components/PasswordItem.js';
 import { Passwords } from '../components/Passwords.js';
-import { CardSheet, ScratchModal, Scratchpad } from '../components/Scratchpad.js';
 import { NoteSearchField, SearchQuery } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourceTabs } from '../components/SourceTabs.js';
@@ -53,14 +43,14 @@ import { deleteNote, getNote } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { setNotebookPin, setNotePinned } from '../store/pins.js';
 import { createRenamings } from '../store/renaming.js';
-import { isLive } from '../store/rowStates.js';
-import { scratchMarks } from '../store/scratchpad.js';
 import { nameShown, titleShown } from '../store/titles.js';
 import { findFolder, notesUnder } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import { useEnterCode, useKeepOnInstall, useShellCommands } from './-home/commands.js';
 import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
+import { NoteColumn, PasswordColumn } from './-home/NoteColumn.js';
 import { covered, emptyPaneOffers, placeRow } from './-home/rules.js';
+import { ScratchOverlays, ScratchPane } from './-home/ScratchParts.js';
 import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
 import { useEscapePutsDown, useMoving } from './-home/useMoving.js';
@@ -493,106 +483,6 @@ const Home = () => {
 		/>
 	);
 
-	/**
-	 * What is in the note's column in the scratchpad: in a compact window, the
-	 * card open, full screen; nothing open, an empty pane behind the
-	 * scratchpad's. In a wide one the scratchpad has the column too.
-	 */
-	const noteColumn = () => {
-		if (inPasswords) return passwordColumn();
-		if (!inScratchpad) return noteEditor();
-		if (!compact) return null;
-		if (scratch.card !== undefined) {
-			// A pane open with a card open is a dropdown over it: nothing rests
-			// under a card (`useScratchpad`).
-			return (
-				<CardSheet id={scratch.card.id} unseen={panel !== null}>
-					{noteEditor(scratch.editing)}
-				</CardSheet>
-			);
-		}
-		return <section className="note-view empty" aria-label={t('shell.notePane')} />;
-	};
-
-	/**
-	 * What is in the note's column in the passwords: the item open, or, with
-	 * none, what to do, or in a compact window an empty pane behind the list.
-	 * Keyed by the item, so nothing one showed is there as another opens.
-	 */
-	const passwordColumn = () => {
-		if (openNote !== undefined && isLive(openNote) && isVaultPath(openNote.path)) {
-			return (
-				<PasswordItem
-					key={openNote.id}
-					note={openNote}
-					draft={place.noteDraft}
-					onProblem={setProblem}
-					onDelete={deletePassword}
-					// Not `select`, which would take down what the item had to
-					// say: why a new one could not be begun.
-					onClose={() => {
-						go({ folder: VAULT_FOLDER }, { replace: true, notePath: undefined });
-					}}
-					onOpen={(note) => {
-						select({ folder: VAULT_FOLDER, note: note.id }, { replace: true, note });
-					}}
-				/>
-			);
-		}
-		if (compact)
-			return <section className="note-view empty" aria-label={t('shell.notePane')} />;
-		return (
-			<section className="note-view empty" aria-label={t('shell.notePane')}>
-				<p className="muted placeholder">
-					{opening ? t('passwords.item.opening') : t('passwords.none')}
-				</p>
-			</section>
-		);
-	};
-
-	/** The scratchpad, in the notes' place. */
-	const scratchPane = () => (
-		<Scratchpad
-			notes={scratch.notes}
-			takingId={scratch.takingId}
-			editor={scratch.taking ? noteEditor(scratch.editing) : undefined}
-			onTake={scratch.take}
-			onCloseTake={scratch.closeTake}
-			openId={scratch.card?.id}
-			openingId={scratch.openingId}
-			onOpen={scratch.open}
-			onMark={scratch.mark}
-			onMove={scratch.offered}
-			onDelete={scratch.remove}
-			liveEdits={liveEdits}
-		/>
-	);
-
-	/** What the scratchpad puts over the page: a card's dialog, and the name it asks for. */
-	const scratchOverlays = () => (
-		<>
-			{scratch.modal && scratch.card !== undefined && (
-				<ScratchModal
-					id={scratch.card.id}
-					color={scratchMarks(scratch.card).color}
-					onClose={scratch.close}
-				>
-					{noteEditor(scratch.editing)}
-				</ScratchModal>
-			)}
-			{scratch.naming !== undefined && (
-				<NameDialog
-					title={t('shell.nameNote.title')}
-					text={t('shell.nameNote.text')}
-					label={t('shell.nameNote.label')}
-					confirmLabel={t('shell.nameNote.confirm')}
-					onConfirm={scratch.named}
-					onCancel={scratch.cancelNaming}
-				/>
-			)}
-		</>
-	);
-
 	return (
 		// `app-shell` is a three-column grid with exactly three children. A banner
 		// put inside it becomes a fourth grid item, takes the sidebar's column and
@@ -730,7 +620,7 @@ const Home = () => {
 					/>
 
 					{inScratchpad ? (
-						scratchPane()
+						<ScratchPane scratch={scratch} liveEdits={liveEdits} editor={noteEditor} />
 					) : inPasswords ? (
 						<Passwords
 							items={passwords.items}
@@ -802,10 +692,42 @@ const Home = () => {
 						/>
 					)}
 
-					{noteColumn()}
+					{inPasswords ? (
+						<PasswordColumn
+							openNote={openNote}
+							opening={opening}
+							compact={compact}
+							draft={place.noteDraft}
+							onProblem={setProblem}
+							onDelete={deletePassword}
+							// Not `select`, which would take down what the item had to
+							// say: why a new one could not be begun.
+							onClose={() => {
+								go(
+									{ folder: VAULT_FOLDER },
+									{ replace: true, notePath: undefined }
+								);
+							}}
+							onOpen={(note) => {
+								select(
+									{ folder: VAULT_FOLDER, note: note.id },
+									{ replace: true, note }
+								);
+							}}
+						/>
+					) : (
+						<NoteColumn
+							inScratchpad={inScratchpad}
+							compact={compact}
+							cardId={scratch.card?.id}
+							unseen={panel !== null}
+							editing={scratch.editing}
+							editor={noteEditor}
+						/>
+					)}
 				</div>
 
-				{scratchOverlays()}
+				<ScratchOverlays scratch={scratch} editor={noteEditor} />
 
 				{/*
 				 * One stack for everything this screen floats over the page. Two
