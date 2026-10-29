@@ -15,6 +15,7 @@ import {
 import { flushSync } from 'react-dom';
 
 import { DialogActions } from '../components/ui/Dialog.js';
+import { usePressAway } from '../components/ui/usePressAway.js';
 import { t } from '../i18n/t.js';
 import {
 	clearLink,
@@ -419,13 +420,16 @@ const useDismiss = (
 	close: (restoreFocus: boolean) => void,
 	host: RefObject<HTMLElement | null>
 ) => {
+	usePressAway(
+		[host],
+		() => {
+			close(false);
+		},
+		{ enabled: open, capture: true }
+	);
 	useEffect(() => {
 		if (!open) return;
 
-		const onPointerDown = (event: PointerEvent) => {
-			if (host.current?.contains(event.target as Node) === true) return;
-			close(false);
-		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== 'Escape') return;
 			// Claimed, so that the app's own shortcut registry — which stands
@@ -436,10 +440,8 @@ const useDismiss = (
 			close(true);
 		};
 
-		document.addEventListener('pointerdown', onPointerDown, true);
 		document.addEventListener('keydown', onKeyDown, true);
 		return () => {
-			document.removeEventListener('pointerdown', onPointerDown, true);
 			document.removeEventListener('keydown', onKeyDown, true);
 		};
 	}, [open, close, host]);

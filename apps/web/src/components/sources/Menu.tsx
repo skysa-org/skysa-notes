@@ -1,6 +1,7 @@
-import { type ReactNode, type RefObject, useEffect } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 import { useEscape } from '../ui/useEscape.js';
+import { usePressAway } from '../ui/usePressAway.js';
 
 /**
  * What the `+` opens. Closes on Escape and on a press anywhere outside it, which is the whole of
@@ -32,21 +33,16 @@ export const Menu = ({
 }) => {
 	useEscape(frame, true, onClose);
 
-	useEffect(() => {
-		const away = (event: PointerEvent) => {
-			const target = event.target;
-			if (target instanceof Node && frame.current?.contains(target) === true) return;
-			// A dialog is over everything, this menu included, and one opened from
-			// in here is drawn at the end of the page (`ConnectButton`): a press in
-			// it is an answer to it, not a press outside.
-			if (target instanceof Element && target.closest('[aria-modal="true"]') !== null) return;
+	// A dialog is over everything, this menu included, and one opened from in
+	// here is drawn at the end of the page (`ConnectButton`): a press in it is an
+	// answer to it, not a press outside.
+	usePressAway(
+		[frame],
+		() => {
 			onClose();
-		};
-		document.addEventListener('pointerdown', away);
-		return () => {
-			document.removeEventListener('pointerdown', away);
-		};
-	}, [onClose, frame]);
+		},
+		{ ignoreModals: true }
+	);
 
 	return (
 		<div className={`toolbar-panel ${className}`} role="group" aria-label={label}>

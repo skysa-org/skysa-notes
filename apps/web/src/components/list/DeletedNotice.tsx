@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';
 import { DismissButton } from '../ui/Toast.js';
+import { usePressAway } from '../ui/usePressAway.js';
 
 /**
  * How long a delete can be taken back from here. Long enough to notice the note
@@ -60,26 +61,16 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 			clearTimeout(timer);
 		};
 	}, [held, onDismiss]);
-	useEffect(() => {
-		if (keep) return undefined;
-		const away = (event: PointerEvent) => {
-			const target = event.target;
-			if (target instanceof Node && card.current?.contains(target) === true) return;
-			// Nor a press in a dialog over the page, which is not the page: the
-			// command palette offers this same Undo, and choosing it there by
-			// pointer would otherwise take it away before the click arrived.
-			if (target instanceof Element && target.closest('[aria-modal="true"]') !== null) {
-				return;
-			}
+	// Nor a press in a dialog over the page, which is not the page: the command
+	// palette offers this same Undo, and choosing it there by pointer would
+	// otherwise take it away before the click arrived.
+	usePressAway(
+		[card],
+		() => {
 			onDismiss();
-		};
-		// From an effect, as `Toast` does: by the time it listens, the press that
-		// deleted the note has finished dispatching and cannot take this away.
-		document.addEventListener('pointerdown', away);
-		return () => {
-			document.removeEventListener('pointerdown', away);
-		};
-	}, [keep, onDismiss]);
+		},
+		{ enabled: !keep, ignoreModals: true }
+	);
 
 	return (
 		<div

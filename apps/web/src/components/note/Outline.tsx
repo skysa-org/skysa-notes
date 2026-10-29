@@ -3,6 +3,7 @@ import { type Heading, headings } from '@skysa/core';
 import { type RefObject, useEffect, useMemo, useRef } from 'react';
 
 import { t } from '../../i18n/t.js';
+import { usePressAway } from '../ui/usePressAway.js';
 
 /**
  * The note's headings, down the side, as somewhere to jump to.
@@ -136,26 +137,26 @@ const TOGGLE = '[data-outline-toggle]';
  * focused as it opens, as a menu's first item is.
  */
 const useFlyout = (nav: RefObject<HTMLElement | null>, onClose: (() => void) | undefined) => {
+	// The toggle is not away: a press on it shuts the flyout itself.
+	usePressAway(
+		[nav],
+		() => {
+			onClose?.();
+		},
+		{ enabled: onClose !== undefined, capture: true, inside: TOGGLE }
+	);
 	useEffect(() => {
 		const element = nav.current;
 		if (onClose === undefined || element === null) return undefined;
 		element.querySelector('button')?.focus({ preventScroll: true });
-		const onPress = (event: PointerEvent) => {
-			const target = event.target as Element | null;
-			if (target === null || element.contains(target) || target.closest(TOGGLE) !== null)
-				return;
-			onClose();
-		};
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key !== 'Escape') return;
 			event.stopPropagation();
 			onClose();
 			document.querySelector<HTMLElement>(TOGGLE)?.focus();
 		};
-		document.addEventListener('pointerdown', onPress, true);
 		element.addEventListener('keydown', onKey);
 		return () => {
-			document.removeEventListener('pointerdown', onPress, true);
 			element.removeEventListener('keydown', onKey);
 		};
 	}, [nav, onClose]);

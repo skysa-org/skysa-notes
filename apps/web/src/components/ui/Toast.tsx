@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 
 import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
+import { usePressAway } from './usePressAway.js';
 
 /**
  * What a toast is about. It decides the colour, the weight of the words, and
@@ -81,22 +82,16 @@ export interface ToastProps {
 export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 	const card = useRef<HTMLDivElement>(null);
 
-	useEffect(() => {
-		const away = (event: PointerEvent) => {
-			// Not our own Dismiss, and not a word being selected in the message.
-			const target = event.target;
-			if (target instanceof Node && card.current?.contains(target) === true) return;
+	// Not our own Dismiss, not a word being selected in the message, and not a
+	// press in a dialog over the page (#443): what is pressed there answers the
+	// dialog, and the toast is still to be read once it has gone.
+	usePressAway(
+		[card],
+		() => {
 			onDismiss();
-		};
-		// `pointerdown`, so a press anywhere answers without waiting to see
-		// whether it becomes a click; and attached from an effect, so that by the
-		// time it is listening the interaction that put this toast here has
-		// finished dispatching and cannot be the one that takes it away again.
-		document.addEventListener('pointerdown', away);
-		return () => {
-			document.removeEventListener('pointerdown', away);
-		};
-	}, [onDismiss]);
+		},
+		{ ignoreModals: true }
+	);
 
 	return (
 		<div ref={card} className={`toast toast-${tone}`} role={ROLE[tone]}>

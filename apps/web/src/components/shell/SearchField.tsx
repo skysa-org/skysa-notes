@@ -17,6 +17,7 @@ import { titleShown } from '../../store/titles.js';
 import { folderLabel } from '../../store/tree.js';
 import { editedAt } from '../ui/editedAt.js';
 import { usePointerMoved } from '../ui/usePointerMoved.js';
+import { usePressAway } from '../ui/usePressAway.js';
 
 /**
  * The app's search field, and its answers in a list that drops from it.
@@ -205,18 +206,13 @@ const offered = (
  */
 const useOpen = (frame: RefObject<HTMLDivElement | null>) => {
 	const [open, setOpen] = useState(false);
-	useEffect(() => {
-		if (!open) return undefined;
-		const away = (event: PointerEvent) => {
-			const target = event.target;
-			if (target instanceof Node && frame.current?.contains(target) === true) return;
+	usePressAway(
+		[frame],
+		() => {
 			setOpen(false);
-		};
-		document.addEventListener('pointerdown', away);
-		return () => {
-			document.removeEventListener('pointerdown', away);
-		};
-	}, [open, frame]);
+		},
+		{ enabled: open }
+	);
 	return [open, setOpen] as const;
 };
 

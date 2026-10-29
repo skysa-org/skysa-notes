@@ -10,6 +10,8 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { usePressAway } from './usePressAway.js';
+
 /**
  * What can be done to one thing, behind one button: the notebook menu in the
  * sidebar's header (`NotebookMenu`) and the note's in its own.
@@ -320,6 +322,12 @@ export const FloatingMenu = ({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	const goneAway = () => {
+		handBack.current = false;
+		onClose();
+	};
+	usePressAway(anchor === undefined ? [card] : [card, anchor], goneAway);
+
 	useEffect(() => {
 		const element = card.current;
 		const away = (event: Event) => {
@@ -336,14 +344,12 @@ export const FloatingMenu = ({
 			event.preventDefault();
 			onClose();
 		};
-		document.addEventListener('pointerdown', away);
 		// Capture: a scroll in any pane, not only the page's own.
 		document.addEventListener('scroll', away, true);
 		window.addEventListener('resize', away);
 		window.addEventListener('blur', away);
 		element?.addEventListener('keydown', onKey);
 		return () => {
-			document.removeEventListener('pointerdown', away);
 			document.removeEventListener('scroll', away, true);
 			window.removeEventListener('resize', away);
 			window.removeEventListener('blur', away);
