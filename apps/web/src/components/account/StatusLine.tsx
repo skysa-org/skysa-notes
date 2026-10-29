@@ -3,24 +3,16 @@ import type { ReactNode, RefObject } from 'react';
 import { t } from '../../i18n/t.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { InfoDialog } from '../ui/InfoDialog.js';
-import { RunProgress } from '../ui/RunProgress.js';
+import { RunBar, RunProgress } from '../ui/RunProgress.js';
 import { lineStatus, statusMessage, type SyncCount } from './statusWords.js';
 
 /**
  * How full a long run is, under what says how far it has got: a fraction, or,
  * while a scan or a round is still listing, a bar that does not pretend to know.
  */
-export const SyncBar = ({ count }: { count: SyncCount }) =>
-	count.bar === null ? (
-		<progress className="account-bar" aria-label={t('account.progress')} />
-	) : (
-		<progress
-			className="account-bar"
-			aria-label={t('account.progress')}
-			value={count.bar.value}
-			max={Math.max(count.bar.max, 1)}
-		/>
-	);
+export const SyncBar = ({ count }: { count: SyncCount }) => (
+	<RunBar bar={count.bar} label={t('account.progress')} className="account-bar" />
+);
 
 /**
  * Where the panel ends, once there is nothing to ask the user: the source and
