@@ -1,3 +1,4 @@
+import { runBar } from '../../sync/progress.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
 
 /**
@@ -6,15 +7,24 @@ import type { SchedulerStatus } from '../../sync/scheduler.js';
  * details, opened from the status line (`SyncDetails` in `account/StatusLine.tsx`).
  */
 
-/** How full the bar is, or nothing for a bar that cannot know. */
-const fraction = (status: SchedulerStatus): { value: number; max: number } | undefined => {
-	const { progress } = status;
-	if (status.phase !== 'syncing' || progress === undefined) return undefined;
-	if (progress.stage === 'receiving' && progress.listing) return undefined;
-	if (progress.stage !== 'scanning') return { value: progress.done, max: progress.total };
-	if (progress.listing || progress.found === 0) return undefined;
-	return { value: progress.done, max: progress.found };
-};
+/**
+ * How full a run is (`runBar`), or, where it cannot say of how many, the
+ * browser's own drawing of not knowing. The status line's bar too (`SyncBar`).
+ */
+export const RunBar = ({
+	bar,
+	label,
+	className,
+}: {
+	bar: { value: number; max: number } | null;
+	label: string;
+	className: string;
+}) =>
+	bar === null ? (
+		<progress className={className} aria-label={label} />
+	) : (
+		<progress className={className} aria-label={label} value={bar.value} max={bar.max} />
+	);
 
 /** How much of a path's end is kept whole when it is cut. */
 const KEPT_END = 24;
@@ -37,25 +47,13 @@ const MiddleCut = ({ text }: { text: string }) => {
 	);
 };
 
-/**
- * The bar, a fraction or, where the run cannot say of how many, the browser's
- * own drawing of not knowing; and the file it is on. `label` names the bar.
- */
+/** The bar, and the file the run is on. `label` names the bar. */
 export const RunProgress = ({ status, label }: { status: SchedulerStatus; label: string }) => {
-	const path = status.phase === 'syncing' ? status.progress?.path : undefined;
-	const bar = fraction(status);
+	const progress = status.phase === 'syncing' ? status.progress : undefined;
+	const path = progress?.path;
 	return (
 		<>
-			{bar === undefined ? (
-				<progress className="run-bar" aria-label={label} />
-			) : (
-				<progress
-					className="run-bar"
-					aria-label={label}
-					value={bar.value}
-					max={Math.max(bar.max, 1)}
-				/>
-			)}
+			<RunBar bar={runBar(progress)} label={label} className="run-bar" />
 			{/* Not live: it changes with every file, faster than anyone could
 			    listen, and the count above already says how far it has got. A
 			    space holds its line, so the buttons do not jump as it comes and

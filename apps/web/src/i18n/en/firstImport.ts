@@ -19,17 +19,10 @@ export const firstImport = {
 	/** The same, where nothing said why. */
 	stoppedUnknown:
 		'The import has stopped: something went wrong. Cancel, and connect {provider} again.',
-	/** While the list of notes is still being made, so the total is not known yet. */
-	listing: {
-		one: 'Looking for notes in {provider}: {count} found so far.',
-		other: 'Looking for notes in {provider}: {count} found so far.',
-	},
-	/** Reading what has changed since it last looked, so the total is not known yet. */
-	checking: {
-		one: 'Checking {provider} for changes: {count} changed note found so far.',
-		other: 'Checking {provider} for changes: {count} changed notes found so far.',
-	},
-	/** {done} of {total} notes so far. */
+	/**
+	 * {done} of {total} notes so far. Before the total is known, an import says
+	 * what a sync does (`account.status.looking`, `checkingFound`).
+	 */
 	downloading: 'Downloading notes from {provider}: {done} of {total}.',
 	uploading: 'Uploading notes to {provider}: {done} of {total}.',
 	/** In place of the progress while the import is being canceled. */

@@ -3,7 +3,7 @@ import type { EntitlementCode, SyncProgress } from '@skysa/core';
 import type { Refusal } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { type MessageKey, t } from '../../i18n/t.js';
-import { isLongRun } from '../../sync/progress.js';
+import { isLongRun, runBar, type RunCount, runCount, runSentence } from '../../sync/progress.js';
 import type { SchedulerStatus, StuckOp } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 
@@ -87,47 +87,25 @@ export const syncCount = (
 	label: string
 ): SyncCount | undefined => {
 	if (!isLongRun(progress)) return undefined;
-	if (progress.stage === 'scanning') return scanCount(progress, label);
-	if (progress.stage === 'receiving' && progress.listing) {
-		return {
-			text: t('account.line.checkingFound', { count: progress.total }),
-			sentence: t('account.status.checkingFound', { provider: label, count: progress.total }),
-			bar: null,
-		};
-	}
-	const counted = { done: progress.done, total: progress.total };
-	const of = { provider: label, ...counted };
-	const bar = { value: progress.done, max: progress.total };
-	return progress.stage === 'uploading'
-		? {
-				text: t('account.line.sending', counted),
-				sentence: t('account.status.sending', of),
-				bar,
-			}
-		: {
-				text: t('account.line.receiving', counted),
-				sentence: t('account.status.receiving', of),
-				bar,
-			};
+	return {
+		text: lineCount(runCount(progress)),
+		sentence: runSentence(progress, label, 'sync'),
+		bar: runBar(progress),
+	};
 };
 
-const scanCount = (
-	{ found, done, listing }: Extract<SyncProgress, { stage: 'scanning' }>,
-	label: string
-): SyncCount => {
-	if (listing) {
-		return {
-			text: t('account.line.looking', { count: found }),
-			sentence: t('account.status.looking', { provider: label, count: found }),
-			bar: null,
-		};
+/** The few words of a count, after the source's tab has said which it is. */
+const lineCount = (count: RunCount): string => {
+	switch (count.kind) {
+		case 'looking':
+			return t('account.line.looking', { count: count.count });
+		case 'checking':
+			return t('account.line.checkingFound', { count: count.count });
+		case 'sending':
+			return t('account.line.sending', { done: count.done, total: count.total });
+		case 'receiving':
+			return t('account.line.receiving', { done: count.done, total: count.total });
 	}
-	const of = { provider: label, done, total: found };
-	return {
-		text: t('account.line.receiving', { done, total: found }),
-		sentence: t('account.status.receiving', of),
-		bar: { value: done, max: found },
-	};
 };
 
 /**
