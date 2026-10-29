@@ -272,9 +272,6 @@ const Home = () => {
 		onDeleted: noteDeleted,
 		pickUp,
 		moving,
-		onProblem: (message) => {
-			say({ message, tone: 'error' });
-		},
 	});
 	useOpenWhenShown(activeConnection, scratchpadShown, scratch.show);
 
@@ -326,7 +323,6 @@ const Home = () => {
 			draft={place.noteDraft}
 			liveEdits={liveEdits}
 			renamings={renamings}
-			onProblem={say}
 			scratch={scratchNote}
 			{...emptyPaneOffers({
 				folder,
@@ -470,7 +466,6 @@ const Home = () => {
 						opening={opening}
 						compact={compact}
 						draft={place.noteDraft}
-						onProblem={say}
 						onDelete={deletePassword}
 						// Not `select`, which would take down what the item had to
 						// say: why a new one could not be begun.

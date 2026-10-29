@@ -9,8 +9,9 @@ import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import { useNoteAttachments } from '../attachments/noteAttachments.js';
 import { useNoteSecrets } from '../secrets/noteSecrets.js';
+import { useNotices } from '../ui/notices.js';
 import { Outline } from './Outline.js';
-import type { NoteDraft, NoteViewProps } from './types.js';
+import type { NoteDraft } from './types.js';
 
 /**
  * Whichever editor is open, with the outline beside it.
@@ -28,7 +29,6 @@ export const NoteBody = ({
 	onCloseOutline,
 	toolbar,
 	onUserEdit,
-	onProblem,
 	draft,
 	onUnsupported,
 	onAdopted,
@@ -47,7 +47,6 @@ export const NoteBody = ({
 	onCloseOutline: () => void;
 	toolbar: RichEditorProps['toolbar'];
 	onUserEdit: (body: string, origin: string) => void;
-	onProblem: NoteViewProps['onProblem'];
 	/** Stored before a file is added to it, as before the first keystroke. */
 	draft: NoteDraft | undefined;
 	onUnsupported: (lost: StructuralDifference) => void;
@@ -62,8 +61,11 @@ export const NoteBody = ({
 	toolbarEnd: ReactNode;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
+	// What did not work with a file beside the note, or its secrets, said over
+	// the page (#187).
+	const { say } = useNotices();
 	const attachments = useNoteAttachments(note, {
-		report: onProblem,
+		report: say,
 		store: draft?.store,
 		onAdded,
 	});
@@ -76,7 +78,7 @@ export const NoteBody = ({
 		enabled: mode !== undefined,
 		run: attachments.pick,
 	});
-	const secrets = useNoteSecrets(note, { report: onProblem });
+	const secrets = useNoteSecrets(note, { report: say });
 	// Either editor's, as "Attach files" is.
 	useCommand({
 		id: 'note.insertSecret',

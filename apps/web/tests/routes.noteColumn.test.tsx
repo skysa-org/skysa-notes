@@ -97,7 +97,6 @@ describe('PasswordColumn', () => {
 	const none = {
 		openNote: undefined,
 		draft: undefined,
-		onProblem: () => undefined,
 		onDelete: () => undefined,
 		onClose: () => undefined,
 		onOpen: () => undefined,

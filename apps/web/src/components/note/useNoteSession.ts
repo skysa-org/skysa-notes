@@ -8,6 +8,7 @@ import { db, type NoteRecord, noteRef } from '../../store/db.js';
 import { beforeClosing } from '../../store/heldEdits.js';
 import { useDefaultEditorMode } from '../../store/hooks.js';
 import { deleteForUndo, renameNote, saveNoteBody, setNoteEditorMode } from '../../store/notes.js';
+import { useNotices } from '../ui/notices.js';
 import type { NoteViewProps } from './types.js';
 import { useUnsupported } from './unsupported.js';
 import { useFileCleanup } from './useFileCleanup.js';
@@ -49,12 +50,12 @@ export const useNoteSession = ({
 	draft,
 	liveEdits,
 	onDeleted,
-	onProblem,
 	isScratch,
-}: Pick<NoteViewProps, 'note' | 'draft' | 'liveEdits' | 'onDeleted' | 'onProblem'> & {
+}: Pick<NoteViewProps, 'note' | 'draft' | 'liveEdits' | 'onDeleted'> & {
 	/** A scratch note, whose editor is always the rich one. */
 	isScratch: boolean;
 }) => {
+	const { say } = useNotices();
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
 
@@ -195,11 +196,11 @@ export const useNoteSession = ({
 				// as the scratchpad and the vault say it, rather than a note
 				// that stays put after Delete with nothing said.
 				() => {
-					onProblem?.({ message: t('notes.view.notDeleted'), tone: 'error' });
+					say({ message: t('notes.view.notDeleted'), tone: 'error' });
 				}
 			);
 		},
-		[flush, forget, onDeleted, onProblem, settle]
+		[flush, forget, onDeleted, say, settle]
 	);
 
 	const mode = editorModeOf(note, locked, isScratch, defaultMode);

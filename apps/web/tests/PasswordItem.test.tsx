@@ -8,7 +8,7 @@ import {
 	type VaultFields,
 	vaultPayload,
 } from '@skysa/core';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -24,6 +24,7 @@ import { createNote, draftNote, getNote } from '../src/store/notes.js';
 import { GENERATOR_DEFAULT, getGeneratorOptions } from '../src/store/vault.js';
 import { updateNote } from './noteRows.js';
 import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.js';
+import { render } from './support/notices.js';
 
 /**
  * A password in the vault, in the note's column (docs/ARCHITECTURE.md §7,
@@ -72,7 +73,6 @@ const Harness = ({
 			note={note}
 			draft={draft}
 			host={host}
-			onProblem={() => undefined}
 			onDelete={onDelete}
 			onClose={onClose}
 			onOpen={() => undefined}
@@ -96,7 +96,6 @@ const Behind = ({ note, host }: { note: NoteRecord; host: SecretHost }) => (
 		note={note}
 		draft={undefined}
 		host={host}
-		onProblem={() => undefined}
 		onDelete={() => undefined}
 		onClose={() => undefined}
 		onOpen={() => undefined}
@@ -601,7 +600,6 @@ describe('a password made by Generate', () => {
 					setMode: () => undefined,
 				}}
 				host={host}
-				onProblem={() => undefined}
 				onDelete={() => undefined}
 				onClose={() => undefined}
 				onOpen={() => undefined}
@@ -809,7 +807,6 @@ describe('a new password', () => {
 				note={stored ?? draft}
 				draft={{ store, setMode: () => undefined }}
 				host={host}
-				onProblem={() => undefined}
 				onDelete={() => undefined}
 				onClose={onClose}
 				onOpen={() => undefined}
@@ -954,7 +951,6 @@ describe('a new password', () => {
 				note={draft}
 				draft={{ store: storeOf(draft), setMode: () => undefined }}
 				host={host}
-				onProblem={() => undefined}
 				onDelete={() => undefined}
 				onClose={() => undefined}
 				onOpen={() => undefined}

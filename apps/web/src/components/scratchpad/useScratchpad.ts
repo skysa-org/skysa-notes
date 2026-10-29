@@ -30,6 +30,7 @@ import { movingNote } from '../../store/titles.js';
 import { visibleBlocks } from '../../store/visibleText.js';
 import type { NoteViewHandle, ScratchEditing } from '../note/types.js';
 import { COARSE_POINTER, useMediaQuery } from '../ui/layout.js';
+import { useNotices } from '../ui/notices.js';
 import type { MarkChange } from './Scratchpad.js';
 
 /**
@@ -98,7 +99,6 @@ export const useScratchpad = ({
 	onDeleted,
 	pickUp,
 	moving,
-	onProblem,
 }: {
 	/** Whether the scratchpad is open. */
 	active: boolean;
@@ -120,8 +120,11 @@ export const useScratchpad = ({
 	pickUp: (what: Moving) => void;
 	/** What is being moved: nothing else is, while something is. */
 	moving: Moving | null;
-	onProblem: (message: string) => void;
 }) => {
+	const { say } = useNotices();
+	const onProblem = (message: string) => {
+		say({ message, tone: 'error' });
+	};
 	const router = useRouter();
 	const touch = useMediaQuery(COARSE_POINTER);
 	const notes = useScratchNotes(active ? connectionId : undefined);

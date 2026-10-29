@@ -72,12 +72,11 @@ export const PasswordColumn = ({
 	opening,
 	compact,
 	draft,
-	onProblem,
 	onDelete,
 	onClose,
 	onOpen,
 }: Readonly<
-	Pick<PasswordItemProps, 'draft' | 'onProblem' | 'onDelete' | 'onClose' | 'onOpen'> & {
+	Pick<PasswordItemProps, 'draft' | 'onDelete' | 'onClose' | 'onOpen'> & {
 		openNote: NoteRecord | undefined;
 		opening: boolean;
 		compact: boolean;
@@ -89,7 +88,6 @@ export const PasswordColumn = ({
 				key={openNote.id}
 				note={openNote}
 				draft={draft}
-				onProblem={onProblem}
 				onDelete={onDelete}
 				onClose={onClose}
 				onOpen={onOpen}

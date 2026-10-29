@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -16,6 +16,7 @@ import {
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { render } from './support/notices.js';
 
 /**
  * Switching from one note to another, with the real editor.
