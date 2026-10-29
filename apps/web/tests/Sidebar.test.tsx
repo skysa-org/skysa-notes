@@ -1,9 +1,12 @@
+import { ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import { Sidebar } from '../src/components/sidebar/Sidebar.js';
+import type { Moving } from '../src/store/rearrange.js';
+import { createRenamings } from '../src/store/renaming.js';
 import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 /**
@@ -480,6 +483,24 @@ describe('renaming a notebook', () => {
 
 		expect(onRenameFolder).not.toHaveBeenCalled();
 	});
+
+	it('keeps the name given shown until the route has the notebook at it', async () => {
+		// Let go of when the write resolved, the old name would flicker back for
+		// the moment the store takes to bring the new one (`store/renaming.ts`).
+		const renamings = createRenamings();
+		renderSidebar({ selectedFolder: 'work', onRenameFolder: () => undefined, renamings });
+		await openMenu('work');
+		await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
+
+		await userEvent.keyboard('Projects{Enter}');
+
+		expect(renamings.get()).toMatchObject({
+			kind: 'notebook',
+			key: 'work',
+			text: 'Projects',
+			given: { was: 'work' },
+		});
+	});
 });
 
 describe('deleting a notebook', () => {
@@ -577,6 +598,77 @@ describe('deleting a notebook', () => {
 
 		expect(screen.queryByRole('alertdialog', { name: 'Delete notebook?' })).toBeNull();
 		expect(onDeleteFolder).not.toHaveBeenCalled();
+	});
+
+	it('is asked about the open notebook from the palette too', async () => {
+		const onDeleteFolder = vi.fn();
+		const commands: { current: ReturnType<typeof useCommands> } = { current: [] };
+		const Commands = () => {
+			commands.current = useCommands();
+			return null;
+		};
+		render(
+			<CommandsProvider>
+				<Sidebar
+					tree={counted}
+					selectedFolder="work"
+					onSelectFolder={() => undefined}
+					onCreateFolder={() => undefined}
+					onDeleteFolder={onDeleteFolder}
+					looseNoteCount={0}
+				/>
+				<Commands />
+			</CommandsProvider>
+		);
+
+		act(() => {
+			commands.current.find((command) => command.id === 'notebook.delete')?.run();
+		});
+		await userEvent.click(
+			within(screen.getByRole('alertdialog', { name: 'Delete notebook?' })).getByRole(
+				'button',
+				{ name: 'Delete' }
+			)
+		);
+
+		expect(onDeleteFolder).toHaveBeenCalledWith('work');
+	});
+
+	it('is not offered from the palette during a move, nor with no notebook open', () => {
+		// Nor is a rename: a move is a mode, and the root, the scratchpad and the
+		// passwords are no notebook to rename or delete (`notebookOpen`).
+		const commands: { current: ReturnType<typeof useCommands> } = { current: [] };
+		const Commands = () => {
+			commands.current = useCommands();
+			return null;
+		};
+		const shown = (selectedFolder: string | undefined, moving: Moving | null) => (
+			<CommandsProvider>
+				<Sidebar
+					tree={counted}
+					selectedFolder={selectedFolder}
+					onSelectFolder={() => undefined}
+					onCreateFolder={() => undefined}
+					looseNoteCount={0}
+					moving={moving}
+				/>
+				<Commands />
+			</CommandsProvider>
+		);
+		const offered = () =>
+			['notebook.rename', 'notebook.delete'].map(
+				(id) => commands.current.find((command) => command.id === id)?.enabled
+			);
+		const { rerender } = render(shown('work', null));
+		expect(offered()).toEqual([true, true]);
+
+		rerender(shown('work', holding('personal', 'personal')));
+		expect(offered()).toEqual([false, false]);
+
+		for (const notNotebook of [undefined, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER]) {
+			rerender(shown(notNotebook, null));
+			expect(offered()).toEqual([false, false]);
+		}
 	});
 });
 

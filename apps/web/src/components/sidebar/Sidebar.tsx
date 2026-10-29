@@ -1,7 +1,6 @@
 import { ancestorPaths, basename, isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
-import { useCommand } from '../../commands/context.js';
 import { Icon, type IconName } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
@@ -11,10 +10,10 @@ import { SCRATCHPAD_LABEL } from '../../store/scratchpad.js';
 import { type FolderNode, notesUnder } from '../../store/tree.js';
 import { PASSWORDS_LABEL } from '../../store/vault.js';
 import { AttachedFiles } from '../AttachedFiles.js';
-import { FloatingMenu, type MenuPoint } from '../OptionsMenu.js';
+import { FloatingMenu } from '../OptionsMenu.js';
 import { TreeBody } from './FolderTree.js';
 import { DeleteConfirm, MoveHint, NewFolderField } from './NotebookFields.js';
-import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
+import { useNotebookMenu } from './useNotebookMenu.js';
 
 /**
  * The notebook tree. Folders are real directories on the provider, so this is a
@@ -218,12 +217,6 @@ const toggleWith =
 const filesUnder = (node: FolderNode): number =>
 	node.children.reduce((total, child) => total + filesUnder(child), node.fileCount);
 
-const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
-	nodes.reduce<FolderNode | undefined>(
-		(found, node) => found ?? (node.path === path ? node : nodeAt(node.children, path)),
-		undefined
-	);
-
 /**
  * The notebook open in the note list is shown in the sidebar too: when one is
  * opened — from the URL, from where the user was, from a search or a palette
@@ -286,11 +279,6 @@ export const Sidebar = ({
 		setAnsweredAsk(newNotebookAsked);
 		if (moving === null) setCreating({ parent: undefined });
 	}
-	const [renaming, setRenaming] = useState<string | null>(null);
-	const [deleting, setDeleting] = useState<string | null>(null);
-	const [listing, setListing] = useState<string | null>(null);
-	/** A notebook's row right-clicked, and where: its menu is open there. */
-	const [menu, setMenu] = useState<{ path: string; at: MenuPoint } | null>(null);
 	/** Which row the pointer is over, for the highlight and nothing else. */
 	const [over, setOver] = useState<string | null>(null);
 
@@ -304,97 +292,34 @@ export const Sidebar = ({
 
 	/** The notebook the palette's commands are about (`notebookOpen`). */
 	const open = notebookOpen(selectedFolder);
-	const manageable = open !== undefined && moving === null;
-	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
-
-	/** Pinned or not, and the way to change it, where the route keeps pins. */
-	const pinning = (
-		path: string,
-		node: FolderNode | undefined
-	): Pick<NotebookActions, 'pinned' | 'onPin'> => {
-		if (onPinFolder === undefined) return {};
-		return {
-			pinned: node?.pinned,
-			onPin: (pin) => {
-				onPinFolder(path, pin);
-			},
-		};
-	};
-
-	/**
-	 * What the menu does to a notebook, from its row's `⋯` or a right-click on
-	 * the row. One set of actions, so the two menus cannot drift.
-	 */
-	const actionsFor = (path: string): NotebookActions => {
-		const node = nodeAt(tree ?? [], path);
-		return {
-			...pinning(path, node),
-			onNewInside: () => {
-				setCreating({ parent: path });
-			},
-			onRename: () => {
-				setRenaming(path);
-			},
-			onMove: () => {
-				pickUp({ kind: 'notebook', path, name: basename(path) });
-			},
-			onFiles:
-				(node?.fileCount ?? 0) === 0
-					? undefined
-					: () => {
-							setListing(path);
-						},
-			onDelete: () => {
-				setDeleting(path);
-			},
-		};
-	};
-
-	const renamed = (path: string, chosen?: string) => {
-		setRenaming(null);
-		const trimmed = chosen?.trim();
-		// Nothing typed, Escape, or the name it already had: all of them are the
-		// user changing their mind, and none of them is worth a move on the
-		// provider — `moveFolder` answers a rename to the same name with nothing
-		// at all, but the queue and the toast are cheaper not to reach.
-		if (
-			trimmed === undefined ||
-			trimmed === '' ||
-			trimmed === basename(path) ||
-			onRenameFolder === undefined
-		) {
-			renamings?.clear('notebook', path);
-			return;
-		}
-		// Shown as given until the route has the notebook at its new path.
-		renamings?.give('notebook', path, path);
-		onRenameFolder(path, trimmed);
-	};
-
-	useCommand({
-		id: 'notebook.rename',
-		label: t('notebooks.commands.rename'),
-		group: t('shell.commands.group.notebook'),
-		enabled: manageable,
-		run: () => {
-			setRenaming(open ?? null);
-			// The row becomes the field, so it has to be listed: a notebook inside
-			// a shut one is not, and its name would wait there for whenever that
-			// one is opened next, and take the focus then.
-			if (open !== undefined) openThese(...ancestorPaths(open));
-			onReveal?.();
+	const {
+		renaming,
+		typed,
+		renamed,
+		deleting,
+		going,
+		confirmDelete,
+		stopDeleting,
+		listing,
+		stopListing,
+		menu,
+		openMenu,
+		closeMenu,
+		itemsFor,
+	} = useNotebookMenu({
+		tree,
+		open,
+		moving,
+		pickUp,
+		openThese,
+		onNewInside: (path) => {
+			setCreating({ parent: path });
 		},
-	});
-
-	useCommand({
-		id: 'notebook.delete',
-		label: t('notebooks.commands.delete'),
-		group: t('shell.commands.group.notebook'),
-		enabled: manageable,
-		run: () => {
-			setDeleting(open ?? null);
-			onReveal?.();
-		},
+		onRenameFolder,
+		onDeleteFolder,
+		onPinFolder,
+		renamings,
+		onReveal,
 	});
 
 	return (
@@ -449,13 +374,7 @@ export const Sidebar = ({
 			)}
 
 			{listing !== null && (
-				<AttachedFiles
-					name={basename(listing)}
-					path={listing}
-					onClose={() => {
-						setListing(null);
-					}}
-				/>
+				<AttachedFiles name={basename(listing)} path={listing} onClose={stopListing} />
 			)}
 
 			{deleting !== null && (
@@ -463,13 +382,8 @@ export const Sidebar = ({
 					name={basename(deleting)}
 					noteCount={going === undefined ? 0 : notesUnder(going)}
 					fileCount={going === undefined ? 0 : filesUnder(going)}
-					onConfirm={() => {
-						setDeleting(null);
-						onDeleteFolder?.(deleting);
-					}}
-					onCancel={() => {
-						setDeleting(null);
-					}}
+					onConfirm={confirmDelete}
+					onCancel={stopDeleting}
 				/>
 			)}
 
@@ -488,14 +402,10 @@ export const Sidebar = ({
 				onDrop={drop}
 				onCancelMove={cancel}
 				renaming={renaming}
-				onDraft={(path, text) => {
-					renamings?.typed('notebook', path, text);
-				}}
+				onDraft={typed}
 				onRenamed={renamed}
-				onMenu={(path, at) => {
-					setMenu({ path, at });
-				}}
-				itemsFor={(path) => notebookMenuItems(basename(path), actionsFor(path))}
+				onMenu={openMenu}
+				itemsFor={itemsFor}
 				openNotebooks={openNotebooks}
 				onToggle={toggleWith(onOpenNotebooks)}
 				onDwell={dwell}
@@ -505,10 +415,8 @@ export const Sidebar = ({
 				<FloatingMenu
 					at={menu.at}
 					label={t('rows.notebook.menu', { name: basename(menu.path) })}
-					items={notebookMenuItems(basename(menu.path), actionsFor(menu.path))}
-					onClose={() => {
-						setMenu(null);
-					}}
+					items={itemsFor(menu.path)}
+					onClose={closeMenu}
 				/>
 			)}
 
