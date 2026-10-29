@@ -20,6 +20,15 @@ export const rowIndent = (depth: number): string =>
  *
  * Each keystroke is told (`onDraft`), so what else shows the name can say what
  * is typed (`store/renaming.ts`).
+ *
+ * Escape abandons it and Enter takes it, which is the pair every rename in
+ * this app has. Blur takes it too: a click somewhere else is not "cancel", and
+ * a field that threw the name away because the user looked at the note they
+ * were naming it after would be its own bug report.
+ *
+ * The text starts selected. A rename is nearly always a replacement — "Dropbox
+ * 2" into "Work" — and the alternative is every user clearing the field by
+ * hand before they can start.
  */
 export const RowRename = ({
 	name,

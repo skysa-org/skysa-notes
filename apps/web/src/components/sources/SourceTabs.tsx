@@ -14,6 +14,12 @@ import { AddSource } from './AddSource.js';
 import { ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';
 
+/**
+ * The tab showing, and so the box its rename field wears: the same classes,
+ * or the bar moves as the name becomes editable.
+ */
+const ACTIVE_TAB = 'source-tab source-tab-active';
+
 export interface SourceTabsProps {
 	db?: NotesDatabase;
 	client?: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
@@ -84,7 +90,7 @@ export const SourceTabs = ({
 								<RowRename
 									name={tabName(source, ordered)}
 									selected
-									className="source-tab source-tab-active source-tab-editing"
+									className={`${ACTIVE_TAB} source-tab-editing`}
 									width={renaming.width}
 									mark={<ProviderIcon kind={sourceKind(source)} />}
 									maxLength={LABEL_LIMIT}
@@ -188,7 +194,7 @@ const SourceTab = ({
 	return (
 		<button
 			type="button"
-			className={source.active ? 'source-tab source-tab-active' : 'source-tab'}
+			className={source.active ? ACTIVE_TAB : 'source-tab'}
 			// Said outright (`sourceLabel`): the name from contents joins the
 			// spans below by its own rules, so "A source" and " — disconnected"
 			// came out as a name no caller could predict.
