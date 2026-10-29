@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DeletedNotice, UNDO_WINDOW_MS } from '../src/components/DeletedNotice.js';
+import { DeletedNotice, UNDO_WINDOW_MS } from '../src/components/list/DeletedNotice.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';

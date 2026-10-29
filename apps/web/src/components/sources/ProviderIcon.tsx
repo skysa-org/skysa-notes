@@ -1,13 +1,13 @@
 import type { ProviderKind } from '@skysa/core';
 
-import dropbox from '../assets/providers/dropbox.svg';
-import gdrive16 from '../assets/providers/gdrive-16.png';
-import gdrive32 from '../assets/providers/gdrive-32.png';
-import gdrive48 from '../assets/providers/gdrive-48.png';
-import onedrive from '../assets/providers/onedrive.svg';
-import { Icon } from '../editor/icons.js';
-import type { ConnectedSource } from '../store/connection.js';
-import { LOCAL_CONNECTION_ID } from '../store/db.js';
+import dropbox from '../../assets/providers/dropbox.svg';
+import gdrive16 from '../../assets/providers/gdrive-16.png';
+import gdrive32 from '../../assets/providers/gdrive-32.png';
+import gdrive48 from '../../assets/providers/gdrive-48.png';
+import onedrive from '../../assets/providers/onedrive.svg';
+import { Icon } from '../../editor/icons.js';
+import type { ConnectedSource } from '../../store/connection.js';
+import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 
 /**
  * Which storage a source is, in front of its name: on a tab, on a row of a

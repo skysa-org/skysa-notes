@@ -11,7 +11,7 @@ import {
 	useShortcuts,
 } from '../src/commands/context.js';
 import { createCommandRegistry, reachable } from '../src/commands/registry.js';
-import { CommandPalette } from '../src/components/CommandPalette.js';
+import { CommandPalette } from '../src/components/shell/CommandPalette.js';
 
 /**
  * The registry exists so that one list serves both the keyboard and the

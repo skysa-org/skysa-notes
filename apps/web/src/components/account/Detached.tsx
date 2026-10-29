@@ -3,9 +3,9 @@ import { t } from '../../i18n/t.js';
 import type { SyncStateRecord } from '../../store/db.js';
 import type { Unsynced } from '../../store/unsynced.js';
 import { CONNECTABLE } from '../../sync/account.js';
-import { ConnectButton } from '../ConnectButton.js';
-import { DetachedSource } from '../DetachedSource.js';
+import { ConnectButton } from '../sources/connect/ConnectButton.js';
 import type { LocalProps } from './clients.js';
+import { DetachedSource } from './DetachedSource.js';
 import { ActionsMenu } from './PanelMenus.js';
 
 interface DetachedProps extends LocalProps {

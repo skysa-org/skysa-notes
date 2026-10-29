@@ -216,7 +216,7 @@ export interface SyncStateRecord {
 	unreadable?: { remoteId: string; path: string; movedAside?: string[] }[];
 	/**
 	 * Bound for the first time and not yet through its first sync: the import
-	 * the user watches and can cancel (`components/ImportProgress.tsx`). Set by
+	 * the user watches and can cancel (`components/account/ImportProgress.tsx`). Set by
 	 * `bindConnection` for a source it has not seen, cleared by `finishImport`
 	 * once a pull has reached the end and a push has gone through the queue,
 	 * and the whole source thrown away by `abandonImport` on a cancel.

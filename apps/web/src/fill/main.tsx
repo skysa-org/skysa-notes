@@ -5,7 +5,7 @@ import '../styles.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { StaleTabGate } from '../components/StaleTabGate.js';
+import { StaleTabGate } from '../components/shell/StaleTabGate.js';
 import { openChannel } from './channel.js';
 import { FillPage } from './FillPage.js';
 

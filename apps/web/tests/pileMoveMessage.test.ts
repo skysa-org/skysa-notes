@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { pileMoveMessage } from '../src/components/ConnectButton.js';
+import { pileMoveMessage } from '../src/components/sources/connect/ConnectButton.js';
 
 /**
  * What the question before a connect says will move. Counted, so the user can

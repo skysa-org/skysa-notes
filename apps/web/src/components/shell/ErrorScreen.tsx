@@ -1,7 +1,7 @@
 import { messageOf } from '@skysa/core';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 
-import { t } from '../i18n/t.js';
+import { t } from '../../i18n/t.js';
 
 /**
  * What is shown when rendering throws — a live query the store refused (quota,

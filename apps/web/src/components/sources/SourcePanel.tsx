@@ -9,12 +9,12 @@ import { holdsAnything } from '../../store/exportNotes.js';
 import type { Renamings } from '../../store/renaming.js';
 import { isLiveSource } from '../../store/rowStates.js';
 import { CONNECTABLE, tabName } from '../../sync/account.js';
-import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
 import { secretsLabel } from '../secrets/secretsLabel.js';
 import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 import { RowOptions } from '../ui/RowOptions.js';
 import { RowRename } from '../ui/RowRename.js';
 import { AddSource } from './AddSource.js';
+import { ProviderIcon, sourceKind } from './ProviderIcon.js';
 import { ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';
 

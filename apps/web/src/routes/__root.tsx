@@ -1,8 +1,8 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router';
 
 import { useFileDropGuard } from '../components/clipboard/useFileDropGuard';
-import { ErrorScreen } from '../components/ErrorScreen';
-import { UpdatePrompt } from '../components/UpdatePrompt';
+import { ErrorScreen } from '../components/shell/ErrorScreen';
+import { UpdatePrompt } from '../components/shell/UpdatePrompt';
 
 const RootLayout = () => {
 	useFileDropGuard();

@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { MoveUnsent } from '../src/components/MoveUnsent.js';
+import { MoveUnsent } from '../src/components/account/MoveUnsent.js';
 import {
 	abandonImport,
 	bindConnection,

@@ -1,8 +1,8 @@
 import { type ReactNode, useState, useSyncExternalStore } from 'react';
 
-import { t } from '../i18n/t.js';
-import { subscribeTabState, tabState } from '../store/staleTab.js';
-import { Dialog, DialogActions } from './ui/Dialog.js';
+import { t } from '../../i18n/t.js';
+import { subscribeTabState, tabState } from '../../store/staleTab.js';
+import { Dialog, DialogActions } from '../ui/Dialog.js';
 
 /**
  * The app, and in front of it the two things `store/staleTab.ts` can have to

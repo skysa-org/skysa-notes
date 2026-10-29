@@ -5,7 +5,7 @@ import { type Renaming, shownSourceName } from '../../store/renaming.js';
 import { tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
-import { type SourceKind, sourceKind } from '../ProviderIcon.js';
+import { type SourceKind, sourceKind } from './ProviderIcon.js';
 import { useSourceChoices } from './useSourceChoices.js';
 
 /**

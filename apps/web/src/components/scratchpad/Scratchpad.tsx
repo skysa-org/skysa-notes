@@ -38,7 +38,7 @@ import {
 import { handBack, SLICE_MS } from '../../store/slices.js';
 import { titleShown } from '../../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../../store/visibleText.js';
-import { useOpeningNotice } from '../opening.js';
+import { useOpeningNotice } from '../note/opening.js';
 import { useElementWidth } from '../ui/layout.js';
 import {
 	besideOf,

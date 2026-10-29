@@ -1,23 +1,23 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
-import { LOCALE, t } from '../i18n/t.js';
+import { LOCALE, t } from '../../i18n/t.js';
 import {
 	connectedSources,
 	type MoveOutcome,
 	moveUnsyncedTo,
 	releaseConnection,
-} from '../store/connection.js';
-import { noteRef, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
-import { holdsTextFor } from '../store/detached.js';
-import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
-import { settleEditors } from '../store/heldEdits.js';
-import { titleShown } from '../store/titles.js';
-import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
-import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../sync/account.js';
+} from '../../store/connection.js';
+import { noteRef, type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import { holdsTextFor } from '../../store/detached.js';
+import { downloadProblem, hasUnsentDownload } from '../../store/exportNotes.js';
+import { settleEditors } from '../../store/heldEdits.js';
+import { titleShown } from '../../store/titles.js';
+import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../../store/unsynced.js';
+import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../../sync/account.js';
+import { DialogActions, InlineDialog } from '../ui/Dialog.js';
+import { useEscape } from '../ui/useEscape.js';
 import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
-import { DialogActions, InlineDialog } from './ui/Dialog.js';
-import { useEscape } from './ui/useEscape.js';
 
 /**
  * A source this device no longer reaches, which is still here because it holds

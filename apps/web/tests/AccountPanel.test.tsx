@@ -11,7 +11,7 @@ import { type ReactNode, StrictMode, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
+import { AccountPanel, returnPath } from '../src/components/account/AccountPanel.js';
 import { SourcePanel } from '../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../src/components/sources/SourceTabs.js';
 import { type Notice, NotifyContext } from '../src/components/ui/notify.js';
