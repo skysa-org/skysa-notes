@@ -582,6 +582,26 @@ describe('the palette as a dialog', () => {
 		return button;
 	};
 
+	it('closes on a press begun and let go on the page around it, as a dialog does', async () => {
+		const user = userEvent.setup();
+		const { onClose } = openOver(focused());
+		const backdrop = document.querySelector<HTMLElement>('.palette-backdrop');
+		if (backdrop === null) throw new Error('no backdrop');
+
+		// Begun there and let go on the palette: not a press outside, and the
+		// field keeps the focus, so Escape still closes it.
+		await user.pointer([
+			{ keys: '[MouseLeft>]', target: backdrop },
+			{ target: screen.getByRole('dialog') },
+			{ keys: '[/MouseLeft]' },
+		]);
+		expect(onClose).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(screen.getByRole('combobox'));
+
+		await user.click(backdrop);
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
 	it('gives focus back to whatever had it, when it closes having done nothing', () => {
 		// Removing the focused element does not return focus where it came from:
 		// the browser drops it on `document.body`, and a keyboard user who opens
