@@ -8,6 +8,7 @@ import { NoteView } from '../src/components/note/NoteView.js';
 import { db, noteRef } from '../src/store/db.js';
 import { fileCleanup } from '../src/store/fileCleanup.js';
 import { useNote } from '../src/store/hooks.js';
+import { createLiveEdits } from '../src/store/liveEdits.js';
 import { createNote, getNote, importNoteFile } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { noteById, updateNote } from './noteRows.js';
@@ -227,6 +228,57 @@ describe('naming an unnamed note', () => {
 		await user.click(field);
 
 		expect(field.selectionStart).toBe(field.selectionEnd);
+	});
+});
+
+describe('what was typed, around a switch and a save', () => {
+	const typeInRaw = async (text: string) => {
+		const editor = await screen.findByTestId('raw-editor');
+		const view = EditorView.findFromDOM(editor);
+		if (view === null) throw new Error('CodeMirror did not mount');
+		view.dispatch({ changes: { from: 0, insert: text } });
+	};
+
+	it('is stored as the editor switches, not seconds later', async () => {
+		// The incoming editor loads from the row, so the edit has to be in it
+		// first. Autosave would get there in two seconds; `waitFor` gives up
+		// after one.
+		const user = userEvent.setup();
+		await setDefaultEditorMode(db, 'raw');
+		const note = await openNote('Body.\n');
+		await typeInRaw('Typed. ');
+
+		await user.keyboard('{Control>}e{/Control}');
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.body).toBe('Typed. Body.\n');
+		});
+	});
+
+	it('tells the list the row has it, once the row does', async () => {
+		// The list shows what is typed until the row has it, and the row again
+		// after (`store/liveEdits.ts`), so the save has to say when it landed.
+		await setDefaultEditorMode(db, 'raw');
+		const liveEdits = createLiveEdits();
+		const note = await createNote(db, { title: 'A note', body: 'Body.\n' });
+		const Live = () => {
+			const shown = useNote(note.id);
+			return <NoteView note={shown} onDeleted={() => undefined} liveEdits={liveEdits} />;
+		};
+		render(
+			<CommandsProvider>
+				<Live />
+			</CommandsProvider>
+		);
+		await typeInRaw('Typed. ');
+		expect(liveEdits.get(noteRef(note))?.body?.landed).toBeUndefined();
+
+		await waitFor(
+			() => {
+				expect(liveEdits.get(noteRef(note))?.body?.landed).toBeTypeOf('number');
+			},
+			{ timeout: 4000 }
+		);
 	});
 });
 
