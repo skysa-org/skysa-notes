@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '../../api/client.js';
 import { answer, useInstanceConfig } from '../../api/instanceConfig.js';
-import type { Notice } from '../../components/ui/notify.js';
+import type { Notice } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
 import {
 	connectCodeAskedAt,

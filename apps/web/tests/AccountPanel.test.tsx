@@ -7,14 +7,14 @@ import {
 } from '@tanstack/react-router';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { type ReactNode, StrictMode, useState } from 'react';
+import { type ReactNode, StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/account/AccountPanel.js';
 import { SourcePanel } from '../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../src/components/sources/SourceTabs.js';
-import { type Notice, NotifyContext } from '../src/components/ui/notify.js';
+import { NoticesProvider, useShownNotices } from '../src/components/ui/notices.js';
 import { Toast } from '../src/components/ui/Toast.js';
 import type { pickFiles } from '../src/editor/pickFiles.js';
 import { t } from '../src/i18n/t.js';
@@ -244,26 +244,24 @@ type FakeSync = ReturnType<typeof fakeSync>;
 
 /** The panel at `url`, inside a router, since it reads where it is. */
 /**
- * What the shell does with what the panel says over the page (`useNotify`): one
- * toast, until it is dismissed.
+ * What the shell does with what the panel keeps over the page (`Notices`):
+ * one toast, until it is dismissed.
  */
-const WithNotices = ({ children }: { children: ReactNode }) => {
-	const [told, setTold] = useState<Notice | null>(null);
+const Staying = () => {
+	const { staying, dismissStaying } = useShownNotices();
 	return (
-		<NotifyContext.Provider value={setTold}>
-			{children}
-			{told !== null && (
-				<Toast
-					message={told.message}
-					tone={told.tone}
-					onDismiss={() => {
-						setTold(null);
-					}}
-				/>
-			)}
-		</NotifyContext.Provider>
+		staying !== null && (
+			<Toast message={staying.message} tone={staying.tone} onDismiss={dismissStaying} />
+		)
 	);
 };
+
+const WithNotices = ({ children }: { children: ReactNode }) => (
+	<NoticesProvider>
+		{children}
+		<Staying />
+	</NoticesProvider>
+);
 
 const renderPanel = (
 	client: Client,

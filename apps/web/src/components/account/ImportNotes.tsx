@@ -19,7 +19,7 @@ import {
 	type SkipReason,
 } from '../../store/importLibrary.js';
 import { ConfirmDialog } from '../ui/ConfirmDialog.js';
-import { useNotify } from '../ui/notify.js';
+import { useNotices } from '../ui/notices.js';
 import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
@@ -200,9 +200,9 @@ export const useImportNotes = (
 	{ label, syncs, pick = pickFiles }: { label: string; syncs: boolean; pick?: Pick }
 ) => {
 	const [step, setStep] = useState<Step>({ kind: 'idle' });
-	// How it went is said over the page, where it outlives the panel it was
-	// asked from (`useNotify`).
-	const notify = useNotify();
+	// How it went is kept over the page, where it outlives the panel it was
+	// asked from (`Notices`).
+	const { keep: notify } = useNotices();
 
 	const choose = (into: ImportInto) => {
 		setStep({ kind: 'choosing', into });
@@ -300,7 +300,7 @@ export const importItems = (
 
 /**
  * What an import says in its source's panel: that it is working, and the
- * question. How it went is said over the page (`useNotify`), and the ways in
+ * question. How it went is said over the page (`useNotices`), and the ways in
  * are menu items (`importItems`).
  */
 export const ImportNotes = ({ importing }: { importing: Importing }) => {

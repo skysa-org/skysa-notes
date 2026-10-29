@@ -13,7 +13,7 @@ import { useOpenWhenShown, useScratchpad } from '../components/scratchpad/useScr
 import { CommandPalette } from '../components/shell/CommandPalette.js';
 import { ErrorScreen } from '../components/shell/ErrorScreen.js';
 import { Sidebar } from '../components/sidebar/Sidebar.js';
-import type { Notice } from '../components/ui/notify.js';
+import { NoticesProvider, useNotices } from '../components/ui/notices.js';
 import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { TakeShare } from '../share/TakeShare.js';
@@ -93,21 +93,7 @@ const Home = () => {
 	const { tree, pins } = usePinnedTree(activeConnection);
 	const looseNoteCount = useLooseNoteCount(activeConnection);
 
-	/**
-	 * Why the last thing the user asked for did not happen. Creating a notebook
-	 * or a note can reject — a duplicate name is the everyday case — and by then
-	 * the name field has closed and the click is over, so without somewhere to
-	 * put this the user acts and the app shows nothing at all.
-	 */
-	const [problem, setProblem] = useState<Notice | null>(null);
-	/**
-	 * What a component inside the shell had to say (`useNotify`): how an import
-	 * went, said over the page rather than in the panel it was started from.
-	 */
-	const [told, setTold] = useState<Notice | null>(null);
-	const dismissTold = useCallback(() => {
-		setTold(null);
-	}, []);
+	const { say } = useNotices();
 	/** What is typed into the open note before it is saved, for the list to show. */
 	const [liveEdits] = useState(createLiveEdits);
 	/** A notebook or source being renamed, for everything else that names it. */
@@ -116,8 +102,8 @@ const Home = () => {
 	// refuse — but the same silence if it happens: the user types into a note
 	// that is nowhere, and the failure goes to the console.
 	const noteNotMade = useCallback(() => {
-		setProblem({ message: t('shell.note.notMade'), tone: 'error' });
-	}, []);
+		say({ message: t('shell.note.notMade'), tone: 'error' });
+	}, [say]);
 
 	const scratchpadShown = useScratchpadShown(activeConnection);
 	const passwordsShown = usePasswordsShown(activeConnection);
@@ -196,15 +182,11 @@ const Home = () => {
 		setPanel,
 		shutPanel,
 		setSearchOpen,
-		setProblem,
 		dismissConnect,
 	});
 
 	const { deleted, noteDeleted, undoFailed, dismissDeleted, undoDelete, deletePassword } =
-		useUndoDelete({ select, setProblem, noteIdRef });
-	const dismissProblem = useCallback(() => {
-		setProblem(null);
-	}, []);
+		useUndoDelete({ select, noteIdRef });
 
 	/**
 	 * Begin a note in the open notebook: on screen, named "Untitled" with the
@@ -235,7 +217,6 @@ const Home = () => {
 		openNote,
 		select,
 		openFolder,
-		setProblem,
 		renamings,
 	});
 
@@ -244,7 +225,6 @@ const Home = () => {
 		setPanel,
 		shutPanel,
 		select,
-		setProblem,
 		folder,
 		noteIdRef,
 	});
@@ -293,7 +273,7 @@ const Home = () => {
 		pickUp,
 		moving,
 		onProblem: (message) => {
-			setProblem({ message, tone: 'error' });
+			say({ message, tone: 'error' });
 		},
 	});
 	useOpenWhenShown(activeConnection, scratchpadShown, scratch.show);
@@ -319,7 +299,6 @@ const Home = () => {
 		searchField,
 		connectionId: activeConnection,
 		source,
-		setProblem,
 		deleted,
 		undoDelete,
 		folder,
@@ -347,7 +326,7 @@ const Home = () => {
 			draft={place.noteDraft}
 			liveEdits={liveEdits}
 			renamings={renamings}
-			onProblem={setProblem}
+			onProblem={say}
 			scratch={scratchNote}
 			{...emptyPaneOffers({
 				folder,
@@ -368,7 +347,6 @@ const Home = () => {
 
 	return (
 		<HomeLayout
-			notify={setTold}
 			frameClassName={frameClassName}
 			inert={covered(held, scratch.modal)}
 			source={source}
@@ -492,7 +470,7 @@ const Home = () => {
 						opening={opening}
 						compact={compact}
 						draft={place.noteDraft}
-						onProblem={setProblem}
+						onProblem={say}
 						onDelete={deletePassword}
 						// Not `select`, which would take down what the item had to
 						// say: why a new one could not be begun.
@@ -542,10 +520,6 @@ const Home = () => {
 						undoFailed={undoFailed}
 						connectNotice={connectNotice}
 						dismissConnect={dismissConnect}
-						problem={problem}
-						dismissProblem={dismissProblem}
-						told={told}
-						dismissTold={dismissTold}
 					/>
 				</>
 			}
@@ -554,13 +528,17 @@ const Home = () => {
 };
 
 /**
- * The provider wraps the shell rather than the app: every command belongs to a
+ * The providers wrap the shell rather than the app: every command belongs to a
  * mounted screen, so a registry with the same lifetime as the screen is one
  * that cannot hold a command whose `run` closes over a component that has gone.
+ * The notices are the shell's to show (`HomeToasts`), and outside the shell
+ * nothing would show them.
  */
 const HomeWithCommands = () => (
 	<CommandsProvider>
-		<Home />
+		<NoticesProvider>
+			<Home />
+		</NoticesProvider>
 	</CommandsProvider>
 );
 

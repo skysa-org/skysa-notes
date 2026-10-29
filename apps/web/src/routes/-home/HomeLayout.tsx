@@ -1,6 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
 
-import { type Notice, NotifyContext } from '../../components/ui/notify.js';
 import { t } from '../../i18n/t.js';
 import { InstallBanner } from '../../install/InstallBanner.js';
 import type { SyncStateRecord } from '../../store/db.js';
@@ -24,7 +23,6 @@ const detachedText = (source: SyncStateRecord): string => {
  * floats over the page.
  */
 export const HomeLayout = ({
-	notify,
 	frameClassName,
 	inert,
 	source,
@@ -38,8 +36,6 @@ export const HomeLayout = ({
 	overlays,
 	floating,
 }: Readonly<{
-	/** Where a component inside the shell says something (`NotifyContext`). */
-	notify: (notice: Notice | null) => void;
 	frameClassName: string;
 	/** The page behind an import or a card's dialog (`covered`). */
 	inert: boolean;
@@ -68,49 +64,47 @@ export const HomeLayout = ({
 	// above the panes goes in the frame around them instead. The toasts are
 	// not laid out at all — they are fixed to the viewport — but they are
 	// here for the same reason: a stack in the grid would take a column.
-	<NotifyContext.Provider value={notify}>
-		<div className={frameClassName} inert={inert}>
-			{/*
-			 * Above everything, because it says which app this is: each source
-			 * is its own notes, its own notebooks and its own sync (§6), so the
-			 * panes below all mean something different depending on which of
-			 * these is lit.
-			 */}
-			{bar}
-			{/*
-			 * Under the bar rather than over it: the bar is the top of the window
-			 * to a compact window's search, which hangs from it to the foot.
-			 */}
-			<InstallBanner />
-			{/*
-			 * For as long as a detached source is the one showing, and not
-			 * dismissable: its notes look like any others, can be opened and
-			 * written in like any others, and sync nowhere. `role="note"` rather
-			 * than `status`, as a standing remark about what is on screen and not
-			 * news of something that has just happened.
-			 */}
-			{source?.detached !== undefined && (
-				<p className="banner" role="note">
-					{detachedText(source)}
-				</p>
-			)}
-			{palette}
+	<div className={frameClassName} inert={inert}>
+		{/*
+		 * Above everything, because it says which app this is: each source
+		 * is its own notes, its own notebooks and its own sync (§6), so the
+		 * panes below all mean something different depending on which of
+		 * these is lit.
+		 */}
+		{bar}
+		{/*
+		 * Under the bar rather than over it: the bar is the top of the window
+		 * to a compact window's search, which hangs from it to the foot.
+		 */}
+		<InstallBanner />
+		{/*
+		 * For as long as a detached source is the one showing, and not
+		 * dismissable: its notes look like any others, can be opened and
+		 * written in like any others, and sync nowhere. `role="note"` rather
+		 * than `status`, as a standing remark about what is on screen and not
+		 * news of something that has just happened.
+		 */}
+		{source?.detached !== undefined && (
+			<p className="banner" role="note">
+				{detachedText(source)}
+			</p>
+		)}
+		{palette}
 
-			{/* `data-panel` is which pane a compact window is showing as a
-			    dropdown; the stylesheet ignores it in a wide one. */}
-			<div className="app-shell" {...shell}>
-				{/* Positioned, like the two panes in a compact window, so it is
-				    never a grid item and takes no column. */}
-				{sourceDropdown}
-				{sidebar}
-				{list}
-				{note}
-			</div>
-
-			{overlays}
-
-			{/* One stack for everything the screen floats over the page (`Home`). */}
-			{floating}
+		{/* `data-panel` is which pane a compact window is showing as a
+		    dropdown; the stylesheet ignores it in a wide one. */}
+		<div className="app-shell" {...shell}>
+			{/* Positioned, like the two panes in a compact window, so it is
+			    never a grid item and takes no column. */}
+			{sourceDropdown}
+			{sidebar}
+			{list}
+			{note}
 		</div>
-	</NotifyContext.Provider>
+
+		{overlays}
+
+		{/* One stack for everything the screen floats over the page (`Home`). */}
+		{floating}
+	</div>
 );

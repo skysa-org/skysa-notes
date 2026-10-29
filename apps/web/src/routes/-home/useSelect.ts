@@ -1,4 +1,4 @@
-import type { Notice } from '../../components/ui/notify.js';
+import { useNotices } from '../../components/ui/notices.js';
 import { showConnection } from '../../store/connection.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { noteIsUnder, rememberOpen } from '../../store/lastOpen.js';
@@ -20,7 +20,6 @@ export const useSelect = ({
 	setPanel,
 	shutPanel,
 	setSearchOpen,
-	setProblem,
 	dismissConnect,
 }: Readonly<{
 	place: Pick<
@@ -34,9 +33,9 @@ export const useSelect = ({
 	/** Shut the dropdown, resolving once the history has it shut (`useCompactLayout`). */
 	shutPanel: () => Promise<void>;
 	setSearchOpen: (open: boolean) => void;
-	setProblem: (notice: Notice | null) => void;
 	dismissConnect: () => void;
 }>) => {
+	const { moveOn } = useNotices();
 	const { folder, noteId, openNote, openedOver, go } = place;
 
 	/**
@@ -45,7 +44,7 @@ export const useSelect = ({
 	 * notebook they have since moved on from sits there for the session.
 	 */
 	const answerBanner = () => {
-		setProblem(null);
+		moveOn();
 		dismissConnect();
 	};
 
