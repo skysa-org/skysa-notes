@@ -83,7 +83,10 @@ const outcomeMessage = (result: CancelImportResult, label: string): Cancelling =
 	return { kind: 'idle' };
 };
 
-/** What an import is shown with; the app's own unless a test says otherwise. */
+/**
+ * What an import is shown with besides the database (`useDb`): the app's own
+ * unless a test says otherwise.
+ */
 interface ImportSeams {
 	client?: Pick<ApiClient, 'withCredential'>;
 	sync?: Pick<SyncScheduler, 'halt' | 'status' | 'subscribe'>;
