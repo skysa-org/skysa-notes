@@ -1,5 +1,4 @@
-import { isVaultPath } from '@skysa/core';
-import { Link, useRouterState } from '@tanstack/react-router';
+import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type RefObject,
@@ -10,17 +9,13 @@ import {
 	useSyncExternalStore,
 } from 'react';
 
-import { api, type ApiClient, type Grant, type InstanceConfig } from '../api/client.js';
+import { api, type Grant, type InstanceConfig } from '../api/client.js';
 import { answer, type Asked } from '../api/instanceConfig.js';
-import { Icon } from '../editor/icons.js';
 import { type pickFiles } from '../editor/pickFiles.js';
-import { failedAt, saying } from '../errors/reached.js';
 import { t } from '../i18n/t.js';
-import { noteLink } from '../routes/place.js';
 import { tabLock } from '../secrets/tabLock.js';
 import { setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { connectedSources } from '../store/connection.js';
-import { credentialFor } from '../store/credentials.js';
 import {
 	activeConnectionId,
 	db as defaultDb,
@@ -40,9 +35,8 @@ import {
 } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
-import { getNote } from '../store/notes.js';
 import { rowsOf } from '../store/rows.js';
-import { isLiveSource, isTombstone } from '../store/rowStates.js';
+import { isLiveSource } from '../store/rowStates.js';
 import { getScratchpadShown, setScratchpadShown } from '../store/scratchpad.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
@@ -55,32 +49,21 @@ import {
 	PROVIDER_LABELS,
 	type UnsentAnswer,
 } from '../sync/account.js';
-import { needsReconnect, syncScheduler, useSyncStatus } from '../sync/runtime.js';
-import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
+import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
+import { type SchedulerStatus } from '../sync/scheduler.js';
+import { type Client, type Sync } from './account/clients.js';
+import { Devices, stillSignedIn, useGrants } from './account/Devices.js';
 import { ActionsMenu, GearMenu, useMenuButtons } from './account/PanelMenus.js';
 import { StatusLine, SyncBar, SyncDetails } from './account/StatusLine.js';
-import {
-	conflictMessage,
-	failureMessage,
-	lineStatus,
-	refusalMessage,
-	statusMessage,
-	syncCount,
-	when,
-} from './account/statusWords.js';
-import {
-	LeftAtProvider,
-	UnreadableNotice,
-	UnseenDialog,
-	unseenItem,
-} from './account/SyncNotices.js';
+import { failureMessage, lineStatus, refusalMessage, syncCount } from './account/statusWords.js';
+import { LeftAtProvider, UnseenDialog, unseenItem } from './account/SyncNotices.js';
+import { importingHere, isSyncable, SyncState } from './account/SyncState.js';
 import { ClipboardPanel } from './ClipboardPanel.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
 import { DialogActions, InlineDialog } from './Dialog.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
-import { InfoDialog } from './InfoDialog.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 import { SecretsDialog, type SecretsDialogProps, secretsLabel } from './SecretsDialog.js';
@@ -102,13 +85,6 @@ import { useEscape } from './useEscape.js';
  * How syncing is going comes from the scheduler (`sync/scheduler.ts`), which
  * runs on its own; the panel only reports it and offers "Sync now".
  */
-
-type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
-
-type Sync = Pick<
-	SyncScheduler,
-	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'pause' | 'clipboard' | 'keyFile'
->;
 
 export interface AccountPanelProps {
 	client?: Client;
@@ -352,466 +328,6 @@ const NotConnected = ({
 			{slot !== undefined && <ActionsMenu slot={slot} items={items} />}
 		</section>
 	);
-};
-
-/**
- * The note a stuck op is about, when it is still here. A stuck `delete` is
- * about a note the user has already deleted — its row is a tombstone — and
- * offering to open that would be offering nothing. Nor a password in the
- * vault (docs/ARCHITECTURE.md §7, "Passwords in the vault"), which the link
- * would open in the note editor, its fence's words and all.
- */
-const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: string }) => {
-	// Wrapped, so "not read yet" and "no such note" are not the same answer.
-	const found = useLiveQuery(
-		// The source being synced is the one showing, and so is this.
-		async () => ({ note: await getNote(database, noteId) }),
-		[database, noteId]
-	);
-	const note = found?.note;
-	// The paragraph is part of the answer: rendered outside, it would be an
-	// empty line under the message while the query is out, and for good after
-	// it for a note that is gone.
-	if (note === undefined || isTombstone(note) || isVaultPath(note.path)) return null;
-	return (
-		<p className="muted">
-			<Link to="/" {...noteLink(note)}>
-				{t('account.openNote')}
-			</Link>
-		</p>
-	);
-};
-
-/**
- * Under "this account cannot sync on this server": the operator's own words
- * for why, as the server passed them on with its refusal, and the one thing
- * their gate offers to do about it. Nothing when there is neither — the line
- * above is then the whole of what is known.
- */
-const Denied = ({
-	status,
-	syncable,
-	config,
-}: {
-	status: SchedulerStatus;
-	/** Said only where the line above it is (`attentionMessage`). */
-	syncable: boolean;
-	config: Asked<InstanceConfig>;
-}) => {
-	if (!syncable || status.phase !== 'attention' || status.refusal !== 'not_entitled') return null;
-	const reason = status.denial?.reason;
-	const gate = answer(config)?.connectGate;
-	if (reason === undefined && gate === undefined) return null;
-	return (
-		<p className="muted">
-			{reason}
-			{reason !== undefined && gate !== undefined && ' '}
-			{gate !== undefined && (
-				// In this window, as the `+` menu's is (`GateLink`).
-				<a href={gate.action.url} rel="noreferrer">
-					{gate.action.label}
-				</a>
-			)}
-		</p>
-	);
-};
-
-/** A source the app can sync, and so re-scan: one at a provider it can still connect. */
-const isSyncable = (bound: SyncStateRecord): boolean =>
-	bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
-
-/**
- * A source's first import, which holds the app behind its own dialog
- * (`ImportDialog`): the panel offers nothing about syncing until it is done.
- */
-const importingHere = (bound: SyncStateRecord): boolean => bound.importing !== undefined;
-
-interface SyncStateProps {
-	client: Client;
-	database: NotesDatabase;
-	sync: Sync;
-	bound: SyncStateRecord;
-	label: string;
-	/** This server lets the user connect storage from here. */
-	reconnectable: boolean;
-	/** What this server offers, which includes what its operator says to an account it will not sync. */
-	config: Asked<InstanceConfig>;
-	returnTo: string;
-	navigate?: (url: string) => void;
-	/** Whether the re-scan is being asked about, which the panel holds. */
-	rescanning: boolean;
-	onRescanning: (asking: boolean) => void;
-}
-
-/**
- * What to do about how syncing is going, above the status line
- * (`StatusLine`), which says how it is going itself: here, then, only where it
- * has stopped on something the user has to deal with. Not a live region: it
- * changes on every sync, every minute, and a screen reader announcing each one
- * would be noise; the panel is where the user looks.
- */
-const SyncState = ({
-	client,
-	database,
-	sync,
-	bound,
-	label,
-	reconnectable,
-	config,
-	returnTo,
-	navigate,
-	rescanning,
-	onRescanning: setRescanning,
-}: SyncStateProps) => {
-	const status = useSyncStatus(sync);
-	const syncable = isSyncable(bound);
-	const message = statusMessage(status, label, syncable);
-	const reconnect = needsReconnect(status);
-
-	return (
-		<>
-			{/*
-			 * Said even where there is no link to offer: sync has stopped. In
-			 * the colour of an error, as the mark on the source's tab is.
-			 */}
-			{reconnect && (
-				<p className="account-problem">
-					{status.refusal === 'credential_revoked' ||
-					status.refusal === 'credential_required'
-						? t('account.reconnect.cannotReach', { provider: label })
-						: t('account.reconnect.needed', { provider: label })}
-				</p>
-			)}
-			{/*
-			 * A button of the panel's, under what it answers, rather than a word
-			 * in the sentence: it was one, dressed as nothing, that a phone's
-			 * taller button wrapped onto the line under the text with no space
-			 * between them. And what it renders besides — its own error, the
-			 * question about the device's notes — is not something a paragraph
-			 * may hold.
-			 */}
-			{reconnect && reconnectable && bound.provider !== undefined && (
-				<ConnectButton
-					db={database}
-					client={client}
-					provider={bound.provider}
-					returnTo={returnTo}
-					{...(navigate === undefined ? {} : { navigate })}
-				>
-					{t('account.reconnect.again')}
-				</ConnectButton>
-			)}
-			{message !== null && status.phase === 'attention' && <p className="muted">{message}</p>}
-			<Denied status={status} syncable={syncable} config={config} />
-			{/*
-			 * Beside the message that names the op, and only there: `stuck`
-			 * outlives the run that found it, and an offer to open a note under
-			 * "Syncing…" or "Synced" is about a problem the user is not being
-			 * told about.
-			 */}
-			{status.phase === 'attention' && status.stuck?.noteId !== undefined && (
-				<StuckNote database={database} noteId={status.stuck.noteId} />
-			)}
-			{status.conflicts.length > 0 && (
-				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
-			)}
-			<UnreadableNotice files={bound.unreadable} label={label} />
-			{/*
-			 * The way out of a cursor the provider has lost track of, or a
-			 * store that disagrees with the remote about what is there. It is
-			 * not a repair of nothing: the confirm says what it costs. Asked for
-			 * from the gear's menu, or the `⋯`.
-			 */}
-			{status.phase !== 'local' && syncable && rescanning && (
-				<InlineDialog
-					className="account-confirm"
-					label={t('account.rescan.confirm')}
-					onClose={() => {
-						setRescanning(false);
-					}}
-				>
-					<p className="muted">{t('account.rescan.question', { provider: label })}</p>
-					<DialogActions
-						primary={
-							<button
-								type="button"
-								className="primary"
-								disabled={status.phase === 'syncing'}
-								onClick={() => {
-									setRescanning(false);
-									void sync.resync();
-								}}
-							>
-								{t('account.rescan.confirm')}
-							</button>
-						}
-					/>
-				</InlineDialog>
-			)}
-		</>
-	);
-};
-
-/**
- * The devices holding a source's connection, as the server lists them. The
- * device list shows them; the disconnect question counts them, since what it
- * does depends on whether this is the last.
- */
-const useGrants = (client: Client, database: NotesDatabase, connectionId: string) => {
-	const [grants, setGrants] = useState<Asked<Grant[]>>({ kind: 'asking' });
-
-	// Only the newest question's answer is kept, and none once the source has
-	// changed or the panel has gone. A slow answer about one source landing under
-	// another's name is a list of grant ids the source on screen has never heard
-	// of, each with a Remove button.
-	const question = useRef(0);
-	const ask = useCallback(() => {
-		question.current += 1;
-		const mine = question.current;
-		const settle = (next: Asked<Grant[]>) => {
-			if (question.current === mine) setGrants(next);
-		};
-		void withHeld(database, client, connectionId)
-			.then((authed) => (authed === undefined ? undefined : authed.grants()))
-			.then((result) => {
-				settle(
-					result === undefined || !result.ok
-						? { kind: 'unreachable' }
-						: { kind: 'answered', value: result.value }
-				);
-			})
-			.catch(() => {
-				settle({ kind: 'unreachable' });
-			});
-	}, [client, database, connectionId]);
-	useEffect(() => {
-		ask();
-		return () => {
-			question.current += 1;
-		};
-	}, [ask]);
-
-	return { grants, ask };
-};
-
-/**
- * How many other devices a disconnect here would leave connected, or
- * `undefined` where the server has not said. One signed out for being idle is
- * not counted: the server does not count it either, and disconnecting the last
- * live device takes the account with it (`signOut`).
- */
-const stillSignedIn = (grants: Asked<Grant[]>): number | undefined =>
-	answer(grants)?.filter((grant) => !grant.current && !grant.expired).length;
-
-const devicesLine = (count: number): string => t('account.devices.count', { count });
-
-/** Taking a device off the connection, and what went wrong if it did not come off. */
-const useRevoke = (
-	client: Client,
-	database: NotesDatabase,
-	connectionId: string,
-	onChanged: () => void
-) => {
-	const [busy, setBusy] = useState<string | null>(null);
-	const [problem, setProblem] = useState<string | null>(null);
-	const revoke = (grantId: string) => {
-		setBusy(grantId);
-		setProblem(null);
-		// Each half labelled as it is called: the credential is read from this
-		// device and the grant is revoked on the server, and a failure of the
-		// first has nothing to do with a connection. The device half runs strictly
-		// before the server is asked, which is what lets its wording say that
-		// nothing was removed.
-		void failedAt('device', () => withHeld(database, client, connectionId))
-			.then((authed) =>
-				authed === undefined
-					? undefined
-					: failedAt('server', () => authed.revokeGrant(grantId))
-			)
-			.then((result) => {
-				if (result?.ok === true) {
-					onChanged();
-					return;
-				}
-				setProblem(t('account.devices.stillSignedIn'));
-			})
-			.catch((error: unknown) => {
-				setProblem(
-					saying(error, {
-						answered: t('account.devices.failed.answered'),
-						unreachable: t('account.devices.failed.unreachable'),
-						device: t('account.devices.failed.device'),
-						// Neither call, so it happened after the revoke had already
-						// done whatever it did.
-						unknown: t('account.devices.failed.unknown'),
-					})
-				);
-			})
-			.finally(() => {
-				setBusy(null);
-			});
-	};
-	return { busy, problem, revoke };
-};
-
-/**
- * What a device's row says of it: what its browser called it, where it called
- * it anything, when it was last used, and whether the server has signed it out
- * for being idle.
- */
-const deviceRow = ({ device, lastUsedAt, expired }: Grant): string => {
-	const used = when(lastUsedAt);
-	if (device === undefined) {
-		return expired
-			? t('account.devices.unnamedIdle', { when: used })
-			: t('account.devices.unnamed', { when: used });
-	}
-	return expired
-		? t('account.devices.namedIdle', { device, when: used })
-		: t('account.devices.named', { device, when: used });
-};
-
-/** A row per other device, each with its Remove, and what went wrong with one. */
-const DeviceRows = ({
-	others,
-	revoking,
-}: {
-	others: readonly Grant[];
-	revoking: ReturnType<typeof useRevoke>;
-}) => (
-	<>
-		<ul aria-label={t('account.devices.list')}>
-			{others.map((grant) => (
-				<li key={grant.id}>
-					<span className="muted">{deviceRow(grant)}</span>
-					<button
-						type="button"
-						disabled={revoking.busy !== null}
-						onClick={() => {
-							revoking.revoke(grant.id);
-						}}
-					>
-						{t('account.devices.remove')}
-					</button>
-				</li>
-			))}
-		</ul>
-		{revoking.problem !== null && (
-			<p className="muted" role="alert">
-				{revoking.problem}
-			</p>
-		)}
-	</>
-);
-
-/**
- * The devices holding this connection, and the way to take one away.
- *
- * The point of it is that a stolen credential is visible and revocable. It is
- * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
- * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
- * how many other devices there are is said whether or not the list is open:
- * one more than the user has is what a theft looks like from here. The count
- * is in the status line (`StatusLine`), where there is room for it and not for
- * the rows: it is a button, beside the gear or the source's `⋯`, that opens
- * them over everything. Each row names the device as its browser did at
- * sign-in ("Safari on iPhone"), since a row that says only "a device" cannot
- * be told from the one in the user's pocket. This one is not among them.
- *
- * Revoking is permanent in a way worth saying: the server spends a credential's
- * hash for ever, so the device that held it cannot be talked back into this
- * connection — it has to be connected again from scratch.
- */
-const Devices = ({
-	client,
-	database,
-	connectionId,
-	grants,
-	onChanged,
-	gear,
-}: {
-	client: Client;
-	database: NotesDatabase;
-	/**
-	 * Which source these are the devices of. Named rather than looked up: it
-	 * pins every call in this component to one source, rather than re-reading
-	 * "whichever is in front" between asking and revoking.
-	 */
-	connectionId: string;
-	/**
-	 * Asked by the panel (`useGrants`), keyed by the same source, which is what
-	 * keeps the list from staying on the previous source's devices after a
-	 * switch, with a Remove sending a grant id the new connection has never
-	 * heard of. The panel's because the disconnect question counts them too.
-	 */
-	grants: Asked<Grant[]>;
-	/** A device was removed: ask again. */
-	onChanged: () => void;
-	/**
-	 * Where the focus goes when the list is put away with nobody left on it: the
-	 * count it was opened from went with the last of them. The gear, or the
-	 * source's `⋯`.
-	 */
-	gear?: RefObject<HTMLButtonElement | null>;
-}) => {
-	const revoking = useRevoke(client, database, connectionId, onChanged);
-	const [open, setOpen] = useState(false);
-	const count = useRef<HTMLButtonElement>(null);
-
-	// This one is not listed: it cannot be removed from itself (disconnecting
-	// is that), and "this device" is the one thing about it the user knows.
-	const others = (answer(grants) ?? []).filter((grant) => !grant.current);
-	// Kept open after the last other device is removed, saying so, rather than
-	// taken away from under the focus.
-	if (others.length === 0 && !open) return null;
-
-	return (
-		<>
-			{others.length > 0 && (
-				<button
-					ref={count}
-					type="button"
-					className="icon icon-quiet account-devices-count"
-					aria-label={devicesLine(others.length)}
-					title={devicesLine(others.length)}
-					onClick={() => {
-						setOpen(true);
-					}}
-				>
-					<Icon name="device" />
-					<span aria-hidden="true">{others.length}</span>
-				</button>
-			)}
-			{open && (
-				<InfoDialog
-					title={t('account.devices.title')}
-					onClose={() => {
-						setOpen(false);
-						if (others.length === 0) gear?.current?.focus();
-					}}
-					returnFocus={count}
-				>
-					<div className="account-devices">
-						{others.length === 0 ? (
-							<p>{t('account.devices.none')}</p>
-						) : (
-							<DeviceRows others={others} revoking={revoking} />
-						)}
-					</div>
-				</InfoDialog>
-			)}
-		</>
-	);
-};
-
-/** The client, presenting the credential this device holds for one source. */
-const withHeld = async (
-	database: NotesDatabase,
-	client: Client,
-	connectionId: string
-): Promise<ApiClient | undefined> => {
-	const held = await credentialFor(database, connectionId);
-	return held === undefined ? undefined : client.withCredential(held.credential);
 };
 
 /**
