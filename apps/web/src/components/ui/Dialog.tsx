@@ -9,7 +9,6 @@ import {
 	useEffect,
 	useId,
 	useRef,
-	useState,
 } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -17,6 +16,8 @@ import { useSuspendShortcuts } from '../../commands/context.js';
 import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import { rems } from './layout.js';
+import { useFocusBack } from './useFocusBack.js';
+import { usePressOutside } from './usePressOutside.js';
 
 /**
  * Every dialog the app draws, built one way (docs/ARCHITECTURE.md §7,
@@ -307,37 +308,6 @@ const useOverflow = (
 	}, [dialog, body]);
 };
 
-/**
- * A press on the page around the dialog, begun there and let go there, is its
- * way out: not one begun in the dialog — a drag across a field's text, or a
- * pattern's — that ends outside it.
- */
-const usePressOutside = (
-	backdrop: RefObject<HTMLElement | null>,
-	onClose: (() => void) | undefined,
-	busy: boolean | undefined
-): void => {
-	useEffect(() => {
-		const element = backdrop.current;
-		if (element === null || onClose === undefined) return undefined;
-		const began = cell(false);
-		const onDown = (event: PointerEvent) => {
-			began.current = event.target === element;
-		};
-		const onClick = (event: MouseEvent) => {
-			const outside = began.current && event.target === element;
-			began.current = false;
-			if (outside && busy !== true) onClose();
-		};
-		element.addEventListener('pointerdown', onDown);
-		element.addEventListener('click', onClick);
-		return () => {
-			element.removeEventListener('pointerdown', onDown);
-			element.removeEventListener('click', onClick);
-		};
-	}, [backdrop, onClose, busy]);
-};
-
 export interface DialogProps {
 	title: string;
 	/** What it asks, or is about, under the title: read after it. */
@@ -400,24 +370,13 @@ export const Dialog = ({
 	}, []);
 	const backdrop = useRef<HTMLDivElement>(null);
 	const body = useRef<HTMLDivElement>(null);
-	// What had the focus as the dialog was asked for: read as it is first
-	// drawn, before a field inside it takes the focus in an effect of its own.
-	const [opener] = useState(() => document.activeElement);
 	useSuspendShortcuts();
 	useRefocus(dialog);
 	useFitViewport(backdrop, body);
 	useOverflow(dialog, body);
 	usePressOutside(backdrop, onClose, busy);
 
-	useEffect(() => {
-		// Read now: what it names is on the page for as long as the dialog is.
-		const back = returnFocus?.current ?? opener;
-		return () => {
-			if (back instanceof HTMLElement && back.isConnected) back.focus();
-		};
-		// Mount and unmount only: the focus is given back once.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	useFocusBack(returnFocus);
 
 	// Taken as the dialog is first drawn: as it opens, or as it stops being hidden.
 	useEffect(() => {

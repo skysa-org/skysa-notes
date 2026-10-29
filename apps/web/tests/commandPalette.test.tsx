@@ -582,6 +582,22 @@ describe('the palette as a dialog', () => {
 		return button;
 	};
 
+	it('closes on a press begun and let go on the page around it, as a dialog does', () => {
+		const { onClose } = openOver(focused());
+		const backdrop = document.querySelector<HTMLElement>('.palette-backdrop');
+		const row = screen.getByRole('option', { name: /Do the thing/ });
+		if (backdrop === null) throw new Error('no backdrop');
+
+		// A drag from a row, let go outside it, is not a press outside.
+		fireEvent.pointerDown(row);
+		fireEvent.click(backdrop);
+		expect(onClose).not.toHaveBeenCalled();
+
+		fireEvent.pointerDown(backdrop);
+		fireEvent.click(backdrop);
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
 	it('gives focus back to whatever had it, when it closes having done nothing', () => {
 		// Removing the focused element does not return focus where it came from:
 		// the browser drops it on `document.body`, and a keyboard user who opens
