@@ -13,7 +13,7 @@ import { DownloadAll, downloadItem, useDownloadAll } from './DownloadAll.js';
 import { importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
 import { ActionsMenu, GearMenu } from './PanelMenus.js';
 import { StatusLine } from './StatusLine.js';
-import { useScratchpadItem } from './storageItems.js';
+import { offersDownload, useScratchpadItem } from './storageItems.js';
 import { useAsked } from './useAsked.js';
 
 /**
@@ -60,12 +60,11 @@ export const NotConnected = ({
 		syncs: false,
 		...(pick === undefined ? {} : { pick }),
 	});
-	useAsked(slot, LOCAL_CONNECTION_ID, (action) => {
-		if (action !== 'download') return true;
-		if (holds === undefined) return false;
-		if (holds) downloading.start();
-		return true;
-	});
+	// The device's own notes offer a download alone.
+	useAsked(slot, LOCAL_CONNECTION_ID, (action) => ({
+		offer: action === 'download' ? offersDownload(true, holds) : 'no',
+		act: downloading.start,
+	}));
 	const kept = useKept(keep);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -73,7 +72,7 @@ export const NotConnected = ({
 			: [];
 	const scratchpad = useScratchpadItem(database, LOCAL_CONNECTION_ID);
 	const items = [
-		...downloadItem(holds, downloading),
+		...downloadItem(offersDownload(true, holds), downloading),
 		...importItems(importing, { scratchpad: scratchpad.shown === true }),
 		...scratchpad.items,
 	];

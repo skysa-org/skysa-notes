@@ -9,6 +9,7 @@ import {
 	type Library,
 } from '../../store/exportNotes.js';
 import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
+import type { Offer } from './storageItems.js';
 
 /**
  * The whole of one source, as one archive of markdown files: the tree a push
@@ -62,11 +63,8 @@ export const DownloadAll = ({
 	) : null;
 
 /** The way to start it, as an item of the gear's menu or the `⋯`. */
-export const downloadItem = (
-	holds: boolean | undefined,
-	downloading: Downloading
-): OptionsMenuItem[] =>
-	holds === true
+export const downloadItem = (offer: Offer, downloading: Downloading): OptionsMenuItem[] =>
+	offer === 'yes'
 		? [
 				{
 					label: t('account.menu.downloadAll'),

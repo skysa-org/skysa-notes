@@ -783,6 +783,50 @@ describe('the source panel, in a compact window', () => {
 		expect(given.at(-1)?.asked).toBeNull();
 	});
 
+	it('lets go of an ask still waiting once another source is shown', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		const given: AccountSlot[] = [];
+		render(
+			<SourcePanel
+				db={db}
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>
+		);
+		await user.click(
+			await within(panel()).findByRole('button', { name: 'Options for “OneDrive”' })
+		);
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+		await waitFor(() => {
+			expect(given.at(-1)?.asked).toEqual({ connectionId: 'c2', action: 'disconnect' });
+		});
+
+		// Not answered yet (a disconnect still out, say), and the user goes back.
+		await showConnection(db, 'c1');
+		await waitFor(() => {
+			expect(given.at(-1)?.asked).toBeNull();
+		});
+		// Nor is it asked again the next time OneDrive is shown.
+		await showConnection(db, 'c2');
+		await waitFor(async () => {
+			expect((await connectedSources(db)).find((source) => source.active)?.connectionId).toBe(
+				'c2'
+			);
+		});
+		expect(given.at(-1)?.asked).toBeNull();
+	});
+
 	it('renames a source from its `⋯`, telling the bar what is typed until it is stored', async () => {
 		const db = freshDatabase();
 		await bindInOrder(db, [

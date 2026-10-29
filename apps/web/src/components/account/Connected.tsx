@@ -36,6 +36,10 @@ import { StatusLine, SyncBar, SyncDetails } from './StatusLine.js';
 import { lineStatus, syncCount } from './statusWords.js';
 import {
 	clipboardItem,
+	offersDisconnect,
+	offersDownload,
+	offersRescan,
+	offersSecrets,
 	stoppedBy,
 	storageItems,
 	useScratchpadItem,
@@ -158,7 +162,7 @@ const ConnectedFoot = ({
 		...actions,
 		bound,
 		phase: status.phase,
-		download: downloadable ? downloadItem(holds, downloading) : [],
+		download: downloadItem(offersDownload(downloadable, holds), downloading),
 		imports: downloadable
 			? importItems(importing, { scratchpad: scratchpad.shown === true })
 			: [],
@@ -397,28 +401,31 @@ export const Connected = ({
 	// item here would do it, once it can be, and dropped where it would not
 	// be offered.
 	useAsked(slot, connectionId, (action) => {
-		if (action === 'download') {
-			if (!downloadable) return true;
-			if (holds === undefined) return false;
-			if (holds) downloading.start();
-			return true;
+		switch (action) {
+			case 'download':
+				return { offer: offersDownload(downloadable, holds), act: downloading.start };
+			case 'rescan':
+				return {
+					offer: offersRescan(bound, status.phase),
+					act: () => {
+						setRescanning(true);
+					},
+				};
+			case 'secrets':
+				return {
+					offer: offersSecrets(bound, status.phase),
+					act: () => {
+						setSecrets(true);
+					},
+				};
+			case 'disconnect':
+				return {
+					offer: offersDisconnect(open, disconnectBlocked),
+					act: () => {
+						ask(true);
+					},
+				};
 		}
-		if (action === 'rescan') {
-			if (!isSyncable(bound) || importingHere(bound)) return true;
-			if (status.phase === 'local') return false;
-			setRescanning(true);
-			return true;
-		}
-		if (action === 'secrets') {
-			if (importingHere(bound)) return true;
-			if (status.phase === 'local') return false;
-			setSecrets(true);
-			return true;
-		}
-		if (open) return true;
-		if (disconnectBlocked) return false;
-		ask(true);
-		return true;
 	});
 
 	return (
