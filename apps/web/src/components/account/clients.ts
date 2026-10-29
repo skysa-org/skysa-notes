@@ -2,7 +2,7 @@ import type { ApiClient, InstanceConfig } from '../../api/client.js';
 import type { Asked } from '../../api/instanceConfig.js';
 import type { NotesDatabase } from '../../store/db.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
-import type { AccountSlot } from '../SourceTabs.js';
+import type { AccountSlot } from '../sources/SourcePanel.js';
 
 /**
  * The parts of the API client and the scheduler the storage panel uses, and
