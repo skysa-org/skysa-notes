@@ -6,6 +6,7 @@ import { saying } from '../../errors/reached.js';
 import { t } from '../../i18n/t.js';
 import { db, type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../../sync/account.js';
+import { runSentence } from '../../sync/progress.js';
 import { syncScheduler, useSyncStatus } from '../../sync/runtime.js';
 import type { SchedulerStatus, SyncScheduler } from '../../sync/scheduler.js';
 import { Dialog, DialogActions } from '../ui/Dialog.js';
@@ -53,30 +54,8 @@ export const importMessage = (status: SchedulerStatus, label: string): string =>
 	}
 };
 
-const progressMessage = (progress: SyncProgress | undefined, label: string): string => {
-	if (progress === undefined) return t('firstImport.gettingReady');
-	if (progress.stage === 'uploading') {
-		return t('firstImport.uploading', {
-			provider: label,
-			done: progress.done,
-			total: progress.total,
-		});
-	}
-	if (progress.stage === 'receiving' && progress.listing) {
-		return t('firstImport.checking', { provider: label, count: progress.total });
-	}
-	if (progress.stage === 'receiving') {
-		return t('firstImport.downloading', {
-			provider: label,
-			done: progress.done,
-			total: progress.total,
-		});
-	}
-	const { found, done } = progress;
-	return progress.listing
-		? t('firstImport.listing', { provider: label, count: found })
-		: t('firstImport.downloading', { provider: label, done, total: found });
-};
+const progressMessage = (progress: SyncProgress | undefined, label: string): string =>
+	progress === undefined ? t('firstImport.gettingReady') : runSentence(progress, label, 'import');
 
 type Cancelling =
 	| { kind: 'idle' }
