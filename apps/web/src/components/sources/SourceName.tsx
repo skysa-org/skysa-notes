@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
-import { LABEL_LIMIT, renameSource } from '../../store/connection.js';
+import { type ConnectedSource, LABEL_LIMIT, renameSource } from '../../store/connection.js';
 import type { NotesDatabase } from '../../store/db.js';
 import type { Renamings } from '../../store/renaming.js';
+import { isLiveSource } from '../../store/rowStates.js';
 import { ProviderIcon, type SourceKind } from '../ProviderIcon.js';
 
 /**
@@ -130,3 +132,39 @@ export const RenameField = ({
 		</span>
 	);
 };
+
+/**
+ * A source's name as a screen reader is told it: one that syncs nowhere says
+ * so. Said outright, in the bar and the source dropdown alike, rather than
+ * left to be assembled from the spans `ShownSourceName` draws, which the name
+ * from contents joins by its own rules. Exactly the visible words, so it still
+ * satisfies WCAG 2.5.3.
+ */
+export const sourceLabel = (source: ConnectedSource, name: string): string =>
+	isLiveSource(source) ? name : t('sources.disconnected.label', { source: name });
+
+/**
+ * A source's name on screen, and a disconnected one's with the words that say
+ * so — not an icon alone: a source that syncs nowhere is the one thing about
+ * the bar a user must not have to infer from a colour. `shown` draws the name
+ * itself, where a place has its own way to (the tab holds its width with it).
+ */
+export const ShownSourceName = ({
+	source,
+	name,
+	shown = (words) => words,
+}: {
+	source: ConnectedSource;
+	name: string;
+	shown?: (words: string) => ReactNode;
+}) =>
+	isLiveSource(source)
+		? shown(name)
+		: rich(
+				'sources.disconnected.shown',
+				{
+					name: shown,
+					state: (words) => <span className="source-tab-detached">{words}</span>,
+				},
+				{ source: name }
+			);

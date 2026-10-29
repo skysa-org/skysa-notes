@@ -366,6 +366,10 @@ describe('the source tabs', () => {
 		await waitFor(() => {
 			expect(tabs()).toEqual(['Dropbox — disconnected']);
 		});
+		// The state set apart from the name, for the stylesheet to say it quietly.
+		expect(document.querySelector('.source-tab-detached')?.textContent).toContain(
+			'disconnected'
+		);
 	});
 
 	it('offers the providers this deployment has, and nothing when it cannot ask', async () => {
