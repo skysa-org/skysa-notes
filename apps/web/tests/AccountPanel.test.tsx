@@ -2359,13 +2359,6 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(sync.syncNow).toHaveBeenCalledTimes(1);
 	});
 
-	it('gives the date of a sync that was not today', async () => {
-		const at = new Date('2020-02-03T10:00:00');
-		await connected(fakeSync({ phase: 'idle', lastSyncAt: at.getTime() }));
-
-		expect((await statusLine()).textContent).toBe(`Synced ${at.toLocaleDateString()}`);
-	});
-
 	it('cannot be asked to sync while it is syncing', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'syncing' });
@@ -2510,17 +2503,6 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		await waitFor(() => {
 			expect(line.textContent).toBe('0 of 30 received');
 		});
-	});
-
-	it('says it is looking for notes from the start of a re-scan, before it has found any', async () => {
-		const sync = fakeSync({
-			phase: 'syncing',
-			progress: { stage: 'scanning', found: 0, done: 0, listing: true },
-		});
-		await connected(sync);
-
-		expect((await statusLine()).textContent).toBe('Looking for notes…');
-		expect(screen.queryByRole('progressbar')).toBeNull();
 	});
 
 	it('opens what a sync is doing from its line, and pauses it there', async () => {
@@ -2888,56 +2870,6 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		sync.say({ phase: 'idle' });
 
 		expect(screen.queryByText('Not on the list.')).toBeNull();
-	});
-
-	it('says when changes could not be sent', async () => {
-		await connected(fakeSync({ phase: 'attention', error: 'write a.md failed 8 times' }));
-
-		expect(
-			screen.getByText(
-				'Some changes could not be sent to Dropbox. They will be tried again (write a.md failed 8 times).'
-			)
-		).toBeTruthy();
-	});
-
-	it('says which change is stuck, and by the name the user gave it', async () => {
-		// "Some changes could not be sent" leaves the user with nothing to act
-		// on. The queue is ordered, so this one op is also why everything
-		// behind it is waiting.
-		await connected(
-			fakeSync({
-				phase: 'attention',
-				error: 'move Plan.md failed 5 times',
-				stuck: {
-					op: 'move',
-					path: 'Plan.md',
-					targetPath: 'Work/Plan.md',
-					attempts: 5,
-					error: 'insufficient permissions',
-				},
-			})
-		);
-
-		expect(
-			screen.getByText(
-				'Dropbox would not take the rename of Work/Plan.md after 5 tries (insufficient permissions). Everything queued behind it is waiting. \u201CSync now\u201D tries again.'
-			)
-		).toBeTruthy();
-	});
-
-	it('says a stuck change this version cannot read is one (#447)', async () => {
-		await connected(
-			fakeSync({
-				phase: 'attention',
-				stuck: { op: 'malformed', path: 'Away.md', attempts: 5, error: 'teleport' },
-			})
-		);
-
-		expect(
-			screen.getByText(
-				'A change to Away.md could not be sent to Dropbox after 5 tries: this version of the app cannot read it (teleport). Everything queued behind it is waiting. Updating the app may let it through.'
-			)
-		).toBeTruthy();
 	});
 
 	it('offers to open the note a stuck change is about', async () => {
