@@ -1,12 +1,10 @@
-import { type ReactNode } from 'react';
-
 import { NameDialog } from '../../components/NameDialog.js';
-import { type ScratchEditing } from '../../components/NoteView.js';
 import { ScratchModal, Scratchpad } from '../../components/Scratchpad.js';
 import { type useScratchpad } from '../../components/useScratchpad.js';
 import { t } from '../../i18n/t.js';
 import { type LiveEdits } from '../../store/liveEdits.js';
 import { scratchMarks } from '../../store/scratchpad.js';
+import { type NotePane } from './NoteColumn.js';
 
 /**
  * The scratchpad's parts of the shell: its pane, in the notes' place, and
@@ -24,7 +22,7 @@ export const ScratchPane = ({
 }: Readonly<{
 	scratch: Scratch;
 	liveEdits: LiveEdits;
-	editor: (scratchNote?: ScratchEditing) => ReactNode;
+	editor: NotePane;
 }>) => (
 	<Scratchpad
 		notes={scratch.notes}
@@ -48,7 +46,7 @@ export const ScratchOverlays = ({
 	editor,
 }: Readonly<{
 	scratch: Scratch;
-	editor: (scratchNote?: ScratchEditing) => ReactNode;
+	editor: NotePane;
 }>) => (
 	<>
 		{scratch.modal && scratch.card !== undefined && (

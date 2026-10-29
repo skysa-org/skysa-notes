@@ -15,6 +15,16 @@ import { isLive } from '../../store/rowStates.js';
  * is shown.
  */
 
+/** The shell's note pane, as a place shows it: with the scratchpad's part, or without. */
+export type NotePane = (scratchNote?: ScratchEditing) => ReactNode;
+
+/** The column with nothing in it, or only a line about what is coming. */
+const EmptyPane = ({ children }: Readonly<{ children?: ReactNode }>) => (
+	<section className="note-view empty" aria-label={t('shell.notePane')}>
+		{children}
+	</section>
+);
+
 /**
  * What is in the note's column in the scratchpad: in a compact window, the
  * card open, full screen; nothing open, an empty pane behind the
@@ -36,7 +46,7 @@ export const NoteColumn = ({
 	unseen: boolean;
 	/** The note pane's part in the scratchpad (`useScratchpad`). */
 	editing: ScratchEditing;
-	editor: (scratchNote?: ScratchEditing) => ReactNode;
+	editor: NotePane;
 }>) => {
 	if (!inScratchpad) return editor();
 	if (!compact) return null;
@@ -49,7 +59,7 @@ export const NoteColumn = ({
 			</CardSheet>
 		);
 	}
-	return <section className="note-view empty" aria-label={t('shell.notePane')} />;
+	return <EmptyPane />;
 };
 
 /**
@@ -86,12 +96,12 @@ export const PasswordColumn = ({
 			/>
 		);
 	}
-	if (compact) return <section className="note-view empty" aria-label={t('shell.notePane')} />;
+	if (compact) return <EmptyPane />;
 	return (
-		<section className="note-view empty" aria-label={t('shell.notePane')}>
+		<EmptyPane>
 			<p className="muted placeholder">
 				{opening ? t('passwords.item.opening') : t('passwords.none')}
 			</p>
-		</section>
+		</EmptyPane>
 	);
 };

@@ -1,9 +1,17 @@
+import { VAULT_FOLDER } from '@skysa/core';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type ScratchEditing } from '../src/components/NoteView.js';
 import { t } from '../src/i18n/t.js';
 import { NoteColumn, PasswordColumn } from '../src/routes/-home/NoteColumn.js';
+import { type NoteRecord } from '../src/store/db.js';
+
+vi.mock('../src/components/PasswordItem.js', () => ({
+	PasswordItem: ({ note }: { note: NoteRecord }) => (
+		<article aria-label="item">{note.id}</article>
+	),
+}));
 
 /**
  * The shell's third column on its own (`routes/-home/NoteColumn.tsx`). The
@@ -110,5 +118,49 @@ describe('PasswordColumn', () => {
 	it('is an empty pane behind the list in a compact window', () => {
 		render(<PasswordColumn {...none} opening compact />);
 		expect(screen.getByLabelText(t('shell.notePane')).textContent).toBe('');
+	});
+
+	const item = (path: string, deletedLocally: 0 | 1): NoteRecord =>
+		({
+			id: path,
+			connectionId: 'local',
+			title: '',
+			body: '',
+			path,
+			deletedLocally,
+		}) as NoteRecord;
+
+	it('is the item open, while it is a live one in the vault', () => {
+		render(
+			<PasswordColumn
+				{...none}
+				openNote={item(`${VAULT_FOLDER}/a.md`, 0)}
+				opening={false}
+				compact={false}
+			/>
+		);
+		expect(screen.getByLabelText('item').textContent).toBe(`${VAULT_FOLDER}/a.md`);
+	});
+
+	it('is no item for one deleted here, or a note that is not in the vault', () => {
+		const { rerender } = render(
+			<PasswordColumn
+				{...none}
+				openNote={item(`${VAULT_FOLDER}/a.md`, 1)}
+				opening={false}
+				compact={false}
+			/>
+		);
+		expect(screen.queryByLabelText('item')).toBeNull();
+		rerender(
+			<PasswordColumn
+				{...none}
+				openNote={item('Work/a.md', 0)}
+				opening={false}
+				compact={false}
+			/>
+		);
+		expect(screen.queryByLabelText('item')).toBeNull();
+		expect(screen.getByLabelText(t('shell.notePane')).textContent).toBe(t('passwords.none'));
 	});
 });
