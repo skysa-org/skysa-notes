@@ -2421,6 +2421,28 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(screen.queryByRole('progressbar')).toBeNull();
 	});
 
+	it('says when syncing is waiting for another tab, over its count, and goes back to the count after', async () => {
+		const progress = { stage: 'uploading', done: 120, total: 1000 } as const;
+		const sync = fakeSync({ phase: 'syncing', progress });
+		await connected(sync);
+		const line = await naming('ada@example.com');
+		const thousand = (1000).toLocaleString();
+		expect(line.textContent).toBe(`120 of ${thousand} sent`);
+
+		sync.say({ phase: 'syncing', progress, waiting: true });
+		await waitFor(() => {
+			expect(line.textContent).toBe('Waiting for a tab');
+		});
+		expect(line.title).toBe(
+			'Syncing with Dropbox · ada@example.com\nSyncing is waiting for another tab or window of this app to finish with the notes on this device. If this does not go away, close the app’s other tabs.'
+		);
+
+		sync.say({ phase: 'syncing', progress });
+		await waitFor(() => {
+			expect(line.textContent).toBe(`120 of ${thousand} sent`);
+		});
+	});
+
 	it('counts a re-scan as it finds notes, with a bar that does not know how many until it does', async () => {
 		const sync = fakeSync({
 			phase: 'syncing',
@@ -2442,6 +2464,45 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
 		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['10', '40']);
+	});
+
+	it('says it is checking for changes while it reads them, counting from enough to count', async () => {
+		// Reported on a phone: another device's notebooks moved was minutes of
+		// plain "Syncing…" while the round's pages were read.
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: 0, listing: true },
+		});
+		await connected(sync);
+		const line = await naming('ada@example.com');
+		expect(line.textContent).toBe('Checking…');
+		expect(line.title).toBe(
+			'Syncing with Dropbox · ada@example.com\nChecking Dropbox for changes…'
+		);
+		// No bar for a few, which every quiet sync would flash.
+		expect(screen.queryByRole('progressbar')).toBeNull();
+
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: PROGRESS_FROM, listing: true },
+		});
+		await waitFor(() => {
+			expect(line.textContent).toBe(`${String(PROGRESS_FROM)} changes found`);
+		});
+		expect(line.title).toBe(
+			`Syncing with Dropbox · ada@example.com\nChecking Dropbox for changes: ${String(PROGRESS_FROM)} changed notes found so far.`
+		);
+		expect(
+			screen.getByRole('progressbar', { name: 'Sync progress' }).hasAttribute('value')
+		).toBe(false);
+
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: 30, listing: false },
+		});
+		await waitFor(() => {
+			expect(line.textContent).toBe('0 of 30 received');
+		});
 	});
 
 	it('opens what a sync is doing from its line, and pauses it there', async () => {

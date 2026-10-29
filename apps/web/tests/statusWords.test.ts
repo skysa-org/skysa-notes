@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	conflictMessage,
@@ -24,6 +24,8 @@ const status = (rest: Omit<SchedulerStatus, 'conflicts'>): SchedulerStatus => ({
 
 const thousand = (1000).toLocaleString();
 
+const earlier = new Date('2020-02-03T10:00:00');
+
 describe('the status line', () => {
 	it.each<[string, SchedulerStatus, { text: string; title: string | null }]>([
 		[
@@ -38,8 +40,8 @@ describe('the status line', () => {
 		],
 		[
 			'gives the date of a sync that was not today',
-			status({ phase: 'idle', lastSyncAt: new Date('2020-02-03T10:00:00').getTime() }),
-			{ text: `Synced ${new Date('2020-02-03T10:00:00').toLocaleDateString()}`, title: null },
+			status({ phase: 'idle', lastSyncAt: earlier.getTime() }),
+			{ text: `Synced ${earlier.toLocaleDateString()}`, title: null },
 		],
 		[
 			'says it is syncing, a short run',
@@ -134,7 +136,13 @@ describe('the status line', () => {
 		expect(lineStatus(given, 'Dropbox', true)).toEqual(said);
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it('gives the time of a sync today', () => {
+		// A clock that cannot cross midnight between the sync and the asking.
+		vi.useFakeTimers({ now: new Date('2026-03-04T12:00:00'), toFake: ['Date'] });
 		const at = new Date();
 		at.setHours(9, 5, 0, 0);
 		const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -321,14 +329,102 @@ describe('the sentence above the line', () => {
 			status({ phase: 'attention', error: 'authorization required' }),
 			null,
 		],
+		[
+			'says nothing where the device holds no credential for the source',
+			status({ phase: 'attention', refusal: 'credential_required' }),
+			null,
+		],
+		[
+			'says nothing where the source’s credential was revoked',
+			status({ phase: 'attention', refusal: 'credential_revoked' }),
+			null,
+		],
+		['says it is syncing, a short run', status({ phase: 'syncing' }), 'Syncing…'],
+		[
+			'says it is waiting for another tab, over its count',
+			status({
+				phase: 'syncing',
+				progress: { stage: 'uploading', done: 120, total: 1000 },
+				waiting: true,
+			}),
+			'Syncing is waiting for another tab or window of this app to finish with the notes on this device. If this does not go away, close the app’s other tabs.',
+		],
+		[
+			'counts a long run',
+			status({ phase: 'syncing', progress: { stage: 'uploading', done: 120, total: 1000 } }),
+			`Sending changes to Dropbox: 120 of ${thousand}.`,
+		],
+		[
+			'counts the changes it is checking, over saying it checks',
+			status({
+				phase: 'syncing',
+				progress: { stage: 'receiving', done: 0, total: PROGRESS_FROM, listing: true },
+			}),
+			`Checking Dropbox for changes: ${String(PROGRESS_FROM)} changed notes found so far.`,
+		],
+		[
+			'says it is checking before it has found enough to count',
+			status({
+				phase: 'syncing',
+				progress: { stage: 'receiving', done: 0, total: 0, listing: true },
+			}),
+			'Checking Dropbox for changes…',
+		],
+		[
+			'says it is looking for notes from the start of a re-scan',
+			status({
+				phase: 'syncing',
+				progress: { stage: 'scanning', found: 0, done: 0, listing: true },
+			}),
+			'Looking for notes in Dropbox…',
+		],
+		['says it synced, where it never has yet', status({ phase: 'idle' }), 'Synced'],
+		[
+			'gives the date of a sync that was not today',
+			status({ phase: 'idle', lastSyncAt: earlier.getTime() }),
+			`Synced ${earlier.toLocaleDateString()}`,
+		],
+		[
+			'says it is offline',
+			status({ phase: 'offline' }),
+			'Offline. Changes are kept on this device and sync when the connection is back.',
+		],
+		[
+			'says it is paused',
+			status({ phase: 'paused' }),
+			'Syncing with Dropbox is paused on this device. Your edits are kept here and sent when it resumes.',
+		],
+		[
+			'says it is trying again, and why',
+			status({ phase: 'retrying', error: 'dropbox 503: unavailable' }),
+			'Could not sync with Dropbox. Trying again shortly (dropbox 503: unavailable).',
+		],
+		[
+			'says it is trying again where nothing said why',
+			status({ phase: 'retrying' }),
+			'Could not sync with Dropbox. Trying again shortly (unknown error).',
+		],
 	])('%s', (_, given, said) => {
 		expect(statusMessage(given, 'Dropbox', true)).toBe(said);
 	});
 
-	it('says this build cannot sync the provider, before anything else wrong with it', () => {
-		expect(statusMessage(status({ phase: 'attention', error: 'boom' }), 'WebDAV', false)).toBe(
-			'This app cannot sync with WebDAV yet.'
-		);
+	it.each<[string, SchedulerStatus]>([
+		['an error', status({ phase: 'attention', error: 'boom' })],
+		['a stuck change', stuck('write')],
+		['a refusal', status({ phase: 'attention', refusal: 'not_entitled' })],
+		['a missing connection', status({ phase: 'attention', refusal: 'not_found' })],
+	])('says this build cannot sync the provider, over %s', (_, given) => {
+		expect(statusMessage(given, 'WebDAV', false)).toBe('This app cannot sync with WebDAV yet.');
+	});
+
+	it('says nothing where connecting again is the answer, even for a provider this build cannot sync', () => {
+		expect(
+			statusMessage(
+				status({ phase: 'attention', refusal: 'reauthorize_required' }),
+				'WebDAV',
+				false
+			)
+		).toBeNull();
 	});
 });
 
