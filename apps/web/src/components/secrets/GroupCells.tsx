@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { t } from '../i18n/t.js';
+import { t } from '../../i18n/t.js';
 
 /**
  * How many characters each of a recovery key's groups holds: eleven of five,

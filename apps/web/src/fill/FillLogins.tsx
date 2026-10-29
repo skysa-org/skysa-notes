@@ -9,7 +9,7 @@ import {
 	useState,
 } from 'react';
 
-import { UnlockDialog } from '../components/UnlockDialog.js';
+import { UnlockDialog } from '../components/secrets/UnlockDialog.js';
 import { openLink } from '../editor/links.js';
 import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';

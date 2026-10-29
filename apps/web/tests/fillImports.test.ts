@@ -64,7 +64,7 @@ describe('the fill window', () => {
 		'src/main.tsx',
 		'src/sync/runtime.ts',
 		'src/sync/scheduler.ts',
-		'src/components/noteSecrets.tsx',
+		'src/components/secrets/noteSecrets.tsx',
 		'src/secrets/catchUp.ts',
 	])('does not load %s', (module) => {
 		expect(modules).not.toContain(module);

@@ -34,9 +34,9 @@ import { titleShown } from '../store/titles.js';
 import { editedAt } from './editedAt.js';
 import { KEEP_OUT } from './keepOut.js';
 import type { NoteDraft } from './note/types.js';
-import { useNoteSecrets } from './noteSecrets.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
 import { labelLink, siteLink } from './passwordLink.js';
+import { useNoteSecrets } from './secrets/noteSecrets.js';
 
 /**
  * A password in the vault, in the note's column (docs/ARCHITECTURE.md §7,

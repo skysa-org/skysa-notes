@@ -1,7 +1,7 @@
 import { cell } from '@skysa/core';
 import { useEffect, useRef } from 'react';
 
-import { t } from '../i18n/t.js';
+import { t } from '../../i18n/t.js';
 
 /**
  * A pattern on a 3×3 grid of dots, for unlocking the vault on this device

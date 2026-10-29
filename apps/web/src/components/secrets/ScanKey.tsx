@@ -1,7 +1,7 @@
 import { cell } from '@skysa/core';
 import { useEffect, useRef, useState } from 'react';
 
-import { t } from '../i18n/t.js';
+import { t } from '../../i18n/t.js';
 
 /** What a frame of the camera says, where a QR code is in it. */
 type ReadFrame = (video: HTMLVideoElement) => string | undefined;

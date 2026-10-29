@@ -2,7 +2,7 @@ import { encodeIdentity } from '@skysa/core';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { RecoveryQr } from '../src/components/RecoveryQr.js';
+import { RecoveryQr } from '../src/components/secrets/RecoveryQr.js';
 import { generateIdentity } from '../src/secrets/age.js';
 import { readQr } from './qrRead.js';
 

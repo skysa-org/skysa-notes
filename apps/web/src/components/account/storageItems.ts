@@ -7,7 +7,7 @@ import { getScratchpadShown, setScratchpadShown } from '../../store/scratchpad.j
 import type { Unsynced } from '../../store/unsynced.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
 import type { OptionsMenuItem } from '../OptionsMenu.js';
-import { secretsLabel } from '../SecretsDialog.js';
+import { secretsLabel } from '../secrets/SecretsDialog.js';
 import { importingHere, isSyncable } from './SyncState.js';
 
 /**

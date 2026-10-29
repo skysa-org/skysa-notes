@@ -1,8 +1,8 @@
 import { readRecoveryKey, RECOVERY_KEY_PREFIX } from '@skysa/core';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 
-import { t } from '../i18n/t.js';
-import { DialogActions } from './Dialog.js';
+import { t } from '../../i18n/t.js';
+import { DialogActions } from '../Dialog.js';
 import { asTyped, GroupCells, SIZES, spilled, type Typed } from './GroupCells.js';
 import { browserScanner, ScanKey, type Scanner } from './ScanKey.js';
 

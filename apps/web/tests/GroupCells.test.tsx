@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { GroupCells, SIZES, spilled } from '../src/components/GroupCells.js';
+import { GroupCells, SIZES, spilled } from '../src/components/secrets/GroupCells.js';
 
 /**
  * A recovery key's groups typed into cells (`GroupCells`): the whole key's
