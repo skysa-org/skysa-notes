@@ -1,6 +1,6 @@
 import { AccountPanel } from '../../components/AccountPanel.js';
 import { SourcePanel } from '../../components/SourceTabs.js';
-import { type Renamings } from '../../store/renaming.js';
+import type { Renamings } from '../../store/renaming.js';
 /**
  * What the source dropdown opens, in a compact window only: the sources, the
  * way to another account, and the storage panel a wide window keeps under the

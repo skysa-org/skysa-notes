@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SearchField, type SearchFieldProps } from '../src/components/SearchField.js';
-import { type NoteRecord } from '../src/store/db.js';
+import type { NoteRecord } from '../src/store/db.js';
 import { type NoteHit, SEARCH_LIMIT } from '../src/store/search.js';
 
 /**

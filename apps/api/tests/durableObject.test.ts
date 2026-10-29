@@ -2,7 +2,7 @@ import { RELAY_CHANGED as CHANGED, RELAY_CLOSE } from '@skysa/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConnectionRelay, durableObjectRelay } from '../src/relay/durableObject.js';
-import { type RelayMember } from '../src/relay/hub.js';
+import type { RelayMember } from '../src/relay/hub.js';
 
 /**
  * The Durable Object hub, against a stand-in for the runtime: Node has no

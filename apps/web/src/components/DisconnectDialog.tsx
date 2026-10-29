@@ -1,12 +1,12 @@
 import { type ReactNode, useState } from 'react';
 
 import { t } from '../i18n/t.js';
-import { type ConnectedSource } from '../store/connection.js';
+import type { ConnectedSource } from '../store/connection.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
 import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
 import { titleShown } from '../store/titles.js';
 import { countedFolders, countOf, isEmpty, type Unsynced } from '../store/unsynced.js';
-import { type UnsentAnswer } from '../sync/account.js';
+import type { UnsentAnswer } from '../sync/account.js';
 import { DialogActions, InlineDialog } from './Dialog.js';
 import { canMove, leftBehind, MoveUnsent } from './MoveUnsent.js';
 

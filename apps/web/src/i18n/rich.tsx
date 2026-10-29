@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 
-import { type Args, type At, type ParamValue, type Tags, type Texts } from './catalog.js';
+import type { Args, At, ParamValue, Tags, Texts } from './catalog.js';
 import { choose, type English, fill, messageAt, type MessageKey } from './t.js';
 
 /** A function for each tag the message wraps words in, given those words. */

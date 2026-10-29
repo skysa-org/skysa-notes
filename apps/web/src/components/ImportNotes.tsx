@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import { pickFiles } from '../editor/pickFiles.js';
 import { t } from '../i18n/t.js';
-import { type NotesDatabase } from '../store/db.js';
+import type { NotesDatabase } from '../store/db.js';
 import {
 	bringsAnything,
 	importLibrary,
@@ -20,7 +20,7 @@ import {
 } from '../store/importLibrary.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { useNotify } from './notify.js';
-import { type OptionsMenuItem } from './OptionsMenu.js';
+import type { OptionsMenuItem } from './OptionsMenu.js';
 
 /**
  * Notes brought in from a folder or a ZIP (docs/ARCHITECTURE.md §7, "Getting a

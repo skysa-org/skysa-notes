@@ -1,4 +1,4 @@
-import { type SyncStateRecord } from './db.js';
+import type { SyncStateRecord } from './db.js';
 
 /**
  * The sources this tab has let go of entirely, by connection id: whose account

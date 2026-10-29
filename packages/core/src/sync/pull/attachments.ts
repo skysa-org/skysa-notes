@@ -1,8 +1,8 @@
 import { conflictFilePath } from '../../names/conflicts.js';
 import { basename, parentPath, rebasePath } from '../../paths.js';
-import { type DeletedEntry, type RemoteEntry } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
-import { type PullChange, type SyncOp } from '../store.js';
+import type { DeletedEntry, RemoteEntry } from '../../providers/types.js';
+import type { EngineContext } from '../context.js';
+import type { PullChange, SyncOp } from '../store.js';
 import { aliveElsewhere, type Batch, listedAfter, type Step } from './batch.js';
 import { type FileBase, fileGone, type FilePlace, placedFiles, startingFiles } from './files.js';
 

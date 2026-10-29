@@ -1,7 +1,7 @@
 import { cell } from '@skysa/core';
 
 import { isLongRun } from './progress.js';
-import { type SchedulerStatus, type SyncScheduler } from './scheduler.js';
+import type { SchedulerStatus, SyncScheduler } from './scheduler.js';
 
 /**
  * The screen kept on while a long sync runs in front of the user. A phone

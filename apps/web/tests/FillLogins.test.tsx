@@ -26,7 +26,7 @@ import {
 	sealSecret,
 } from '../src/secrets/age.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { type NotesDatabase } from '../src/store/db.js';
+import type { NotesDatabase } from '../src/store/db.js';
 import { createNote, rewriteNoteBody } from '../src/store/notes.js';
 import { enrol, type Unlock } from '../src/store/secretKeys.js';
 import { setPasswordsShown } from '../src/store/vault.js';

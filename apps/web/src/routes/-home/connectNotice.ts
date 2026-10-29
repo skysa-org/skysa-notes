@@ -1,10 +1,10 @@
-import { type ConnectGate, type EntitlementCode } from '@skysa/core';
+import type { ConnectGate, EntitlementCode } from '@skysa/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '../../api/client.js';
 import { answer, useInstanceConfig } from '../../api/instanceConfig.js';
-import { type Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import {
 	connectCodeAskedAt,
@@ -13,9 +13,9 @@ import {
 	heldConnectCodeShown,
 	holdAcceptedCode,
 } from '../../store/connectCode.js';
-import { type SyncStateRecord } from '../../store/db.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { useClaimingConnection } from '../../store/hooks.js';
-import { type ConnectOutcome } from '../search.js';
+import type { ConnectOutcome } from '../search.js';
 
 /**
  * What the app says on the way back from connecting storage (`?connect=…`),

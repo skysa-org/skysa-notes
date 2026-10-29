@@ -1,6 +1,6 @@
 import { APP_FOLDER_NAME, type ProviderKind } from '@skysa/core';
 
-import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
+import type { ApiClient, Connection, Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';
 import { t } from '../i18n/t.js';
 import {
@@ -31,8 +31,8 @@ import {
 } from '../store/db.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { isLiveSource } from '../store/rowStates.js';
-import { type Seen } from '../store/unsynced.js';
-import { type SyncScheduler } from './scheduler.js';
+import type { Seen } from '../store/unsynced.js';
+import type { SyncScheduler } from './scheduler.js';
 import { PROVIDER_LABELS } from './sourceNames.js';
 
 /**

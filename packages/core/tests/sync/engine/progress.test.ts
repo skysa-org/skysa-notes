@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { createFakeProvider } from '../../../src/providers/fake.js';
-import { type StorageProvider } from '../../../src/providers/types.js';
-import { type SyncProgress } from '../../../src/sync/engine.js';
+import type { StorageProvider } from '../../../src/providers/types.js';
+import type { SyncProgress } from '../../../src/sync/engine.js';
 import { boundTo } from '../kit/seed.js';
 import { syncWorld } from '../kit/world.js';
 

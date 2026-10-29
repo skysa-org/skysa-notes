@@ -1,8 +1,8 @@
 import { ancestorPaths, isWithin, normalizePath, parentPath, ROOT } from '../../paths.js';
-import { type PullChange, type SyncOp } from '../store.js';
-import { type PullAttachments } from './attachments.js';
-import { type FileBase } from './files.js';
-import { type Occupancy } from './occupancy.js';
+import type { PullChange, SyncOp } from '../store.js';
+import type { PullAttachments } from './attachments.js';
+import type { FileBase } from './files.js';
+import type { Occupancy } from './occupancy.js';
 
 /**
  * A folder's deletion, and what it takes with it: the folders above a note

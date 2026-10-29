@@ -1,7 +1,7 @@
 import { parentPath } from '@skysa/core';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { type NoteDraft } from '../../components/NoteView.js';
+import type { NoteDraft } from '../../components/NoteView.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../../store/db.js';
 import { keeping } from '../../store/keeping.js';
 import { createNote, draftNote, setNoteEditorMode } from '../../store/notes.js';

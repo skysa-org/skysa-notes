@@ -4,20 +4,20 @@ import { useEffect, useRef, useState } from 'react';
 
 import { api, type InstanceConfig } from '../api/client.js';
 import { answer, type Asked } from '../api/instanceConfig.js';
-import { type pickFiles } from '../editor/pickFiles.js';
+import type { pickFiles } from '../editor/pickFiles.js';
 import { activeConnectionId, db as defaultDb, type NotesDatabase } from '../store/db.js';
 import { downloadLibrary, downloadUnsent, type Library } from '../store/exportNotes.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
 import { isLiveSource } from '../store/rowStates.js';
-import { type Unsynced } from '../store/unsynced.js';
+import type { Unsynced } from '../store/unsynced.js';
 import { type AccountState, claimConnection } from '../sync/account.js';
 import { syncScheduler } from '../sync/runtime.js';
-import { type Client, type Sync } from './account/clients.js';
+import type { Client, Sync } from './account/clients.js';
 import { Connected } from './account/Connected.js';
 import { Detached } from './account/Detached.js';
 import { NotConnected } from './account/NotConnected.js';
 import { useDisconnects } from './account/useDisconnects.js';
-import { type AccountSlot } from './SourceTabs.js';
+import type { AccountSlot } from './SourceTabs.js';
 
 /**
  * Where storage is connected, switched between and let go of: the sources this

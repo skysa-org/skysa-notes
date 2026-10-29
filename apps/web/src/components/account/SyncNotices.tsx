@@ -1,12 +1,12 @@
-import { type ProviderKind } from '@skysa/core';
+import type { ProviderKind } from '@skysa/core';
 import { Fragment, type RefObject } from 'react';
 
 import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
-import { type SyncStateRecord } from '../../store/db.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { LEFT_AT_PROVIDER, UNSEEN_AT_PROVIDER } from '../../sync/account.js';
 import { InfoDialog } from '../InfoDialog.js';
-import { type OptionsMenuItem } from '../OptionsMenu.js';
+import type { OptionsMenuItem } from '../OptionsMenu.js';
 
 /** How many of the files that could not be read are named before "and N more". */
 const UNREADABLE_NAMED = 5;

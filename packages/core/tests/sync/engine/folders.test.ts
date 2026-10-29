@@ -4,7 +4,7 @@ import { contentHash } from '../../../src/hash.js';
 import { conflictFolderPath, conflictPath } from '../../../src/names/conflicts.js';
 import { parentPath } from '../../../src/paths.js';
 import { createFakeProvider } from '../../../src/providers/fake.js';
-import { type StorageProvider } from '../../../src/providers/types.js';
+import type { StorageProvider } from '../../../src/providers/types.js';
 import { AT } from '../kit/engine.js';
 import { expectSoundStore } from '../kit/invariants.js';
 import { entryAt, remoteAt } from '../kit/remote.js';

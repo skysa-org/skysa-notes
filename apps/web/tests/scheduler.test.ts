@@ -12,15 +12,15 @@ import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient } from '../src/api/client.js';
+import type { ApiClient } from '../src/api/client.js';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
-import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
+import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { heldUpOf } from '../src/store/heldUp.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
-import { type FileRead } from '../src/sync/fileReads.js';
-import { type RelayFactory } from '../src/sync/relay.js';
+import type { FileRead } from '../src/sync/fileReads.js';
+import type { RelayFactory } from '../src/sync/relay.js';
 import {
 	createSyncScheduler,
 	type ProviderFactory,

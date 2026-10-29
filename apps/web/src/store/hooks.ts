@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { startTransition, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
-import { type EditorMode } from '../editor/mode.js';
+import type { EditorMode } from '../editor/mode.js';
 import { type ConnectedSource, connectedSources, holdsPile } from './connection.js';
 import {
 	activeConnectionId,

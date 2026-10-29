@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type ChangeEntry } from '../../../src/providers/types.js';
+import type { ChangeEntry } from '../../../src/providers/types.js';
 import { renameHere } from '../kit/userActions.js';
 import { syncWorld } from '../kit/world.js';
 

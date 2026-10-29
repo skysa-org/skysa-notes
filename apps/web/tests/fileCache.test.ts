@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { type FileRecord, type NotesDatabase } from '../src/store/db.js';
+import type { FileRecord, NotesDatabase } from '../src/store/db.js';
 import { cacheBytes, evictCache, heldFile, TOUCH_AFTER_MS } from '../src/store/fileCache.js';
 import { freshDatabase } from './support/db.js';
 

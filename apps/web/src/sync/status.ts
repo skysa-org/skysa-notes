@@ -1,4 +1,4 @@
-import { type SchedulerStatus } from './scheduler.js';
+import type { SchedulerStatus } from './scheduler.js';
 
 /**
  * A problem that connecting the account again is the answer to: said in the

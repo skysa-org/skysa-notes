@@ -1,4 +1,4 @@
-import { type NotesDatabase, type SecretKeyRecord, type UnlockKind } from './db.js';
+import type { NotesDatabase, SecretKeyRecord, UnlockKind } from './db.js';
 
 /**
  * A source's keys for secrets on this device (docs/ARCHITECTURE.md §7, "Secrets

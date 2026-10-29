@@ -17,7 +17,7 @@ import {
 } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient } from '../src/api/client.js';
+import type { ApiClient } from '../src/api/client.js';
 import {
 	bindConnection,
 	detachConnection,

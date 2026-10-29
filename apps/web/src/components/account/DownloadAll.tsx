@@ -1,14 +1,14 @@
 import { useState } from 'react';
 
 import { t } from '../../i18n/t.js';
-import { type NotesDatabase } from '../../store/db.js';
+import type { NotesDatabase } from '../../store/db.js';
 import {
 	downloadNotice,
 	downloadProblem,
 	downloadSource,
 	type Library,
 } from '../../store/exportNotes.js';
-import { type OptionsMenuItem } from '../OptionsMenu.js';
+import type { OptionsMenuItem } from '../OptionsMenu.js';
 
 /**
  * The whole of one source, as one archive of markdown files: the tree a push

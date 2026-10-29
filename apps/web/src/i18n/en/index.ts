@@ -1,4 +1,4 @@
-import { type Catalog } from '../catalog.js';
+import type { Catalog } from '../catalog.js';
 import { account } from './account.js';
 import { attachedFiles } from './attachedFiles.js';
 import { clipboard } from './clipboard.js';

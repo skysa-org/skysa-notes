@@ -1,5 +1,5 @@
 import { DeletedNotice } from '../../components/DeletedNotice.js';
-import { type Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/notify.js';
 import { Toast } from '../../components/Toast.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
 import { nameShown } from '../../store/titles.js';

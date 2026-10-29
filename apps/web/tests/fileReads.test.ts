@@ -2,7 +2,7 @@ import { AuthError, type EntryRef, type StorageProvider } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type FileRecord } from '../src/store/db.js';
+import type { FileRecord } from '../src/store/db.js';
 import { queueUpload } from '../src/store/queue.js';
 import {
 	createFileReader,

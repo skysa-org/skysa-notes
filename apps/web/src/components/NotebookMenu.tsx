@@ -1,6 +1,6 @@
 import { t } from '../i18n/t.js';
-import { type NotebookPin } from '../store/pins.js';
-import { type OptionsMenuItem } from './OptionsMenu.js';
+import type { NotebookPin } from '../store/pins.js';
+import type { OptionsMenuItem } from './OptionsMenu.js';
 
 /**
  * What can be done to a notebook: offered by the `⋯` at the end of its row

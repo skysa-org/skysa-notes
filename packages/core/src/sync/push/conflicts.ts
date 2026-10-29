@@ -2,10 +2,10 @@ import { contentHash } from '../../hash.js';
 import { conflictPath } from '../../names/conflicts.js';
 import { basename } from '../../paths.js';
 import { isConflictError, isUnreadableError, type RemoteEntry } from '../../providers/types.js';
-import { type EngineContext, type FromPull } from '../context.js';
+import type { EngineContext, FromPull } from '../context.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
-import { type SyncNote, type SyncOp, type UnreadableFile } from '../store.js';
-import { type NotePush } from './notes.js';
+import type { SyncNote, SyncOp, UnreadableFile } from '../store.js';
+import type { NotePush } from './notes.js';
 
 /**
  * A write the remote would not simply take, settled instead: the note set

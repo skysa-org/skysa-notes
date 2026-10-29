@@ -1,4 +1,4 @@
-import { type RouterHistory } from '@tanstack/react-router';
+import type { RouterHistory } from '@tanstack/react-router';
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';

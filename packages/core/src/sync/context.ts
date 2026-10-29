@@ -1,11 +1,6 @@
-import { type EntryRef, type RemoteEntry, type StorageProvider } from '../providers/types.js';
-import { type Meter } from './progress.js';
-import {
-	type ConflictResolution,
-	type PullChange,
-	type SyncNote,
-	type SyncStore,
-} from './store.js';
+import type { EntryRef, RemoteEntry, StorageProvider } from '../providers/types.js';
+import type { Meter } from './progress.js';
+import type { ConflictResolution, PullChange, SyncNote, SyncStore } from './store.js';
 
 /**
  * What every part of the engine is handed by `createSyncEngine`: the provider

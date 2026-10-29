@@ -1,4 +1,4 @@
-import { type ProviderKind } from '../config.js';
+import type { ProviderKind } from '../config.js';
 
 /**
  * The one interface the sync engine talks to. Every provider — Drive, Graph,

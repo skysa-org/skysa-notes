@@ -59,7 +59,7 @@ export {
 	showsInline,
 } from './files/attachments.js';
 export { type ClipName, clipName, clipPath, clipStamp, readClipName } from './files/clipboard.js';
-export { type FileKind } from './files/mediaTypes.js';
+export type { FileKind } from './files/mediaTypes.js';
 export {
 	imageInfo,
 	type PictureInfo,
@@ -139,7 +139,7 @@ export {
 } from './paths.js';
 export { createDropboxProvider } from './providers/dropbox.js';
 export { createGDriveProvider } from './providers/gdrive/index.js';
-export { type FetchLike } from './providers/http.js';
+export type { FetchLike } from './providers/http.js';
 export { createOneDriveProvider } from './providers/onedrive.js';
 export { withoutNul } from './providers/text.js';
 export {
@@ -174,7 +174,7 @@ export { openSecret, opensSecret, resealSecret, sealSecret } from './secrets/sea
 export { conflictContent } from './sync/conflicts.js';
 export { createSyncEngine, type SyncEngine } from './sync/engine.js';
 export { messageOf, type SyncOutcome } from './sync/outcome.js';
-export { type SyncProgress } from './sync/progress.js';
+export type { SyncProgress } from './sync/progress.js';
 export {
 	type ConflictResolution,
 	isFileChange,

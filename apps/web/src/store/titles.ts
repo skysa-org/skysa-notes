@@ -1,10 +1,10 @@
 import { basename, clusters, titleFromFilename, UNTITLED_TITLE } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { type NoteRecord } from './db.js';
+import type { NoteRecord } from './db.js';
 import { frontmatterOf } from './frontmatter.js';
 import { isUnnamed } from './notes.js';
-import { type Moving } from './rearrange.js';
+import type { Moving } from './rearrange.js';
 import { noteOpening, openingLines } from './visibleText.js';
 
 /**

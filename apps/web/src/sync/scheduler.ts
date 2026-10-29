@@ -15,7 +15,7 @@ import {
 } from '@skysa/core';
 import { liveQuery } from 'dexie';
 
-import { type ApiClient, type Denial, type Refusal } from '../api/client.js';
+import type { ApiClient, Denial, Refusal } from '../api/client.js';
 import { t } from '../i18n/t.js';
 import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
 import {
@@ -32,7 +32,7 @@ import { isLiveSource } from '../store/rowStates.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
 import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
-import { type RelayFactory, type RelayLink } from './relay.js';
+import type { RelayFactory, RelayLink } from './relay.js';
 import { createDexieSyncStore, toSyncOp } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 

@@ -1,6 +1,6 @@
-import { type Table } from 'dexie';
+import type { Table } from 'dexie';
 
-import { type NotesDatabase } from './db.js';
+import type { NotesDatabase } from './db.js';
 
 /**
  * The tables a transaction opens, for the transactions that open many (#452).

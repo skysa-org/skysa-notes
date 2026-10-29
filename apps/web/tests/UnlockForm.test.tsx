@@ -9,7 +9,7 @@ import { UnlockDialog, UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
 import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { type NotesDatabase, type UnlockKind } from '../src/store/db.js';
+import type { NotesDatabase, UnlockKind } from '../src/store/db.js';
 import { enrol, FREE_TRIES, MAX_TRIES, TRY_WAIT_MS, type Unlock } from '../src/store/secretKeys.js';
 import { freshDatabase } from './support/db.js';
 

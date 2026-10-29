@@ -25,7 +25,7 @@ import { Icon } from '../editor/icons.js';
 import { openableLink, openLink } from '../editor/links.js';
 import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
-import { type NoteRecord } from '../store/db.js';
+import type { NoteRecord } from '../store/db.js';
 import { keepRows } from '../store/kept.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';

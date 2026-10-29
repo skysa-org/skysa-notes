@@ -5,14 +5,14 @@ import {
 	isAuthError,
 	isCursorResetError,
 } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
+import type { EngineContext } from '../context.js';
 import { metIn, metOf, ok, paused, type SyncOutcome } from '../outcome.js';
-import { type PullChange } from '../store.js';
-import { type PullAttachments } from './attachments.js';
+import type { PullChange } from '../store.js';
+import type { PullAttachments } from './attachments.js';
 import { unreadMap } from './batch.js';
-import { type Cascade } from './cascade.js';
+import type { Cascade } from './cascade.js';
 import { isNoteEntry, type PullDecide } from './decide.js';
-import { type PullReconcile } from './reconcile.js';
+import type { PullReconcile } from './reconcile.js';
 
 /**
  * A pull, run: a round from the stored cursor, its pages read whole and then

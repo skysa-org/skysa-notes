@@ -1,15 +1,15 @@
 import { isScratchPath, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { type RefObject, useCallback, useState } from 'react';
 
-import { type DisplacedText } from '../../components/NoteView.js';
-import { type Notice } from '../../components/notify.js';
+import type { DisplacedText } from '../../components/NoteView.js';
+import type { Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../../store/db.js';
 import { deleteNote, getNote, saveNoteBody, undeleteNote } from '../../store/notes.js';
 import { nameShown } from '../../store/titles.js';
 import { sourceName } from '../../sync/account.js';
 import { placeFolder } from '../place.js';
-import { type Select } from './useOpenPlace.js';
+import type { Select } from './useOpenPlace.js';
 
 /**
  * A deleted note brought back into a source that has been disconnected, which

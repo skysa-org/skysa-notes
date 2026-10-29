@@ -9,14 +9,14 @@ import {
 	rebasePath,
 	ROOT,
 } from '../../paths.js';
-import { type ChangeEntry, type RemoteEntry } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
+import type { ChangeEntry, RemoteEntry } from '../../providers/types.js';
+import type { EngineContext } from '../context.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
-import { type PullChange, type SyncFolder, type SyncNote } from '../store.js';
-import { type PullAttachments } from './attachments.js';
+import type { PullChange, SyncFolder, SyncNote } from '../store.js';
+import type { PullAttachments } from './attachments.js';
 import { aliveElsewhere, leavesFor, listedAfter, type Step } from './batch.js';
-import { type Cascade } from './cascade.js';
-import { type Occupancy } from './occupancy.js';
+import type { Cascade } from './cascade.js';
+import type { Occupancy } from './occupancy.js';
 import { folderBefore, folderNow, remoteNow } from './replay.js';
 
 /**

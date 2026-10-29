@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { parseJson } from '../json.js';
 import { clientForm, nameField, nonEmpty, postTokenForm, revokeByBearer } from './common.js';
-import { type FetchLike, type StorageOAuth, type TokenSet } from './types.js';
+import type { FetchLike, StorageOAuth, TokenSet } from './types.js';
 
 /**
  * The storage half of Dropbox OAuth: Authorization Code + PKCE, exchanged on

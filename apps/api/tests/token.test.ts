@@ -1,4 +1,4 @@
-import { type EntitlementCode } from '@skysa/core';
+import type { EntitlementCode } from '@skysa/core';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 

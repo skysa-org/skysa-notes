@@ -1,6 +1,6 @@
 import { cell } from '@skysa/core';
 
-import { type SyncScheduler } from './scheduler.js';
+import type { SyncScheduler } from './scheduler.js';
 
 /**
  * Making way for a new build, before `UpdatePrompt`'s Reload asks for it.

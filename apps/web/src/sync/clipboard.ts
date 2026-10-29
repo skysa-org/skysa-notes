@@ -11,7 +11,7 @@ import {
 } from '@skysa/core';
 
 import { PREVIEW_CHARS, showsClipboard } from '../store/clipboard.js';
-import { type ClipKey, type ClipRecord, type NotesDatabase } from '../store/db.js';
+import type { ClipKey, ClipRecord, NotesDatabase } from '../store/db.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
 import { type FileRead, ownBuffer, type ReadingSession } from './fileReads.js';

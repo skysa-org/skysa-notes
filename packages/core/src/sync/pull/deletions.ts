@@ -1,14 +1,14 @@
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../paths.js';
-import { type DeletedEntry } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
+import type { DeletedEntry } from '../../providers/types.js';
+import type { EngineContext } from '../context.js';
 import { orIfNotFound } from '../providerOps.js';
-import { type PullChange, type SyncNote } from '../store.js';
-import { type PullAttachments } from './attachments.js';
+import type { PullChange, SyncNote } from '../store.js';
+import type { PullAttachments } from './attachments.js';
 import { aliveElsewhere, listedAfter, madeInBatch, type Step } from './batch.js';
 import { reestablished } from './decided.js';
-import { type PullFolders } from './folders.js';
-import { type PullNotes } from './notes.js';
-import { type Occupancy } from './occupancy.js';
+import type { PullFolders } from './folders.js';
+import type { PullNotes } from './notes.js';
+import type { Occupancy } from './occupancy.js';
 import {
 	placement,
 	rebaseThrough,

@@ -7,10 +7,10 @@ import {
 	isNotFoundError,
 	type RemoteEntry,
 } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
+import type { EngineContext } from '../context.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
-import { type SyncFile, type SyncOpOf } from '../store.js';
-import { type FolderPush } from './folders.js';
+import type { SyncFile, SyncOpOf } from '../store.js';
+import type { FolderPush } from './folders.js';
 
 /**
  * The files that are not notes, as a push sends them: uploaded where their

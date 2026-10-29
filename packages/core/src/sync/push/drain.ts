@@ -6,7 +6,7 @@ import {
 	isRateLimitError,
 	isUnreadableError,
 } from '../../providers/types.js';
-import { type EngineContext, type FromPull } from '../context.js';
+import type { EngineContext, FromPull } from '../context.js';
 import { messageOf, ok, paused, type SyncOutcome, waitFor } from '../outcome.js';
 import { withParent } from '../providerOps.js';
 import { copiedBy, destinationOf, type SyncOp, type SyncOpOf } from '../store.js';

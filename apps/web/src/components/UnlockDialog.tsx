@@ -2,8 +2,8 @@ import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } fr
 
 import { t } from '../i18n/t.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock } from '../secrets/deviceLock.js';
-import { type SecretsLock } from '../secrets/lock.js';
-import { type NotesDatabase, type UnlockKind } from '../store/db.js';
+import type { SecretsLock } from '../secrets/lock.js';
+import type { NotesDatabase, UnlockKind } from '../store/db.js';
 import {
 	enrolment,
 	type EnteredKind,

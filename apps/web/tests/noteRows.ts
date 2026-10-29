@@ -1,4 +1,4 @@
-import { type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import type { NoteRecord, NotesDatabase } from '../src/store/db.js';
 
 /**
  * A note's row by its id alone, for tests that hold one database and never two

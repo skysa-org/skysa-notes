@@ -1,6 +1,6 @@
 import { isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 
-import { type SyncStateRecord } from '../../store/db.js';
+import type { SyncStateRecord } from '../../store/db.js';
 
 /**
  * The small rules the shell reads about the place open: what can be made or

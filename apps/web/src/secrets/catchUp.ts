@@ -1,8 +1,8 @@
 import { activeConnectionId, type NotesDatabase } from '../store/db.js';
 import { enrolment } from '../store/secretKeys.js';
-import { type SchedulerStatus } from '../sync/scheduler.js';
+import type { SchedulerStatus } from '../sync/scheduler.js';
 import { type Age, loadAge } from './loadAge.js';
-import { type SecretsLock } from './lock.js';
+import type { SecretsLock } from './lock.js';
 
 /**
  * Secrets still made with a key a source had before, encrypted afresh to the

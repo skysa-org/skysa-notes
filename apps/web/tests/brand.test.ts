@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { messageOf } from '@skysa/core';
-import { type ViteDevServer } from 'vite';
+import type { ViteDevServer } from 'vite';
 import { describe, expect, it } from 'vitest';
 
 import {

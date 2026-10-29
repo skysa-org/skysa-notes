@@ -7,11 +7,11 @@ import {
 	isNotFoundError,
 	type RemoteEntry,
 } from '../../providers/types.js';
-import { type EngineContext, type FromPull } from '../context.js';
+import type { EngineContext, FromPull } from '../context.js';
 import { findFreeName } from '../names.js';
 import { orIfNotFound, withParent } from '../providerOps.js';
-import { type SyncNote, type SyncOpOf } from '../store.js';
-import { type FolderPush } from './folders.js';
+import type { SyncNote, SyncOpOf } from '../store.js';
+import type { FolderPush } from './folders.js';
 
 /**
  * The notes, as a push sends them: written (`runWrite`), following a rename

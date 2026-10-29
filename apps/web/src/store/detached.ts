@@ -8,7 +8,7 @@ import {
 	type SyncStateRecord,
 } from './db.js';
 import { goneSources } from './goneSources.js';
-import { type SettledEditors } from './heldEdits.js';
+import type { SettledEditors } from './heldEdits.js';
 import { isLiveSource } from './rowStates.js';
 
 /**

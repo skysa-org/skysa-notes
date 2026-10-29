@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { type NotesDatabase } from './db.js';
+import type { NotesDatabase } from './db.js';
 import { mergeLastOpen } from './lastOpen.js';
 import { OPEN_KEPT } from './openNotebooks.js';
 import { PINS_KEPT } from './pins.js';

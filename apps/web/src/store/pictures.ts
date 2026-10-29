@@ -1,12 +1,6 @@
 import { cell, type PictureInfo, type PictureVariant } from '@skysa/core';
 
-import {
-	type FileKey,
-	type FileRecord,
-	type NotesDatabase,
-	type PictureCopyRecord,
-	type PictureRecord,
-} from './db.js';
+import type { FileKey, FileRecord, NotesDatabase, PictureCopyRecord, PictureRecord } from './db.js';
 import { TOUCH_AFTER_MS } from './fileCache.js';
 import { fileKey } from './files.js';
 

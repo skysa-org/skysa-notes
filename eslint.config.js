@@ -31,6 +31,14 @@ const RESTRICTED_SYNTAX = [
 		message: 'import the test doubles statically, from a test (#449).',
 	},
 	{
+		// `no-import-type-side-effects`, for re-exports, which it does not look
+		// at: `export { type X } from 'm'` is kept as `export {} from 'm'`.
+		selector:
+			"ExportNamedDeclaration[source][exportKind='value']:not(:has(ExportSpecifier[exportKind='value']))",
+		message:
+			"a re-export of nothing but types is 'export type { … } from', which loads nothing.",
+	},
+	{
 		selector: 'AwaitExpression > ImportExpression',
 		message:
 			'Await with dynamic imports (await import()) is not allowed. Use static imports at the top of the file instead.',
@@ -207,6 +215,10 @@ const typescriptRules = {
 	'simple-import-sort/imports': 'error',
 	'unused-imports/no-unused-imports': 'error',
 	'@typescript-eslint/consistent-type-imports': 'error',
+	// An import whose every name is a type is `import type`: with
+	// `verbatimModuleSyntax`, `import { type X }` is kept as `import {}`, which
+	// still loads the module — and whatever it builds as it loads.
+	'@typescript-eslint/no-import-type-side-effects': 'error',
 
 	// Where typescript-eslint has a type-aware version of a core rule, the core
 	// one is off and that one is on.

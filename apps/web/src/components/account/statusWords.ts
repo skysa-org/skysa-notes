@@ -1,10 +1,10 @@
-import { type EntitlementCode, type SyncProgress } from '@skysa/core';
+import type { EntitlementCode, SyncProgress } from '@skysa/core';
 
-import { type Refusal } from '../../api/client.js';
+import type { Refusal } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { type MessageKey, t } from '../../i18n/t.js';
 import { isLongRun } from '../../sync/progress.js';
-import { type SchedulerStatus, type StuckOp } from '../../sync/scheduler.js';
+import type { SchedulerStatus, StuckOp } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 
 /**

@@ -1,6 +1,6 @@
 import { t } from '../i18n/t.js';
-import { type KeyFileRecord } from '../store/db.js';
-import { type Enrolment } from '../store/secretKeys.js';
+import type { KeyFileRecord } from '../store/db.js';
+import type { Enrolment } from '../store/secretKeys.js';
 
 /**
  * Whether a new secret can be sealed in a source on this device

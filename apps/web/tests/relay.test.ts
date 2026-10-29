@@ -2,7 +2,7 @@ import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PING, RELAY_PONG, RELAY_PUSHED } from
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { type NotesDatabase } from '../src/store/db.js';
+import type { NotesDatabase } from '../src/store/db.js';
 import {
 	createRelayFactory,
 	createRelayLink,

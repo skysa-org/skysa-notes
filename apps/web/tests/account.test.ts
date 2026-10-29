@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
+import type { ApiClient, Connection, Result } from '../src/api/client.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { beginConnect, credentialFor, keepCredential } from '../src/store/credentials.js';
 import {

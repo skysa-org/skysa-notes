@@ -1,4 +1,4 @@
-import { type Collection, type Table } from 'dexie';
+import type { Collection, Table } from 'dexie';
 
 /**
  * A source's rows in `table`: every table that holds rows for more than one

@@ -1,4 +1,4 @@
-import { type NoteRecord } from './db.js';
+import type { NoteRecord } from './db.js';
 
 /**
  * What state a row is in, asked by name rather than by its flag (#452). A note

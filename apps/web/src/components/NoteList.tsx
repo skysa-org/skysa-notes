@@ -13,7 +13,7 @@ import {
 
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
-import { type NoteRecord } from '../store/db.js';
+import type { NoteRecord } from '../store/db.js';
 import { keepRows } from '../store/kept.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';

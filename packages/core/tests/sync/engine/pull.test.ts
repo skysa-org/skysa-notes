@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { contentHash } from '../../../src/hash.js';
 import { createFakeProvider, type FakeProvider } from '../../../src/providers/fake.js';
 import { AuthError, type ChangeEntry, type StorageProvider } from '../../../src/providers/types.js';
-import { type SyncEngine } from '../../../src/sync/engine.js';
+import type { SyncEngine } from '../../../src/sync/engine.js';
 import type { SyncStore } from '../../../src/sync/store.js';
 import { reporting } from '../kit/engine.js';
 import { entryAt, remoteAt } from '../kit/remote.js';

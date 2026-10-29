@@ -11,11 +11,11 @@ import {
 } from 'react';
 
 import { t } from '../i18n/t.js';
-import { type ReplaceScan } from '../secrets/age.js';
+import type { ReplaceScan } from '../secrets/age.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock, setUpDeviceLock } from '../secrets/deviceLock.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
-import { type SecretsLock } from '../secrets/lock.js';
-import { type KeyFileRecord, type NotesDatabase, type UnlockKind } from '../store/db.js';
+import type { SecretsLock } from '../secrets/lock.js';
+import type { KeyFileRecord, NotesDatabase, UnlockKind } from '../store/db.js';
 import {
 	changeUnlock,
 	enrol,
@@ -27,7 +27,7 @@ import {
 	type UnlockedKeys,
 } from '../store/secretKeys.js';
 import { getPasswordsShown, setPasswordsShown } from '../store/vault.js';
-import { type KeyFileSync } from '../sync/keyFile.js';
+import type { KeyFileSync } from '../sync/keyFile.js';
 import { Dialog, DialogActions, DialogOption, DialogOptions } from './Dialog.js';
 import { GroupCells, SIZES, spilled } from './GroupCells.js';
 import { PasteKey } from './PasteKey.js';

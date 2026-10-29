@@ -1,10 +1,10 @@
-import { type Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/notify.js';
 import { showConnection } from '../../store/connection.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { noteIsUnder, rememberOpen } from '../../store/lastOpen.js';
-import { type Pane } from '../panel.js';
+import type { Pane } from '../panel.js';
 import { type Place, placeFolder } from '../place.js';
-import { type Select, type useOpenPlace } from './useOpenPlace.js';
+import type { Select, useOpenPlace } from './useOpenPlace.js';
 
 /**
  * The shell's ways of going somewhere: `select`, over the place open; a

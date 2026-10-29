@@ -1,7 +1,7 @@
 import { basename, foldName, parentPath } from '@skysa/core';
 
 import type { FileRecord, NoteRecord, NotesDatabase, SyncStateRecord } from './db.js';
-import { type FileKey } from './db.js';
+import type { FileKey } from './db.js';
 import { fileKey, handOverToCopies } from './files.js';
 import { foldPath } from './naming.js';
 import { dropPictures } from './pictures.js';

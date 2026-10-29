@@ -2,10 +2,10 @@ import { VAULT_FOLDER } from '@skysa/core';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ScratchEditing } from '../src/components/NoteView.js';
+import type { ScratchEditing } from '../src/components/NoteView.js';
 import { t } from '../src/i18n/t.js';
 import { NoteColumn, PasswordColumn } from '../src/routes/-home/NoteColumn.js';
-import { type NoteRecord } from '../src/store/db.js';
+import type { NoteRecord } from '../src/store/db.js';
 
 vi.mock('../src/components/PasswordItem.js', () => ({
 	PasswordItem: ({ note }: { note: NoteRecord }) => (

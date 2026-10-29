@@ -8,7 +8,7 @@ import {
 } from '@skysa/core';
 import Dexie, { type PromiseExtended } from 'dexie';
 
-import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
+import type { FileRecord, NoteRecord, NotesDatabase, OpQueueRecord } from './db.js';
 import { rowsOf } from './rows.js';
 import { isTombstone } from './rowStates.js';
 

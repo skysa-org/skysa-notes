@@ -2,7 +2,7 @@ import { createSyncEngine, isHidden, type StorageProvider } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
-import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
+import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import { createFolder, deleteFolder, moveFolder, renameFolder } from '../src/store/folders.js';
 import {
 	createNote,

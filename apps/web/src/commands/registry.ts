@@ -1,7 +1,7 @@
 import { cell } from '@skysa/core';
 
 import { createEmitter } from '../store/emitter.js';
-import { type Chord } from './chord.js';
+import type { Chord } from './chord.js';
 
 /**
  * The things the app can be asked to do, as a list rather than as a pile of

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { SHARE_CACHE } from '../src/share/received.js';
 import { TakeShare, whatCame } from '../src/share/TakeShare.js';
-import { type SyncStateRecord } from '../src/store/db.js';
+import type { SyncStateRecord } from '../src/store/db.js';
 import { fakeCaches } from './fakeCaches.js';
 import { freshDatabase } from './support/db.js';
 

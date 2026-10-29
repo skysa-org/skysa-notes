@@ -41,9 +41,9 @@ import {
 	tabName,
 } from '../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../sync/runtime.js';
-import { type SyncScheduler } from '../sync/scheduler.js';
+import type { SyncScheduler } from '../sync/scheduler.js';
 import { ConnectButton } from './ConnectButton.js';
-import { type OptionsMenuItem } from './OptionsMenu.js';
+import type { OptionsMenuItem } from './OptionsMenu.js';
 import { ProviderIcon, type SourceKind, sourceKind } from './ProviderIcon.js';
 import { RowOptions } from './RowOptions.js';
 import { RowRename } from './RowRename.js';

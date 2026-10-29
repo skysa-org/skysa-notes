@@ -14,7 +14,7 @@ import {
 	detachConnection,
 	releaseConnection,
 } from '../src/store/connection.js';
-import { type FileRecord, type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
+import type { FileRecord, NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import {
 	addAttachment,
 	type AddAttachmentInput,

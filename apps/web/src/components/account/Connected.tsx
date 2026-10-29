@@ -1,16 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
-import { type Grant, type InstanceConfig } from '../../api/client.js';
+import type { Grant, InstanceConfig } from '../../api/client.js';
 import { answer, type Asked } from '../../api/instanceConfig.js';
-import { type pickFiles } from '../../editor/pickFiles.js';
+import type { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
 import { tabLock } from '../../secrets/tabLock.js';
 import { setClipboardShown, showsClipboard } from '../../store/clipboard.js';
 import { connectedSources } from '../../store/connection.js';
-import { type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
 import { holdsAnything, type Library } from '../../store/exportNotes.js';
-import { type Unsynced } from '../../store/unsynced.js';
+import type { Unsynced } from '../../store/unsynced.js';
 import {
 	type AccountState,
 	type LetGoInput,
@@ -18,16 +18,16 @@ import {
 	type UnsentAnswer,
 } from '../../sync/account.js';
 import { useSyncStatus } from '../../sync/runtime.js';
-import { type SchedulerStatus } from '../../sync/scheduler.js';
+import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { ClipboardPanel } from '../ClipboardPanel.js';
 import { DialogActions, InlineDialog } from '../Dialog.js';
 import { DisconnectDialog } from '../DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from '../ImportNotes.js';
 import { otherLiveSources } from '../MoveUnsent.js';
 import { SecretsDialog, type SecretsDialogProps } from '../SecretsDialog.js';
-import { type AccountSlot } from '../SourceTabs.js';
+import type { AccountSlot } from '../SourceTabs.js';
 import { useEscape } from '../useEscape.js';
-import { type Client, type Sync } from './clients.js';
+import type { Client, Sync } from './clients.js';
 import { Devices, stillSignedIn, useGrants } from './Devices.js';
 import { DownloadAll, type Downloading, downloadItem, useDownloadAll } from './DownloadAll.js';
 import { ActionsMenu, GearMenu, useMenuButtons } from './PanelMenus.js';

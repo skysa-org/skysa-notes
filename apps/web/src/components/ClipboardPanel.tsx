@@ -27,9 +27,9 @@ import { pickFiles } from '../editor/pickFiles.js';
 import { t } from '../i18n/t.js';
 import { type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
 import { addClips, type ClipInput, listClips, removeClip } from '../store/clipboard.js';
-import { type ClipKey, type ClipRecord, type NotesDatabase } from '../store/db.js';
-import { type FileRead } from '../sync/fileReads.js';
-import { type SyncScheduler } from '../sync/scheduler.js';
+import type { ClipKey, ClipRecord, NotesDatabase } from '../store/db.js';
+import type { FileRead } from '../sync/fileReads.js';
+import type { SyncScheduler } from '../sync/scheduler.js';
 import { sizeOf } from './AttachedFiles.js';
 import { clipPicture } from './clipPictures.js';
 import {

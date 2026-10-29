@@ -1,4 +1,4 @@
-import { type CredentialRecord, type NotesDatabase } from '../../src/store/db.js';
+import type { CredentialRecord, NotesDatabase } from '../../src/store/db.js';
 
 /**
  * The credential a bound device holds for a source (docs/ARCHITECTURE.md §6,

@@ -1,4 +1,4 @@
-import { type NoteRecord } from './db.js';
+import type { NoteRecord } from './db.js';
 
 /** A field of a row, the same in both: its value, or each of its tags. */
 const same = (a: unknown, b: unknown): boolean =>
