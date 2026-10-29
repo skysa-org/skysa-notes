@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 import { bookmarkletUrl } from '../../fill/bookmarklet.js';
 import { t } from '../../i18n/t.js';
+import { copyText } from '../clipboard/systemClipboard.js';
 import { Dialog } from '../ui/Dialog.js';
 
 /**
@@ -30,8 +31,6 @@ export interface FillSetupDialogProps {
 }
 
 type Said = 'nothing' | 'copied' | 'notCopied' | 'pressed';
-
-const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
 
 /** The link, made by hand: React will not write a `javascript:` address. */
 const useBookmarkletLink = (address: string, name: string, onPressed: () => void) => {

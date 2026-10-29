@@ -5,6 +5,7 @@ import { loadAge } from '../../secrets/loadAge.js';
 import type { KeyFileRecord } from '../../store/db.js';
 import { PBKDF2_ROUNDS } from '../../store/secretKeys.js';
 import { setPasswordsShown } from '../../store/vault.js';
+import { copyText } from '../clipboard/systemClipboard.js';
 import { Dialog, DialogActions } from '../ui/Dialog.js';
 import { PasteKey } from './PasteKey.js';
 import { Device, Lost, RemoveKey } from './steps/Device.js';
@@ -54,8 +55,6 @@ const printPage = (): Promise<void> =>
 		window.addEventListener('afterprint', done);
 		window.print();
 	});
-
-const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
 
 const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'another' | 'rekey'>> =
 	{

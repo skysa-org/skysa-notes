@@ -31,6 +31,7 @@ import type { ClipKey, ClipRecord, NotesDatabase } from '../../store/db.js';
 import type { FileRead } from '../../sync/fileReads.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import { sizeOf } from '../attachments/AttachedFiles.js';
+import { useFlash } from '../ui/useFlash.js';
 import { clipPicture } from './clipPictures.js';
 import {
 	asPng,
@@ -73,9 +74,6 @@ export interface ClipboardPanelProps {
 	/** What makes a picture's thumb (#276). Injected: jsdom has no worker to make one. */
 	shrinker?: PictureShrinker;
 }
-
-/** How long a "Copied" stays said. */
-const SAID_MS = 2500;
 
 const MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
 
@@ -144,21 +142,13 @@ interface Said {
 const SAID_NOTHING: Said = { words: '' };
 
 const useSaying = (): readonly [Said, (words: string, about?: About) => void] => {
-	const [said, setSaid] = useState<Said>(SAID_NOTHING);
-	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-	useEffect(
-		() => () => {
-			clearTimeout(timer.current);
+	const [said, flash] = useFlash<Said>(SAID_NOTHING);
+	const say = useCallback(
+		(words: string, about?: About) => {
+			flash(about === undefined ? { words } : { words, about });
 		},
-		[]
+		[flash]
 	);
-	const say = useCallback((words: string, about?: About) => {
-		clearTimeout(timer.current);
-		setSaid(about === undefined ? { words } : { words, about });
-		timer.current = setTimeout(() => {
-			setSaid(SAID_NOTHING);
-		}, SAID_MS);
-	}, []);
 	return [said, say] as const;
 };
 

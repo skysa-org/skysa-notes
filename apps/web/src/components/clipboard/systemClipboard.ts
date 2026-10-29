@@ -105,6 +105,15 @@ export const systemClipboard = (
 });
 
 /**
+ * Put `text` on the clipboard, for a Copy button. A promise either way: where
+ * there is no clipboard to write to (outside a secure context) it is refused
+ * like any other write, rather than thrown before the caller is listening.
+ */
+export const copyText = async (text: string): Promise<void> => {
+	await navigator.clipboard.writeText(text);
+};
+
+/**
  * A picture as PNG, the one kind of picture every browser puts on the
  * clipboard. Another kind is drawn and drawn out again.
  */

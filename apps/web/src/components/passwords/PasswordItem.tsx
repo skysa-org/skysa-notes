@@ -34,6 +34,7 @@ import { titleShown } from '../../store/titles.js';
 import type { NoteDraft } from '../note/types.js';
 import { useNoteSecrets } from '../secrets/noteSecrets.js';
 import { editedAt } from '../ui/editedAt.js';
+import { useFlash } from '../ui/useFlash.js';
 import { KEEP_OUT } from './keepOut.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
 import { labelLink, siteLink } from './passwordLink.js';
@@ -349,7 +350,8 @@ export const PasswordItem = ({
 	const [own, setOwn] = useState<ReadonlySet<string>>(new Set());
 	const [editing, setEditing] = useState<Editing | null>(null);
 	const [revealed, setRevealed] = useState(false);
-	const [said, setSaid] = useState<string | undefined>();
+	// "Copied." for a moment, then nothing.
+	const [said, setSaid] = useFlash<string | undefined>(undefined);
 	/** A new item the store could not take: the form stays open on it (`write`). */
 	const [unstored, setUnstored] = useState(false);
 	const ids = {
@@ -602,17 +604,6 @@ export const PasswordItem = ({
 		wasInForm.current = inForm;
 		(inForm ? labelField.current : editButton.current)?.focus();
 	}, [inForm]);
-
-	// "Copied." for a moment, then nothing.
-	useEffect(() => {
-		if (said === undefined) return undefined;
-		const timer = setTimeout(() => {
-			setSaid(undefined);
-		}, 3000);
-		return () => {
-			clearTimeout(timer);
-		};
-	}, [said]);
 
 	const copy = (text: string) => {
 		void host.copy(text).then((copied) => {
