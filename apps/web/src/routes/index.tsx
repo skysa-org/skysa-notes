@@ -9,7 +9,7 @@ import {
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback, useRef, useState } from 'react';
 
-import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
+import { CommandsProvider, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
 import { CompactBar } from '../components/CompactBar.js';
@@ -58,17 +58,9 @@ import { scratchMarks } from '../store/scratchpad.js';
 import { nameShown, titleShown } from '../store/titles.js';
 import { findFolder, notesUnder } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
-import {
-	FIND,
-	NEW_NOTE,
-	PALETTE,
-	useDownloadCommand,
-	useEnterCode,
-	useKeepOnInstall,
-	useNoteMove,
-} from './-home/commands.js';
+import { useEnterCode, useKeepOnInstall, useShellCommands } from './-home/commands.js';
 import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
-import { canMakeNote, covered, emptyPaneOffers, isNotebook, placeRow } from './-home/rules.js';
+import { covered, emptyPaneOffers, placeRow } from './-home/rules.js';
 import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
 import { useEscapePutsDown, useMoving } from './-home/useMoving.js';
@@ -445,74 +437,25 @@ const Home = () => {
 
 	useEscapePutsDown(moving, setMoving);
 
-	useCommand({
-		id: 'app.palette',
-		label: t('shell.commands.palette'),
-		group: t('shell.commands.group.app'),
-		chord: PALETTE,
-		enabled: true,
-		run: () => {
-			setPaletteOpen(true);
-		},
+	useShellCommands({
+		setPaletteOpen,
+		onCreateNote,
+		scratchModal: scratch.modal,
+		setSearchOpen,
+		searchField,
+		connectionId: activeConnection,
+		source,
+		setProblem,
+		deleted,
+		undoDelete,
+		folder,
+		moving,
+		pickUp,
+		// A note begun and not stored has nowhere to move from yet.
+		// Nor a password, which is no note to put in a notebook.
+		noteToMove: inPasswords ? undefined : storedNote,
+		promote: scratch.moveOpen,
 	});
-
-	useCommand({
-		id: 'note.new',
-		label: t('shell.commands.newNote'),
-		group: t('shell.commands.group.note'),
-		chord: NEW_NOTE,
-		enabled: canMakeNote(folder, scratch.modal),
-		run: onCreateNote,
-	});
-
-	useCommand({
-		id: 'app.search',
-		label: t('shell.commands.search'),
-		group: t('shell.commands.group.app'),
-		chord: FIND,
-		enabled: true,
-		run: () => {
-			// In a compact window the field is not there until the search is
-			// open; the bar puts the cursor in it as it appears.
-			setSearchOpen(true);
-			searchField.current?.focus();
-			searchField.current?.select();
-		},
-	});
-
-	useDownloadCommand({ connectionId: activeConnection, source, onProblem: setProblem });
-
-	useCommand({
-		id: 'note.undoDelete',
-		label: t('shell.commands.undoDelete'),
-		group: t('shell.commands.group.note'),
-		enabled: deleted !== null,
-		run: undoDelete,
-	});
-
-	/**
-	 * Picking up without a pointer. Dragging is a pointer gesture, and WCAG 2.2
-	 * SC 2.5.7 asks that whatever it does be doable without one; these two put
-	 * the same thing in the air that `dragstart` does, and the destination rows
-	 * in the sidebar are ordinary buttons, so a click or Enter on one puts it
-	 * down. No chord: they are rare enough to be found in the palette, and every
-	 * chord taken is one a note cannot use.
-	 */
-	useCommand({
-		id: 'notebook.move',
-		label: t('shell.commands.moveNotebook'),
-		group: t('shell.commands.group.notebook'),
-		// Nor can a second thing while one is already in the air.
-		enabled: isNotebook(folder) && moving === null,
-		run: () => {
-			if (!isNotebook(folder)) return;
-			pickUp({ kind: 'notebook', path: folder, name: basename(folder) });
-		},
-	});
-
-	// A note begun and not stored has nowhere to move from yet.
-	// Nor a password, which is no note to put in a notebook.
-	useNoteMove(inPasswords ? undefined : storedNote, moving, pickUp, scratch.moveOpen);
 	useKeepOnInstall();
 
 	useShortcuts();
