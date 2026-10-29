@@ -17,7 +17,8 @@ import { movedRows } from '../../src/store/movedRows.js';
  *   the file thought to list. Twenty different hand-kept lists of tables let
  *   pins and preferences leak from one test into the next.
  * - a test that can hand a database in asks `freshDatabase` for one of its own,
- *   deleted after the test.
+ *   deleted after the test. A component is handed one by drawing it inside a
+ *   `DatabaseProvider` (`store/database.tsx`), which the store's hooks read.
  */
 
 const opened: Dexie[] = [];
