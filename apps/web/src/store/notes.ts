@@ -1048,6 +1048,27 @@ export const restoreNote = (
 ): Promise<void> => setDeleted(db, id, 0, scope);
 
 /**
+ * Delete a note for the notice's undo to bring back (`undeleteNote`), by its
+ * own source: a note, a scratch card, a password (#455). What comes back is the
+ * tombstone as it is once deleted, holding whatever `settle` has landed in it
+ * meanwhile — an editor's held edits, which go into the tombstone rather than
+ * bring the note back (`useNoteSession`) — or, where it cannot be read, the
+ * note as given. It is deleted either way; only the delete itself can fail.
+ * A `settle` that fails has landed nothing, and what it held is the caller's
+ * to carry into the undo.
+ */
+export const deleteForUndo = async (
+	db: NotesDatabase,
+	note: NoteRecord,
+	{ settle }: { settle?: () => Promise<unknown> } = {}
+): Promise<NoteRecord> => {
+	const home = { connectionId: note.connectionId };
+	await deleteNote(db, note.id, home);
+	await settle?.().catch(() => undefined);
+	return (await getNote(db, note.id, home).catch(() => undefined)) ?? note;
+};
+
+/**
  * Whatever has taken a restored note's path since moves to a free name beside
  * it. A deleted note's name is free at once (`takenNamesIn`), so deleting
  * `untitled.md`, making a new note and undoing is all it takes — and lifted with

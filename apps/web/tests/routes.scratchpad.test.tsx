@@ -1,16 +1,29 @@
 import { readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote, listScratchNotes, setScratchMarks } from '../src/store/notes.js';
 import { setScratchpadShown } from '../src/store/scratchpad.js';
 import { hashIn } from './entry.js';
 import { fence, sealed } from './secretHostFake.js';
 import { openApp } from './support/app.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
+
+/** A store that turns the next delete for undo down, as a write IndexedDB refuses does. */
+const store = vi.hoisted(() => ({ refusing: false }));
+
+vi.mock('../src/store/notes.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Notes>();
+	return {
+		...actual,
+		deleteForUndo: (...args: Parameters<typeof Notes.deleteForUndo>) =>
+			store.refusing ? Promise.reject(new Error('refused')) : actual.deleteForUndo(...args),
+	};
+});
 
 /**
  * The scratchpad, end to end (docs/ARCHITECTURE.md §7, "The scratchpad"): its
@@ -25,6 +38,7 @@ afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
+	store.refusing = false;
 });
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };
@@ -195,6 +209,20 @@ describe('a card', () => {
 		expect(readFrontmatter((await getNote(db, older.id))?.frontmatter ?? null).pinned).toBe(
 			true
 		);
+	});
+
+	it('says so where the store will not delete it, and stays on the wall', async () => {
+		await inbox();
+		const note = await scratch({ body: 'Milk\n' });
+		const { user } = await openScratchpad();
+		store.refusing = true;
+
+		await user.click(await screen.findByRole('button', { name: 'Options for “Milk”' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+		expect(await screen.findByText('That note could not be deleted.')).toBeDefined();
+		expect(screen.getByRole('button', { name: /^Milk/ })).toBeDefined();
+		expect((await getNote(db, note.id))?.deletedLocally).toBe(0);
 	});
 
 	it('is deleted from the wall, with the way back offered', async () => {

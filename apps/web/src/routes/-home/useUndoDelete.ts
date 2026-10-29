@@ -5,7 +5,7 @@ import type { DisplacedText } from '../../components/note/types.js';
 import type { Notice } from '../../components/ui/notify.js';
 import { t } from '../../i18n/t.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../../store/db.js';
-import { deleteNote, getNote, saveNoteBody, undeleteNote } from '../../store/notes.js';
+import { deleteForUndo, saveNoteBody, undeleteNote } from '../../store/notes.js';
 import { nameShown } from '../../store/titles.js';
 import { sourceName } from '../../sync/account.js';
 import { placeFolder } from '../place.js';
@@ -123,18 +123,17 @@ export const useUndoDelete = ({
 	 * is; the list is what shows in its place.
 	 */
 	const deletePassword = (note: NoteRecord) => {
-		const home = { connectionId: note.connectionId };
-		void deleteNote(db, note.id, home)
-			.then(() => getNote(db, note.id, home).catch(() => undefined))
-			.then((row) => {
-				noteDeleted(row ?? note);
+		void deleteForUndo(db, note).then(
+			(row) => {
+				noteDeleted(row);
 				if (noteIdRef.current === note.id) {
 					select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
 				}
-			})
-			.catch(() => {
+			},
+			() => {
 				setProblem({ message: t('passwords.item.notDeleted'), tone: 'error' });
-			});
+			}
+		);
 	};
 
 	return {

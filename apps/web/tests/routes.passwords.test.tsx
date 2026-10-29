@@ -1,16 +1,29 @@
 import { VAULT_FOLDER } from '@skysa/core';
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote } from '../src/store/notes.js';
 import { setPasswordsShown } from '../src/store/vault.js';
 import { hashIn } from './entry.js';
 import { fence, sealed } from './secretHostFake.js';
 import { openApp } from './support/app.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
+
+/** A store that turns the next delete for undo down, as a write IndexedDB refuses does. */
+const store = vi.hoisted(() => ({ refusing: false }));
+
+vi.mock('../src/store/notes.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Notes>();
+	return {
+		...actual,
+		deleteForUndo: (...args: Parameters<typeof Notes.deleteForUndo>) =>
+			store.refusing ? Promise.reject(new Error('refused')) : actual.deleteForUndo(...args),
+	};
+});
 
 /**
  * The passwords, end to end (docs/ARCHITECTURE.md §7, "Passwords in the
@@ -25,6 +38,7 @@ afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
+	store.refusing = false;
 });
 
 const scope = { connectionId: LOCAL_CONNECTION_ID };
@@ -159,6 +173,21 @@ describe('a password', () => {
 		// Nor in the note editor, its fence and all: the notebook's own note opens.
 		expect((await screen.findByLabelText<HTMLInputElement>('Note title')).value).toBe('Agenda');
 		expect(screen.queryByDisplayValue('GitHub')).toBeNull();
+	});
+
+	it('says so where the store will not delete it, and stays', async () => {
+		await inbox();
+		const note = await item('Old', 'Not an item.\n');
+		const { user } = await openPasswords();
+		await user.click(await screen.findByRole('button', { name: /^Old/u }));
+		const open = await screen.findByRole('region', { name: 'Old' });
+		store.refusing = true;
+
+		await user.click(within(open).getByRole('button', { name: 'Delete' }));
+
+		expect(await screen.findByText('That password could not be deleted.')).toBeDefined();
+		expect(screen.getByRole('region', { name: 'Old' })).toBeDefined();
+		expect((await getNote(db, note.id, scope))?.deletedLocally).toBe(0);
 	});
 
 	it('is deleted at once, and the undo brings it back open', async () => {
