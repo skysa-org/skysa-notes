@@ -58,8 +58,8 @@ export const UnlockEntry = ({
 	const field = useRef<HTMLInputElement>(null);
 	const pattern = useRef<HTMLDivElement>(null);
 	// The field is what was asked for, so the typing goes in it, or the drawing
-	// starts from its first dot (Sidebar's `NewFolderField` says why this is
-	// not `autoFocus`).
+	// starts from its first dot (`NewFolderField`, in `sidebar/NotebookFields.tsx`,
+	// says why this is not `autoFocus`).
 	useEffect(() => {
 		(field.current ?? pattern.current?.querySelector<HTMLElement>('[data-dot]'))?.focus();
 	}, []);

@@ -1,275 +1,23 @@
-import { ancestorPaths, basename, isScratchPath, isVaultPath, ROOT } from '@skysa/core';
+import { ROOT } from '@skysa/core';
 import {
 	type CSSProperties,
 	type KeyboardEvent,
 	memo,
-	type ReactNode,
 	useCallback,
-	useEffect,
 	useId,
 	useLayoutEffect,
 	useRef,
-	useState,
 } from 'react';
 
-import { useCommand } from '../commands/context.js';
-import { Icon, type IconName } from '../editor/icons.js';
-import { rich } from '../i18n/rich.js';
-import { t } from '../i18n/t.js';
-import type { NotebookPin } from '../store/pins.js';
-import { canDrop, type Moving } from '../store/rearrange.js';
-import type { Renamings } from '../store/renaming.js';
-import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
-import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../store/tree.js';
-import { PASSWORDS_LABEL } from '../store/vault.js';
-import { AttachedFiles } from './AttachedFiles.js';
-import { ConfirmDialog } from './ConfirmDialog.js';
-import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
-import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
-import { RowOptions } from './RowOptions.js';
-import { rowIndent, RowRename } from './RowRename.js';
-
-/**
- * The notebook tree. Folders are real directories on the provider, so this is a
- * view of the user's actual directory structure, not an app-only abstraction.
- *
- * Only notebooks are listed. The root is where notebooks live, not a notebook
- * itself, so it has no row of its own — except when it actually holds notes,
- * which a remote folder can arrive already doing. Then one row appears below
- * the notebooks and names exactly what it holds. It is not the "All notes" row
- * we removed: that one always showed and misdescribed its contents.
- *
- * A notebook can be dragged into another, and a note can be dragged out of the
- * list beside it and into one. While either is in the air every row here is a
- * destination rather than a place to go, which is the whole of the mode: see
- * `MoveHint` below for why it is also reachable without a pointer.
- *
- * The header makes a notebook at the **top level**, always, and everything
- * else that can be done to one — a notebook inside it, a rename, a move, a
- * delete — is behind the `\u22ef` beside it and is about the open notebook.
- * The `+` used to put the new notebook inside whichever was open, which meant
- * that with anything open there was no way to make a top-level one at all: the
- * only route to the top level was to have nothing selected, which the app
- * arranges only when there are no notebooks. Nesting is the rarer thing and it
- * now has two ways of its own to be asked for, so the common one is the one
- * that is unconditional.
- *
- * A notebook with notebooks inside it lists them only while it is open, which
- * it is once the user has opened it and stays on this device
- * (`store/openNotebooks.ts`). A library brought in from elsewhere can be
- * hundreds of notebooks nested three deep, and listed whole it was a column
- * to scroll through to find anything. A notebook counts every note inside
- * it, at every depth, open or shut, as its list shows them all (`listedUnder`).
- */
-
-export interface SidebarProps {
-	tree: FolderNode[] | undefined;
-	/** Undefined until the tree has loaded, and when there are no notebooks. */
-	selectedFolder: string | undefined;
-	onSelectFolder: (path: string) => void;
-	/** `undefined` for the top level, which is what the header's `+` asks for. */
-	onCreateFolder: (parentPath: string | undefined, name: string) => void;
-	/** Rename in place. The name is a single segment, not a path. */
-	onRenameFolder?: (path: string, name: string) => void;
-	/** Delete the notebook and everything in it. Asked about first. */
-	onDeleteFolder?: (path: string) => void;
-	/** Where a name being typed is told, for what else on screen shows it. */
-	renamings?: Renamings;
-	/**
-	 * Notes sitting at the root, in no notebook. Undefined while loading; zero
-	 * in the normal case, and then there is no row.
-	 */
-	looseNoteCount: number | undefined;
-	/** Below the tree: where the storage account lives. */
-	footer?: ReactNode;
-	/**
-	 * What is being moved, or null. Held by the route rather than here because
-	 * a note is picked up in the pane next door and put down in this one.
-	 */
-	moving?: Moving | null;
-	/** A drag started on a notebook row. */
-	onPickUp?: (moving: Moving) => void;
-	/** Put what is being moved into this folder. `ROOT` is the top level. */
-	onDrop?: (into: string) => void;
-	/** The drag ended without a drop, or Escape was pressed. */
-	onCancelMove?: () => void;
-	/**
-	 * Something here has just started that needs the user's eyes — a rename or
-	 * a delete asked for from the palette. In a compact window the sidebar is a
-	 * dropdown and may be shut, and a field focused inside a shut panel takes
-	 * no keystrokes at all.
-	 */
-	onReveal?: () => void;
-	/**
-	 * Counts the times something outside the sidebar asked for a new top-level
-	 * notebook: the note list's "Create a notebook", for one. A count, not a
-	 * flag, so asking twice opens the field twice. The field and what it
-	 * holds stay the sidebar's own.
-	 */
-	newNotebookAsked?: number;
-	/**
-	 * The notebooks whose notebooks are listed. `undefined` until it has been
-	 * read, when every notebook is shut, as one nobody has opened is.
-	 */
-	openNotebooks?: ReadonlySet<string>;
-	/** Open or shut these notebooks. */
-	onOpenNotebooks?: (paths: string[], open: boolean) => void;
-	/**
-	 * Pin a notebook to the top or the bottom of its level, or unpin it
-	 * (`undefined`). Which are pinned is in the tree (`withPins`), which comes
-	 * in that order.
-	 */
-	onPinFolder?: (path: string, pin: NotebookPin | undefined) => void;
-	/**
-	 * The source's scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"), a
-	 * row above the notebooks while this device shows it: open or not, and the
-	 * way to open it.
-	 */
-	scratchpad?: { selected: boolean; onSelect: () => void } | undefined;
-	/**
-	 * The source's passwords (docs/ARCHITECTURE.md §7, "Passwords in the
-	 * vault"), a row under the notebooks while this device shows them.
-	 */
-	passwords?: { selected: boolean; onSelect: () => void } | undefined;
-}
-
-/**
- * The notebook the palette's commands are about, of the folder selected. The
- * root is selectable while it holds loose notes and is not a notebook: it
- * cannot be renamed, moved or deleted, and a notebook made "inside" it is a
- * top-level one anyway. Nor is the scratchpad one, or the passwords.
- */
-const notebookOpen = (selectedFolder: string | undefined): string | undefined =>
-	selectedFolder === undefined ||
-	selectedFolder === ROOT ||
-	isScratchPath(selectedFolder) ||
-	isVaultPath(selectedFolder)
-		? undefined
-		: selectedFolder;
-
-/**
- * The row of a place that is no notebook: the scratchpad's, above the
- * notebooks, and the passwords', under them. Not one of the notebooks, so it is
- * never a place to put something being moved, and is not offered while
- * something is. As tall as the headings at the top of the other columns, so the
- * rules under the scratchpad's line up across the window.
- */
-const PlaceRow = ({
-	className,
-	icon,
-	label,
-	selected,
-	onSelect,
-	moving,
-}: {
-	className: string;
-	icon: IconName;
-	label: string;
-	selected: boolean;
-	onSelect: () => void;
-	moving: boolean;
-}) => (
-	<div className={`place-row ${className}`}>
-		<button
-			type="button"
-			className={selected ? 'row selected' : 'row'}
-			aria-current={selected ? 'true' : undefined}
-			disabled={moving}
-			onClick={onSelect}
-		>
-			<Icon name={icon} />
-			<span className="row-label">{label}</span>
-		</button>
-	</div>
-);
-
-/**
- * Inline rather than a `prompt()`: a modal browser dialog blocks the page, is
- * unstyleable, and behaves badly in an installed PWA.
- */
-interface NewFolderFieldProps {
-	/** Where the notebook will go, or undefined for the top level. */
-	parentPath: string | undefined;
-	onCancel: () => void;
-	onSubmit: (name: string) => void;
-}
-
-const NewFolderField = ({ parentPath, onCancel, onSubmit }: NewFolderFieldProps) => {
-	const [name, setName] = useState('');
-	const field = useRef<HTMLInputElement>(null);
-
-	// The field appears in response to a click, so moving focus into it is what
-	// the user asked for — unlike `autoFocus` on page load, which jsx-a11y
-	// rightly rejects. A keyboard user would otherwise have to hunt for the
-	// field they just opened.
-	useEffect(() => {
-		field.current?.focus();
-	}, []);
-
-	const submit = () => {
-		const trimmed = name.trim();
-		if (trimmed === '') {
-			onCancel();
-			return;
-		}
-		onSubmit(trimmed);
-	};
-
-	return (
-		<input
-			className="new-folder"
-			// The field is in the header wherever the notebook is going, so where
-			// that is has to be in the words: the two cases are one keystroke
-			// apart and land in different places.
-			aria-label={
-				parentPath === undefined
-					? t('notebooks.newName.label')
-					: t('notebooks.newName.insideLabel', { name: basename(parentPath) })
-			}
-			placeholder={
-				parentPath === undefined
-					? t('notebooks.newName.placeholder')
-					: t('notebooks.newName.insidePlaceholder', { name: basename(parentPath) })
-			}
-			ref={field}
-			value={name}
-			onChange={(event) => {
-				setName(event.target.value);
-			}}
-			onBlur={submit}
-			onKeyDown={(event) => {
-				if (event.key === 'Enter') submit();
-				if (event.key === 'Escape') onCancel();
-			}}
-		/>
-	);
-};
-
-/**
- * What the sidebar says while something is in the air, and the reason the
- * dragging is not the only way to do this.
- *
- * Dragging is a pointer gesture, and WCAG 2.2 asks that anything it can do be
- * doable with a single pointer that does not drag (SC 2.5.7) — a keyboard user
- * and a user with a tremor both need the same moves. The answer here is that
- * picking up is a *command* (`notebook.move`, `note.move` in the route, so they
- * are in the palette like everything else — docs/ARCHITECTURE.md §7, "Commands are
- * declared, not collected") and putting down is a click on the destination row.
- * That is the same mode a drag enters, so there is one implementation and not
- * two: `moving` is set by the command or by `dragstart`, and read here and by
- * every row below without either of them knowing which it was.
- */
-const MoveHint = ({ moving, onCancel }: { moving: Moving; onCancel: () => void }) => (
-	<p className="move-hint">
-		{/* The live region is the sentence alone: the way out is a control to
-		    reach, not news to be read out every time the hint changes. Escape
-		    still puts the thing down too (the route listens for it). */}
-		<span role="status">{t('notebooks.move.hint', { name: moving.name })}</span>{' '}
-		<button type="button" className="link-button" onClick={onCancel}>
-			{t('common.cancel')}
-		</button>
-	</p>
-);
+import { Icon } from '../../editor/icons.js';
+import { rich } from '../../i18n/rich.js';
+import { t } from '../../i18n/t.js';
+import type { NotebookPin } from '../../store/pins.js';
+import { canDrop, type Moving } from '../../store/rearrange.js';
+import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../../store/tree.js';
+import { type MenuPoint, menuPoint, type OptionsMenuItem } from '../OptionsMenu.js';
+import { RowOptions } from '../RowOptions.js';
+import { rowIndent, RowRename } from '../RowRename.js';
 
 /**
  * A row's label while a move is on. Said outright rather than left to be read
@@ -285,58 +33,6 @@ const destinationLabel = (
 	allowed
 		? (landing?.(moving) ?? t('notebooks.move.into', { name: moving.name, notebook: name }))
 		: t('notebooks.move.cannotGo', { notebook: name });
-
-/**
- * What deleting a notebook takes, in words. The files too: a file beside a note
- * is deleted with its notebook and in no other way (#187), so this is the one
- * place the user is told it will go.
- */
-const deletionOf = (name: string, noteCount: number, fileCount: number): string => {
-	if (noteCount === 0 && fileCount === 0) return t('notebooks.delete.nothingInside', { name });
-	if (fileCount === 0) return t('notebooks.delete.notes', { name, count: noteCount });
-	if (noteCount === 0) return t('notebooks.delete.files', { name, count: fileCount });
-	// Two counts in one sentence: its words follow the notes', and the files
-	// are a phrase counted on its own.
-	return t('notebooks.delete.notesAndFiles', {
-		name,
-		count: noteCount,
-		files: t('notebooks.delete.fileCount', { count: fileCount }),
-	});
-};
-
-/**
- * Asked before a notebook goes, and not told afterwards — the rule the
- * disconnect confirm exists for (docs/ARCHITECTURE.md §10), and the reason a notebook
- * needs one where a note does not: a note comes back from the notice that
- * follows it, and a notebook takes every note beneath it with it. So the count
- * is in the question, because that is the part the user may not know.
- *
- * Over the page rather than wedged under the pane header, where it pushed the
- * tree down and read as a row of it (`ConfirmDialog`).
- */
-const DeleteConfirm = ({
-	name,
-	noteCount,
-	fileCount,
-	onConfirm,
-	onCancel,
-}: {
-	name: string;
-	noteCount: number;
-	fileCount: number;
-	onConfirm: () => void;
-	onCancel: () => void;
-}) => (
-	<ConfirmDialog
-		title={t('notebooks.delete.title')}
-		confirmLabel={t('notebooks.delete.confirm')}
-		tone="danger"
-		onConfirm={onConfirm}
-		onCancel={onCancel}
-	>
-		{deletionOf(name, noteCount, fileCount)}
-	</ConfirmDialog>
-);
 
 interface RowProps {
 	/** `ROOT` for the top level and for the loose notes. */
@@ -550,7 +246,7 @@ const DWELL_GAP_MS = 600;
  * the `dragover`s a browser sends while the pointer is there, moving or not,
  * so there is no timer to cancel.
  */
-const useDwell = (open: (path: string) => void) => {
+export const useDwell = (open: (path: string) => void) => {
 	const dwell = useRef<{ path: string; since: number; seen: number } | null>(null);
 	return (path: string) => {
 		const now = Date.now();
@@ -850,14 +546,14 @@ const FolderItemView = ({
 const FolderItem = memo(FolderItemView);
 
 /** Notebooks opened, by whoever keeps which are open. */
-const opener =
+export const opener =
 	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
 	(...paths: string[]) => {
 		onOpenNotebooks?.(paths, true);
 	};
 
 /** One notebook opened or shut, by whoever keeps which are open. */
-const toggleWith =
+export const toggleWith =
 	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
 	(path: string, open: boolean) => {
 		onOpenNotebooks?.([path], open);
@@ -867,10 +563,10 @@ const toggleWith =
 const TOP_LEVEL_LABEL = t('notebooks.topLevel');
 
 /** Every file beneath a notebook, which deleting it takes as well. */
-const filesUnder = (node: FolderNode): number =>
+export const filesUnder = (node: FolderNode): number =>
 	node.children.reduce((total, child) => total + filesUnder(child), node.fileCount);
 
-const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
+export const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
 	nodes.reduce<FolderNode | undefined>(
 		(found, node) => found ?? (node.path === path ? node : nodeAt(node.children, path)),
 		undefined
@@ -890,7 +586,7 @@ interface TreeBodyProps extends Omit<FolderRowsProps, 'nodes' | 'depth' | 'openN
  * header, a hint, three things that can be open at once and this — and all of
  * it in one function is a shape nobody can read.
  */
-const TreeBody = ({
+export const TreeBody = ({
 	tree,
 	looseNoteCount,
 	onCreate,
@@ -1030,309 +726,5 @@ const TreeBody = ({
 				</li>
 			)}
 		</ul>
-	);
-};
-
-/**
- * The notebook open in the note list is shown in the sidebar too: when one is
- * opened — from the URL, from where the user was, from a search or a palette
- * command, or made — the notebooks it is in are opened. Once for each, so
- * shutting one of them afterwards is the user's to do, and done.
- */
-const useRevealed = (
-	selectedFolder: string | undefined,
-	openNotebooks: ReadonlySet<string> | undefined,
-	onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined
-) => {
-	const revealed = useRef<string | undefined>(undefined);
-	useEffect(() => {
-		// Not read yet, for this source: a source shown in place of another has
-		// a set of its own, which the notebook open there has to be revealed in
-		// too, though its path may be the one revealed in the last.
-		if (openNotebooks === undefined) {
-			revealed.current = undefined;
-			return;
-		}
-		if (selectedFolder === undefined || selectedFolder === ROOT) return;
-		if (revealed.current === selectedFolder) return;
-		revealed.current = selectedFolder;
-		const shut = ancestorPaths(selectedFolder).filter((path) => !openNotebooks.has(path));
-		if (shut.length > 0) onOpenNotebooks?.(shut, true);
-	}, [selectedFolder, openNotebooks, onOpenNotebooks]);
-};
-
-export const Sidebar = ({
-	tree,
-	selectedFolder,
-	onSelectFolder,
-	onCreateFolder,
-	onRenameFolder,
-	onDeleteFolder,
-	looseNoteCount,
-	footer,
-	moving = null,
-	onPickUp,
-	onDrop,
-	onCancelMove,
-	onReveal,
-	newNotebookAsked = 0,
-	renamings,
-	openNotebooks,
-	onOpenNotebooks,
-	onPinFolder,
-	scratchpad,
-	passwords,
-}: SidebarProps) => {
-	/** Where a notebook is being made, or null. `undefined` is the top level. */
-	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
-
-	// Asked for from outside: the field opens as it does for the header's `+`.
-	// Adjusted during render rather than in an effect, as React has it for state
-	// that follows a prop.
-	// https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-	const [answeredAsk, setAnsweredAsk] = useState(newNotebookAsked);
-	if (newNotebookAsked !== answeredAsk) {
-		setAnsweredAsk(newNotebookAsked);
-		if (moving === null) setCreating({ parent: undefined });
-	}
-	const [renaming, setRenaming] = useState<string | null>(null);
-	const [deleting, setDeleting] = useState<string | null>(null);
-	const [listing, setListing] = useState<string | null>(null);
-	/** A notebook's row right-clicked, and where: its menu is open there. */
-	const [menu, setMenu] = useState<{ path: string; at: MenuPoint } | null>(null);
-	/** Which row the pointer is over, for the highlight and nothing else. */
-	const [over, setOver] = useState<string | null>(null);
-
-	useRevealed(selectedFolder, openNotebooks, onOpenNotebooks);
-	const openThese = opener(onOpenNotebooks);
-	const dwell = useDwell(openThese);
-
-	const pickUp = onPickUp ?? (() => undefined);
-	const drop = onDrop ?? (() => undefined);
-	const cancel = onCancelMove ?? (() => undefined);
-
-	/** The notebook the palette's commands are about (`notebookOpen`). */
-	const open = notebookOpen(selectedFolder);
-	const manageable = open !== undefined && moving === null;
-	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
-
-	/** Pinned or not, and the way to change it, where the route keeps pins. */
-	const pinning = (
-		path: string,
-		node: FolderNode | undefined
-	): Pick<NotebookActions, 'pinned' | 'onPin'> => {
-		if (onPinFolder === undefined) return {};
-		return {
-			pinned: node?.pinned,
-			onPin: (pin) => {
-				onPinFolder(path, pin);
-			},
-		};
-	};
-
-	/**
-	 * What the menu does to a notebook, from its row's `⋯` or a right-click on
-	 * the row. One set of actions, so the two menus cannot drift.
-	 */
-	const actionsFor = (path: string): NotebookActions => {
-		const node = nodeAt(tree ?? [], path);
-		return {
-			...pinning(path, node),
-			onNewInside: () => {
-				setCreating({ parent: path });
-			},
-			onRename: () => {
-				setRenaming(path);
-			},
-			onMove: () => {
-				pickUp({ kind: 'notebook', path, name: basename(path) });
-			},
-			onFiles:
-				(node?.fileCount ?? 0) === 0
-					? undefined
-					: () => {
-							setListing(path);
-						},
-			onDelete: () => {
-				setDeleting(path);
-			},
-		};
-	};
-
-	const renamed = (path: string, chosen?: string) => {
-		setRenaming(null);
-		const trimmed = chosen?.trim();
-		// Nothing typed, Escape, or the name it already had: all of them are the
-		// user changing their mind, and none of them is worth a move on the
-		// provider — `moveFolder` answers a rename to the same name with nothing
-		// at all, but the queue and the toast are cheaper not to reach.
-		if (
-			trimmed === undefined ||
-			trimmed === '' ||
-			trimmed === basename(path) ||
-			onRenameFolder === undefined
-		) {
-			renamings?.clear('notebook', path);
-			return;
-		}
-		// Shown as given until the route has the notebook at its new path.
-		renamings?.give('notebook', path, path);
-		onRenameFolder(path, trimmed);
-	};
-
-	useCommand({
-		id: 'notebook.rename',
-		label: t('notebooks.commands.rename'),
-		group: t('shell.commands.group.notebook'),
-		enabled: manageable,
-		run: () => {
-			setRenaming(open ?? null);
-			// The row becomes the field, so it has to be listed: a notebook inside
-			// a shut one is not, and its name would wait there for whenever that
-			// one is opened next, and take the focus then.
-			if (open !== undefined) openThese(...ancestorPaths(open));
-			onReveal?.();
-		},
-	});
-
-	useCommand({
-		id: 'notebook.delete',
-		label: t('notebooks.commands.delete'),
-		group: t('shell.commands.group.notebook'),
-		enabled: manageable,
-		run: () => {
-			setDeleting(open ?? null);
-			onReveal?.();
-		},
-	});
-
-	return (
-		<nav className="sidebar" aria-label={t('notebooks.title')}>
-			{scratchpad !== undefined && (
-				<PlaceRow
-					className="scratchpad-row"
-					icon="scratchpad"
-					label={SCRATCHPAD_LABEL}
-					selected={scratchpad.selected}
-					onSelect={scratchpad.onSelect}
-					moving={moving !== null}
-				/>
-			)}
-			<div className="pane-header">
-				<h2>{t('notebooks.title')}</h2>
-				<div className="pane-actions">
-					<button
-						type="button"
-						className="icon"
-						// Unconditionally the top level. What the `+` in a pane
-						// header makes is a notebook, and the top level is where
-						// notebooks live; anywhere else is asked for by name.
-						title={t('notebooks.newNotebook')}
-						aria-label={t('notebooks.newNotebook')}
-						// A move is a mode, and a notebook made in the middle of one
-						// would land in a tree the user is holding a piece of.
-						disabled={moving !== null}
-						onClick={() => {
-							setCreating({ parent: undefined });
-						}}
-					>
-						+
-					</button>
-				</div>
-			</div>
-
-			{moving !== null && <MoveHint moving={moving} onCancel={cancel} />}
-
-			{creating !== null && (
-				<NewFolderField
-					parentPath={creating.parent}
-					onCancel={() => {
-						setCreating(null);
-					}}
-					onSubmit={(name) => {
-						const parent = creating.parent;
-						setCreating(null);
-						onCreateFolder(parent, name);
-					}}
-				/>
-			)}
-
-			{listing !== null && (
-				<AttachedFiles
-					name={basename(listing)}
-					path={listing}
-					onClose={() => {
-						setListing(null);
-					}}
-				/>
-			)}
-
-			{deleting !== null && (
-				<DeleteConfirm
-					name={basename(deleting)}
-					noteCount={going === undefined ? 0 : notesUnder(going)}
-					fileCount={going === undefined ? 0 : filesUnder(going)}
-					onConfirm={() => {
-						setDeleting(null);
-						onDeleteFolder?.(deleting);
-					}}
-					onCancel={() => {
-						setDeleting(null);
-					}}
-				/>
-			)}
-
-			<TreeBody
-				tree={tree}
-				looseNoteCount={looseNoteCount}
-				onCreate={() => {
-					setCreating({ parent: undefined });
-				}}
-				selectedFolder={selectedFolder}
-				onSelectFolder={onSelectFolder}
-				moving={moving}
-				over={over}
-				onOver={setOver}
-				onPickUp={pickUp}
-				onDrop={drop}
-				onCancelMove={cancel}
-				renaming={renaming}
-				onDraft={(path, text) => {
-					renamings?.typed('notebook', path, text);
-				}}
-				onRenamed={renamed}
-				onMenu={(path, at) => {
-					setMenu({ path, at });
-				}}
-				itemsFor={(path) => notebookMenuItems(basename(path), actionsFor(path))}
-				openNotebooks={openNotebooks}
-				onToggle={toggleWith(onOpenNotebooks)}
-				onDwell={dwell}
-			/>
-
-			{menu !== null && (
-				<FloatingMenu
-					at={menu.at}
-					label={t('rows.notebook.menu', { name: basename(menu.path) })}
-					items={notebookMenuItems(basename(menu.path), actionsFor(menu.path))}
-					onClose={() => {
-						setMenu(null);
-					}}
-				/>
-			)}
-
-			{passwords !== undefined && (
-				<PlaceRow
-					className="passwords-row"
-					icon="key"
-					label={PASSWORDS_LABEL}
-					selected={passwords.selected}
-					onSelect={passwords.onSelect}
-					moving={moving !== null}
-				/>
-			)}
-
-			{footer}
-		</nav>
 	);
 };
