@@ -1,14 +1,8 @@
 import { type RouterHistory, useRouter, useRouterState } from '@tanstack/react-router';
-import {
-	type CSSProperties,
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useRef,
-	useState,
-} from 'react';
+import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import { COMPACT, useMediaQuery } from '../components/ui/layout.js';
+import { useEscapeKey } from '../components/ui/useEscapeKey.js';
 import { usePressAway } from '../components/ui/usePressAway.js';
 
 /**
@@ -216,16 +210,14 @@ const usePanel = (compact: boolean) => {
 			inside: panel === null ? undefined : `${PANE_ELEMENT[panel]}, [${KEEPS_PANEL}]`,
 		}
 	);
-	useEffect(() => {
-		if (panel === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') void shut();
-		};
-		document.addEventListener('keydown', onKey);
-		return () => {
-			document.removeEventListener('keydown', onKey);
-		};
-	}, [panel, shut]);
+	// Not an Escape something over the panel has answered: a dialog, or the
+	// menu a row's `⋯` opened, shuts itself and leaves the panel open.
+	useEscapeKey(
+		() => {
+			void shut();
+		},
+		{ enabled: panel !== null }
+	);
 
 	return { panel, setPanel, from: panel === null ? null : shown.from, setRest, shut };
 };
