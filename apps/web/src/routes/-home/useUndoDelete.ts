@@ -1,11 +1,11 @@
-import { isScratchPath, SCRATCHPAD_FOLDER } from '@skysa/core';
-import { useCallback, useState } from 'react';
+import { isScratchPath, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { type RefObject, useCallback, useState } from 'react';
 
 import { type DisplacedText } from '../../components/NoteView.js';
 import { type Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../../store/db.js';
-import { saveNoteBody, undeleteNote } from '../../store/notes.js';
+import { deleteNote, getNote, saveNoteBody, undeleteNote } from '../../store/notes.js';
 import { nameShown } from '../../store/titles.js';
 import { sourceName } from '../../sync/account.js';
 import { placeFolder } from '../place.js';
@@ -29,7 +29,13 @@ const backDisconnected = (title: string, source: string | undefined): string =>
 export const useUndoDelete = ({
 	select,
 	setProblem,
-}: Readonly<{ select: Select; setProblem: (notice: Notice | null) => void }>) => {
+	noteIdRef,
+}: Readonly<{
+	select: Select;
+	setProblem: (notice: Notice | null) => void;
+	/** The note open now, read once a delete has gone through. */
+	noteIdRef: Readonly<RefObject<string | undefined>>;
+}>) => {
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
 	/** The note (`noteRef`) whose undo failed: its notice waits to be dismissed. */
 	const [undoFailed, setUndoFailed] = useState<string | null>(null);
@@ -107,5 +113,33 @@ export const useUndoDelete = ({
 			});
 	};
 
-	return { deleted, setDeleted, undoFailed, setBeside, dismissDeleted, undoDelete };
+	/**
+	 * Delete a password, taken away at once with the notice's undo, as a note
+	 * is; the list is what shows in its place.
+	 */
+	const deletePassword = (note: NoteRecord) => {
+		const home = { connectionId: note.connectionId };
+		void deleteNote(db, note.id, home)
+			.then(() => getNote(db, note.id, home).catch(() => undefined))
+			.then((row) => {
+				setDeleted(row ?? note);
+				setBeside(null);
+				if (noteIdRef.current === note.id) {
+					select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
+				}
+			})
+			.catch(() => {
+				setProblem({ message: t('passwords.item.notDeleted'), tone: 'error' });
+			});
+	};
+
+	return {
+		deleted,
+		setDeleted,
+		undoFailed,
+		setBeside,
+		dismissDeleted,
+		undoDelete,
+		deletePassword,
+	};
 };

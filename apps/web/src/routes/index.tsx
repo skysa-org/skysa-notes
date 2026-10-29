@@ -1,4 +1,4 @@
-import { basename, parentPath, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { basename, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { createFileRoute, useRouterState } from '@tanstack/react-router';
 import { useCallback, useRef, useState } from 'react';
 
@@ -7,8 +7,6 @@ import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
-import { NoteList } from '../components/NoteList.js';
-import { noteMenuItems } from '../components/noteMenu.js';
 import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
 import { type Notice, NotifyContext } from '../components/notify.js';
 import { Passwords } from '../components/Passwords.js';
@@ -19,7 +17,7 @@ import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
-import { db, type NoteRecord, noteRef, type SyncStateRecord } from '../store/db.js';
+import { db, noteRef, type SyncStateRecord } from '../store/db.js';
 import {
 	useActiveConnectionId,
 	useActiveSource,
@@ -32,11 +30,9 @@ import {
 	useSources,
 } from '../store/hooks.js';
 import { createLiveEdits } from '../store/liveEdits.js';
-import { deleteNote, getNote } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
-import { setNotebookPin, setNotePinned } from '../store/pins.js';
+import { setNotebookPin } from '../store/pins.js';
 import { createRenamings } from '../store/renaming.js';
-import { titleShown } from '../store/titles.js';
 import { findFolder, notesUnder } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import {
@@ -49,6 +45,7 @@ import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
 import { HomeBar } from './-home/HomeBar.js';
 import { HomeToasts } from './-home/HomeToasts.js';
 import { NoteColumn, PasswordColumn } from './-home/NoteColumn.js';
+import { NotesPane } from './-home/NotesPane.js';
 import { covered, emptyPaneOffers, placeRow } from './-home/rules.js';
 import { ScratchOverlays, ScratchPane } from './-home/ScratchParts.js';
 import { SourceDropdown } from './-home/SourceDropdown.js';
@@ -214,8 +211,15 @@ const Home = () => {
 		dismissConnect,
 	});
 
-	const { deleted, setDeleted, undoFailed, setBeside, dismissDeleted, undoDelete } =
-		useUndoDelete({ select, setProblem });
+	const {
+		deleted,
+		setDeleted,
+		undoFailed,
+		setBeside,
+		dismissDeleted,
+		undoDelete,
+		deletePassword,
+	} = useUndoDelete({ select, setProblem, noteIdRef });
 	const dismissProblem = useCallback(() => {
 		setProblem(null);
 	}, []);
@@ -325,26 +329,6 @@ const Home = () => {
 		setPanel,
 		setRest,
 	});
-
-	/**
-	 * Delete a password, taken away at once with the notice's undo, as a note
-	 * is; the list is what shows in its place.
-	 */
-	const deletePassword = (note: NoteRecord) => {
-		const home = { connectionId: note.connectionId };
-		void deleteNote(db, note.id, home)
-			.then(() => getNote(db, note.id, home).catch(() => undefined))
-			.then((row) => {
-				setDeleted(row ?? note);
-				setBeside(null);
-				if (noteIdRef.current === note.id) {
-					select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
-				}
-			})
-			.catch(() => {
-				setProblem({ message: t('passwords.item.notDeleted'), tone: 'error' });
-			});
-	};
 
 	useEscapePutsDown(moving, setMoving);
 
@@ -522,66 +506,27 @@ const Home = () => {
 							onAdd={passwords.add}
 						/>
 					) : (
-						<NoteList
+						<NotesPane
 							notes={notes}
 							renamings={renamings}
-							selectedNoteId={noteId}
-							// A note listed from a notebook inside the open one opens that
-							// notebook with it, as a search result does: the sidebar then
-							// lights the notebook the note is in.
-							// Each a step with no dropdown over it, which shuts the notes.
-							onSelectNote={(note) => {
-								select({ folder: parentPath(note.path), note: note.id }, { note });
-							}}
+							noteId={noteId}
+							folder={folder}
+							select={select}
 							onCreateNote={onCreateNote}
 							onCreateNotebook={askNewNotebook}
-							folderPath={folder}
 							// Both queries, not just the tree: the notebooks alone cannot tell
 							// an empty app from one whose notes all sit loose at the root.
 							storeLoaded={tree !== undefined && looseNoteCount !== undefined}
-							onPickUpNote={(note) => {
-								setMoving({
-									kind: 'note',
-									id: note.id,
-									path: note.path,
-									name: titleShown(note.title),
-								});
-							}}
-							onCancelMove={cancelMove}
-							movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
+							setMoving={setMoving}
+							cancelMove={cancelMove}
+							moving={moving}
+							pickUp={pickUp}
 							unsavedNoteId={unsavedNoteId}
 							liveEdits={liveEdits}
-							// The note's own menu, about the note on the row its `⋯` or
-							// a right-click is on, which need not be the one open. Delete goes through the note pane,
-							// which holds what autosave has not stored yet.
-							pinnedNoteIds={pins?.notes}
-							menuFor={(note) =>
-								noteMenuItems({
-									pinned: pins?.notes.has(note.id),
-									onPin: () => {
-										void setNotePinned(
-											db,
-											note.connectionId,
-											note.id,
-											pins?.notes.has(note.id) !== true
-										);
-									},
-									onMove:
-										moving === null
-											? () => {
-													pickUp({
-														kind: 'note',
-														id: note.id,
-														path: note.path,
-														name: titleShown(note.title),
-													});
-												}
-											: undefined,
-									onDelete: () => {
-										noteView.current?.deleteNote(note);
-									},
-								})
-							}
+							pins={pins}
+							deleteNote={(note) => {
+								noteView.current?.deleteNote(note);
+							}}
 						/>
 					)}
 
