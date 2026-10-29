@@ -233,11 +233,9 @@ export const useScratchpad = ({
 			pane.deleteNote(note);
 			return;
 		}
-		void deleteForUndo(db, note)
-			.then(onDeleted)
-			.catch(() => {
-				onProblem(t('scratchpad.problem.deleted'));
-			});
+		void deleteForUndo(db, note).then(onDeleted, () => {
+			onProblem(t('scratchpad.problem.deleted'));
+		});
 	};
 
 	/** The open note's editor is put away, the box or the card, before it moves. */

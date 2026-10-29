@@ -168,8 +168,8 @@ export const useNoteSession = ({
 			// Settled once deleted: everything out has come back, and what had
 			// failed has had one more try — into the tombstone, which keeps an
 			// edit and stays deleted.
-			void deleteForUndo(db, target, { settle })
-				.then((deleted) => {
+			void deleteForUndo(db, target, { settle }).then(
+				(deleted) => {
 					// Only now that it is deleted, and nothing before: a held edit
 					// retried after sync has purged the row would bring the note back
 					// (`saveNoteBody`), here and on the provider. What is let go is
@@ -189,14 +189,15 @@ export const useNoteSession = ({
 					}
 					const { body, origin } = unstored.value;
 					onDeleted({ ...deleted, body, bodyOrigin: origin });
-				})
+				},
 				// Turned down by the store: the note is where it was, nothing
 				// held for it was let go, and there is no delete to undo. Said,
 				// as the scratchpad and the vault say it, rather than a note
 				// that stays put after Delete with nothing said.
-				.catch(() => {
+				() => {
 					onProblem?.({ message: t('notes.view.notDeleted'), tone: 'error' });
-				});
+				}
+			);
 		},
 		[flush, forget, onDeleted, onProblem, settle]
 	);

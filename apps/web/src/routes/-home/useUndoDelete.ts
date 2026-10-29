@@ -123,16 +123,17 @@ export const useUndoDelete = ({
 	 * is; the list is what shows in its place.
 	 */
 	const deletePassword = (note: NoteRecord) => {
-		void deleteForUndo(db, note)
-			.then((row) => {
+		void deleteForUndo(db, note).then(
+			(row) => {
 				noteDeleted(row);
 				if (noteIdRef.current === note.id) {
 					select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
 				}
-			})
-			.catch(() => {
+			},
+			() => {
 				setProblem({ message: t('passwords.item.notDeleted'), tone: 'error' });
-			});
+			}
+		);
 	};
 
 	return {

@@ -93,6 +93,17 @@ describe('deleteForUndo', () => {
 		expect(deleted.deletedLocally).toBe(1);
 	});
 
+	it('is deleted still where what it settles fails', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Gone', body: 'the words\n' });
+
+		const deleted = await deleteForUndo(db, note, {
+			settle: () => Promise.reject(new Error('held')),
+		});
+
+		expect(deleted.deletedLocally).toBe(1);
+	});
+
 	it('gives the note as it was where the tombstone cannot be read back', async () => {
 		const { db } = box;
 		const note = await createNote(db, { title: 'Gone', body: 'the words\n' });

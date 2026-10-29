@@ -1054,6 +1054,8 @@ export const restoreNote = (
  * meanwhile — an editor's held edits, which go into the tombstone rather than
  * bring the note back (`useNoteSession`) — or, where it cannot be read, the
  * note as given. It is deleted either way; only the delete itself can fail.
+ * A `settle` that fails has landed nothing, and what it held is the caller's
+ * to carry into the undo.
  */
 export const deleteForUndo = async (
 	db: NotesDatabase,
@@ -1062,7 +1064,7 @@ export const deleteForUndo = async (
 ): Promise<NoteRecord> => {
 	const home = { connectionId: note.connectionId };
 	await deleteNote(db, note.id, home);
-	await settle?.();
+	await settle?.().catch(() => undefined);
 	return (await getNote(db, note.id, home).catch(() => undefined)) ?? note;
 };
 
