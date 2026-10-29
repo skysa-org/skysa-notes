@@ -2,16 +2,23 @@ import { type ReactNode, useState } from 'react';
 
 import { api, type ApiClient } from '../../api/client.js';
 import { t } from '../../i18n/t.js';
-import { type ConnectedSource, showConnection } from '../../store/connection.js';
+import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/connection.js';
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
 import { isLiveSource } from '../../store/rowStates.js';
 import { CONNECT_FIRST_LABEL, tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
+import { RowRename } from '../RowRename.js';
 import { AddSource } from './AddSource.js';
-import { RenameField, ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
+import { ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';
+
+/**
+ * The tab showing, and so the box its rename field wears: the same classes,
+ * or the bar moves as the name becomes editable.
+ */
+const ACTIVE_TAB = 'source-tab source-tab-active';
 
 export interface SourceTabsProps {
 	db?: NotesDatabase;
@@ -80,10 +87,13 @@ export const SourceTabs = ({
 					{ordered.map((source) => (
 						<li key={source.connectionId}>
 							{renaming?.id === source.connectionId ? (
-								<RenameField
+								<RowRename
 									name={tabName(source, ordered)}
-									kind={sourceKind(source)}
+									selected
+									className={`${ACTIVE_TAB} source-tab-editing`}
 									width={renaming.width}
+									mark={<ProviderIcon kind={sourceKind(source)} />}
+									maxLength={LABEL_LIMIT}
 									onDone={(chosen) => {
 										setRenaming(null);
 										storeSourceName(
@@ -184,7 +194,7 @@ const SourceTab = ({
 	return (
 		<button
 			type="button"
-			className={source.active ? 'source-tab source-tab-active' : 'source-tab'}
+			className={source.active ? ACTIVE_TAB : 'source-tab'}
 			// Said outright (`sourceLabel`): the name from contents joins the
 			// spans below by its own rules, so "A source" and " — disconnected"
 			// came out as a name no caller could predict.

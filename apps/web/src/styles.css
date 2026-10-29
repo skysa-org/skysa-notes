@@ -637,25 +637,11 @@ code {
 
 /* No box of its own: the tab around it is the box. What is left of it after
    the mark, however few characters that is: an input will not otherwise go
-   narrower than its `size`. */
-.source-tab-rename {
-	display: block;
-	flex: 1 1 0;
-	min-width: 0;
+   narrower than its `size`. The field is a row's (`.row-rename`), whose focus
+   ring is off for the same reason: the caret says where the focus is, and the
+   tab it sits in is already lit and bold. */
+.source-tab-editing .row-rename {
 	width: 100%;
-	margin: 0;
-	padding: 0;
-	font: inherit;
-	color: inherit;
-	background: none;
-	border: 0;
-}
-
-/* The caret says where the focus is, and the tab it sits in is already lit and
-   bold. A ring here would draw exactly the border this field is not supposed
-   to have, around a field the user reached by pressing it. */
-.source-tab-rename:focus-visible {
-	outline: none;
 }
 
 .source-add {

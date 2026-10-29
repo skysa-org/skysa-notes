@@ -15,8 +15,6 @@ export const sources = {
 	providers: 'Storage providers',
 	/** That menu's heading while nothing is connected yet. */
 	chooseProvider: 'Choose a storage provider',
-	/** The field a tab becomes while it is renamed. {name} is what the source is called now. */
-	rename: 'Rename {name}',
 	disconnected: {
 		/**
 		 * A source that syncs nowhere any more, as its tab or row is read out.

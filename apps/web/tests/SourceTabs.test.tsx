@@ -279,9 +279,29 @@ describe('the source tabs', () => {
 		expect(box?.className).toContain('source-tab');
 		expect(box?.className).toContain('source-tab-active');
 		expect(box?.className).toContain('source-tab-editing');
-		expect(field.className).toBe('source-tab-rename');
+		expect(field.className).toBe('row-rename');
 		// The mark stays in front of it: only the name becomes a field.
 		expect(box?.firstElementChild?.getAttribute('src')).toBe(dropboxMark);
+	});
+
+	it('pins the field to the width the tab had, so nothing beside it moves', async () => {
+		// jsdom measures nothing, so the tab is given a width to measure.
+		const measured = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(120);
+		try {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+			await showConnection(db, 'c1');
+			show(db);
+
+			await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
+
+			const field = screen.getByRole('textbox', { name: 'Rename Dropbox' });
+			expect(field.parentElement?.style.width).toBe('120px');
+		} finally {
+			// Every element after this one would otherwise be 120px wide.
+			measured.mockRestore();
+		}
 	});
 
 	it('leaves the name alone when the rename is abandoned', async () => {
