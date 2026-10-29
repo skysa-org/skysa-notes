@@ -40,6 +40,16 @@ export const useSelect = ({
 	const { folder, noteId, openNote, openedOver, go } = place;
 
 	/**
+	 * Anything else the user does answers the banner: it is about the name they
+	 * just tried, not about the app, and leaving it up means a message about a
+	 * notebook they have since moved on from sits there for the session.
+	 */
+	const answerBanner = () => {
+		setProblem(null);
+		dismissConnect();
+	};
+
+	/**
 	 * Go somewhere in the source showing: `next` over the notebook and note
 	 * open. A step of the user's own is pushed, so Back undoes it; `replace`
 	 * is for keeping the URL true to what has changed under it — a notebook
@@ -47,11 +57,7 @@ export const useSelect = ({
 	 * the caller has it, so the hash can name it at once.
 	 */
 	const select: Select = (next, { replace = false, note, panel } = {}) => {
-		// Anything else the user does answers the banner: it is about the name they
-		// just tried, not about the app, and leaving it up means a message about a
-		// notebook they have since moved on from sits there for the session.
-		setProblem(null);
-		dismissConnect();
+		answerBanner();
 		const to: Place = { folder, note: noteId, ...next };
 		// Where the user is already, under a dropdown opened over it: the note
 		// open, chosen again from its notes, shuts them, as Back would. Not
@@ -105,8 +111,7 @@ export const useSelect = ({
 		// Back, and the new source's place goes after it (`useStanding`). That
 		// place is the one remembered there, so the way to arrive somewhere in
 		// it is to be remembered there first.
-		setProblem(null);
-		dismissConnect();
+		answerBanner();
 		// Shut first, as the new source's place is pushed with the dropdown the
 		// entry before it had open (`useOpenPlace`).
 		void shutPanel()

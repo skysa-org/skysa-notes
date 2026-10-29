@@ -211,15 +211,8 @@ const Home = () => {
 		dismissConnect,
 	});
 
-	const {
-		deleted,
-		setDeleted,
-		undoFailed,
-		setBeside,
-		dismissDeleted,
-		undoDelete,
-		deletePassword,
-	} = useUndoDelete({ select, setProblem, noteIdRef });
+	const { deleted, noteDeleted, undoFailed, dismissDeleted, undoDelete, deletePassword } =
+		useUndoDelete({ select, setProblem, noteIdRef });
 	const dismissProblem = useCallback(() => {
 		setProblem(null);
 	}, []);
@@ -308,8 +301,7 @@ const Home = () => {
 		setRest,
 		noteView,
 		onDeleted: (note) => {
-			setDeleted(note);
-			setBeside(null);
+			noteDeleted(note);
 		},
 		pickUp,
 		moving,
@@ -381,8 +373,7 @@ const Home = () => {
 			// takes its place (`useOpenPlace`). Not in the scratchpad, whose
 			// card or box closes instead.
 			onDeleted={(note, displaced) => {
-				setDeleted(note);
-				setBeside(displaced ?? null);
+				noteDeleted(note, displaced ?? null);
 				scratch.deleted(note);
 			}}
 		/>

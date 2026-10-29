@@ -4,13 +4,9 @@ import { useEffect } from 'react';
 import { type Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord } from '../../store/db.js';
-import {
-	createFolder,
-	deleteFolder,
-	FolderExistsError,
-	renameFolder,
-} from '../../store/folders.js';
+import { createFolder, deleteFolder, renameFolder } from '../../store/folders.js';
 import { type Renamings } from '../../store/renaming.js';
+import { notebookRefused } from './rules.js';
 import { type Select } from './useOpenPlace.js';
 
 /**
@@ -42,14 +38,7 @@ export const useNotebookActions = ({
 				openFolder(created.path);
 			})
 			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsHere', { name: error.folderName }),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notMade'), tone: 'error' }
-				);
+				setProblem(notebookRefused(error, 'here', t('shell.notebook.notMade')));
 			});
 	};
 
@@ -84,14 +73,7 @@ export const useNotebookActions = ({
 				}
 			})
 			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsHere', { name: error.folderName }),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notRenamed'), tone: 'error' }
-				);
+				setProblem(notebookRefused(error, 'here', t('shell.notebook.notRenamed')));
 			});
 	};
 
