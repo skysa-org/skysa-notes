@@ -14,6 +14,21 @@ import { type Renamings } from '../../store/renaming.js';
 import { type Select } from './useOpenPlace.js';
 
 /**
+ * What a notebook the store refused says: its name taken, here or where it
+ * was going, as a warning; anything else as `failed`, an error.
+ */
+export const notebookRefused = (error: unknown, taken: 'here' | 'there', failed: string): Notice =>
+	error instanceof FolderExistsError
+		? {
+				message:
+					taken === 'here'
+						? t('shell.notebook.existsHere', { name: error.folderName })
+						: t('shell.notebook.existsThere', { name: error.folderName }),
+				tone: 'warning',
+			}
+		: { message: failed, tone: 'error' };
+
+/**
  * Making, renaming and deleting a notebook from the sidebar, and keeping the
  * URL on the open notebook through a rename or a delete.
  */
@@ -42,14 +57,7 @@ export const useNotebookActions = ({
 				openFolder(created.path);
 			})
 			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsHere', { name: error.folderName }),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notMade'), tone: 'error' }
-				);
+				setProblem(notebookRefused(error, 'here', t('shell.notebook.notMade')));
 			});
 	};
 
@@ -84,14 +92,7 @@ export const useNotebookActions = ({
 				}
 			})
 			.catch((error: unknown) => {
-				setProblem(
-					error instanceof FolderExistsError
-						? {
-								message: t('shell.notebook.existsHere', { name: error.folderName }),
-								tone: 'warning',
-							}
-						: { message: t('shell.notebook.notRenamed'), tone: 'error' }
-				);
+				setProblem(notebookRefused(error, 'here', t('shell.notebook.notRenamed')));
 			});
 	};
 

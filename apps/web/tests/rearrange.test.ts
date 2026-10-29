@@ -2,6 +2,7 @@ import { ROOT } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
 import { canDrop, dropMove, type Moving } from '../src/store/rearrange.js';
+import { movingNote, titleShown } from '../src/store/titles.js';
 
 /**
  * Which drops are allowed, decided without a DOM. Every refusal here is one a
@@ -99,5 +100,19 @@ describe('canDrop', () => {
 	it('is the same question as dropMove, asked by a row deciding how to look', () => {
 		expect(canDrop(notebook('Work'), 'Archive')).toBe(true);
 		expect(canDrop(notebook('Work'), 'Work/Ideas')).toBe(false);
+	});
+});
+
+describe('movingNote', () => {
+	it('puts a note in the air under the name its row shows', () => {
+		expect(movingNote({ id: 'n1', path: 'Work/Minutes.md', title: 'Minutes' })).toEqual({
+			kind: 'note',
+			id: 'n1',
+			path: 'Work/Minutes.md',
+			name: 'Minutes',
+		});
+		expect(movingNote({ id: 'n2', path: 'Work/Untitled.md', title: '' }).name).toBe(
+			titleShown('')
+		);
 	});
 });

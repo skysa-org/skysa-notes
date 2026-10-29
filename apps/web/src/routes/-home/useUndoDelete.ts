@@ -44,6 +44,11 @@ export const useUndoDelete = ({
 	const dismissDeleted = useCallback(() => {
 		setDeleted(null);
 	}, []);
+	/** A note just deleted, with the text that goes back beside it, if any. */
+	const noteDeleted = useCallback((note: NoteRecord, displaced?: DisplacedText) => {
+		setDeleted(note);
+		setBeside(displaced ?? null);
+	}, []);
 
 	const undoDelete = () => {
 		if (deleted === null) return;
@@ -122,8 +127,7 @@ export const useUndoDelete = ({
 		void deleteNote(db, note.id, home)
 			.then(() => getNote(db, note.id, home).catch(() => undefined))
 			.then((row) => {
-				setDeleted(row ?? note);
-				setBeside(null);
+				noteDeleted(row ?? note);
 				if (noteIdRef.current === note.id) {
 					select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
 				}
@@ -135,9 +139,8 @@ export const useUndoDelete = ({
 
 	return {
 		deleted,
-		setDeleted,
+		noteDeleted,
 		undoFailed,
-		setBeside,
 		dismissDeleted,
 		undoDelete,
 		deletePassword,

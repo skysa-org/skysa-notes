@@ -19,7 +19,7 @@ import { deleteNote, getNote, isUnnamed, renameNote, setScratchMarks } from '../
 import type { Moving } from '../store/rearrange.js';
 import { isLive } from '../store/rowStates.js';
 import { scratchMarks } from '../store/scratchpad.js';
-import { titleShown } from '../store/titles.js';
+import { movingNote } from '../store/titles.js';
 import { visibleBlocks } from '../store/visibleText.js';
 import { COARSE_POINTER, useMediaQuery } from './layout.js';
 import type { NoteViewHandle, ScratchEditing } from './NoteView.js';
@@ -254,7 +254,7 @@ export const useScratchpad = ({
 			.then(() => getNote(db, note.id, scope(note)))
 			.then((row) => {
 				if (row === undefined || !isLive(row)) return;
-				pickUp({ kind: 'note', id: row.id, path: row.path, name: titleShown(row.title) });
+				pickUp(movingNote(row));
 			});
 	};
 

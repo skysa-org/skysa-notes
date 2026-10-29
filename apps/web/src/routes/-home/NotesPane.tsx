@@ -5,7 +5,7 @@ import { noteMenuItems } from '../../components/noteMenu.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { setNotePinned } from '../../store/pins.js';
 import { type Moving } from '../../store/rearrange.js';
-import { titleShown } from '../../store/titles.js';
+import { movingNote } from '../../store/titles.js';
 import { type Select } from './useOpenPlace.js';
 
 /**
@@ -70,12 +70,7 @@ export const NotesPane = ({
 		folderPath={folderPath}
 		storeLoaded={storeLoaded}
 		onPickUpNote={(note) => {
-			setMoving({
-				kind: 'note',
-				id: note.id,
-				path: note.path,
-				name: titleShown(note.title),
-			});
+			setMoving(movingNote(note));
 		}}
 		onCancelMove={cancelMove}
 		movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
@@ -98,12 +93,7 @@ export const NotesPane = ({
 				onMove:
 					moving === null
 						? () => {
-								pickUp({
-									kind: 'note',
-									id: note.id,
-									path: note.path,
-									name: titleShown(note.title),
-								});
+								pickUp(movingNote(note));
 							}
 						: undefined,
 				onDelete: () => {

@@ -11,7 +11,7 @@ import { downloadNotice, downloadProblem, downloadSource } from '../../store/exp
 import { useHoldsAnything } from '../../store/hooks.js';
 import { keeping } from '../../store/keeping.js';
 import { type Moving } from '../../store/rearrange.js';
-import { titleShown } from '../../store/titles.js';
+import { movingNote } from '../../store/titles.js';
 import { type Pane } from '../panel.js';
 import { type AppSearch } from '../search.js';
 import { canMakeNote, isNotebook } from './rules.js';
@@ -111,12 +111,7 @@ const useNoteMove = (
 			promote(openNote);
 			return;
 		}
-		pickUp({
-			kind: 'note',
-			id: openNote.id,
-			path: openNote.path,
-			name: titleShown(openNote.title),
-		});
+		pickUp(movingNote(openNote));
 	};
 
 	useCommand({
