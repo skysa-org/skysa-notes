@@ -5,7 +5,7 @@ import { type Unsynced } from '../../store/unsynced.js';
 import { CONNECTABLE } from '../../sync/account.js';
 import { ConnectButton } from '../ConnectButton.js';
 import { DetachedSource } from '../DetachedSource.js';
-import { type LocalProps } from './NotConnected.js';
+import { type LocalProps } from './clients.js';
 import { ActionsMenu } from './PanelMenus.js';
 
 interface DetachedProps extends LocalProps {

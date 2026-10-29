@@ -1,31 +1,20 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useSyncExternalStore } from 'react';
 
-import { type InstanceConfig } from '../../api/client.js';
-import { answer, type Asked } from '../../api/instanceConfig.js';
+import { answer } from '../../api/instanceConfig.js';
 import { type pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
-import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
+import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { holdsAnything, type Library } from '../../store/exportNotes.js';
 import { type Keeping } from '../../store/keeping.js';
 import { CONNECTABLE } from '../../sync/account.js';
 import { importItems, ImportNotes, useImportNotes } from '../ImportNotes.js';
-import { type AccountSlot } from '../SourceTabs.js';
-import { type Client } from './clients.js';
+import { type LocalProps } from './clients.js';
 import { DownloadAll, downloadItem, useDownloadAll } from './DownloadAll.js';
 import { ActionsMenu, GearMenu } from './PanelMenus.js';
 import { StatusLine } from './StatusLine.js';
 import { useScratchpadItem } from './storageItems.js';
 import { useAsked } from './useAsked.js';
-
-export interface LocalProps {
-	client: Client;
-	database: NotesDatabase;
-	config: Asked<InstanceConfig>;
-	returnTo: string;
-	navigate?: (url: string) => void;
-	slot?: AccountSlot;
-}
 
 /**
  * What the browser has said about keeping this device's notes, asked on sight

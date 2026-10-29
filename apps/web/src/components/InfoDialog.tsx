@@ -6,7 +6,7 @@ import { Dialog, DialogActions } from './Dialog.js';
  * Something the app has to say at more length than the place it is asked from
  * has room for, over everything: the devices signed in on a source, and what
  * its provider keeps from the app, asked for from the foot of the sidebar
- * (`AccountPanel`).
+ * (the storage panel, `components/account/`).
  *
  * A `Dialog` with nothing to answer: the ✕ is its way out, and has the focus
  * unless what it holds has a field. What it holds may have controls of its own

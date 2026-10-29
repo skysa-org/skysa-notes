@@ -3,7 +3,7 @@ import { type SchedulerStatus } from '../sync/scheduler.js';
 /**
  * How far a run has got, drawn: a bar, and under it, lightly, the file it is
  * on. A source's first import shows it (`ImportProgress`), and so do a run's
- * details, opened from the status line (`SyncDetails` in `AccountPanel`).
+ * details, opened from the status line (`SyncDetails` in `account/StatusLine.tsx`).
  */
 
 /** How full the bar is, or nothing for a bar that cannot know. */
