@@ -13,7 +13,7 @@ import type { OptionsMenuItem } from '../OptionsMenu.js';
 import { ProviderIcon, sourceKind } from '../ProviderIcon.js';
 import { RowOptions } from '../RowOptions.js';
 import { RowRename } from '../RowRename.js';
-import { secretsLabel } from '../secrets/SecretsDialog.js';
+import { secretsLabel } from '../secrets/secretsLabel.js';
 import { AddSource } from './AddSource.js';
 import { ShownSourceName, sourceLabel, storeSourceName } from './SourceName.js';
 import { useSourceChoices } from './useSourceChoices.js';
