@@ -405,6 +405,28 @@ describe('the compact bar', () => {
 		expect(panel()).toBeNull();
 	});
 
+	it('puts a move down and shuts its dropdown on one Escape', async () => {
+		// The two are side by side, not one in the other: which was listening
+		// first is no reason for the move to outlive its dropdown.
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Home');
+		});
+		await user.keyboard('{Control>}k{/Control}');
+		await user.click(await screen.findByRole('option', { name: /Move notebook/ }));
+		await waitFor(() => {
+			expect(panel()).toBe('notebooks');
+		});
+		expect(screen.getByText(/^Moving “Home”/)).toBeDefined();
+
+		await user.keyboard('{Escape}');
+
+		expect(panel()).toBeNull();
+		expect(screen.queryByText(/^Moving “Home”/)).toBeNull();
+	});
+
 	it('keeps the storage panel in the source dropdown, not under the notebooks', async () => {
 		const user = userEvent.setup();
 		await openApp();

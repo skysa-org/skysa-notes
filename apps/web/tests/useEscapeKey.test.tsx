@@ -64,7 +64,7 @@ describe('Escape', () => {
 		expect(onEscape).not.toHaveBeenCalled();
 	});
 
-	it('answered, is claimed, so one Escape shuts the nearest thing only', () => {
+	it('answered within an element, is claimed, so what it is in stays', () => {
 		const inner = vi.fn();
 		const outer = vi.fn();
 		render(
@@ -78,6 +78,33 @@ describe('Escape', () => {
 
 		expect(inner).toHaveBeenCalledOnce();
 		expect(outer).not.toHaveBeenCalled();
+	});
+
+	it('answered on the window, is not claimed: two things there both go', () => {
+		// Side by side rather than one in the other — a dropdown, a move — so
+		// which listened first is no reason for one to stay.
+		const first = vi.fn();
+		const second = vi.fn();
+		render(
+			<>
+				<OnWindow onEscape={first} />
+				<OnWindow onEscape={second} />
+			</>
+		);
+
+		escape();
+
+		expect(first).toHaveBeenCalledOnce();
+		expect(second).toHaveBeenCalledOnce();
+	});
+
+	it('is left to a field ending a composition with it', () => {
+		const onEscape = vi.fn();
+		render(<OnWindow onEscape={onEscape} />);
+
+		fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
+
+		expect(onEscape).not.toHaveBeenCalled();
 	});
 
 	it('within an element, is answered only there', () => {
@@ -103,9 +130,12 @@ describe('Escape', () => {
 		expect(onEscape).not.toHaveBeenCalled();
 
 		rerender(<OnWindow onEscape={onEscape} enabled />);
+		escape();
+		expect(onEscape).toHaveBeenCalledOnce();
+
 		unmount();
 		escape();
-		expect(onEscape).not.toHaveBeenCalled();
+		expect(onEscape).toHaveBeenCalledOnce();
 	});
 
 	it('calls the latest handler rendered', () => {
