@@ -120,9 +120,9 @@ export const useNoteSecrets = (
 	const db = useDb();
 	// Read when asked, not when the host was made: the editor keeps the host
 	// it was built with for as long as the note is open.
-	const latest = useRef({ connectionId: note.connectionId, report, db, lock, age, copy });
+	const latest = useRef({ connectionId: note.connectionId, report, lock, age, copy });
 	useEffect(() => {
-		latest.current = { connectionId: note.connectionId, report, db, lock, age, copy };
+		latest.current = { connectionId: note.connectionId, report, lock, age, copy };
 	});
 
 	const [asking, setAsking] = useState<Asking | null>(null);
@@ -138,13 +138,13 @@ export const useNoteSecrets = (
 	}> | null>(null);
 
 	const openSecrets = useCallback(() => {
-		const { connectionId, db: database } = latest.current;
-		void nameOf(database, connectionId)
+		const { connectionId } = latest.current;
+		void nameOf(db, connectionId)
 			.catch(() => UNKNOWN_LABEL)
 			.then((name) => {
 				setSecretsOf({ connectionId, name });
 			});
-	}, []);
+	}, [db]);
 
 	/** `why`, as a warning, with the way to the Vault dialog where that is the way on. */
 	const said = useCallback(
@@ -166,9 +166,9 @@ export const useNoteSecrets = (
 
 	/** Whether the source is unlocked, the unlock asked for over the note where it is not. */
 	const unlockedNow = useCallback(async (): Promise<boolean> => {
-		const { connectionId, lock: held, db: database, report: say } = latest.current;
+		const { connectionId, lock: held, report: say } = latest.current;
 		if (held.isUnlocked(connectionId)) return true;
-		const enrolled = await enrolment(database, connectionId);
+		const enrolled = await enrolment(db, connectionId);
 		if (enrolled === undefined) {
 			say(said(notEnrolled()));
 			return false;
@@ -185,7 +185,7 @@ export const useNoteSecrets = (
 			});
 		});
 		return waiting.current;
-	}, [said]);
+	}, [said, db]);
 
 	/**
 	 * Copies of this device's keys for the source, unlocked first where they
@@ -222,11 +222,11 @@ export const useNoteSecrets = (
 	const host = useMemo<SecretHost>(
 		() => ({
 			begin: async () => {
-				const { connectionId, db: database, report: say } = latest.current;
+				const { connectionId, report: say } = latest.current;
 				try {
 					const [file, enrolled] = await Promise.all([
-						database.keyFiles.get(connectionId),
-						enrolment(database, connectionId),
+						db.keyFiles.get(connectionId),
+						enrolment(db, connectionId),
 					]);
 					const why = notHere(file, enrolled);
 					if (why !== undefined || enrolled === undefined) {
@@ -290,7 +290,7 @@ export const useNoteSecrets = (
 				};
 			},
 		}),
-		[opening, unlocked, unlockedNow, said]
+		[opening, unlocked, unlockedNow, said, db]
 	);
 
 	const insert = useCallback(() => {

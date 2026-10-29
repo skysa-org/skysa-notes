@@ -26,12 +26,12 @@ import {
 	renameSource,
 	showConnection,
 } from '../src/store/connection.js';
-import { DatabaseProvider } from '../src/store/database.js';
 import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
 import type { SchedulerStatus } from '../src/sync/scheduler.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /** A store that turns the next rename down, as a write IndexedDB refuses does. */
@@ -136,9 +136,8 @@ const show = (
 	sync: ReturnType<typeof syncSaying> = syncSaying(IDLE)
 ) =>
 	render(
-		<DatabaseProvider db={db}>
-			<SourceTabs client={client} returnTo="/" navigate={() => undefined} sync={sync} />
-		</DatabaseProvider>
+		<SourceTabs client={client} returnTo="/" navigate={() => undefined} sync={sync} />,
+		over(db)
 	);
 
 describe('the source tabs', () => {
@@ -160,14 +159,13 @@ describe('the source tabs', () => {
 		// source's: a device with nothing connected still has its own notes.
 		const db = freshDatabase();
 		render(
-			<DatabaseProvider db={db}>
-				<SourceTabs
-					client={clientWith(() => Promise.reject(new Error('down')))}
-					returnTo="/"
-					navigate={() => undefined}
-					search={<input type="search" aria-label="Search notes" />}
-				/>
-			</DatabaseProvider>
+			<SourceTabs
+				client={clientWith(() => Promise.reject(new Error('down')))}
+				returnTo="/"
+				navigate={() => undefined}
+				search={<input type="search" aria-label="Search notes" />}
+			/>,
+			over(db)
 		);
 
 		expect(await screen.findByRole('searchbox', { name: 'Search notes' })).toBeDefined();
@@ -643,15 +641,14 @@ describe('the source panel, in a compact window', () => {
 		{ client = clientWith(), onChosen = () => undefined } = {}
 	) =>
 		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel
-					client={client}
-					returnTo="/"
-					navigate={() => undefined}
-					account={() => <section aria-label="Storage">Syncing with Dropbox</section>}
-					onChosen={onChosen}
-				/>
-			</DatabaseProvider>
+			<SourcePanel
+				client={client}
+				returnTo="/"
+				navigate={() => undefined}
+				account={() => <section aria-label="Storage">Syncing with Dropbox</section>}
+				onChosen={onChosen}
+			/>,
+			over(db)
 		);
 
 	const panel = () => screen.getByRole('region', { name: 'Sources' });
@@ -722,17 +719,16 @@ describe('the source panel, in a compact window', () => {
 		await showConnection(db, 'c1');
 		const given: AccountSlot[] = [];
 		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel
-					client={clientWith()}
-					returnTo="/"
-					navigate={() => undefined}
-					account={(slot) => {
-						given.push(slot);
-						return null;
-					}}
-				/>
-			</DatabaseProvider>
+			<SourcePanel
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>,
+			over(db)
 		);
 
 		await waitFor(() => {
@@ -759,17 +755,16 @@ describe('the source panel, in a compact window', () => {
 		const user = userEvent.setup();
 		const given: AccountSlot[] = [];
 		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel
-					client={clientWith()}
-					returnTo="/"
-					navigate={() => undefined}
-					account={(slot) => {
-						given.push(slot);
-						return null;
-					}}
-				/>
-			</DatabaseProvider>
+			<SourcePanel
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>,
+			over(db)
 		);
 
 		await user.click(
@@ -800,17 +795,16 @@ describe('the source panel, in a compact window', () => {
 		const user = userEvent.setup();
 		const given: AccountSlot[] = [];
 		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel
-					client={clientWith()}
-					returnTo="/"
-					navigate={() => undefined}
-					account={(slot) => {
-						given.push(slot);
-						return null;
-					}}
-				/>
-			</DatabaseProvider>
+			<SourcePanel
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>,
+			over(db)
 		);
 		await user.click(
 			await within(panel()).findByRole('button', { name: 'Options for “OneDrive”' })
@@ -845,15 +839,14 @@ describe('the source panel, in a compact window', () => {
 		const user = userEvent.setup();
 		const renamings = createRenamings();
 		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel
-					client={clientWith()}
-					returnTo="/"
-					navigate={() => undefined}
-					renamings={renamings}
-					account={() => null}
-				/>
-			</DatabaseProvider>
+			<SourcePanel
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				renamings={renamings}
+				account={() => null}
+			/>,
+			over(db)
 		);
 
 		await user.click(
@@ -891,18 +884,17 @@ describe('the source panel, in a compact window', () => {
 		const renamings = createRenamings();
 		const given: AccountSlot[] = [];
 		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel
-					client={clientWith()}
-					returnTo="/"
-					navigate={() => undefined}
-					renamings={renamings}
-					account={(slot) => {
-						given.push(slot);
-						return null;
-					}}
-				/>
-			</DatabaseProvider>
+			<SourcePanel
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				renamings={renamings}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>,
+			over(db)
 		);
 
 		await waitFor(() => {
@@ -1111,11 +1103,7 @@ describe('the way to connect, on an instance whose operator gates it', () => {
 	it('says the same in the source panel of a compact window', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
-		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel client={gated()} returnTo="/" navigate={() => undefined} />
-			</DatabaseProvider>
-		);
+		render(<SourcePanel client={gated()} returnTo="/" navigate={() => undefined} />, over(db));
 
 		const connect = await openPanelAdd(user, 'Connect storage provider');
 		expect(connect.getByText(GATE.message)).toBeTruthy();
@@ -1179,18 +1167,13 @@ describe("the gate's code, on an instance that asks for one", () => {
 			const { client } = coded();
 			const db = freshDatabase();
 			const { rerender } = render(
-				<DatabaseProvider db={db}>
-					<SourceTabs client={client} returnTo="/" enterCode={0} />
-				</DatabaseProvider>
+				<SourceTabs client={client} returnTo="/" enterCode={0} />,
+				over(db)
 			);
 			await screen.findByRole('button', { name: 'Connect storage provider' });
 			expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();
 
-			rerender(
-				<DatabaseProvider db={db}>
-					<SourceTabs client={client} returnTo="/" enterCode={1} />
-				</DatabaseProvider>
-			);
+			rerender(<SourceTabs client={client} returnTo="/" enterCode={1} />);
 
 			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
 			await waitFor(() => {
@@ -1210,9 +1193,8 @@ describe("the gate's code, on an instance that asks for one", () => {
 					}),
 			} as unknown as Client;
 			render(
-				<DatabaseProvider db={freshDatabase()}>
-					<SourceTabs client={client} returnTo="/" enterCode={1} />
-				</DatabaseProvider>
+				<SourceTabs client={client} returnTo="/" enterCode={1} />,
+				over(freshDatabase())
 			);
 
 			answer({ ...STORAGE_FIRST, connectGate: GATE });
@@ -1229,9 +1211,8 @@ describe("the gate's code, on an instance that asks for one", () => {
 			holdConnectCode('K7QM-2XRD', 900);
 			const { client } = coded(REQUIRED);
 			render(
-				<DatabaseProvider db={freshDatabase()}>
-					<SourceTabs client={client} returnTo="/" enterCode={1} />
-				</DatabaseProvider>
+				<SourceTabs client={client} returnTo="/" enterCode={1} />,
+				over(freshDatabase())
 			);
 
 			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
@@ -1244,9 +1225,8 @@ describe("the gate's code, on an instance that asks for one", () => {
 			holdConnectCode('K7QM-2XRD', 900);
 			const { client } = coded(REQUIRED);
 			render(
-				<DatabaseProvider db={freshDatabase()}>
-					<SourceTabs client={client} returnTo="/" enterCode={1} />
-				</DatabaseProvider>
+				<SourceTabs client={client} returnTo="/" enterCode={1} />,
+				over(freshDatabase())
 			);
 			const plus = await screen.findByRole('button', { name: 'Connect storage provider' });
 			await screen.findByRole('group', { name: 'Storage providers' });
@@ -1263,9 +1243,8 @@ describe("the gate's code, on an instance that asks for one", () => {
 		it('opens the compact panel’s menu at the field too', async () => {
 			const { client } = coded();
 			render(
-				<DatabaseProvider db={freshDatabase()}>
-					<SourcePanel client={client} returnTo="/" enterCode={1} />
-				</DatabaseProvider>
+				<SourcePanel client={client} returnTo="/" enterCode={1} />,
+				over(freshDatabase())
 			);
 
 			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
@@ -1621,11 +1600,7 @@ describe("the gate's code, on an instance that asks for one", () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
 		const { client, checkConnectCode } = coded(REQUIRED);
-		render(
-			<DatabaseProvider db={db}>
-				<SourcePanel client={client} returnTo="/" navigate={() => undefined} />
-			</DatabaseProvider>
-		);
+		render(<SourcePanel client={client} returnTo="/" navigate={() => undefined} />, over(db));
 		const connect = await openPanelAdd(user, 'Connect storage provider');
 
 		await user.type(connect.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD');
@@ -1654,11 +1629,7 @@ describe('the compact bar\u2019s source dropdown', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await showConnection(db, 'c1');
 		const sync = syncSaying(REAUTHORIZE);
-		render(
-			<DatabaseProvider db={db}>
-				<Trigger sync={sync} />
-			</DatabaseProvider>
-		);
+		render(<Trigger sync={sync} />, over(db));
 
 		expect(await screen.findByText('Dropbox needs connecting again')).toBeDefined();
 		act(() => {
@@ -1669,11 +1640,7 @@ describe('the compact bar\u2019s source dropdown', () => {
 
 	it('says nothing of it before a source is showing', async () => {
 		const db = freshDatabase();
-		render(
-			<DatabaseProvider db={db}>
-				<Trigger sync={syncSaying(REAUTHORIZE)} />
-			</DatabaseProvider>
-		);
+		render(<Trigger sync={syncSaying(REAUTHORIZE)} />, over(db));
 
 		expect(await screen.findByText('Storage')).toBeDefined();
 	});

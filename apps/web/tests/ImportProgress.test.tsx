@@ -6,11 +6,11 @@ import type { ApiClient, Result } from '../src/api/client.js';
 import { CommandsProvider } from '../src/commands/context.js';
 import { ImportDialog, importMessage } from '../src/components/account/ImportProgress.js';
 import { bindConnection } from '../src/store/connection.js';
-import { DatabaseProvider } from '../src/store/database.js';
 import { LOCAL_CONNECTION_ID, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import type { SchedulerStatus } from '../src/sync/scheduler.js';
 import { holdCredential } from './support/connection.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 const syncing = (progress?: SchedulerStatus['progress']): SchedulerStatus => ({
@@ -102,11 +102,10 @@ describe('the import dialog', () => {
 		const { db, source } = await importing();
 		const sync = fakeSync(syncing({ stage: 'scanning', found: 12, done: 0, listing: true }));
 		render(
-			<DatabaseProvider db={db}>
-				<CommandsProvider>
-					<ImportDialog source={source} sync={sync} />
-				</CommandsProvider>
-			</DatabaseProvider>
+			<CommandsProvider>
+				<ImportDialog source={source} sync={sync} />
+			</CommandsProvider>,
+			over(db)
 		);
 
 		const dialog = screen.getByRole('dialog', { name: 'Connecting Dropbox' });
@@ -156,11 +155,10 @@ describe('the import dialog', () => {
 		const sync = fakeSync(syncing());
 		const client = server(() => Promise.resolve({ ok: true, value: { disconnected: false } }));
 		render(
-			<DatabaseProvider db={db}>
-				<CommandsProvider>
-					<ImportDialog source={source} client={client} sync={sync} />
-				</CommandsProvider>
-			</DatabaseProvider>
+			<CommandsProvider>
+				<ImportDialog source={source} client={client} sync={sync} />
+			</CommandsProvider>,
+			over(db)
 		);
 
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -178,11 +176,10 @@ describe('the import dialog', () => {
 		const { db, source } = await importing();
 		const client = server(() => Promise.reject(new TypeError('offline')));
 		render(
-			<DatabaseProvider db={db}>
-				<CommandsProvider>
-					<ImportDialog source={source} client={client} sync={fakeSync(syncing())} />
-				</CommandsProvider>
-			</DatabaseProvider>
+			<CommandsProvider>
+				<ImportDialog source={source} client={client} sync={fakeSync(syncing())} />
+			</CommandsProvider>,
+			over(db)
 		);
 
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -211,11 +208,10 @@ describe('the import dialog', () => {
 		const { db, source } = await importing();
 		const client = server(() => Promise.reject(new TypeError('offline')));
 		render(
-			<DatabaseProvider db={db}>
-				<CommandsProvider>
-					<ImportDialog source={source} client={client} sync={fakeSync(syncing())} />
-				</CommandsProvider>
-			</DatabaseProvider>
+			<CommandsProvider>
+				<ImportDialog source={source} client={client} sync={fakeSync(syncing())} />
+			</CommandsProvider>,
+			over(db)
 		);
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
