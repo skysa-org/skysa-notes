@@ -1,7 +1,6 @@
 import { type ComponentProps, type ReactNode, useRef } from 'react';
 
 import { t } from '../../i18n/t.js';
-import { CONNECT_FIRST_LABEL } from '../../sync/account.js';
 import { ConnectChoice } from './connect/ConnectChoice.js';
 import { Menu } from './Menu.js';
 import { useAdding } from './useAdding.js';
@@ -13,6 +12,10 @@ export interface AddButton {
 	toggle: () => void;
 	/** Nothing connected yet: the control has words, and the menu asks for a provider. */
 	first: boolean;
+	/** Whether there is any provider to offer, which is whether the menu can open. */
+	offering: boolean;
+	/** What connecting is called here (`connectLabel`). */
+	label: string;
 }
 
 /**
@@ -27,26 +30,26 @@ export interface AddButton {
  * is the menu's business; whether it is open is.
  */
 export const AddSource = ({
-	choices: { offerable, gate, live, connectLabel },
+	choices: { offerable, gate, live, connectLabel, first },
 	enterCode,
 	button,
 	...connect
 }: Omit<ComponentProps<typeof ConnectChoice>, 'gate' | 'live' | 'openAt' | 'offerable'> & {
 	choices: Pick<
 		ReturnType<typeof useSourceChoices>,
-		'offerable' | 'gate' | 'live' | 'connectLabel'
+		'offerable' | 'gate' | 'live' | 'connectLabel' | 'first'
 	>;
 	/** How many times the app's URL has asked for the code field (`useAdding`). */
 	enterCode: number | undefined;
 	button: (control: AddButton) => ReactNode;
 }) => {
-	const first = connectLabel === CONNECT_FIRST_LABEL;
-	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offerable.length > 0);
+	const offering = offerable.length > 0;
+	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offering);
 	const frame = useRef<HTMLDivElement>(null);
 	return (
 		<div className="source-add" ref={frame}>
-			{button({ adding, toggle, first })}
-			{adding && offerable.length > 0 && (
+			{button({ adding, toggle, first, offering, label: connectLabel })}
+			{adding && (
 				<Menu
 					className="source-add-menu"
 					label={t('sources.providers')}

@@ -66,7 +66,7 @@ export const SourceTabs = ({
 	sync = syncScheduler,
 }: SourceTabsProps) => {
 	const choices = useSourceChoices(db, client);
-	const { ordered, offerable, connectLabel, nothingToShow } = choices;
+	const { ordered, offerable, nothingToShow } = choices;
 	// The scheduler syncs the showing source only, so it is the only one
 	// known to need connecting again.
 	const reconnect = useNeedsReconnect(sync);
@@ -127,7 +127,7 @@ export const SourceTabs = ({
 					client={client}
 					returnTo={returnTo}
 					navigate={navigate}
-					button={({ adding, toggle, first }) => (
+					button={({ adding, toggle, first, label }) => (
 						<button
 							type="button"
 							className={
@@ -137,7 +137,7 @@ export const SourceTabs = ({
 							}
 							// Named by its words where it has them, which is when nothing is
 							// connected; a bare `+` beside the tabs is named for what it does.
-							{...(first ? {} : { 'aria-label': connectLabel })}
+							{...(first ? {} : { 'aria-label': label })}
 							aria-haspopup="true"
 							aria-expanded={adding}
 							onClick={toggle}

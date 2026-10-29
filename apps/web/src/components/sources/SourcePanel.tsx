@@ -98,7 +98,7 @@ export const SourcePanel = ({
 	enterCode,
 }: SourcePanelProps) => {
 	const choices = useSourceChoices(db, client);
-	const { ordered, offerable, connectLabel } = choices;
+	const { ordered } = choices;
 	// State rather than a ref: the storage panel draws its menu into this, and
 	// has to be drawn again once it is there.
 	const [actions, setActions] = useState<HTMLDivElement | null>(null);
@@ -196,15 +196,15 @@ export const SourcePanel = ({
 						client={client}
 						returnTo={returnTo}
 						navigate={navigate}
-						button={({ adding, toggle }) => (
+						button={({ adding, toggle, offering, label }) => (
 							<button
 								type="button"
 								className="icon"
-								title={connectLabel}
-								aria-label={connectLabel}
+								title={label}
+								aria-label={label}
 								aria-haspopup="true"
 								aria-expanded={adding}
-								disabled={offerable.length === 0}
+								disabled={!offering}
 								onClick={toggle}
 							>
 								+

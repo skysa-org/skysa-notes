@@ -661,6 +661,15 @@ describe('the source panel, in a compact window', () => {
 		expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();
 	});
 
+	it('asks for a provider from its `+` while nothing is connected', async () => {
+		const db = freshDatabase();
+		const user = userEvent.setup();
+		showPanel(db);
+
+		const menu = await openPanelAdd(user, 'Connect storage provider');
+		expect(menu.getByText('Choose a storage provider')).toBeTruthy();
+	});
+
 	it('hands the storage panel the end of the showing source’s row, for its `⋯`', async () => {
 		const db = freshDatabase();
 		await bindInOrder(db, [
