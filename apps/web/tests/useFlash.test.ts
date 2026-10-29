@@ -52,6 +52,17 @@ describe('something said for a moment', () => {
 		expect(result.current[0]).toBe('Saved.');
 	});
 
+	it('hands back the same way to say something, whatever is passed as nothing', () => {
+		// A caller that writes its nothing inline passes a new one each render;
+		// a new `flash` each time would re-run whatever depends on it.
+		const { result, rerender } = renderHook(() => useFlash({ words: '' }));
+		const [, first] = result.current;
+
+		rerender();
+
+		expect(result.current[1]).toBe(first);
+	});
+
 	it('leaves nothing waiting once it has gone', () => {
 		const { result, unmount } = renderHook(() => useFlash(''));
 		act(() => {
