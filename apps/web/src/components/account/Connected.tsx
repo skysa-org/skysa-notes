@@ -24,7 +24,7 @@ import { SecretsDialog } from '../secrets/SecretsDialog.js';
 import type { SecretsDialogProps } from '../secrets/types.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
 import { DialogActions, InlineDialog } from '../ui/Dialog.js';
-import { useEscape } from '../ui/useEscape.js';
+import { useEscapeKey } from '../ui/useEscapeKey.js';
 import type { Client, Sync } from './clients.js';
 import { Devices, stillSignedIn, useGrants } from './Devices.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
@@ -344,7 +344,7 @@ export const Connected = ({
 		focusBack.current = true;
 		setStep({ kind: 'closed' });
 	}, []);
-	useEscape(panel, open, cancel);
+	useEscapeKey(cancel, { enabled: open, within: panel });
 
 	const label =
 		bound.provider === undefined ? t('account.someStorage') : PROVIDER_LABELS[bound.provider];

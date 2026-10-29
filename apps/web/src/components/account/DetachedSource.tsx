@@ -16,7 +16,7 @@ import { titleShown } from '../../store/titles.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../../store/unsynced.js';
 import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../../sync/account.js';
 import { DialogActions, InlineDialog } from '../ui/Dialog.js';
-import { useEscape } from '../ui/useEscape.js';
+import { useEscapeKey } from '../ui/useEscapeKey.js';
 import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
 
 /**
@@ -279,7 +279,7 @@ export const DetachedSource = ({
 		focusBack.current = true;
 		setListed(null);
 	}, []);
-	useEscape(panel, confirming, close);
+	useEscapeKey(close, { enabled: confirming, within: panel });
 
 	/**
 	 * Into another account, which is the one thing here that is not about this

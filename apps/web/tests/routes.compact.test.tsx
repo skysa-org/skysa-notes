@@ -384,6 +384,27 @@ describe('the compact bar', () => {
 		expect(panel()).toBeNull();
 	});
 
+	it('leaves a dropdown open for an Escape that shuts a menu drawn over it', async () => {
+		// One Escape, one thing shut: the nearest. The menu is the row's, opened
+		// from the dropdown and drawn over it.
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Home');
+		});
+		await user.click(notebookTrigger());
+		await user.click(screen.getByRole('button', { name: 'Options for “Home”' }));
+		expect(screen.getByRole('group', { name: 'Notebook “Home”' })).toBeDefined();
+
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('group', { name: 'Notebook “Home”' })).toBeNull();
+		expect(panel()).toBe('notebooks');
+
+		await user.keyboard('{Escape}');
+		expect(panel()).toBeNull();
+	});
+
 	it('keeps the storage panel in the source dropdown, not under the notebooks', async () => {
 		const user = userEvent.setup();
 		await openApp();

@@ -1,7 +1,8 @@
 import { isScratchPath, isWithin, rebasePath } from '@skysa/core';
-import { type RefObject, useCallback, useEffect, useState } from 'react';
+import { type RefObject, useCallback, useState } from 'react';
 
 import type { Notice } from '../../components/ui/notify.js';
+import { useEscapeKey } from '../../components/ui/useEscapeKey.js';
 import { t } from '../../i18n/t.js';
 import { db } from '../../store/db.js';
 import { moveFolder } from '../../store/folders.js';
@@ -117,23 +118,20 @@ export const useMoving = ({
 };
 
 /**
- * Escape puts down whatever is being moved, from wherever the focus is. On
- * the document rather than on the sidebar: a move started from the palette
- * leaves the focus where the palette had it, which may be nowhere near the
- * destinations, and a mode with no way out is worse than no mode.
+ * Escape puts down whatever is being moved, from wherever the focus is, once
+ * nothing nearer has answered it. On the window rather than on the sidebar: a
+ * move started from the palette leaves the focus where the palette had it,
+ * which may be nowhere near the destinations, and a mode with no way out is
+ * worse than no mode.
  */
 export const useEscapePutsDown = (
 	moving: Moving | null,
 	setMoving: (moving: Moving | null) => void
 ) => {
-	useEffect(() => {
-		if (moving === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') setMoving(null);
-		};
-		document.addEventListener('keydown', onKey);
-		return () => {
-			document.removeEventListener('keydown', onKey);
-		};
-	}, [moving, setMoving]);
+	useEscapeKey(
+		() => {
+			setMoving(null);
+		},
+		{ enabled: moving !== null }
+	);
 };

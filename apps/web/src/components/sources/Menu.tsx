@@ -1,6 +1,6 @@
 import type { ReactNode, RefObject } from 'react';
 
-import { useEscape } from '../ui/useEscape.js';
+import { useEscapeKey } from '../ui/useEscapeKey.js';
 import { usePressAway } from '../ui/usePressAway.js';
 
 /**
@@ -31,7 +31,7 @@ export const Menu = ({
 	frame: RefObject<HTMLElement | null>;
 	onClose: () => void;
 }) => {
-	useEscape(frame, true, onClose);
+	useEscapeKey(onClose, { within: frame });
 
 	// A dialog is over everything, this menu included, and one opened from in
 	// here is drawn at the end of the page (`ConnectButton`): a press in it is an
