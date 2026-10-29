@@ -61,12 +61,10 @@ export const NotConnected = ({
 		...(pick === undefined ? {} : { pick }),
 	});
 	// The device's own notes offer a download alone.
-	useAsked(
-		slot,
-		LOCAL_CONNECTION_ID,
-		(action) => (action === 'download' ? offersDownload(true, holds) : 'no'),
-		downloading.start
-	);
+	useAsked(slot, LOCAL_CONNECTION_ID, (action) => ({
+		offer: action === 'download' ? offersDownload(true, holds) : 'no',
+		act: downloading.start,
+	}));
 	const kept = useKept(keep);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -74,7 +72,7 @@ export const NotConnected = ({
 			: [];
 	const scratchpad = useScratchpadItem(database, LOCAL_CONNECTION_ID);
 	const items = [
-		...downloadItem(holds, downloading),
+		...downloadItem(offersDownload(true, holds), downloading),
 		...importItems(importing, { scratchpad: scratchpad.shown === true }),
 		...scratchpad.items,
 	];

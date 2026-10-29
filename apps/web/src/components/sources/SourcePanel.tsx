@@ -119,6 +119,15 @@ export const SourcePanel = ({
 		[db]
 	);
 	const showing = ordered.find((source) => source.active);
+	const showingId = showing?.connectionId;
+	// An ask still waiting is let go once another source is shown: it was for
+	// the one the user went to, not for whenever that one is next shown. Here
+	// as the render sees the change, as React has state follow a prop.
+	const [shownWas, setShownWas] = useState(showingId);
+	if (shownWas !== showingId) {
+		setShownWas(showingId);
+		if (asked !== null && asked.connectionId !== showingId) setAsked(null);
+	}
 	/** The source whose name is being typed, if one is. */
 	const [renaming, setRenaming] = useState<string | null>(null);
 

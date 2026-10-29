@@ -53,9 +53,16 @@ export const offersDownload = (downloadable: boolean, holds: boolean | undefined
 export const offersRescan = (bound: SyncStateRecord, phase: SchedulerStatus['phase']): Offer =>
 	!isSyncable(bound) || importingHere(bound) ? 'no' : phase === 'local' ? 'not yet' : 'yes';
 
+/**
+ * Whether the scheduler syncs the source now: not before it has begun, nor
+ * while a first import holds it. What a sync is needed for waits on it.
+ */
+const syncsHere = (bound: SyncStateRecord, phase: SchedulerStatus['phase']): boolean =>
+	!importingHere(bound) && phase !== 'local';
+
 /** Secrets in the source, once the scheduler is syncing it, as the key file is in its folder. */
 export const offersSecrets = (bound: SyncStateRecord, phase: SchedulerStatus['phase']): Offer =>
-	importingHere(bound) ? 'no' : phase === 'local' ? 'not yet' : 'yes';
+	importingHere(bound) ? 'no' : syncsHere(bound, phase) ? 'yes' : 'not yet';
 
 /** Disconnect it: not while the question is open, and not yet while one is out. */
 export const offersDisconnect = (open: boolean, blocked: boolean): Offer =>
@@ -108,7 +115,7 @@ export const storageItems = ({
 	ask: (onServer: boolean) => void;
 }): OptionsMenuItem[] => {
 	const syncing = phase === 'syncing';
-	const syncs = !importingHere(bound) && phase !== 'local';
+	const syncs = syncsHere(bound, phase);
 	return [
 		...(syncs
 			? [{ label: t('account.menu.syncNow'), onChoose: syncNow, disabled: syncing }]
@@ -159,7 +166,7 @@ export const clipboardItem = (
 	phase: SchedulerStatus['phase'],
 	onChoose: () => void
 ): OptionsMenuItem[] =>
-	importingHere(bound) || phase === 'local'
+	!syncsHere(bound, phase)
 		? []
 		: [
 				{

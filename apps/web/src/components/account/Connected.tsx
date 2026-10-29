@@ -162,7 +162,7 @@ const ConnectedFoot = ({
 		...actions,
 		bound,
 		phase: status.phase,
-		download: downloadable ? downloadItem(holds, downloading) : [],
+		download: downloadItem(offersDownload(downloadable, holds), downloading),
 		imports: downloadable
 			? importItems(importing, { scratchpad: scratchpad.shown === true })
 			: [],
@@ -400,37 +400,33 @@ export const Connected = ({
 	// Asked from this source's row before it was showing: done as its own
 	// item here would do it, once it can be, and dropped where it would not
 	// be offered.
-	useAsked(
-		slot,
-		connectionId,
-		(action) => {
-			switch (action) {
-				case 'download':
-					return offersDownload(downloadable, holds);
-				case 'rescan':
-					return offersRescan(bound, status.phase);
-				case 'secrets':
-					return offersSecrets(bound, status.phase);
-				case 'disconnect':
-					return offersDisconnect(open, disconnectBlocked);
-			}
-		},
-		(action) => {
-			switch (action) {
-				case 'download':
-					downloading.start();
-					return;
-				case 'rescan':
-					setRescanning(true);
-					return;
-				case 'secrets':
-					setSecrets(true);
-					return;
-				case 'disconnect':
-					ask(true);
-			}
+	useAsked(slot, connectionId, (action) => {
+		switch (action) {
+			case 'download':
+				return { offer: offersDownload(downloadable, holds), act: downloading.start };
+			case 'rescan':
+				return {
+					offer: offersRescan(bound, status.phase),
+					act: () => {
+						setRescanning(true);
+					},
+				};
+			case 'secrets':
+				return {
+					offer: offersSecrets(bound, status.phase),
+					act: () => {
+						setSecrets(true);
+					},
+				};
+			case 'disconnect':
+				return {
+					offer: offersDisconnect(open, disconnectBlocked),
+					act: () => {
+						ask(true);
+					},
+				};
 		}
-	);
+	});
 
 	return (
 		<>

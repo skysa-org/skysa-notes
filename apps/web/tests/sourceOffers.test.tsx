@@ -1,6 +1,8 @@
 import { act, render } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { downloadItem } from '../src/components/account/DownloadAll.js';
 import {
 	type Offer,
 	offersDisconnect,
@@ -45,6 +47,18 @@ describe('what a source’s panel offers', () => {
 	});
 });
 
+describe('the gear’s download', () => {
+	const downloading = { busy: false, problem: null, start: () => undefined };
+
+	it('is offered where the panel offers it, and not before the notes are counted', () => {
+		expect(downloadItem('yes', downloading).map((item) => item.label)).toEqual([
+			'Download all notes',
+		]);
+		expect(downloadItem('not yet', downloading)).toEqual([]);
+		expect(downloadItem('no', downloading)).toEqual([]);
+	});
+});
+
 const Asked = ({
 	slot,
 	offer,
@@ -54,7 +68,12 @@ const Asked = ({
 	offer: Offer;
 	act: (action: SourceAsk['action']) => void;
 }) => {
-	useAsked(slot, 'c1', () => offer, onAct);
+	useAsked(slot, 'c1', (action) => ({
+		offer,
+		act: () => {
+			onAct(action);
+		},
+	}));
 	return null;
 };
 
@@ -81,6 +100,19 @@ describe('an ask from another source’s `⋯`', () => {
 		rerender(<Asked slot={slot} offer="yes" act={onAct} />);
 
 		expect(onAct.mock.calls).toEqual([['rescan']]);
+		expect(onAsked).toHaveBeenCalledOnce();
+	});
+
+	it('is done once where React runs its effect twice, as StrictMode does', () => {
+		const onAct = vi.fn();
+		const onAsked = vi.fn();
+		render(
+			<StrictMode>
+				<Asked slot={slotAsking('download', onAsked)} offer="yes" act={onAct} />
+			</StrictMode>
+		);
+
+		expect(onAct).toHaveBeenCalledOnce();
 		expect(onAsked).toHaveBeenCalledOnce();
 	});
 
