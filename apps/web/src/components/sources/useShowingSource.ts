@@ -1,6 +1,5 @@
 import { api, type ApiClient } from '../../api/client.js';
 import { t } from '../../i18n/t.js';
-import { db as defaultDb, type NotesDatabase } from '../../store/db.js';
 import { type Renaming, shownSourceName } from '../../store/renaming.js';
 import { tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
@@ -18,11 +17,10 @@ import { useSourceChoices } from './useSourceChoices.js';
  */
 export const useShowingSource = (
 	renaming?: Renaming,
-	db: NotesDatabase = defaultDb,
 	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'> = api,
 	sync: Pick<SyncScheduler, 'status' | 'subscribe'> = syncScheduler
 ): { name: string; kind: SourceKind; reconnect: boolean } => {
-	const { ordered } = useSourceChoices(db, client);
+	const { ordered } = useSourceChoices(client);
 	const reconnect = useNeedsReconnect(sync);
 	const showing = ordered.find((source) => source.active);
 	return showing === undefined

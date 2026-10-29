@@ -3,7 +3,8 @@ import { type ReactNode, useState } from 'react';
 import { api, type ApiClient } from '../../api/client.js';
 import { t } from '../../i18n/t.js';
 import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/connection.js';
-import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { isLiveSource } from '../../store/rowStates.js';
 import { CONNECT_FIRST_LABEL, tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
@@ -21,7 +22,6 @@ import { useSourceChoices } from './useSourceChoices.js';
 const ACTIVE_TAB = 'source-tab source-tab-active';
 
 export interface SourceTabsProps {
-	db?: NotesDatabase;
 	client?: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 	/** Where the provider's callback should send the browser back to. */
 	returnTo: string;
@@ -63,7 +63,6 @@ export interface SourceTabsProps {
  * reader user nothing.
  */
 export const SourceTabs = ({
-	db = defaultDb,
 	client = api,
 	returnTo,
 	navigate,
@@ -71,7 +70,8 @@ export const SourceTabs = ({
 	enterCode,
 	sync = syncScheduler,
 }: SourceTabsProps) => {
-	const choices = useSourceChoices(db, client);
+	const db = useDb();
+	const choices = useSourceChoices(client);
 	const { ordered, offerable, nothingToShow } = choices;
 	// The scheduler syncs the showing source only, so it is the only one
 	// known to need connecting again.
@@ -132,7 +132,6 @@ export const SourceTabs = ({
 				<AddSource
 					choices={choices}
 					enterCode={enterCode}
-					db={db}
 					client={client}
 					returnTo={returnTo}
 					navigate={navigate}

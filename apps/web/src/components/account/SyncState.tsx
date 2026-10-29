@@ -128,7 +128,6 @@ export const SyncState = ({
 	rescanning,
 	onRescanning: setRescanning,
 }: SyncStateProps) => {
-	const database = useDb();
 	const status = useSyncStatus(sync);
 	const syncable = isSyncable(bound);
 	const message = statusMessage(status, label, syncable);
@@ -158,7 +157,6 @@ export const SyncState = ({
 			 */}
 			{reconnect && reconnectable && bound.provider !== undefined && (
 				<ConnectButton
-					db={database}
 					client={client}
 					provider={bound.provider}
 					returnTo={returnTo}

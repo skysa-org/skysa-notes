@@ -297,7 +297,6 @@ const renderPanel = (
 			<DatabaseProvider db={database}>
 				<WithNotices>
 					<SourceTabs
-						db={database}
 						client={client}
 						returnTo={returnPath(href)}
 						navigate={(to) => {
@@ -404,7 +403,6 @@ const renderDropdown = (
 		<DatabaseProvider db={database}>
 			<WithNotices>
 				<SourcePanel
-					db={database}
 					client={client}
 					returnTo="/"
 					navigate={() => undefined}

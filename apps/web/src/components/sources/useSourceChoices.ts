@@ -4,7 +4,8 @@ import type { ApiClient } from '../../api/client.js';
 import { answer, useInstanceConfig } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
 import { connectedSources } from '../../store/connection.js';
-import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { isLiveSource } from '../../store/rowStates.js';
 import { anyConnected, CONNECT_FIRST_LABEL, CONNECTABLE, inOrder } from '../../sync/account.js';
 
@@ -14,9 +15,9 @@ import { anyConnected, CONNECT_FIRST_LABEL, CONNECTABLE, inOrder } from '../../s
  * compact window's dropdown, which are the same choice drawn two ways.
  */
 export const useSourceChoices = (
-	db: NotesDatabase,
 	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>
 ) => {
+	const db = useDb();
 	const sources = useLiveQuery(() => connectedSources(db), [db]);
 	const config = useInstanceConfig(client);
 
