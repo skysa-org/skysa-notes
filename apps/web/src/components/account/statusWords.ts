@@ -4,8 +4,8 @@ import { type Refusal } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { type MessageKey, t } from '../../i18n/t.js';
 import { isLongRun } from '../../sync/progress.js';
-import { needsReconnect } from '../../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp } from '../../sync/scheduler.js';
+import { needsReconnect } from '../../sync/status.js';
 
 /**
  * Why a disconnect did not happen. `credential_revoked` and `not_found` never
