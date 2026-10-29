@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PasteKey, typedIn } from '../src/components/PasteKey.js';
-import type { Scanner } from '../src/components/ScanKey.js';
+import { PasteKey, typedIn } from '../src/components/secrets/PasteKey.js';
+import type { Scanner } from '../src/components/secrets/ScanKey.js';
 import { generateIdentity } from '../src/secrets/age.js';
 
 /**

@@ -1,12 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 
-import { t } from '../i18n/t.js';
-import { type Age, loadAge } from '../secrets/loadAge.js';
-import type { SecretsLock } from '../secrets/lock.js';
-import type { NotesDatabase } from '../store/db.js';
-import { enrolment, replaceKeys } from '../store/secretKeys.js';
-import { Dialog } from './Dialog.js';
+import { t } from '../../i18n/t.js';
+import { type Age, loadAge } from '../../secrets/loadAge.js';
+import type { SecretsLock } from '../../secrets/lock.js';
+import type { NotesDatabase } from '../../store/db.js';
+import { enrolment, replaceKeys } from '../../store/secretKeys.js';
+import { Dialog } from '../Dialog.js';
 import { PasteKey } from './PasteKey.js';
 
 export interface AddKeyDialogProps {

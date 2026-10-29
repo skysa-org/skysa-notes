@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type NoteSecrets, useNoteSecrets } from '../src/components/noteSecrets.js';
+import { type NoteSecrets, useNoteSecrets } from '../src/components/secrets/noteSecrets.js';
 import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import {
 	generateIdentity,

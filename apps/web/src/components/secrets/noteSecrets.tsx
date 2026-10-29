@@ -1,19 +1,24 @@
 import { AgeError, cell } from '@skysa/core';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AttachmentProblem } from '../editor/attachHost.js';
-import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
-import { t } from '../i18n/t.js';
-import { type Age, loadAge } from '../secrets/loadAge.js';
-import type { SecretsLock } from '../secrets/lock.js';
-import { notEnrolled, notHere, type Why } from '../secrets/sealHere.js';
-import { tabLock } from '../secrets/tabLock.js';
-import { connectedSources } from '../store/connection.js';
-import { db as appDb, type NoteRecord, type NotesDatabase, type UnlockKind } from '../store/db.js';
-import { enrolment, type UnlockedKeys } from '../store/secretKeys.js';
-import { tabName, UNKNOWN_LABEL } from '../sync/account.js';
-import type { KeyFileSync } from '../sync/keyFile.js';
-import { syncScheduler } from '../sync/runtime.js';
+import type { AttachmentProblem } from '../../editor/attachHost.js';
+import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
+import { t } from '../../i18n/t.js';
+import { type Age, loadAge } from '../../secrets/loadAge.js';
+import type { SecretsLock } from '../../secrets/lock.js';
+import { notEnrolled, notHere, type Why } from '../../secrets/sealHere.js';
+import { tabLock } from '../../secrets/tabLock.js';
+import { connectedSources } from '../../store/connection.js';
+import {
+	db as appDb,
+	type NoteRecord,
+	type NotesDatabase,
+	type UnlockKind,
+} from '../../store/db.js';
+import { enrolment, type UnlockedKeys } from '../../store/secretKeys.js';
+import { tabName, UNKNOWN_LABEL } from '../../sync/account.js';
+import type { KeyFileSync } from '../../sync/keyFile.js';
+import { syncScheduler } from '../../sync/runtime.js';
 import { AddKeyDialog } from './AddKeyDialog.js';
 import { SecretsDialog } from './SecretsDialog.js';
 import { UnlockDialog } from './UnlockDialog.js';

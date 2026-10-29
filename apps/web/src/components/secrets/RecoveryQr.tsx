@@ -1,6 +1,6 @@
 import { encode } from 'uqr';
 
-import { t } from '../i18n/t.js';
+import { t } from '../../i18n/t.js';
 
 /**
  * The recovery key as a QR code (docs/ARCHITECTURE.md §7, "Secrets in a

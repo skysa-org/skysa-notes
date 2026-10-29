@@ -24,7 +24,7 @@ import { DialogActions, InlineDialog } from '../Dialog.js';
 import { DisconnectDialog } from '../DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from '../ImportNotes.js';
 import { otherLiveSources } from '../MoveUnsent.js';
-import { SecretsDialog, type SecretsDialogProps } from '../SecretsDialog.js';
+import { SecretsDialog, type SecretsDialogProps } from '../secrets/SecretsDialog.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
 import { useEscape } from '../useEscape.js';
 import type { Client, Sync } from './clients.js';

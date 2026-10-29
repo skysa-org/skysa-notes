@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
-import { t } from '../i18n/t.js';
-import { type EnteredKind, type EnteredUnlock, isAcceptedUnlock } from '../store/secretKeys.js';
-import { DialogActions } from './Dialog.js';
+import { t } from '../../i18n/t.js';
+import { type EnteredKind, type EnteredUnlock, isAcceptedUnlock } from '../../store/secretKeys.js';
+import { DialogActions } from '../Dialog.js';
 import { PatternGrid } from './PatternGrid.js';
 
 /**
