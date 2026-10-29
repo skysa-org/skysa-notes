@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteList, WINDOWED_ABOVE } from '../src/components/NoteList.js';
-import { type NoteRecord } from '../src/store/db.js';
+import type { NoteRecord } from '../src/store/db.js';
 
 /**
  * A long list draws only its rows near the screen (#275; docs/ARCHITECTURE.md

@@ -1,4 +1,4 @@
-import { type Editor } from '@milkdown/kit/core';
+import type { Editor } from '@milkdown/kit/core';
 
 import { createRichEditor, type RichEditorSetup } from '../../src/editor/rich.js';
 

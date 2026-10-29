@@ -7,7 +7,7 @@ import {
 } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { type ProviderFactory } from './scheduler.js';
+import type { ProviderFactory } from './scheduler.js';
 
 /**
  * The storage adapters this build can sync with, for the scheduler.

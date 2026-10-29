@@ -14,7 +14,7 @@ import { createSecretsLock } from '../src/secrets/lock.js';
 import { ACTIVE_CONNECTION_KEY, type NoteRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
-import { type SchedulerStatus, type SyncPhase } from '../src/sync/scheduler.js';
+import type { SchedulerStatus, SyncPhase } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
 import { freshDatabase } from './support/db.js';
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { AuthError, CursorResetError } from '../../../src/providers/types.js';
-import { type SyncEngine } from '../../../src/sync/engine.js';
+import type { SyncEngine } from '../../../src/sync/engine.js';
 import { remoteAt } from '../kit/remote.js';
 import { boundTo } from '../kit/seed.js';
 import { syncWorld } from '../kit/world.js';

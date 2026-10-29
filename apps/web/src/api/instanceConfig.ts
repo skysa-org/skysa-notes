@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { type ApiClient, type InstanceConfig } from './client.js';
+import type { ApiClient, InstanceConfig } from './client.js';
 
 /** A server answer: still being asked, not reachable, or what it said. */
 export type Asked<T> =

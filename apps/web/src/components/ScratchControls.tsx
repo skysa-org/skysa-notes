@@ -1,4 +1,4 @@
-import { type ScratchColor } from '@skysa/core';
+import type { ScratchColor } from '@skysa/core';
 
 import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';

@@ -1,4 +1,4 @@
-import { type NotesDatabase } from './db.js';
+import type { NotesDatabase } from './db.js';
 import { createStore } from './emitter.js';
 
 /**

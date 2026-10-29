@@ -10,7 +10,7 @@ import {
 
 import { type ApiClient, ApiError } from '../api/client.js';
 import { credentialFor } from '../store/credentials.js';
-import { type NotesDatabase } from '../store/db.js';
+import type { NotesDatabase } from '../store/db.js';
 
 /**
  * The change relay, from this side (docs/ARCHITECTURE.md §6, "Change relay"):

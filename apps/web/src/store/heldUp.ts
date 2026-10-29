@@ -1,11 +1,11 @@
 import { cell } from '@skysa/core';
 import type Dexie from 'dexie';
-import {
-	type DBCore,
-	type DBCoreGetManyRequest,
-	type DBCoreMutateRequest,
-	type DBCoreTable,
-	type DBCoreTransaction,
+import type {
+	DBCore,
+	DBCoreGetManyRequest,
+	DBCoreMutateRequest,
+	DBCoreTable,
+	DBCoreTransaction,
 } from 'dexie';
 
 /**

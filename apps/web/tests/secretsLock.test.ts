@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSecretsLock, IDLE_MS, type LockTarget } from '../src/secrets/lock.js';
-import { type UnlockedKeys } from '../src/store/secretKeys.js';
+import type { UnlockedKeys } from '../src/store/secretKeys.js';
 
 /**
  * A tab's unlocked sources (docs/ARCHITECTURE.md §7, "Secrets in a note"):

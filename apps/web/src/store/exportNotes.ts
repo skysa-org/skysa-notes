@@ -9,12 +9,7 @@ import {
 } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import {
-	type FileBytesRecord,
-	type FileRecord,
-	type NoteRecord,
-	type NotesDatabase,
-} from './db.js';
+import type { FileBytesRecord, FileRecord, NoteRecord, NotesDatabase } from './db.js';
 import { holdsTextFor } from './detached.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
 import { settleEditors } from './heldEdits.js';
@@ -22,7 +17,7 @@ import { foldPath } from './naming.js';
 import { noteFile } from './notes.js';
 import { rowsOf } from './rows.js';
 import { isLive } from './rowStates.js';
-import { type Unsynced } from './unsynced.js';
+import type { Unsynced } from './unsynced.js';
 
 /**
  * Notes out of the app as files, with no provider involved.

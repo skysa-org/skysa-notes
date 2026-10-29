@@ -33,7 +33,7 @@ import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
-import { type SchedulerStatus } from '../src/sync/scheduler.js';
+import type { SchedulerStatus } from '../src/sync/scheduler.js';
 import { freshDatabase } from './support/db.js';
 
 /** A store that turns the next rename down, as a write IndexedDB refuses does. */

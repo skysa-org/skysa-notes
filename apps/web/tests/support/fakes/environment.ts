@@ -1,4 +1,4 @@
-import { type SchedulerEnvironment, type SchedulerEvent } from '../../../src/sync/scheduler.js';
+import type { SchedulerEnvironment, SchedulerEvent } from '../../../src/sync/scheduler.js';
 
 /**
  * The browser, as the sync scheduler and the change relay see it: a clock, the

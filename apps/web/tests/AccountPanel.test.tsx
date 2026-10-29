@@ -15,7 +15,7 @@ import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
 import { type Notice, NotifyContext } from '../src/components/notify.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { Toast } from '../src/components/Toast.js';
-import { type pickFiles } from '../src/editor/pickFiles.js';
+import type { pickFiles } from '../src/editor/pickFiles.js';
 import { t } from '../src/i18n/t.js';
 import {
 	bindConnection,
@@ -40,7 +40,7 @@ import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
 import { getScratchpadShown, setScratchpadShown } from '../src/store/scratchpad.js';
 import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
-import { type SchedulerStatus } from '../src/sync/scheduler.js';
+import type { SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';

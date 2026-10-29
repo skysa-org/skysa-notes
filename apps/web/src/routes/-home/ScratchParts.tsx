@@ -1,10 +1,10 @@
 import { NameDialog } from '../../components/NameDialog.js';
 import { ScratchModal, Scratchpad } from '../../components/Scratchpad.js';
-import { type useScratchpad } from '../../components/useScratchpad.js';
+import type { useScratchpad } from '../../components/useScratchpad.js';
 import { t } from '../../i18n/t.js';
-import { type LiveEdits } from '../../store/liveEdits.js';
+import type { LiveEdits } from '../../store/liveEdits.js';
 import { scratchMarks } from '../../store/scratchpad.js';
-import { type NotePane } from './NoteColumn.js';
+import type { NotePane } from './NoteColumn.js';
 
 /**
  * The scratchpad's parts of the shell: its pane, in the notes' place, and

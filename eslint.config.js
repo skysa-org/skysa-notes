@@ -207,6 +207,10 @@ const typescriptRules = {
 	'simple-import-sort/imports': 'error',
 	'unused-imports/no-unused-imports': 'error',
 	'@typescript-eslint/consistent-type-imports': 'error',
+	// An import whose every name is a type is `import type`: with
+	// `verbatimModuleSyntax`, `import { type X }` is kept as `import {}`, which
+	// still loads the module — and whatever it builds as it loads.
+	'@typescript-eslint/no-import-type-side-effects': 'error',
 
 	// Where typescript-eslint has a type-aware version of a core rule, the core
 	// one is off and that one is on.

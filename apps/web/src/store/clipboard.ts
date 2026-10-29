@@ -8,12 +8,7 @@ import {
 } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import {
-	type ClipRecord,
-	type ClipThumbRecord,
-	type NotesDatabase,
-	type SyncStateRecord,
-} from './db.js';
+import type { ClipRecord, ClipThumbRecord, NotesDatabase, SyncStateRecord } from './db.js';
 import { updateLive } from './detached.js';
 import { rowsOf } from './rows.js';
 import { isLiveSource } from './rowStates.js';

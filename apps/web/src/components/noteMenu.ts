@@ -1,5 +1,5 @@
 import { t } from '../i18n/t.js';
-import { type OptionsMenuItem } from './OptionsMenu.js';
+import type { OptionsMenuItem } from './OptionsMenu.js';
 
 /**
  * What can be done to a note, wherever it is offered from: the `⋯` at the

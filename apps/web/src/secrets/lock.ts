@@ -1,7 +1,7 @@
 import { cell } from '@skysa/core';
 
 import { createEmitter } from '../store/emitter.js';
-import { type UnlockedKeys } from '../store/secretKeys.js';
+import type { UnlockedKeys } from '../store/secretKeys.js';
 
 /**
  * Which sources this tab holds unlocked for secrets, and their keys

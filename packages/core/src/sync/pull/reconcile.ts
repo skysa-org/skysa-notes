@@ -1,11 +1,11 @@
 import { isWithin, normalizePath, ROOT } from '../../paths.js';
-import { type EngineContext } from '../context.js';
+import type { EngineContext } from '../context.js';
 import { pathOf, type PullChange, type SyncFolder, type UnreadableFile } from '../store.js';
-import { type PullAttachments } from './attachments.js';
-import { type Cascade } from './cascade.js';
+import type { PullAttachments } from './attachments.js';
+import type { Cascade } from './cascade.js';
 import { decidedApartFromMoves, decidedNotes, reestablished } from './decided.js';
 import { type FileBase, fileGone } from './files.js';
-import { type PullNotes } from './notes.js';
+import type { PullNotes } from './notes.js';
 import { folderNow, removedInBatch, survives, unreadNow } from './replay.js';
 
 /**

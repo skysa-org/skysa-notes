@@ -1,8 +1,8 @@
 import { AuthError, cell } from '@skysa/core';
 
-import { type AccessToken, type ApiClient, type Denial, type Refusal } from '../api/client.js';
+import type { AccessToken, ApiClient, Denial, Refusal } from '../api/client.js';
 import { credentialFor } from '../store/credentials.js';
-import { type NotesDatabase } from '../store/db.js';
+import type { NotesDatabase } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
 
 /**

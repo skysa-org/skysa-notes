@@ -1,7 +1,7 @@
 import { isAuthError } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient } from '../src/api/client.js';
+import type { ApiClient } from '../src/api/client.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createNote } from '../src/store/notes.js';
 import { createTokenSource } from '../src/sync/tokens.js';

@@ -17,7 +17,7 @@ import {
 } from '../editor/attachHost.js';
 import { FILE_ICONS, Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
-import { type NoteRecord } from '../store/db.js';
+import type { NoteRecord } from '../store/db.js';
 import { useNoteAttachments } from './noteAttachments.js';
 
 /**

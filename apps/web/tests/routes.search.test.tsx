@@ -1,4 +1,4 @@
-import { type AnyRouter } from '@tanstack/react-router';
+import type { AnyRouter } from '@tanstack/react-router';
 import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 

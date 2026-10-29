@@ -1,5 +1,5 @@
 import { clientForm, postTokenForm, readIdClaims } from './common.js';
-import { type FetchLike, type OAuthCredentials, type StorageOAuth } from './types.js';
+import type { FetchLike, OAuthCredentials, StorageOAuth } from './types.js';
 
 /**
  * The storage half of Microsoft OAuth, for OneDrive: Authorization Code + PKCE

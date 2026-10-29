@@ -1,9 +1,9 @@
 import { isScratchPath, parentPath } from '@skysa/core';
 import { useEffect, useMemo } from 'react';
 
-import { type NoteRecord } from '../../store/db.js';
+import type { NoteRecord } from '../../store/db.js';
 import { useNotesUnderFolder } from '../../store/hooks.js';
-import { type Pins } from '../../store/pins.js';
+import type { Pins } from '../../store/pins.js';
 import { type FolderNode, listedUnder } from '../../store/tree.js';
 import { isAppFolder } from '../place.js';
 

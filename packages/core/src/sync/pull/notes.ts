@@ -9,12 +9,12 @@ import {
 	type RemoteEntry,
 } from '../../providers/types.js';
 import { conflictContent } from '../conflicts.js';
-import { type EngineContext } from '../context.js';
-import { type ConflictResolution, type PullChange, type SyncNote } from '../store.js';
+import type { EngineContext } from '../context.js';
+import type { ConflictResolution, PullChange, SyncNote } from '../store.js';
 import { madeInBatch, type Step } from './batch.js';
 import { reestablished } from './decided.js';
 import { forgetUnread } from './deletions.js';
-import { type Occupancy } from './occupancy.js';
+import type { Occupancy } from './occupancy.js';
 import { type Placement, remoteNow, removedInBatch, unreadNow, whereNow } from './replay.js';
 
 /**

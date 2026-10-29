@@ -1,4 +1,4 @@
-import { type SyncProgress } from '@skysa/core';
+import type { SyncProgress } from '@skysa/core';
 import { useId, useState } from 'react';
 
 import { api, type ApiClient } from '../api/client.js';
@@ -7,7 +7,7 @@ import { t } from '../i18n/t.js';
 import { db, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
-import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
+import type { SchedulerStatus, SyncScheduler } from '../sync/scheduler.js';
 import { Dialog, DialogActions } from './Dialog.js';
 import { RunProgress } from './RunProgress.js';
 

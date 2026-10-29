@@ -1,7 +1,7 @@
 import { isHidden, isWithin } from '../../paths.js';
-import { type ChangeEntry, type RemoteEntry } from '../../providers/types.js';
-import { type PullChange, type SyncNote, type UnreadableFile } from '../store.js';
-import { type FileBase } from './files.js';
+import type { ChangeEntry, RemoteEntry } from '../../providers/types.js';
+import type { PullChange, SyncNote, UnreadableFile } from '../store.js';
+import type { FileBase } from './files.js';
 
 /**
  * What every decision in a pull's batch is reached against (`Batch`, and with

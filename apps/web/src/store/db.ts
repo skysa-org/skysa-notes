@@ -1,12 +1,7 @@
-import {
-	type PictureInfo,
-	type PictureVariant,
-	type ProviderKind,
-	type SyncOperation,
-} from '@skysa/core';
+import type { PictureInfo, PictureVariant, ProviderKind, SyncOperation } from '@skysa/core';
 import Dexie, { type Table, type Transaction } from 'dexie';
 
-import { type EditorMode } from '../editor/mode.js';
+import type { EditorMode } from '../editor/mode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
 import { watchForHeldUp } from './heldUp.js';
 import { isLiveSource } from './rowStates.js';

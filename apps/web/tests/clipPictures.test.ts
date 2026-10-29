@@ -6,7 +6,7 @@ import { copyTurns } from '../src/pictures/copies.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import { addClips, keepClipThumb, removeClip } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
-import { type NotesDatabase } from '../src/store/db.js';
+import type { NotesDatabase } from '../src/store/db.js';
 import { freshDatabase } from './support/db.js';
 
 /**

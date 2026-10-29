@@ -13,7 +13,7 @@ import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import type { Origins, Pane } from '../routes/panel.js';
 import { KEEPS_PANEL, PANES } from '../routes/panel.js';
-import { type NoteRecord } from '../store/db.js';
+import type { NoteRecord } from '../store/db.js';
 import { type LiveEdit, type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { nameless, shownName } from '../store/titles.js';

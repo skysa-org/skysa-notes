@@ -1,8 +1,8 @@
-import { type z } from 'zod';
+import type { z } from 'zod';
 
 import { type CodeDisplay, DEFAULT_CODE_DISPLAY } from '../editor/codeDisplay.js';
 import { DEFAULT_EDITOR_MODE, type EditorMode, isEditorMode } from '../editor/mode.js';
-import { type NotesDatabase } from './db.js';
+import type { NotesDatabase } from './db.js';
 
 /**
  * App settings. Small enough that a key/value table is the whole story; every

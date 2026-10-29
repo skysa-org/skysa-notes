@@ -1,13 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';
-import { type NotesDatabase } from '../../store/db.js';
+import type { NotesDatabase } from '../../store/db.js';
 import { holdsTextFor } from '../../store/detached.js';
 import { settleEditors } from '../../store/heldEdits.js';
 import { rowsOf } from '../../store/rows.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../../store/unsynced.js';
 import { type LetGoInput, letGoOfSource, type LetGoResult } from '../../sync/account.js';
-import { type Client } from './clients.js';
+import type { Client } from './clients.js';
 import { failureMessage, refusalMessage } from './statusWords.js';
 
 /**

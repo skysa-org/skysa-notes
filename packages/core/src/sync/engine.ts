@@ -1,5 +1,5 @@
-import { type ChangeEntry, type RemoteEntry, type StorageProvider } from '../providers/types.js';
-import { type EngineContext } from './context.js';
+import type { ChangeEntry, RemoteEntry, StorageProvider } from '../providers/types.js';
+import type { EngineContext } from './context.js';
 import { metOf, type SyncOutcome, transient } from './outcome.js';
 import { createProgress, type SyncProgress } from './progress.js';
 import { createPullAttachments } from './pull/attachments.js';

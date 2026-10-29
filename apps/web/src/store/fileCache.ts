@@ -1,6 +1,6 @@
 import { cell } from '@skysa/core';
 
-import { type FileKey, type FileRecord, type NotesDatabase } from './db.js';
+import type { FileKey, FileRecord, NotesDatabase } from './db.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
 import { isLiveSource } from './rowStates.js';
 

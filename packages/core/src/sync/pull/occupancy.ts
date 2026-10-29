@@ -1,6 +1,6 @@
 import { foldName } from '../../names/fold.js';
 import { basename, isWithin, parentPath } from '../../paths.js';
-import { type EngineContext } from '../context.js';
+import type { EngineContext } from '../context.js';
 import { noteIdOf, pathOf, type PullChange, type SyncNote } from '../store.js';
 import { madeInBatch } from './batch.js';
 import { placements } from './replay.js';

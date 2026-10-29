@@ -11,7 +11,7 @@ import {
 	type ProviderKind,
 	type StorageProvider,
 } from '@skysa/core';
-import { type PromiseExtended } from 'dexie';
+import type { PromiseExtended } from 'dexie';
 
 import {
 	ACTIVE_CONNECTION_KEY,

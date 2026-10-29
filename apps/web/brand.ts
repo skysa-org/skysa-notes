@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type HtmlTagDescriptor, type Plugin } from 'vite';
+import type { HtmlTagDescriptor, Plugin } from 'vite';
 import { z } from 'zod';
 
 /**

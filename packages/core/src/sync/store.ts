@@ -1,4 +1,4 @@
-import { type RemoteEntry } from '../providers/types.js';
+import type { RemoteEntry } from '../providers/types.js';
 
 /**
  * The local store, as the sync engine needs it. `packages/core` cannot import

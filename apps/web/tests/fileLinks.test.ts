@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
+import type { NotesDatabase, SyncStateRecord } from '../src/store/db.js';
 import {
 	attachedFiles,
 	deleteUnlinkedFiles,

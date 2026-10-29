@@ -10,9 +10,9 @@ import {
 	serializeEncryptionFile,
 } from '@skysa/core';
 
-import { type KeyFileRecord, type NotesDatabase } from '../store/db.js';
+import type { KeyFileRecord, NotesDatabase } from '../store/db.js';
 import { isLiveSource } from '../store/rowStates.js';
-import { type ReadingSession } from './fileReads.js';
+import type { ReadingSession } from './fileReads.js';
 
 /**
  * A source's key file for secrets, `.encryption.json` at the root of its folder

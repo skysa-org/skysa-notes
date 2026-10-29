@@ -5,12 +5,12 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { InfoDialog } from '../components/InfoDialog.js';
 import { LOCALE, t } from '../i18n/t.js';
 import { addClips, setClipboardShown, showsClipboard } from '../store/clipboard.js';
-import { type ConnectedSource } from '../store/connection.js';
+import type { ConnectedSource } from '../store/connection.js';
 import { db as appDatabase, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { isLiveSource } from '../store/rowStates.js';
 import { tabName } from '../sync/account.js';
 import { syncScheduler } from '../sync/runtime.js';
-import { type SyncScheduler } from '../sync/scheduler.js';
+import type { SyncScheduler } from '../sync/scheduler.js';
 import { forgetShare, readShare, type Received } from './received.js';
 
 /**

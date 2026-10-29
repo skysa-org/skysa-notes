@@ -1,9 +1,9 @@
 import { isNoteName } from '../../names/fold.js';
 import { isHidden } from '../../paths.js';
-import { type ChangeEntry, type RemoteEntry } from '../../providers/types.js';
-import { type EngineContext } from '../context.js';
-import { type PullChange, type SyncOp, type UnreadableFile } from '../store.js';
-import { type PullAttachments } from './attachments.js';
+import type { ChangeEntry, RemoteEntry } from '../../providers/types.js';
+import type { EngineContext } from '../context.js';
+import type { PullChange, SyncOp, UnreadableFile } from '../store.js';
+import type { PullAttachments } from './attachments.js';
 import {
 	type Batch,
 	claimedPaths,
@@ -13,11 +13,11 @@ import {
 	unhidden,
 	unreadMap,
 } from './batch.js';
-import { type Cascade } from './cascade.js';
+import type { Cascade } from './cascade.js';
 import { forgetUnread, type PullDeletions } from './deletions.js';
-import { type FileBase } from './files.js';
-import { type Decide, type PullFolders } from './folders.js';
-import { type PullNotes } from './notes.js';
+import type { FileBase } from './files.js';
+import type { Decide, PullFolders } from './folders.js';
+import type { PullNotes } from './notes.js';
 
 /**
  * A batch decided: each entry, one at a time, sent to the part for its kind

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { type ClipInput } from '../store/clipboard.js';
+import type { ClipInput } from '../store/clipboard.js';
 
 /**
  * What the share target kept for the page (docs/ARCHITECTURE.md §8, "Shared to

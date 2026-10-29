@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type RemoteEntry } from '../../src/providers/types.js';
+import type { RemoteEntry } from '../../src/providers/types.js';
 import {
 	isFileChange,
 	isNoteChange,

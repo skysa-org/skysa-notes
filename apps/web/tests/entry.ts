@@ -1,5 +1,5 @@
 import { parentPath } from '@skysa/core';
-import { type AnyRouter } from '@tanstack/react-router';
+import type { AnyRouter } from '@tanstack/react-router';
 
 import { fragmentOf, heldPlace, type Place, placeHash } from '../src/routes/place.js';
 

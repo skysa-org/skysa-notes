@@ -1,7 +1,7 @@
 import { isVaultPath, isWithin, parentPath, ROOT } from '@skysa/core';
 import { z } from 'zod';
 
-import { type NotesDatabase } from './db.js';
+import type { NotesDatabase } from './db.js';
 import { createEmitter } from './emitter.js';
 import { getNote, listNotes } from './notes.js';
 import { readJson, sourceKey } from './prefs.js';

@@ -21,7 +21,7 @@ import {
 	scanReplacing,
 	sealSecret,
 } from '../src/secrets/age.js';
-import { type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import type { NoteRecord, NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { noteById, updateNote } from './noteRows.js';
 import { freshDatabase } from './support/db.js';

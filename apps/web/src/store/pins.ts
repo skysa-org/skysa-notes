@@ -1,7 +1,7 @@
 import { isWithin } from '@skysa/core';
 import { z } from 'zod';
 
-import { type NoteKey, type NotesDatabase } from './db.js';
+import type { NoteKey, NotesDatabase } from './db.js';
 import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
 import { readJson, sourceKey, type SourcePref } from './prefs.js';
 import { rowsOf } from './rows.js';

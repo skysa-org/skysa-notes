@@ -13,7 +13,7 @@ import {
 } from '../../store/hooks.js';
 import { type LastOpen, noteIsUnder, pickNote, rememberOpen } from '../../store/lastOpen.js';
 import { isUnnamed } from '../../store/notes.js';
-import { type Pins } from '../../store/pins.js';
+import type { Pins } from '../../store/pins.js';
 import { rememberRecent } from '../../store/recentNotes.js';
 import { isLive } from '../../store/rowStates.js';
 import { type FolderNode, selectedFolderPath } from '../../store/tree.js';

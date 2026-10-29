@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
+import type { NotesDatabase, SyncStateRecord } from '../src/store/db.js';
 import { createFileCleanup } from '../src/store/fileCleanup.js';
 import { deleteUnlinkedFilesAt } from '../src/store/fileLinks.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';

@@ -12,14 +12,14 @@ import {
 	recipientOf,
 	sealSecret,
 } from '../src/secrets/age.js';
-import { type DeviceLock, type Made } from '../src/secrets/deviceLock.js';
+import type { DeviceLock, Made } from '../src/secrets/deviceLock.js';
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock, type SecretsLock } from '../src/secrets/lock.js';
-import { type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
+import type { KeyFileRecord, NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol, enrolment, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
 import { getPasswordsShown } from '../src/store/vault.js';
-import { type KeyFileWrite } from '../src/sync/keyFile.js';
+import type { KeyFileWrite } from '../src/sync/keyFile.js';
 import { readQr } from './qrRead.js';
 import { freshDatabase } from './support/db.js';
 

@@ -1,6 +1,6 @@
-import { type ManifestOptions, type VitePWAOptions } from 'vite-plugin-pwa';
+import type { ManifestOptions, VitePWAOptions } from 'vite-plugin-pwa';
 
-import { type Brand } from './brand.js';
+import type { Brand } from './brand.js';
 
 /**
  * The PWA configuration, kept out of `vite.config.ts` so it can be tested.

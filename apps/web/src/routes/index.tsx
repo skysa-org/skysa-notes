@@ -8,7 +8,7 @@ import { CommandPalette } from '../components/CommandPalette.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
 import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
-import { type Notice } from '../components/notify.js';
+import type { Notice } from '../components/notify.js';
 import { Passwords } from '../components/Passwords.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { usePasswords } from '../components/usePasswords.js';

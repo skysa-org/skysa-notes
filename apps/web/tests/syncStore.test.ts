@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 // The suite lives beside the port it checks, in `packages/core`, and is not a
 // `*.test.ts` there so that it runs only where a store registers it. `core`
 // cannot import `apps/*`, so this store registers here instead.
-import { type NotesDatabase, type OpQueueRecord } from '../src/store/db.js';
+import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import {
 	createNote,
 	deleteNote,

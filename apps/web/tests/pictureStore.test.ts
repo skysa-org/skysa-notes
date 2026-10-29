@@ -3,7 +3,7 @@ import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
 import { bindConnection, detachConnection, releaseConnection } from '../src/store/connection.js';
-import { type FileRecord, type NotesDatabase } from '../src/store/db.js';
+import type { FileRecord, NotesDatabase } from '../src/store/db.js';
 import { TOUCH_AFTER_MS } from '../src/store/fileCache.js';
 import { deleteUnlinkedFiles } from '../src/store/fileLinks.js';
 import { addAttachment } from '../src/store/files.js';

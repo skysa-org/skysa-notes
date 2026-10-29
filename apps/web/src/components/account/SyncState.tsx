@@ -2,20 +2,20 @@ import { isVaultPath } from '@skysa/core';
 import { Link } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 
-import { type InstanceConfig } from '../../api/client.js';
+import type { InstanceConfig } from '../../api/client.js';
 import { answer, type Asked } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
 import { noteLink } from '../../routes/place.js';
-import { type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
 import { getNote } from '../../store/notes.js';
 import { isTombstone } from '../../store/rowStates.js';
 import { CONNECTABLE } from '../../sync/account.js';
 import { useSyncStatus } from '../../sync/runtime.js';
-import { type SchedulerStatus } from '../../sync/scheduler.js';
+import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 import { ConnectButton } from '../ConnectButton.js';
 import { DialogActions, InlineDialog } from '../Dialog.js';
-import { type Client, type Sync } from './clients.js';
+import type { Client, Sync } from './clients.js';
 import { conflictMessage, statusMessage } from './statusWords.js';
 import { UnreadableNotice } from './SyncNotices.js';
 

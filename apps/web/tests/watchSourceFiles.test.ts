@@ -1,7 +1,7 @@
 import type * as DexieModule from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type FileRecord } from '../src/store/db.js';
+import type { FileRecord } from '../src/store/db.js';
 import type * as Files from '../src/store/files.js';
 import { watchSourceFiles } from '../src/store/sourceFiles.js';
 import { freshDatabase } from './support/db.js';

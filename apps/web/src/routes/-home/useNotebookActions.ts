@@ -1,7 +1,7 @@
 import { isWithin, rebasePath } from '@skysa/core';
 import { useEffect } from 'react';
 
-import { type Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import {
@@ -10,8 +10,8 @@ import {
 	FolderExistsError,
 	renameFolder,
 } from '../../store/folders.js';
-import { type Renamings } from '../../store/renaming.js';
-import { type Select } from './useOpenPlace.js';
+import type { Renamings } from '../../store/renaming.js';
+import type { Select } from './useOpenPlace.js';
 
 /**
  * What a notebook the store refused says: its name taken, here or where it

@@ -1,5 +1,5 @@
-import { type ProviderKind } from '@skysa/core';
-import { type PromiseExtended } from 'dexie';
+import type { ProviderKind } from '@skysa/core';
+import type { PromiseExtended } from 'dexie';
 
 import { type CredentialRecord, type NotesDatabase, PENDING_CREDENTIAL_ID } from './db.js';
 

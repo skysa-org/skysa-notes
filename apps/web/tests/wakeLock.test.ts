@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { type SchedulerStatus } from '../src/sync/scheduler.js';
+import type { SchedulerStatus } from '../src/sync/scheduler.js';
 import {
 	keepAwakeWhileSyncing,
 	type ScreenLock,

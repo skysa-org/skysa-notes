@@ -12,14 +12,14 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/ClipboardPanel.js';
-import { type SystemClipboard, type SystemRead } from '../src/components/systemClipboard.js';
+import type { SystemClipboard, SystemRead } from '../src/components/systemClipboard.js';
 import { useFileDropGuard } from '../src/components/useFileDropGuard.js';
-import { type FileBrowser } from '../src/editor/fileActions.js';
-import { type ObjectUrlCache } from '../src/editor/objectUrls.js';
-import { type PictureShrinker } from '../src/pictures/shrinker.js';
+import type { FileBrowser } from '../src/editor/fileActions.js';
+import type { ObjectUrlCache } from '../src/editor/objectUrls.js';
+import type { PictureShrinker } from '../src/pictures/shrinker.js';
 import { addClips, type ClipInput } from '../src/store/clipboard.js';
-import { type NotesDatabase } from '../src/store/db.js';
-import { type FileRead } from '../src/sync/fileReads.js';
+import type { NotesDatabase } from '../src/store/db.js';
+import type { FileRead } from '../src/sync/fileReads.js';
 import { freshDatabase } from './support/db.js';
 
 /**

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { chordLabel } from '../commands/chord.js';
 import { useCommands, useSuspendShortcuts } from '../commands/context.js';
-import { type Command } from '../commands/registry.js';
+import type { Command } from '../commands/registry.js';
 import { t } from '../i18n/t.js';
 import { usePointerMoved } from './usePointerMoved.js';
 

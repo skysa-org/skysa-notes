@@ -7,7 +7,7 @@ import {
 	type StorageProvider,
 } from '@skysa/core';
 
-import { type FileRecord, type NotesDatabase } from '../store/db.js';
+import type { FileRecord, NotesDatabase } from '../store/db.js';
 import { CACHE_BUDGET_BYTES, cacheBytes, evictCache, heldFile } from '../store/fileCache.js';
 import { rowsOf } from '../store/rows.js';
 

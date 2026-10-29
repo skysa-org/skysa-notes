@@ -2,11 +2,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 
 import { t } from '../../i18n/t.js';
 import { showsClipboard } from '../../store/clipboard.js';
-import { type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
 import { getScratchpadShown, setScratchpadShown } from '../../store/scratchpad.js';
-import { type Unsynced } from '../../store/unsynced.js';
-import { type SchedulerStatus } from '../../sync/scheduler.js';
-import { type OptionsMenuItem } from '../OptionsMenu.js';
+import type { Unsynced } from '../../store/unsynced.js';
+import type { SchedulerStatus } from '../../sync/scheduler.js';
+import type { OptionsMenuItem } from '../OptionsMenu.js';
 import { secretsLabel } from '../SecretsDialog.js';
 import { importingHere, isSyncable } from './SyncState.js';
 

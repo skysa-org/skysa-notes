@@ -1,4 +1,4 @@
-import { type FetchLike } from '@skysa/core';
+import type { FetchLike } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';

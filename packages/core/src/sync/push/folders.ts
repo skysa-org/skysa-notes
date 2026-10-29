@@ -1,8 +1,8 @@
 import { foldName } from '../../names/fold.js';
 import { normalizePath, parentPath, ROOT } from '../../paths.js';
-import { type EngineContext } from '../context.js';
+import type { EngineContext } from '../context.js';
 import { orIfNotFound } from '../providerOps.js';
-import { type SyncOpOf } from '../store.js';
+import type { SyncOpOf } from '../store.js';
 
 /**
  * The remote's folders, as a push needs them: made, a level at a time,

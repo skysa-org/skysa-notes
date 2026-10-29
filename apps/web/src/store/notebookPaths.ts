@@ -1,7 +1,7 @@
 import { isWithin, rebasePath } from '@skysa/core';
 import { z } from 'zod';
 
-import { type NotesDatabase } from './db.js';
+import type { NotesDatabase } from './db.js';
 import { readJson, sourceKey, type SourcePref } from './prefs.js';
 
 /**

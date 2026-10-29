@@ -4,16 +4,16 @@ import { type RefObject, useCallback, useEffect, useState } from 'react';
 
 import { parseChord } from '../../commands/chord.js';
 import { useCommand } from '../../commands/context.js';
-import { type Notice } from '../../components/notify.js';
+import type { Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord, type SyncStateRecord } from '../../store/db.js';
 import { downloadNotice, downloadProblem, downloadSource } from '../../store/exportNotes.js';
 import { useHoldsAnything } from '../../store/hooks.js';
 import { keeping } from '../../store/keeping.js';
-import { type Moving } from '../../store/rearrange.js';
+import type { Moving } from '../../store/rearrange.js';
 import { movingNote } from '../../store/titles.js';
-import { type Pane } from '../panel.js';
-import { type AppSearch } from '../search.js';
+import type { Pane } from '../panel.js';
+import type { AppSearch } from '../search.js';
 import { canMakeNote, isNotebook } from './rules.js';
 
 /**

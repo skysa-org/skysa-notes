@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { type NotesDatabase } from '../src/store/db.js';
+import type { NotesDatabase } from '../src/store/db.js';
 import {
 	getCodeDisplay,
 	getDefaultEditorMode,

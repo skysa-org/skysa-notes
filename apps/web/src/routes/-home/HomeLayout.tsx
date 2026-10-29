@@ -1,9 +1,9 @@
-import { type CSSProperties, type ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { type Notice, NotifyContext } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { InstallBanner } from '../../install/InstallBanner.js';
-import { type SyncStateRecord } from '../../store/db.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { PROVIDER_LABELS, sourceName } from '../../sync/account.js';
 
 /**

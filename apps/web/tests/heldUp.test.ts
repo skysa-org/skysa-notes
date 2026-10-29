@@ -1,7 +1,7 @@
 import Dexie, { liveQuery } from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type NotesDatabase } from '../src/store/db.js';
+import type { NotesDatabase } from '../src/store/db.js';
 import { type HeldUp, heldUpOf } from '../src/store/heldUp.js';
 import { watchedDatabase } from './support/db.js';
 
