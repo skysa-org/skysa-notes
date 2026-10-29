@@ -19,7 +19,7 @@ import {
 	type SkipReason,
 } from '../../store/importLibrary.js';
 import { ConfirmDialog } from '../ui/ConfirmDialog.js';
-import { type Notice, useNotices } from '../ui/notices.js';
+import { useNotices } from '../ui/notices.js';
 import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
@@ -200,12 +200,9 @@ export const useImportNotes = (
 	{ label, syncs, pick = pickFiles }: { label: string; syncs: boolean; pick?: Pick }
 ) => {
 	const [step, setStep] = useState<Step>({ kind: 'idle' });
-	// How it went is said over the page, where it outlives the panel it was
-	// asked from, and stays until it is read (`Notice.stays`).
-	const { say } = useNotices();
-	const notify = (notice: Notice) => {
-		say({ ...notice, stays: true });
-	};
+	// How it went is kept over the page, where it outlives the panel it was
+	// asked from (`Notices`).
+	const { keep: notify } = useNotices();
 
 	const choose = (into: ImportInto) => {
 		setStep({ kind: 'choosing', into });

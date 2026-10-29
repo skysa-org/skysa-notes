@@ -8,7 +8,7 @@ import { HomeToasts } from '../src/routes/-home/HomeToasts.js';
 /**
  * What the shell says over the page (#455), in its two kinds: what was said
  * about the last thing asked for, which goes as the user moves on, and what
- * stays until it is read — how an import went (2026-10-29).
+ * is kept — how an import went (2026-10-29).
  */
 
 const wrapper = ({ children }: { children: ReactNode }) => (
@@ -23,7 +23,7 @@ describe('notices', () => {
 
 		act(() => {
 			result.current.say({ message: 'Not renamed.', tone: 'error' });
-			result.current.say({ message: 'Imported.', tone: 'success', stays: true });
+			result.current.keep({ message: 'Imported.', tone: 'success' });
 			result.current.say({ message: 'Not moved.', tone: 'error' });
 		});
 
@@ -31,11 +31,11 @@ describe('notices', () => {
 		expect(result.current.staying?.message).toBe('Imported.');
 	});
 
-	it('takes down what was said as the user moves on, and leaves what stays', () => {
+	it('takes down what was said as the user moves on, and leaves what is kept', () => {
 		const { result } = both();
 		act(() => {
 			result.current.say({ message: 'Not renamed.', tone: 'error' });
-			result.current.say({ message: 'Imported.', tone: 'success', stays: true });
+			result.current.keep({ message: 'Imported.', tone: 'success' });
 		});
 
 		act(() => {
@@ -84,10 +84,10 @@ describe('notices', () => {
 	it('is shown in the shell’s stack, both kinds at once', () => {
 		const seen = { say: (): void => undefined };
 		const Saying = () => {
-			const { say } = useNotices();
+			const { say, keep } = useNotices();
 			seen.say = () => {
 				say({ message: 'Not moved.', tone: 'error' });
-				say({ message: 'Imported.', tone: 'success', stays: true });
+				keep({ message: 'Imported.', tone: 'success' });
 			};
 			return null;
 		};

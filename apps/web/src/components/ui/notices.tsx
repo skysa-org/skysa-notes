@@ -12,30 +12,30 @@ export interface Notice {
 	readonly tone: ToastTone;
 	/** Somewhere to go about it, when there is somewhere. */
 	readonly action?: ToastAction | undefined;
-	/**
-	 * Kept until dismissed, beside whatever else is said meanwhile, rather than
-	 * going at the next place the user goes: how something that ran on went —
-	 * an import — which may land after the user has moved on (2026-10-29).
-	 */
-	readonly stays?: true;
 }
 
-/** Where anything inside the shell says something over the page (#455). */
+/**
+ * Where anything inside the shell says something over the page (#455), in
+ * two kinds (2026-10-29). What is said about the last thing the user asked
+ * for — why a notebook was not made — goes as they move on. What is kept is
+ * how something that ran on went — an import — which may land after they
+ * have moved on, and is shown beside whatever else is said meanwhile. Either
+ * goes at its ✕ or a press away from it (`Toast`).
+ */
 export interface Notices {
-	/** Say it, in place of the last thing said of its kind. */
+	/** Say it, in place of the last thing said. */
 	say: (notice: Notice) => void;
-	/**
-	 * The user has moved on: what was said about the last thing they asked
-	 * for goes, and what stays is left.
-	 */
+	/** Keep it, in place of the last thing kept. */
+	keep: (notice: Notice) => void;
+	/** The user has moved on: what was said goes, and what is kept is left. */
 	moveOn: () => void;
 }
 
 /** What is said now, for the shell's stack of toasts (`HomeToasts`). */
 export interface ShownNotices {
-	/** About the last thing asked for, until the user moves on. */
+	/** What was said, until the user moves on. */
 	passing: Notice | null;
-	/** What stays until dismissed. */
+	/** What is kept. */
 	staying: Notice | null;
 	dismissPassing: () => void;
 	dismissStaying: () => void;
@@ -56,10 +56,8 @@ export const NoticesProvider = ({ children }: { children: ReactNode }) => {
 	const [staying, setStaying] = useState<Notice | null>(null);
 	const notices = useMemo<Notices>(
 		() => ({
-			say: (notice) => {
-				if (notice.stays === true) setStaying(notice);
-				else setPassing(notice);
-			},
+			say: setPassing,
+			keep: setStaying,
 			moveOn: () => {
 				setPassing(null);
 			},

@@ -244,8 +244,8 @@ type FakeSync = ReturnType<typeof fakeSync>;
 
 /** The panel at `url`, inside a router, since it reads where it is. */
 /**
- * What the shell does with what the panel says over the page and keeps
- * (`Notice.stays`): one toast, until it is dismissed.
+ * What the shell does with what the panel keeps over the page (`Notices`):
+ * one toast, until it is dismissed.
  */
 const Staying = () => {
 	const { staying, dismissStaying } = useShownNotices();

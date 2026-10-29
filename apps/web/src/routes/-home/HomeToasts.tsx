@@ -4,10 +4,18 @@ import { Toast } from '../../components/ui/Toast.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
 import { nameShown } from '../../store/titles.js';
 
+const NoticeToast = ({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) => (
+	<Toast
+		message={notice.message}
+		tone={notice.tone}
+		action={notice.action}
+		onDismiss={onDismiss}
+	/>
+);
+
 /**
  * The shell's toasts, in one stack: the undo of a delete, what connecting
- * storage came to, what was said about the last thing asked for, and what
- * stays until it is read (`NoticesProvider`).
+ * storage came to, and what was said and what was kept (`Notices`).
  */
 export const HomeToasts = ({
 	deleted,
@@ -41,29 +49,10 @@ export const HomeToasts = ({
 				/>
 			)}
 			{connectNotice !== undefined && (
-				<Toast
-					message={connectNotice.message}
-					tone={connectNotice.tone}
-					action={connectNotice.action}
-					onDismiss={dismissConnect}
-				/>
+				<NoticeToast notice={connectNotice} onDismiss={dismissConnect} />
 			)}
-			{passing !== null && (
-				<Toast
-					message={passing.message}
-					tone={passing.tone}
-					action={passing.action}
-					onDismiss={dismissPassing}
-				/>
-			)}
-			{staying !== null && (
-				<Toast
-					message={staying.message}
-					tone={staying.tone}
-					action={staying.action}
-					onDismiss={dismissStaying}
-				/>
-			)}
+			{passing !== null && <NoticeToast notice={passing} onDismiss={dismissPassing} />}
+			{staying !== null && <NoticeToast notice={staying} onDismiss={dismissStaying} />}
 		</div>
 	);
 };

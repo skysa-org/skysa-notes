@@ -92,10 +92,10 @@ export const HomeLayout = ({
 		{palette}
 
 		{/* `data-panel` is which pane a compact window is showing as a
-			    dropdown; the stylesheet ignores it in a wide one. */}
+		    dropdown; the stylesheet ignores it in a wide one. */}
 		<div className="app-shell" {...shell}>
 			{/* Positioned, like the two panes in a compact window, so it is
-				    never a grid item and takes no column. */}
+			    never a grid item and takes no column. */}
 			{sourceDropdown}
 			{sidebar}
 			{list}

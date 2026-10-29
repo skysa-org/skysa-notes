@@ -93,12 +93,6 @@ const Home = () => {
 	const { tree, pins } = usePinnedTree(activeConnection);
 	const looseNoteCount = useLooseNoteCount(activeConnection);
 
-	/**
-	 * Why the last thing the user asked for did not happen. Creating a notebook
-	 * or a note can reject — a duplicate name is the everyday case — and by then
-	 * the name field has closed and the click is over, so without somewhere to
-	 * put this the user acts and the app shows nothing at all.
-	 */
 	const { say } = useNotices();
 	/** What is typed into the open note before it is saved, for the list to show. */
 	const [liveEdits] = useState(createLiveEdits);
