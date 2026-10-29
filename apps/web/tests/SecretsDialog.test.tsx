@@ -3,7 +3,8 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SecretsDialog, type SecretsDialogProps } from '../src/components/secrets/SecretsDialog.js';
+import { SecretsDialog } from '../src/components/secrets/SecretsDialog.js';
+import type { SecretsDialogProps } from '../src/components/secrets/types.js';
 import {
 	generateIdentity,
 	openSecret,
