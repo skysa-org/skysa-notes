@@ -118,7 +118,7 @@ const useCloseTaking = (taking: boolean, box: HTMLElement | null, onClose: () =>
 	usePressAway(
 		[],
 		() => {
-			close.current();
+			onClose();
 		},
 		{ enabled: taking && box !== null, inside: INSIDE_TAKING }
 	);

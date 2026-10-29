@@ -61,9 +61,9 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 			clearTimeout(timer);
 		};
 	}, [held, onDismiss]);
-	// Nor a press in a dialog over the page, which is not the page: the command
-	// palette offers this same Undo, and choosing it there by pointer would
-	// otherwise take it away before the click arrived.
+	// Not a press on the notice, nor one in a dialog over the page, which is
+	// not the page: the command palette offers this same Undo, and choosing it
+	// there by pointer would otherwise take it away before the click arrived.
 	usePressAway(
 		[card],
 		() => {

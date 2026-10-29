@@ -141,7 +141,8 @@ const useFlyout = (nav: RefObject<HTMLElement | null>, onClose: (() => void) | u
 	usePressAway(
 		[nav],
 		() => {
-			onClose?.();
+			// Not drawn, with no headings to list: nothing to shut.
+			if (nav.current !== null) onClose?.();
 		},
 		{ enabled: onClose !== undefined, capture: true, inside: TOGGLE }
 	);

@@ -42,13 +42,12 @@ export const usePressAway = (
 	useEffect(() => {
 		if (!enabled) return undefined;
 		const onPress = (event: PointerEvent) => {
+			// A press lands on an element; anything else is not one to answer.
 			const target = event.target;
-			if (!(target instanceof Node)) return;
+			if (!(target instanceof Element)) return;
 			if (latestRefs.current.some((ref) => ref.current?.contains(target) === true)) return;
-			if (target instanceof Element) {
-				if (inside !== undefined && target.closest(inside) !== null) return;
-				if (ignoreModals && target.closest(MODAL) !== null) return;
-			}
+			if (inside !== undefined && target.closest(inside) !== null) return;
+			if (ignoreModals && target.closest(MODAL) !== null) return;
 			away.current(event);
 		};
 		document.addEventListener('pointerdown', onPress, capture);
