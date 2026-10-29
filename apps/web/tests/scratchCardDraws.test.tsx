@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
+import { Scratchpad, type ScratchpadProps } from '../src/components/scratchpad/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import type * as Slices from '../src/store/slices.js';
 import type * as VisibleText from '../src/store/visibleText.js';

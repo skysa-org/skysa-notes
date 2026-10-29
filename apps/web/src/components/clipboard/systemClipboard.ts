@@ -1,4 +1,4 @@
-import type { ClipInput } from '../store/clipboard.js';
+import type { ClipInput } from '../../store/clipboard.js';
 
 /**
  * The browser's own clipboard, for the clipboard a source's devices share

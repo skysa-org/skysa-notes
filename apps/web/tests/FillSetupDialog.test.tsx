@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { FillSetupDialog } from '../src/components/FillSetupDialog.js';
-import { Passwords } from '../src/components/Passwords.js';
+import { FillSetupDialog } from '../src/components/passwords/FillSetupDialog.js';
+import { Passwords } from '../src/components/passwords/Passwords.js';
 import { bookmarkletUrl } from '../src/fill/bookmarklet.js';
 
 /**

@@ -1,7 +1,7 @@
 import { CLIPBOARD_ITEMS } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
-import { clipPicture } from '../src/components/clipPictures.js';
+import { clipPicture } from '../src/components/clipboard/clipPictures.js';
 import { copyTurns } from '../src/pictures/copies.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import { addClips, keepClipThumb, removeClip } from '../src/store/clipboard.js';

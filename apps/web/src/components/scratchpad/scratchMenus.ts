@@ -1,7 +1,7 @@
 import { SCRATCH_COLORS, type ScratchColor } from '@skysa/core';
 
-import { t } from '../i18n/t.js';
-import type { OptionsMenuItem } from './ui/OptionsMenu.js';
+import { t } from '../../i18n/t.js';
+import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
  * What can be done to a scratch card, wherever it is offered from: the card's

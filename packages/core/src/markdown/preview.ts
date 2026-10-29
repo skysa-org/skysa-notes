@@ -74,7 +74,7 @@ export type PreviewMark = 'strong' | 'emphasis' | 'delete' | 'code' | 'link';
 
 /**
  * A picture or a file's chip, as the rich editor draws it in a line: what a
- * scratchpad card draws there too (`apps/web/src/components/Scratchpad.tsx`).
+ * scratchpad card draws there too (`apps/web/src/components/scratchpad/Scratchpad.tsx`).
  * The run it is on still says it in words — its alt text, the chip's name —
  * for all that reads only words, so `previewLines` is the same with or
  * without it. A secret's run says nothing: what it is called is its label,
@@ -319,7 +319,7 @@ const collapsed = (runs: readonly PreviewRun[]): PreviewRun[] => {
 
 /**
  * The readable lines of a body, in order, each with how it is set: what a
- * scratchpad card draws (`apps/web/src/components/Scratchpad.tsx`). Whitespace
+ * scratchpad card draws (`apps/web/src/components/scratchpad/Scratchpad.tsx`). Whitespace
  * is collapsed and blank lines dropped, so the words of each are exactly
  * `previewLines`'s.
  */

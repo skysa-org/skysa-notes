@@ -6,7 +6,7 @@ import {
 	columnCount,
 	guessHeight,
 	placeCards,
-} from '../src/components/masonry.js';
+} from '../src/components/scratchpad/masonry.js';
 
 /**
  * The scratchpad's wall (docs/ARCHITECTURE.md §7, "The scratchpad"): as many

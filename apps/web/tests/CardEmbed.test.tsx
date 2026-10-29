@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { CardEmbed, CardHost } from '../src/components/CardEmbed.js';
+import { CardEmbed, CardHost } from '../src/components/scratchpad/CardEmbed.js';
 import {
 	type AttachmentHost,
 	NO_ATTACHMENTS,

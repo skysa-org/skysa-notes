@@ -1,7 +1,7 @@
 import { type Site, siteAddress, siteLabel } from '@skysa/core';
 import { useId, useState } from 'react';
 
-import { KEEP_OUT } from '../components/keepOut.js';
+import { KEEP_OUT } from '../components/passwords/keepOut.js';
 import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import type { FillSource, Login, Match } from './matches.js';

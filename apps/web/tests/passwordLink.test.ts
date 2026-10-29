@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { labelLink } from '../src/components/passwordLink.js';
+import { labelLink } from '../src/components/passwords/passwordLink.js';
 
 /**
  * A password's label that opens (docs/ARCHITECTURE.md §7, "Passwords in the

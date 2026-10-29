@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { asPng, fromFiles, systemClipboard } from '../src/components/systemClipboard.js';
+import { asPng, fromFiles, systemClipboard } from '../src/components/clipboard/systemClipboard.js';
 
 /**
  * The browser's clipboard as the shared clipboard reads and writes it

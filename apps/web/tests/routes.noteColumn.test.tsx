@@ -7,7 +7,7 @@ import { t } from '../src/i18n/t.js';
 import { NoteColumn, PasswordColumn } from '../src/routes/-home/NoteColumn.js';
 import type { NoteRecord } from '../src/store/db.js';
 
-vi.mock('../src/components/PasswordItem.js', () => ({
+vi.mock('../src/components/passwords/PasswordItem.js', () => ({
 	PasswordItem: ({ note }: { note: NoteRecord }) => (
 		<article aria-label="item">{note.id}</article>
 	),

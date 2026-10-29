@@ -18,19 +18,19 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { chordLabel, parseChord } from '../commands/chord.js';
-import { filesToAttach } from '../editor/addFiles.js';
-import { browserFiles, type FileBrowser, saveBytes } from '../editor/fileActions.js';
-import { FILE_ICONS, Icon } from '../editor/icons.js';
-import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
-import { pickFiles } from '../editor/pickFiles.js';
-import { t } from '../i18n/t.js';
-import { type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
-import { addClips, type ClipInput, listClips, removeClip } from '../store/clipboard.js';
-import type { ClipKey, ClipRecord, NotesDatabase } from '../store/db.js';
-import type { FileRead } from '../sync/fileReads.js';
-import type { SyncScheduler } from '../sync/scheduler.js';
-import { sizeOf } from './AttachedFiles.js';
+import { chordLabel, parseChord } from '../../commands/chord.js';
+import { filesToAttach } from '../../editor/addFiles.js';
+import { browserFiles, type FileBrowser, saveBytes } from '../../editor/fileActions.js';
+import { FILE_ICONS, Icon } from '../../editor/icons.js';
+import { createObjectUrlCache, type ObjectUrlCache } from '../../editor/objectUrls.js';
+import { pickFiles } from '../../editor/pickFiles.js';
+import { t } from '../../i18n/t.js';
+import { type PictureShrinker, pictureShrinker } from '../../pictures/shrinker.js';
+import { addClips, type ClipInput, listClips, removeClip } from '../../store/clipboard.js';
+import type { ClipKey, ClipRecord, NotesDatabase } from '../../store/db.js';
+import type { FileRead } from '../../sync/fileReads.js';
+import type { SyncScheduler } from '../../sync/scheduler.js';
+import { sizeOf } from '../attachments/AttachedFiles.js';
 import { clipPicture } from './clipPictures.js';
 import {
 	asPng,

@@ -1,8 +1,8 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { placeCards } from '../src/components/masonry.js';
-import { Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
+import { placeCards } from '../src/components/scratchpad/masonry.js';
+import { Scratchpad, type ScratchpadProps } from '../src/components/scratchpad/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import type * as VisibleText from '../src/store/visibleText.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';

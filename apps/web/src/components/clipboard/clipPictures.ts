@@ -1,9 +1,9 @@
 import { imageInfo, pictureVariant, safeOpenType } from '@skysa/core';
 
-import { copyTurns } from '../pictures/copies.js';
-import { noShrinker, type PictureShrinker } from '../pictures/shrinker.js';
-import { keepClipThumb } from '../store/clipboard.js';
-import type { ClipThumbRecord, NotesDatabase } from '../store/db.js';
+import { copyTurns } from '../../pictures/copies.js';
+import { noShrinker, type PictureShrinker } from '../../pictures/shrinker.js';
+import { keepClipThumb } from '../../store/clipboard.js';
+import type { ClipThumbRecord, NotesDatabase } from '../../store/db.js';
 
 /**
  * The pictures on a source's clipboard, as its panel draws them (#276): from

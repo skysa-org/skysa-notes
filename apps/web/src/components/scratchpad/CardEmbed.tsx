@@ -14,11 +14,11 @@ import {
 	NO_ATTACHMENTS,
 	type PictureSize,
 	type Shown,
-} from '../editor/attachHost.js';
-import { FILE_ICONS, Icon } from '../editor/icons.js';
-import { t } from '../i18n/t.js';
-import type { NoteRecord } from '../store/db.js';
-import { useNoteAttachments } from './noteAttachments.js';
+} from '../../editor/attachHost.js';
+import { FILE_ICONS, Icon } from '../../editor/icons.js';
+import { t } from '../../i18n/t.js';
+import type { NoteRecord } from '../../store/db.js';
+import { useNoteAttachments } from '../attachments/noteAttachments.js';
 
 /**
  * A picture or a file's chip on a scratch card (docs/ARCHITECTURE.md §7, "The

@@ -7,7 +7,7 @@ import { RawEditor } from '../../editor/RawEditor.js';
 import { RichEditor, type RichEditorProps } from '../../editor/RichEditor.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
-import { useNoteAttachments } from '../noteAttachments.js';
+import { useNoteAttachments } from '../attachments/noteAttachments.js';
 import { useNoteSecrets } from '../secrets/noteSecrets.js';
 import { Outline } from './Outline.js';
 import type { NoteDraft, NoteViewProps } from './types.js';
