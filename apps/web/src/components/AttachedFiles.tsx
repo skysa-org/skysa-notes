@@ -17,7 +17,7 @@ import { Dialog, DialogActions, InlineDialog } from './Dialog.js';
 /**
  * The files in a notebook, each with the notes that link it under its name,
  * and Delete for one that none does (2026-10-04). Offered from the notebook's
- * `⋯` where it has files (`NotebookMenu.tsx`).
+ * `⋯` where it has files (`sidebar/NotebookMenu.tsx`).
  *
  * A file nothing links is one the user took out of every note, or whose notes
  * were deleted, and nothing else would ever show it to them. A note that names

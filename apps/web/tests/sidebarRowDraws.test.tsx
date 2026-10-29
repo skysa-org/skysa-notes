@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as RowOptionsModule from '../src/components/RowOptions.js';
-import { Sidebar, type SidebarProps } from '../src/components/Sidebar.js';
+import { Sidebar, type SidebarProps } from '../src/components/sidebar/Sidebar.js';
 import { buildFolderTree, keptTree } from '../src/store/tree.js';
 
 /**

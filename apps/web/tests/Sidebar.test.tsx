@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
-import { Sidebar } from '../src/components/Sidebar.js';
+import { Sidebar } from '../src/components/sidebar/Sidebar.js';
 import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 /**

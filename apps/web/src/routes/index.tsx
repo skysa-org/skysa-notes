@@ -10,7 +10,7 @@ import { HeldImport } from '../components/ImportProgress.js';
 import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
 import type { Notice } from '../components/notify.js';
 import { Passwords } from '../components/Passwords.js';
-import { Sidebar } from '../components/Sidebar.js';
+import { Sidebar } from '../components/sidebar/Sidebar.js';
 import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
 import { useLatest } from '../hooks/useLatest.js';
