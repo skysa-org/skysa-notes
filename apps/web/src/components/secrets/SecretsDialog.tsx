@@ -10,6 +10,7 @@ import {
 
 import { t } from '../../i18n/t.js';
 import { type DeviceLock, setUpDeviceLock } from '../../secrets/deviceLock.js';
+import { sameIdentity, wipe } from '../../secrets/keys.js';
 import { type Age, loadAge } from '../../secrets/loadAge.js';
 import type { SecretsLock } from '../../secrets/lock.js';
 import type { KeyFileRecord, NotesDatabase } from '../../store/db.js';
@@ -26,10 +27,10 @@ import {
 import { getPasswordsShown, setPasswordsShown } from '../../store/vault.js';
 import type { KeyFileSync } from '../../sync/keyFile.js';
 import { Dialog, DialogActions } from '../Dialog.js';
-import { sameIdentity, wipe } from './keys.js';
 import { PasteKey } from './PasteKey.js';
 import { Device, Lost, RemoveKey } from './steps/Device.js';
-import { Different, Intro } from './steps/Intro.js';
+import { Different } from './steps/Different.js';
+import { Intro } from './steps/Intro.js';
 import { CheckKey, ShowKey } from './steps/NewKey.js';
 import { Rekey, RekeyReady } from './steps/Rekey.js';
 import type { Enrolled, Home, Making, Purpose, Step } from './types.js';
