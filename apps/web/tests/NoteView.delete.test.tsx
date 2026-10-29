@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NoteView, type NoteViewHandle } from '../src/components/NoteView.js';
+import { NoteView } from '../src/components/note/NoteView.js';
+import type { NoteViewHandle } from '../src/components/note/types.js';
 import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';

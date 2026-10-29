@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import type { Command } from '../src/commands/registry.js';
-import { NoteView } from '../src/components/NoteView.js';
+import { NoteView } from '../src/components/note/NoteView.js';
 import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import {
 	generateIdentity,

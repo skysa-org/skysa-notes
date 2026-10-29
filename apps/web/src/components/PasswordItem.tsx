@@ -33,8 +33,8 @@ import { isTombstone } from '../store/rowStates.js';
 import { titleShown } from '../store/titles.js';
 import { editedAt } from './editedAt.js';
 import { KEEP_OUT } from './keepOut.js';
+import type { NoteDraft } from './note/types.js';
 import { useNoteSecrets } from './noteSecrets.js';
-import type { NoteDraft } from './NoteView.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
 import { labelLink, siteLink } from './passwordLink.js';
 

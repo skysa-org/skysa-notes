@@ -1,7 +1,7 @@
 import { isScratchPath, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { type RefObject, useCallback, useState } from 'react';
 
-import type { DisplacedText } from '../../components/NoteView.js';
+import type { DisplacedText } from '../../components/note/types.js';
 import type { Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../../store/db.js';

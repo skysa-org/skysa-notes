@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { FindBar } from '../src/components/FindBar.js';
+import { FindBar } from '../src/components/note/FindBar.js';
 import { FindTargetProvider } from '../src/editor/findTarget.js';
 import { RawEditor } from '../src/editor/RawEditor.js';
 

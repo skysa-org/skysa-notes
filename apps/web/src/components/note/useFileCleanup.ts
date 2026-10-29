@@ -1,10 +1,10 @@
 import { basename, linkedFiles } from '@skysa/core';
 import { useCallback, useEffect, useRef } from 'react';
 
-import { useLatest } from '../hooks/useLatest.js';
-import { type NoteRecord, noteRef } from '../store/db.js';
-import { type FileCleanup, fileCleanup } from '../store/fileCleanup.js';
-import { namesFile } from '../store/fileLinks.js';
+import { useLatest } from '../../hooks/useLatest.js';
+import { type NoteRecord, noteRef } from '../../store/db.js';
+import { type FileCleanup, fileCleanup } from '../../store/fileCleanup.js';
+import { namesFile } from '../../store/fileLinks.js';
 
 /**
  * What a visit to a note may have taken out of it, handed to the cleanup as the

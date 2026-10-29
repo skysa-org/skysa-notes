@@ -2,7 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { type Heading, headings } from '@skysa/core';
 import { type RefObject, useEffect, useMemo, useRef } from 'react';
 
-import { t } from '../i18n/t.js';
+import { t } from '../../i18n/t.js';
 
 /**
  * The note's headings, down the side, as somewhere to jump to.

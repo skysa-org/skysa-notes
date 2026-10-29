@@ -1,7 +1,7 @@
 import { isVaultPath } from '@skysa/core';
 import type { ReactNode } from 'react';
 
-import type { ScratchEditing } from '../../components/NoteView.js';
+import type { ScratchEditing } from '../../components/note/types.js';
 import { PasswordItem, type PasswordItemProps } from '../../components/PasswordItem.js';
 import { CardSheet } from '../../components/Scratchpad.js';
 import { t } from '../../i18n/t.js';
