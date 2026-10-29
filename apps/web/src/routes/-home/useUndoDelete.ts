@@ -39,7 +39,7 @@ export const useUndoDelete = ({
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
 	/** The note (`noteRef`) whose undo failed: its notice waits to be dismissed. */
 	const [undoFailed, setUndoFailed] = useState<string | null>(null);
-	/** Text that goes back beside the deleted note, not into it (`NoteView`). */
+	/** Text that goes back beside the deleted note, not into it (`useNoteSession`). */
 	const [beside, setBeside] = useState<DisplacedText | null>(null);
 	const dismissDeleted = useCallback(() => {
 		setDeleted(null);

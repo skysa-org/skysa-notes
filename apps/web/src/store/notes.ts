@@ -384,7 +384,7 @@ export const listNotesEverywhere = (db: NotesDatabase): Promise<NoteRecord[]> =>
  * write to the same row lands, and the `put` below is a whole-record write that
  * takes no notice of it. Everything the app does to a note goes through here or
  * through a sibling that writes the same row, and the app deliberately puts two
- * of them next to each other: `NoteView` flushes a pending autosave immediately
+ * of them next to each other: `useNoteSession` flushes a pending autosave immediately
  * before deleting or switching mode, and a rename can land while one is
  * pending. Those survive only while both land in the same tick. When the 2s debounce fires on its own and the user then
  * clicks, the second write wins the race and the first is gone — a paragraph
