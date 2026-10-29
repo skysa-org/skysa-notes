@@ -19,7 +19,7 @@ import { type CredentialRecord, type NotesDatabase, PENDING_CREDENTIAL_ID } from
  * rather than left for someone to infer.
  *
  * Nothing here is ever logged, put in a URL, or rendered. The device list in
- * `AccountPanel` shows the server's view of the grants, which carries no hashes.
+ * `components/account/Devices.tsx` shows the server's view of the grants, which carries no hashes.
  */
 
 /** The `sk1_` version prefix, hashed along with the rest. See `apps/api/src/credentials.ts`. */

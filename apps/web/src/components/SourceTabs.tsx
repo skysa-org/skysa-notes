@@ -971,7 +971,7 @@ const Menu = ({
  * storage panel acts only on the source showing — the scheduler syncs only
  * that one, and its questions are asked in its panel — so the choice shows the
  * source first, and its panel carries this out once it is there
- * (`AccountPanel`'s `asked`). Sync now needs no asking: showing a source syncs
+ * (`account/useAsked.ts`). Sync now needs no asking: showing a source syncs
  * it.
  */
 export interface SourceAsk {
@@ -985,7 +985,7 @@ export interface AccountSlot {
 	onRename?: () => void;
 	/**
 	 * Where the showing source's `⋯` goes: the end of its row, as every other
-	 * source's is (`AccountPanel`'s `menuIn`). Null until the row is drawn.
+	 * source's is (`ActionsMenu` in `account/PanelMenus.tsx`). Null until the row is drawn.
 	 */
 	menuIn: HTMLElement | null;
 	/** What the showing source's row calls it, for its `⋯`. */
