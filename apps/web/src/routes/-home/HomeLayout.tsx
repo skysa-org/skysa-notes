@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactNode } from 'react';
+import { type CSSProperties, type ReactNode } from 'react';
 
 import { type Notice, NotifyContext } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
@@ -45,8 +45,12 @@ export const HomeLayout = ({
 	inert: boolean;
 	/** The source showing, whose banner says if it is detached. */
 	source: SyncStateRecord | null | undefined;
-	/** What the stylesheet reads off the shell: the panel open, a card. */
-	shell: ComponentProps<'div'>;
+	/**
+	 * What the stylesheet reads off the shell: the panel open, a card, and in a
+	 * compact window where the panels open from. Never a class: the grid's is
+	 * the layout's own.
+	 */
+	shell: Readonly<Record<`data-${string}`, string | undefined> & { style?: CSSProperties }>;
 	bar: ReactNode;
 	palette: ReactNode;
 	sourceDropdown: ReactNode;
@@ -105,15 +109,7 @@ export const HomeLayout = ({
 
 			{overlays}
 
-			{/*
-			 * One stack for everything this screen floats over the page. Two
-			 * notices at once is ordinary — a failed create while the account
-			 * just connected is still being read — and in a stack they sit above
-			 * one another instead of on one another.
-			 *
-			 * The undo notice is here rather than placing itself, which is what
-			 * it did while it was the only other card on the screen.
-			 */}
+			{/* One stack for everything the screen floats over the page (`Home`). */}
 			{floating}
 		</div>
 	</NotifyContext.Provider>

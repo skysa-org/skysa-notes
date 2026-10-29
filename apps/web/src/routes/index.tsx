@@ -517,6 +517,13 @@ const Home = () => {
 				)
 			}
 			overlays={<ScratchOverlays scratch={scratch} editor={noteEditor} />}
+			// One stack for everything this screen floats over the page. Two
+			// notices at once is ordinary — a failed create while the account
+			// just connected is still being read — and in a stack they sit above
+			// one another instead of on one another.
+			//
+			// The undo notice is here rather than placing itself, which is what
+			// it did while it was the only other card on the screen.
 			floating={
 				<>
 					<HeldImport source={held} />
