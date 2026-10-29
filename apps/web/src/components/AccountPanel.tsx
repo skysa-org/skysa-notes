@@ -1,9 +1,7 @@
-import { isVaultPath, type ProviderKind } from '@skysa/core';
+import { isVaultPath } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
-	Fragment,
-	type ReactNode,
 	type RefObject,
 	useCallback,
 	useEffect,
@@ -11,14 +9,12 @@ import {
 	useState,
 	useSyncExternalStore,
 } from 'react';
-import { createPortal } from 'react-dom';
 
 import { api, type ApiClient, type Grant, type InstanceConfig } from '../api/client.js';
 import { answer, type Asked } from '../api/instanceConfig.js';
 import { Icon } from '../editor/icons.js';
 import { type pickFiles } from '../editor/pickFiles.js';
 import { failedAt, saying } from '../errors/reached.js';
-import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
 import { noteLink } from '../routes/place.js';
 import { tabLock } from '../secrets/tabLock.js';
@@ -53,26 +49,37 @@ import {
 	type AccountState,
 	claimConnection,
 	CONNECTABLE,
-	LEFT_AT_PROVIDER,
 	type LetGoInput,
 	letGoOfSource,
 	type LetGoResult,
 	PROVIDER_LABELS,
-	UNSEEN_AT_PROVIDER,
 	type UnsentAnswer,
 } from '../sync/account.js';
 import { needsReconnect, syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
+import {
+	ActionsMenu,
+	GearMenu,
+	StatusLine,
+	SyncBar,
+	SyncDetails,
+	useMenuButtons,
+} from './account/StatusLine.js';
 import {
 	conflictMessage,
 	failureMessage,
 	lineStatus,
 	refusalMessage,
 	statusMessage,
-	type SyncCount,
 	syncCount,
 	when,
 } from './account/statusWords.js';
+import {
+	LeftAtProvider,
+	UnreadableNotice,
+	UnseenDialog,
+	unseenItem,
+} from './account/SyncNotices.js';
 import { ClipboardPanel } from './ClipboardPanel.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
@@ -81,8 +88,7 @@ import { DisconnectDialog } from './DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
 import { InfoDialog } from './InfoDialog.js';
 import { otherLiveSources } from './MoveUnsent.js';
-import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
-import { RunProgress } from './RunProgress.js';
+import { type OptionsMenuItem } from './OptionsMenu.js';
 import { SecretsDialog, type SecretsDialogProps, secretsLabel } from './SecretsDialog.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
 import { useEscape } from './useEscape.js';
@@ -159,154 +165,6 @@ export const returnPath = (href: string): string => {
 	return url.pathname + url.search;
 };
 
-/**
- * How full a long run is, under what says how far it has got: a fraction, or,
- * while a scan or a round is still listing, a bar that does not pretend to know.
- */
-const SyncBar = ({ count }: { count: SyncCount }) =>
-	count.bar === null ? (
-		<progress className="account-bar" aria-label={t('account.progress')} />
-	) : (
-		<progress
-			className="account-bar"
-			aria-label={t('account.progress')}
-			value={count.bar.value}
-			max={Math.max(count.bar.max, 1)}
-		/>
-	);
-
-/** How many of the files that could not be read are named before "and N more". */
-const UNREADABLE_NAMED = 5;
-
-const byName = (one: string, two: string): number => one.localeCompare(two);
-
-/**
- * `a.md, b.md, … and 3 more`. Each path is its own `<bdi>`, so a name written
- * right-to-left cannot reorder the list around it or swallow the comma after
- * it — the path is data, and the sentence is not.
- */
-const PathList = ({ paths }: { paths: readonly string[] }) => {
-	const named = paths.slice(0, UNREADABLE_NAMED);
-	const more = paths.length - named.length;
-	const list = named.map((path, at) => (
-		<Fragment key={path}>
-			{at > 0 && t('account.paths.separator')}
-			<bdi>{path}</bdi>
-		</Fragment>
-	));
-	return (
-		<>{more > 0 ? rich('account.paths.more', { list: () => list }, { count: more }) : list}</>
-	);
-};
-
-/**
- * The files in this source that are not UTF-8 text, which sync leaves alone
- * (docs/ARCHITECTURE.md §7). Said because nothing else does: such a file is not in the
- * list of notes, and a note whose file became one has gone from this device.
- * By path, since that is how the user finds the file in the tool that wrote it,
- * and with what to do about it, since nothing here can do it for them.
- *
- * And where a note of theirs went when one of these files took its name
- * (`movedAside`). That is not a conflict — nothing was edited twice and no copy
- * was made — so it is said here, beside the file that caused it, rather than in
- * the conflicts line above.
- */
-const UnreadableNotice = ({
-	files = [],
-	label,
-}: {
-	files: SyncStateRecord['unreadable'];
-	label: string;
-}) => {
-	const paths = files.map((file) => file.path).sort(byName);
-	const moved = [...new Set(files.flatMap((file) => file.movedAside ?? []))].sort(byName);
-	const [only] = paths;
-	if (only === undefined) return null;
-	return (
-		<p className="muted wrap-anywhere">
-			{rich(
-				'account.unreadable.files',
-				{
-					path: (words) => <bdi>{words}</bdi>,
-					paths: () => <PathList paths={paths} />,
-				},
-				{ count: paths.length, path: only, provider: label }
-			)}
-			{/* A sentence of its own, with a count of its own. */}
-			{moved.length > 0 && (
-				<>
-					{' '}
-					{rich(
-						'account.unreadable.moved',
-						{ paths: () => <PathList paths={moved} /> },
-						{ count: moved.length }
-					)}
-				</>
-			)}
-		</p>
-	);
-};
-
-/**
- * Where to withdraw the app's access by hand, for a provider that gives the
- * server no way to. The links open elsewhere, so the confirmation — and the
- * address — are still here to come back to.
- */
-const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) => {
-	if (provider !== 'onedrive') return null;
-	const pages = LEFT_AT_PROVIDER.onedrive;
-	return (
-		<p className="muted">
-			{rich('account.leftAtProvider.onedrive', {
-				consent: (words) => (
-					<a href={pages.consent} target="_blank" rel="noreferrer">
-						{words}
-					</a>
-				),
-				myApps: (words) => (
-					<a href={pages.myApps} target="_blank" rel="noreferrer">
-						{words}
-					</a>
-				),
-			})}
-		</p>
-	);
-};
-
-/**
- * What this source's app folder holds that the app cannot see: a user who
- * copies notes into the folder by hand otherwise finds nothing arrived, and
- * nothing to say why (`UNSEEN_AT_PROVIDER`). An item of the gear's menu or the
- * `⋯`, that opens it over everything: it is the same for every Drive source
- * for good, and said in the panel it would be a paragraph there for good.
- */
-const unseenItem = (
-	provider: ProviderKind | undefined,
-	label: string,
-	onOpen: () => void
-): OptionsMenuItem[] =>
-	provider !== undefined && UNSEEN_AT_PROVIDER[provider] !== undefined
-		? [{ label: t('account.menu.about', { provider: label }), onChoose: onOpen }]
-		: [];
-
-const UnseenDialog = ({
-	provider,
-	onClose,
-	returnFocus,
-}: {
-	provider: ProviderKind | undefined;
-	onClose: () => void;
-	returnFocus: RefObject<HTMLElement | null>;
-}) => {
-	const unseen = provider === undefined ? undefined : UNSEEN_AT_PROVIDER[provider];
-	if (unseen === undefined) return null;
-	return (
-		<InfoDialog title={unseen.summary} onClose={onClose} returnFocus={returnFocus}>
-			<p>{unseen.detail}</p>
-		</InfoDialog>
-	);
-};
-
 interface LocalProps {
 	client: Client;
 	database: NotesDatabase;
@@ -315,212 +173,6 @@ interface LocalProps {
 	navigate?: (url: string) => void;
 	slot?: AccountSlot;
 }
-
-/**
- * The panel's actions as one `⋯` menu, drawn into the end of the showing
- * source's row as every other row's is drawn into its own (`RowOptions`, whose
- * names it takes). There with nothing in it too, disabled, so the rows keep
- * their shape from source to source.
- */
-const ActionsMenu = ({
-	slot,
-	items,
-	triggerRef,
-	onOpen,
-}: {
-	slot: AccountSlot;
-	items: readonly OptionsMenuItem[];
-	triggerRef?: RefObject<HTMLButtonElement | null>;
-	onOpen?: () => void;
-}) => {
-	// First, as a notebook's menu has it: what the source is called, then what
-	// can be done with it.
-	const all =
-		slot.onRename === undefined
-			? items
-			: [{ label: t('account.menu.rename'), onChoose: slot.onRename }, ...items];
-	return slot.menuIn === null
-		? null
-		: createPortal(
-				<OptionsMenu
-					label={t('account.menu.sourceLabel', { name: slot.name })}
-					title={t('account.menu.sourceTitle')}
-					groupLabel={t('account.menu.sourceGroup', { name: slot.name })}
-					triggerClassName="icon icon-quiet"
-					trigger={<Icon name="overflow" />}
-					disabled={all.length === 0}
-					items={all}
-					{...(triggerRef === undefined ? {} : { triggerRef })}
-					{...(onOpen === undefined ? {} : { onOpen })}
-				/>,
-				slot.menuIn
-			);
-};
-
-/**
- * Where the panel ends, once there is nothing to ask the user: the source and
- * how it is going, in one line, with a connected source's count of its other
- * devices at the line's end, and the gear with everything that can be done to
- * it — at the foot of the sidebar, and of a compact window's source dropdown,
- * where the source's `⋯` has the same. What needs the user — a reconnect, a
- * problem, a question being asked — is drawn above the line while it lasts,
- * so the line is where the panel ends whatever is going on.
- */
-const StatusLine = ({
-	text,
-	title,
-	onDetails,
-	detailsRef,
-	children,
-}: {
-	text: string;
-	title: string | null;
-	/**
-	 * Given while the source syncs, but during a first import: the words are a
-	 * button that opens how syncing is going, and with which account
-	 * (`SyncDetails`). Inside the
-	 * line rather than in its place, so the line is the same element whatever
-	 * it says.
-	 */
-	onDetails?: () => void;
-	detailsRef?: RefObject<HTMLButtonElement | null>;
-	children: ReactNode;
-}) => (
-	<div className="account-line">
-		<p className="account-status muted" {...(title === null ? {} : { title })}>
-			{onDetails === undefined ? (
-				text
-			) : (
-				<button
-					ref={detailsRef}
-					type="button"
-					className="account-status-button"
-					aria-haspopup="dialog"
-					onClick={onDetails}
-				>
-					{text}
-				</button>
-			)}
-		</p>
-		{children}
-	</div>
-);
-
-/**
- * What a sync is doing, at more length than the line has room for, and the
- * way to pause it — or, paused, to resume it (2026-10-13). Opened from the
- * status line, and live while open: once the run it was opened on has ended,
- * it says how syncing stands, with Close alone. Opened from it whatever it
- * says (2026-10-14), since the line no longer names the source, and this
- * does, with its account, on a phone that has no tooltip to show.
- * Paused, nothing syncs on this device until Sync now, a re-scan, the source
- * shown again after another, or a reload (`pause` in `sync/scheduler.ts`).
- */
-const SyncDetails = ({
-	status,
-	label,
-	displayName,
-	syncable,
-	onPause,
-	onResume,
-	onClose,
-	returnFocus,
-}: {
-	status: SchedulerStatus;
-	label: string;
-	displayName: string | null;
-	syncable: boolean;
-	onPause: () => void;
-	onResume: () => void;
-	onClose: () => void;
-	returnFocus: RefObject<HTMLElement | null>;
-}) => {
-	const syncing = status.phase === 'syncing';
-	const paused = status.phase === 'paused';
-	const action = syncing ? (
-		<button type="button" onClick={onPause}>
-			{t('account.details.pause')}
-		</button>
-	) : paused ? (
-		<button type="button" onClick={onResume}>
-			{t('account.details.resume')}
-		</button>
-	) : undefined;
-	return (
-		<InfoDialog
-			title={
-				paused
-					? t('account.details.pausedTitle')
-					: displayName === null
-						? t('account.details.title', { provider: label })
-						: t('account.details.titleAs', { provider: label, account: displayName })
-			}
-			onClose={onClose}
-			actions={action}
-			returnFocus={returnFocus}
-		>
-			<div className="run-body">
-				{/* Polite, as an import's is: it changes every few files. */}
-				<p role="status" aria-live="polite">
-					{statusMessage(status, label, syncable) ??
-						lineStatus(status, label, syncable).text}
-				</p>
-				{syncing && <RunProgress status={status} label={t('account.progress')} />}
-				{syncing && <p className="muted">{t('account.details.pauseHint')}</p>}
-			</div>
-		</InfoDialog>
-	);
-};
-
-/**
- * The panel's actions, behind a gear at the end of its status line: what the
- * showing source's `⋯` offers in a compact window's source dropdown, from the
- * same lists. It opens upwards, being at the foot of the window.
- */
-const GearMenu = ({
-	items,
-	triggerRef,
-	onOpen,
-}: {
-	items: readonly OptionsMenuItem[];
-	triggerRef?: RefObject<HTMLButtonElement | null>;
-	onOpen?: () => void;
-}) => (
-	<OptionsMenu
-		label={t('account.menu.label')}
-		title={t('account.menu.label')}
-		groupLabel={t('account.menu.group')}
-		triggerClassName="icon icon-quiet"
-		trigger={<Icon name="gear" />}
-		disabled={items.length === 0}
-		items={items}
-		rises
-		{...(triggerRef === undefined ? {} : { triggerRef })}
-		{...(onOpen === undefined ? {} : { onOpen })}
-	/>
-);
-
-/**
- * The gear and, in a compact window, the source's `⋯` — two menus of one
- * list — and `openButton` kept on the one opened last, which is where the
- * focus goes back to once a question asked from it is put away. The gear,
- * until either is opened. Each has its own ref: a menu's button is also where
- * it is anchored, so the two cannot share one.
- */
-const useMenuButtons = (openButtonRef: RefObject<HTMLButtonElement | null>) => {
-	const gear = useRef<HTMLButtonElement>(null);
-	const dots = useRef<HTMLButtonElement>(null);
-	useEffect(() => {
-		openButtonRef.current ??= gear.current;
-	});
-	const onGear = useCallback(() => {
-		openButtonRef.current = gear.current;
-	}, [openButtonRef]);
-	const onDots = useCallback(() => {
-		openButtonRef.current = dots.current;
-	}, [openButtonRef]);
-	return { gear, dots, onGear, onDots };
-};
 
 /**
  * What another source's `⋯` asked of this one (`SourceAsk`), once this one is
