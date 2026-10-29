@@ -1,5 +1,5 @@
 import { basename, parentPath, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
-import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, useRouterState } from '@tanstack/react-router';
 import { useCallback, useRef, useState } from 'react';
 
 import { CommandsProvider, useShortcuts } from '../commands/context.js';
@@ -19,7 +19,6 @@ import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
-import { showConnection } from '../store/connection.js';
 import { db, type NoteRecord, noteRef, type SyncStateRecord } from '../store/db.js';
 import {
 	useActiveConnectionId,
@@ -32,7 +31,6 @@ import {
 	useScratchpadShown,
 	useSources,
 } from '../store/hooks.js';
-import { noteIsUnder, rememberOpen } from '../store/lastOpen.js';
 import { createLiveEdits } from '../store/liveEdits.js';
 import { deleteNote, getNote } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
@@ -41,7 +39,12 @@ import { createRenamings } from '../store/renaming.js';
 import { titleShown } from '../store/titles.js';
 import { findFolder, notesUnder } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
-import { useEnterCode, useKeepOnInstall, useShellCommands } from './-home/commands.js';
+import {
+	useEnterCode,
+	useKeepOnInstall,
+	useShareArrival,
+	useShellCommands,
+} from './-home/commands.js';
 import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
 import { HomeBar } from './-home/HomeBar.js';
 import { HomeToasts } from './-home/HomeToasts.js';
@@ -52,10 +55,10 @@ import { SourceDropdown } from './-home/SourceDropdown.js';
 import { useBegunInView, useListedNotes } from './-home/useListedNotes.js';
 import { useEscapePutsDown, useMoving } from './-home/useMoving.js';
 import { useNotebookActions } from './-home/useNotebookActions.js';
-import { canBegin, type Select, useOpenPlace } from './-home/useOpenPlace.js';
+import { canBegin, useOpenPlace } from './-home/useOpenPlace.js';
+import { useSelect } from './-home/useSelect.js';
 import { useUndoDelete } from './-home/useUndoDelete.js';
 import { type Pane, useCompactLayout } from './panel.js';
-import { type Place, placeFolder } from './place.js';
 import { parseSearch } from './search.js';
 
 /**
@@ -81,7 +84,6 @@ const detachedText = (source: SyncStateRecord): string => {
 
 const Home = () => {
 	const { connect, code, enter, share } = Route.useSearch();
-	const navigate = useNavigate({ from: Route.fullPath });
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
 
@@ -144,7 +146,7 @@ const Home = () => {
 		passwords: passwordsShown,
 		onStoreFailed: noteNotMade,
 	});
-	const { folder, noteId, openNote, storedNote, opening, go, openedOver } = place;
+	const { folder, noteId, openNote, storedNote, opening, go } = place;
 	/** The scratchpad is open, in the notes' place (docs/ARCHITECTURE.md §7). */
 	const inScratchpad = folder === SCRATCHPAD_FOLDER;
 	/** The passwords are open, in the notes' place ("Passwords in the vault"). */
@@ -192,21 +194,7 @@ const Home = () => {
 	} = useCompactLayout();
 	useBegunInView(place.begun, setPanel);
 	const enterCode = useEnterCode(enter, compact);
-	// Something shared to the app (`share/TakeShare.tsx`): out of the URL once
-	// read, so a reload does not ask again, and the clipboard brought into
-	// view once it has it, which in a compact window is in the sources
-	// dropdown.
-	const shareRead = useCallback(() => {
-		void navigate({
-			search: ({ share: _share, ...rest }) => rest,
-			hash: true,
-			state: true,
-			replace: true,
-		});
-	}, [navigate]);
-	const shareAdded = useCallback(() => {
-		if (compact) setPanel('sources');
-	}, [compact, setPanel]);
+	const { shareRead, shareAdded } = useShareArrival(compact, setPanel);
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	/**
 	 * The search field, so a command can put the cursor in it. A command that
@@ -215,80 +203,16 @@ const Home = () => {
 	 */
 	const searchField = useRef<HTMLInputElement>(null);
 
-	/**
-	 * Go somewhere in the source showing: `next` over the notebook and note
-	 * open. A step of the user's own is pushed, so Back undoes it; `replace`
-	 * is for keeping the URL true to what has changed under it — a notebook
-	 * renamed or moved, a delete, an undo. `note` is the note going to, where
-	 * the caller has it, so the hash can name it at once.
-	 */
-	const select: Select = (next, { replace = false, note, panel } = {}) => {
-		// Anything else the user does answers the banner: it is about the name they
-		// just tried, not about the app, and leaving it up means a message about a
-		// notebook they have since moved on from sits there for the session.
-		setProblem(null);
-		dismissConnect();
-		const to: Place = { folder, note: noteId, ...next };
-		// Where the user is already, under a dropdown opened over it: the note
-		// open, chosen again from its notes, shuts them, as Back would. Not
-		// where the dropdown came with the place, as a notebook's notes come
-		// with it: choosing from them is a step, for Back to come back to.
-		if (!replace && openedOver(to)) {
-			setPanel(panel ?? null);
-			return;
-		}
-		const going =
-			note ??
-			[openNote, ...(notes ?? [])].find((each) => each !== undefined && each.id === to.note);
-		go(to, { replace, notePath: going?.path, ...(panel === undefined ? {} : { panel }) });
-	};
-
-	/**
-	 * Open a notebook. Only a note under the open notebook can be open, so the
-	 * note showing stays only while it is under the one clicked — in it, or in
-	 * a notebook inside it, at any depth (`noteIsUnder`). Clicking a parent of
-	 * the note's own notebook used to clear it and leave an empty editor beside
-	 * a list, which was the reported bug. Anywhere else the note is let go, and
-	 * the notebook's own opens in its place (`useOpenPlace`): the one open last
-	 * in it on this device, or its first. `panel` is what a compact window
-	 * opens over it, in the same step (`afterFolder`).
-	 */
-	const openFolder = (path: string, panel: Pane | null = null) => {
-		const keep = openNote !== undefined && noteIsUnder(openNote.path, path);
-		select(keep ? { folder: path } : { folder: path, note: undefined }, { panel });
-	};
-
-	/**
-	 * Open a search result. A result can be in any source and any notebook, and
-	 * opening one has to take the user to all of it: the source first, since
-	 * the notebook and the note named in the URL are read inside whichever
-	 * source is showing, and then the notebook and the note together. Left in
-	 * the source or the notebook they were in, the sidebar would highlight one
-	 * place while the note beside it came from another, and clearing the search
-	 * would leave the open note nowhere in the list.
-	 */
-	const openResult = (note: NoteRecord) => {
-		// Done with: the field has emptied itself, and in a compact window the
-		// bar goes back to its dropdowns rather than staying a search. A
-		// dropdown open is shut by the step to the note, which has none.
-		setSearchOpen(false);
-		if (note.connectionId === activeConnection) {
-			// A scratch note opens as its card, over the scratchpad.
-			select({ folder: placeFolder(note.path), note: note.id }, { note });
-			return;
-		}
-		// Another source: the entry in front is the old source's and is kept for
-		// Back, and the new source's place goes after it (`useStanding`). That
-		// place is the one remembered there, so the way to arrive somewhere in
-		// it is to be remembered there first.
-		setProblem(null);
-		dismissConnect();
-		// Shut first, as the new source's place is pushed with the dropdown the
-		// entry before it had open (`useOpenPlace`).
-		void shutPanel()
-			.then(() => rememberOpen(db, note.connectionId, placeFolder(note.path), note.id))
-			.then(() => showConnection(db, note.connectionId));
-	};
+	const { select, openFolder, openResult } = useSelect({
+		place,
+		notes,
+		activeConnection,
+		setPanel,
+		shutPanel,
+		setSearchOpen,
+		setProblem,
+		dismissConnect,
+	});
 
 	const { deleted, setDeleted, undoFailed, setBeside, dismissDeleted, undoDelete } =
 		useUndoDelete({ select, setProblem });

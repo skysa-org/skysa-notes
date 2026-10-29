@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
 import { SHARE_CACHE } from '../src/share/received.js';
+import { bindConnection, finishImport } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { hashIn, placeIn } from './entry.js';
 import { fakeCaches } from './fakeCaches.js';
+import { holdCredential } from './support/connection.js';
+import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
  * `?share=<id>`, where the service worker sends the page once it has kept what
@@ -23,9 +26,13 @@ beforeEach(() => {
 	vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')));
 });
 
+let fake: FakeWindow | undefined;
+
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
+	fake?.restore();
+	fake = undefined;
 });
 
 describe('a share arriving in the URL', () => {
@@ -55,6 +62,35 @@ describe('a share arriving in the URL', () => {
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
 		await waitFor(() => {
 			expect(urls(SHARE_CACHE)).toEqual([]);
+		});
+	});
+
+	it('opens the sources in a compact window once it is on the clipboard, which is there', async () => {
+		const { storage } = fakeCaches();
+		vi.stubGlobal('caches', storage);
+		const cache = await storage.open(SHARE_CACHE);
+		await cache.put(`/share/${ID}`, new Response(JSON.stringify({ text: 'hi', files: [] })));
+		await holdCredential(db, 'c-dropbox');
+		await bindConnection(db, {
+			connectionId: 'c-dropbox',
+			provider: 'dropbox',
+			accountId: 'a',
+		});
+		await finishImport(db, 'c-dropbox');
+		await db.syncState.update('c-dropbox', { clipboard: true });
+		fake = windowWidth(400);
+		const router = createRouter({
+			routeTree,
+			history: createMemoryHistory({ initialEntries: [`/?share=${ID}`] }),
+		});
+		render(<RouterProvider router={router} />);
+
+		const shell = () => document.querySelector('.app-shell');
+		await screen.findByRole('alertdialog', { name: 'Add to the clipboard?' });
+		expect(shell()?.getAttribute('data-panel')).toBeNull();
+		await userEvent.setup().click(screen.getByRole('button', { name: 'Add to clipboard' }));
+		await waitFor(() => {
+			expect(shell()?.getAttribute('data-panel')).toBe('sources');
 		});
 	});
 });
