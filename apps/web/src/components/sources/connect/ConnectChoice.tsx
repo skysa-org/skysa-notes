@@ -6,8 +6,8 @@ import { t } from '../../../i18n/t.js';
 import { heldConnectCode, heldConnectCodeShown } from '../../../store/connectCode.js';
 import type { NotesDatabase } from '../../../store/db.js';
 import { PROVIDER_LABELS } from '../../../sync/account.js';
-import { ConnectButton } from '../../ConnectButton.js';
-import { ProviderIcon } from '../../ProviderIcon.js';
+import { ConnectButton } from '../../account/ConnectButton.js';
+import { ProviderIcon } from '../ProviderIcon.js';
 import {
 	askAbout,
 	ConnectCodeForm,

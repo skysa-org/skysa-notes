@@ -9,14 +9,14 @@ import {
 	useState,
 } from 'react';
 
-import { t } from '../i18n/t.js';
-import { type NoteRecord, noteRef } from '../store/db.js';
-import { useNoteSearch, useRecentNotes } from '../store/hooks.js';
-import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
-import { titleShown } from '../store/titles.js';
-import { folderLabel } from '../store/tree.js';
-import { editedAt } from './ui/editedAt.js';
-import { usePointerMoved } from './ui/usePointerMoved.js';
+import { t } from '../../i18n/t.js';
+import { type NoteRecord, noteRef } from '../../store/db.js';
+import { useNoteSearch, useRecentNotes } from '../../store/hooks.js';
+import { type NoteHit, SEARCH_LIMIT } from '../../store/search.js';
+import { titleShown } from '../../store/titles.js';
+import { folderLabel } from '../../store/tree.js';
+import { editedAt } from '../ui/editedAt.js';
+import { usePointerMoved } from '../ui/usePointerMoved.js';
 
 /**
  * The app's search field, and its answers in a list that drops from it.

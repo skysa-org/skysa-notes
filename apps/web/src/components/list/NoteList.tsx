@@ -11,24 +11,24 @@ import {
 	useState,
 } from 'react';
 
-import { rich } from '../i18n/rich.js';
-import { t } from '../i18n/t.js';
-import type { NoteRecord } from '../store/db.js';
-import { keepRows } from '../store/kept.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
-import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
-import { titleShown } from '../store/titles.js';
-import { byParent, folderLabel } from '../store/tree.js';
-import { noteOpening, openingLines } from '../store/visibleText.js';
-import { editedAt } from './ui/editedAt.js';
+import { rich } from '../../i18n/rich.js';
+import { t } from '../../i18n/t.js';
+import type { NoteRecord } from '../../store/db.js';
+import { keepRows } from '../../store/kept.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../../store/liveEdits.js';
+import { type Renamings, shownFolder, useRenaming } from '../../store/renaming.js';
+import { titleShown } from '../../store/titles.js';
+import { byParent, folderLabel } from '../../store/tree.js';
+import { noteOpening, openingLines } from '../../store/visibleText.js';
+import { editedAt } from '../ui/editedAt.js';
 import {
 	FloatingMenu,
 	type MenuPoint,
 	type OptionsMenuItem,
 	useRowMenu,
-} from './ui/OptionsMenu.js';
-import { pickUpProps } from './ui/pickUpProps.js';
-import { RowOptions } from './ui/RowOptions.js';
+} from '../ui/OptionsMenu.js';
+import { pickUpProps } from '../ui/pickUpProps.js';
+import { RowOptions } from '../ui/RowOptions.js';
 import {
 	besideOf,
 	indicesIn,
@@ -37,7 +37,7 @@ import {
 	useFocusedItem,
 	useHeights,
 	useScrollSpan,
-} from './ui/windowing.js';
+} from '../ui/windowing.js';
 
 /**
  * The middle pane: the notes in the selected notebook, newest first by when

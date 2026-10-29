@@ -1,4 +1,4 @@
-import { AccountPanel } from '../../components/AccountPanel.js';
+import { AccountPanel } from '../../components/account/AccountPanel.js';
 import { SourcePanel } from '../../components/sources/SourcePanel.js';
 import type { Renamings } from '../../store/renaming.js';
 /**

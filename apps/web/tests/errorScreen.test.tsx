@@ -10,7 +10,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ErrorScreen } from '../src/components/ErrorScreen.js';
+import { ErrorScreen } from '../src/components/shell/ErrorScreen.js';
 import { Route as IndexRoute } from '../src/routes/index.js';
 import { routeTree } from '../src/routeTree.gen.js';
 

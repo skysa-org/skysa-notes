@@ -1,15 +1,15 @@
 import type { SyncProgress } from '@skysa/core';
 import { useId, useState } from 'react';
 
-import { api, type ApiClient } from '../api/client.js';
-import { saying } from '../errors/reached.js';
-import { t } from '../i18n/t.js';
-import { db, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
-import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../sync/account.js';
-import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
-import type { SchedulerStatus, SyncScheduler } from '../sync/scheduler.js';
-import { Dialog, DialogActions } from './ui/Dialog.js';
-import { RunProgress } from './ui/RunProgress.js';
+import { api, type ApiClient } from '../../api/client.js';
+import { saying } from '../../errors/reached.js';
+import { t } from '../../i18n/t.js';
+import { db, type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../../sync/account.js';
+import { syncScheduler, useSyncStatus } from '../../sync/runtime.js';
+import type { SchedulerStatus, SyncScheduler } from '../../sync/scheduler.js';
+import { Dialog, DialogActions } from '../ui/Dialog.js';
+import { RunProgress } from '../ui/RunProgress.js';
 
 /**
  * A source's first import, as it happens, and the way out of it.

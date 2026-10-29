@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ApiClient, Result } from '../src/api/client.js';
 import { CommandsProvider } from '../src/commands/context.js';
-import { ImportDialog, importMessage } from '../src/components/ImportProgress.js';
+import { ImportDialog, importMessage } from '../src/components/account/ImportProgress.js';
 import { bindConnection } from '../src/store/connection.js';
 import { LOCAL_CONNECTION_ID, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';

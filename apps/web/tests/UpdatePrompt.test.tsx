@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UpdatePrompt } from '../src/components/UpdatePrompt.js';
+import { UpdatePrompt } from '../src/components/shell/UpdatePrompt.js';
 
 /**
  * The prompt a new build waiting to take over puts up. Reload stops the app's

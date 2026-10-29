@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 
-import { t } from '../i18n/t.js';
-import { makeWay, updateChannel } from '../sync/beforeUpdate.js';
-import { syncScheduler } from '../sync/runtime.js';
+import { t } from '../../i18n/t.js';
+import { makeWay, updateChannel } from '../../sync/beforeUpdate.js';
+import { syncScheduler } from '../../sync/runtime.js';
 
 /** How long Reload may go unanswered before the prompt says what else to do. */
 const SLOW_MS = 10_000;

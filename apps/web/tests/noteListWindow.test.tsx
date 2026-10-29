@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NoteList, WINDOWED_ABOVE } from '../src/components/NoteList.js';
+import { NoteList, WINDOWED_ABOVE } from '../src/components/list/NoteList.js';
 import type { NoteRecord } from '../src/store/db.js';
 
 /**

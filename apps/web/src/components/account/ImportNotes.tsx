@@ -1,9 +1,9 @@
 import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { useState } from 'react';
 
-import { pickFiles } from '../editor/pickFiles.js';
-import { t } from '../i18n/t.js';
-import type { NotesDatabase } from '../store/db.js';
+import { pickFiles } from '../../editor/pickFiles.js';
+import { t } from '../../i18n/t.js';
+import type { NotesDatabase } from '../../store/db.js';
 import {
 	bringsAnything,
 	importLibrary,
@@ -17,10 +17,10 @@ import {
 	readPicked,
 	type Skipped,
 	type SkipReason,
-} from '../store/importLibrary.js';
-import { ConfirmDialog } from './ui/ConfirmDialog.js';
-import { useNotify } from './ui/notify.js';
-import type { OptionsMenuItem } from './ui/OptionsMenu.js';
+} from '../../store/importLibrary.js';
+import { ConfirmDialog } from '../ui/ConfirmDialog.js';
+import { useNotify } from '../ui/notify.js';
+import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
  * Notes brought in from a folder or a ZIP (docs/ARCHITECTURE.md §7, "Getting a

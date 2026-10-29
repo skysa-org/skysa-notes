@@ -1,4 +1,4 @@
-import { DeletedNotice } from '../../components/DeletedNotice.js';
+import { DeletedNotice } from '../../components/list/DeletedNotice.js';
 import type { Notice } from '../../components/ui/notify.js';
 import { Toast } from '../../components/ui/Toast.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type Dexie from 'dexie';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
-import { StaleTabGate } from '../src/components/StaleTabGate.js';
+import { StaleTabGate } from '../src/components/shell/StaleTabGate.js';
 import { createDatabase, type NotesDatabase, watchTab } from '../src/store/db.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';

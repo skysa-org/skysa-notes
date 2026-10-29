@@ -2,7 +2,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { Component, type ReactNode, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { NoteSearchField } from '../src/components/SearchField.js';
+import { NoteSearchField } from '../src/components/shell/SearchField.js';
 import { db } from '../src/store/db.js';
 import { useNoteSearch } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';

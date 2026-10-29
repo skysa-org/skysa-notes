@@ -1,5 +1,5 @@
-import { CompactBar, type CompactBarProps } from '../../components/CompactBar.js';
-import { NoteSearchField, SearchQuery } from '../../components/SearchField.js';
+import { CompactBar, type CompactBarProps } from '../../components/shell/CompactBar.js';
+import { NoteSearchField, SearchQuery } from '../../components/shell/SearchField.js';
 import { SourceTabs } from '../../components/sources/SourceTabs.js';
 
 /**

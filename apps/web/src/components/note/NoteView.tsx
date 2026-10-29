@@ -9,9 +9,9 @@ import { t } from '../../i18n/t.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { setScratchMarks } from '../../store/notes.js';
 import { scratchMarks } from '../../store/scratchpad.js';
-import { useOpeningNotice } from '../opening.js';
 import { focusEditor, inAField } from './focus.js';
 import { NoteScreen } from './NoteScreen.js';
+import { useOpeningNotice } from './opening.js';
 import type {
 	MarkChange,
 	NoteDraft,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { t } from '../i18n/t.js';
-import { DismissButton } from './ui/Toast.js';
+import { t } from '../../i18n/t.js';
+import { DismissButton } from '../ui/Toast.js';
 
 /**
  * How long a delete can be taken back from here. Long enough to notice the note

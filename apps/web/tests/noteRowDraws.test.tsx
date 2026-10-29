@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { NoteList, type NoteListProps } from '../src/components/NoteList.js';
+import { NoteList, type NoteListProps } from '../src/components/list/NoteList.js';
 import type { NoteRecord } from '../src/store/db.js';
 import type * as VisibleText from '../src/store/visibleText.js';
 

@@ -1,7 +1,7 @@
 import { clusters } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
-import { middleEllipsis } from '../src/components/middleEllipsis.js';
+import { middleEllipsis } from '../src/components/shell/middleEllipsis.js';
 
 /**
  * A notebook's path in the compact bar, shortened in its middle. Measured here

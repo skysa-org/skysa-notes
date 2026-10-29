@@ -1,7 +1,7 @@
 import { parentPath } from '@skysa/core';
 
-import { NoteList, type NoteListProps } from '../../components/NoteList.js';
-import { noteMenuItems } from '../../components/noteMenu.js';
+import { NoteList, type NoteListProps } from '../../components/list/NoteList.js';
+import { noteMenuItems } from '../../components/list/noteMenu.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { setNotePinned } from '../../store/pins.js';
 import type { Moving } from '../../store/rearrange.js';
