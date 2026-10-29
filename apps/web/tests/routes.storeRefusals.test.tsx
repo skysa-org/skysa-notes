@@ -75,7 +75,8 @@ describe('a rename the store refuses', () => {
 	it('takes the message down at the next place the user goes', async () => {
 		const user = userEvent.setup();
 		await openApp('Minutes', 'Agenda');
-		await screen.findByRole('heading', { name: 'Work' });
+		await user.click(await screen.findByRole('button', { name: /^Minutes/ }));
+		await screen.findByDisplayValue('Minutes');
 		store.refusing = true;
 		await user.click(screen.getByRole('button', { name: 'Options for “Work”' }));
 		const items = await screen.findByRole('group', { name: 'Notebook “Work”' });

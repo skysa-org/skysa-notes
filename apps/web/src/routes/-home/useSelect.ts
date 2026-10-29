@@ -10,7 +10,8 @@ import { type Select, type useOpenPlace } from './useOpenPlace.js';
  * The shell's ways of going somewhere: `select`, over the place open; a
  * notebook (`openFolder`); and a search result, in whichever source it is in
  * (`openResult`). Each answers the banner first, as anything else the user
- * does does.
+ * does does. Made fresh at each render, over what is open then, as they were
+ * in `Home`.
  */
 export const useSelect = ({
 	place,
