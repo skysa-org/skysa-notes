@@ -400,6 +400,27 @@ describe('the source tabs', () => {
 		).toHaveLength(0);
 	});
 
+	it('heads its menu by what it asks: a provider at first, another account after', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		const { unmount } = show(db);
+
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+		const heading = () =>
+			within(screen.getByRole('group', { name: 'Storage providers' })).getByText(
+				/^(Choose a storage provider|Connect another account)$/
+			).textContent;
+		await screen.findByRole('group', { name: 'Storage providers' });
+		expect(heading()).toBe('Choose a storage provider');
+		unmount();
+
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		show(db);
+		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+		await screen.findByRole('group', { name: 'Storage providers' });
+		expect(heading()).toBe('Connect another account');
+	});
+
 	it('does not call a source of unknown provider "This device" as well', async () => {
 		// A save landing after the connection went brings a row back with no
 		// provider on it (`ensureDetached`). It is not the pile — it holds an
@@ -638,6 +659,15 @@ describe('the source panel, in a compact window', () => {
 
 		await user.keyboard('{Escape}');
 		expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();
+	});
+
+	it('asks for a provider from its `+` while nothing is connected', async () => {
+		const db = freshDatabase();
+		const user = userEvent.setup();
+		showPanel(db);
+
+		const menu = await openPanelAdd(user, 'Connect storage provider');
+		expect(menu.getByText('Choose a storage provider')).toBeTruthy();
 	});
 
 	it('hands the storage panel the end of the showing source’s row, for its `⋯`', async () => {

@@ -39,6 +39,9 @@ export const useSourceChoices = (
 		live: ordered.some(
 			(source) => source.connectionId !== LOCAL_CONNECTION_ID && isLiveSource(source)
 		),
+		// Nothing connected yet, as a fact rather than read back from the words
+		// below, which two languages could make the same.
+		first: !anyConnected(ordered),
 		// "Connect another account" once there is one; before that, what
 		// connecting is (`CONNECT_FIRST_LABEL`).
 		connectLabel: anyConnected(ordered) ? t('sources.connectAnother') : CONNECT_FIRST_LABEL,
