@@ -15,7 +15,14 @@ import type { Place } from '../../routes/place.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { settleEditors } from '../../store/heldEdits.js';
 import { useScratchNotes } from '../../store/hooks.js';
-import { deleteNote, getNote, isUnnamed, renameNote, setScratchMarks } from '../../store/notes.js';
+import {
+	deleteForUndo,
+	deleteNote,
+	getNote,
+	isUnnamed,
+	renameNote,
+	setScratchMarks,
+} from '../../store/notes.js';
 import type { Moving } from '../../store/rearrange.js';
 import { isLive } from '../../store/rowStates.js';
 import { scratchMarks } from '../../store/scratchpad.js';
@@ -226,14 +233,9 @@ export const useScratchpad = ({
 			pane.deleteNote(note);
 			return;
 		}
-		void deleteNote(db, note.id, scope(note))
-			.then(() => getNote(db, note.id, scope(note)).catch(() => undefined))
-			.then((row) => {
-				onDeleted(row ?? note);
-			})
-			.catch(() => {
-				onProblem(t('scratchpad.problem.deleted'));
-			});
+		void deleteForUndo(db, note).then(onDeleted, () => {
+			onProblem(t('scratchpad.problem.deleted'));
+		});
 	};
 
 	/** The open note's editor is put away, the box or the card, before it moves. */
