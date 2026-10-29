@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import { Sidebar } from '../src/components/sidebar/Sidebar.js';
+import { createRenamings } from '../src/store/renaming.js';
 import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 /**
@@ -480,6 +481,24 @@ describe('renaming a notebook', () => {
 
 		expect(onRenameFolder).not.toHaveBeenCalled();
 	});
+
+	it('keeps the name given shown until the route has the notebook at it', async () => {
+		// Let go of when the write resolved, the old name would flicker back for
+		// the moment the store takes to bring the new one (`store/renaming.ts`).
+		const renamings = createRenamings();
+		renderSidebar({ selectedFolder: 'work', onRenameFolder: () => undefined, renamings });
+		await openMenu('work');
+		await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
+
+		await userEvent.keyboard('Projects{Enter}');
+
+		expect(renamings.get()).toMatchObject({
+			kind: 'notebook',
+			key: 'work',
+			text: 'Projects',
+			given: { was: 'work' },
+		});
+	});
 });
 
 describe('deleting a notebook', () => {
@@ -577,6 +596,40 @@ describe('deleting a notebook', () => {
 
 		expect(screen.queryByRole('alertdialog', { name: 'Delete notebook?' })).toBeNull();
 		expect(onDeleteFolder).not.toHaveBeenCalled();
+	});
+
+	it('is asked about the open notebook from the palette too', async () => {
+		const onDeleteFolder = vi.fn();
+		const commands: { current: ReturnType<typeof useCommands> } = { current: [] };
+		const Commands = () => {
+			commands.current = useCommands();
+			return null;
+		};
+		render(
+			<CommandsProvider>
+				<Sidebar
+					tree={counted}
+					selectedFolder="work"
+					onSelectFolder={() => undefined}
+					onCreateFolder={() => undefined}
+					onDeleteFolder={onDeleteFolder}
+					looseNoteCount={0}
+				/>
+				<Commands />
+			</CommandsProvider>
+		);
+
+		act(() => {
+			commands.current.find((command) => command.id === 'notebook.delete')?.run();
+		});
+		await userEvent.click(
+			within(screen.getByRole('alertdialog', { name: 'Delete notebook?' })).getByRole(
+				'button',
+				{ name: 'Delete' }
+			)
+		);
+
+		expect(onDeleteFolder).toHaveBeenCalledWith('work');
 	});
 });
 
