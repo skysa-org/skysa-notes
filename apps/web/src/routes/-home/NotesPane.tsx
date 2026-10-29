@@ -4,7 +4,8 @@ import { NoteList, type NoteListProps } from '../../components/NoteList.js';
 import { noteMenuItems } from '../../components/noteMenu.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import { setNotePinned } from '../../store/pins.js';
-import { type Moving, movingNote } from '../../store/rearrange.js';
+import { type Moving } from '../../store/rearrange.js';
+import { movingNote } from '../../store/titles.js';
 import { type Select } from './useOpenPlace.js';
 
 /**

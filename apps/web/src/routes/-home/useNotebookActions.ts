@@ -4,10 +4,29 @@ import { useEffect } from 'react';
 import { type Notice } from '../../components/notify.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord } from '../../store/db.js';
-import { createFolder, deleteFolder, renameFolder } from '../../store/folders.js';
+import {
+	createFolder,
+	deleteFolder,
+	FolderExistsError,
+	renameFolder,
+} from '../../store/folders.js';
 import { type Renamings } from '../../store/renaming.js';
-import { notebookRefused } from './rules.js';
 import { type Select } from './useOpenPlace.js';
+
+/**
+ * What a notebook the store refused says: its name taken, here or where it
+ * was going, as a warning; anything else as `failed`, an error.
+ */
+export const notebookRefused = (error: unknown, taken: 'here' | 'there', failed: string): Notice =>
+	error instanceof FolderExistsError
+		? {
+				message:
+					taken === 'here'
+						? t('shell.notebook.existsHere', { name: error.folderName })
+						: t('shell.notebook.existsThere', { name: error.folderName }),
+				tone: 'warning',
+			}
+		: { message: failed, tone: 'error' };
 
 /**
  * Making, renaming and deleting a notebook from the sidebar, and keeping the

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { t } from '../src/i18n/t.js';
-import { notebookRefused } from '../src/routes/-home/rules.js';
+import { notebookRefused } from '../src/routes/-home/useNotebookActions.js';
 import { FolderExistsError } from '../src/store/folders.js';
 
 /**
- * What a notebook the store refused says (`routes/-home/rules.ts`), the one
+ * What a notebook the store refused says (`routes/-home/useNotebookActions.ts`), the one
  * rule for making, renaming and moving one.
  */
 

@@ -9,7 +9,7 @@ import { settleEditors } from '../../store/heldEdits.js';
 import { moveNote } from '../../store/notes.js';
 import { dropMove, type Moving } from '../../store/rearrange.js';
 import { type Pane } from '../panel.js';
-import { notebookRefused } from './rules.js';
+import { notebookRefused } from './useNotebookActions.js';
 import { type Select } from './useOpenPlace.js';
 
 /**

@@ -1,8 +1,5 @@
 import { basename, isWithin, joinPath, normalizePath, parentPath, ROOT } from '@skysa/core';
 
-import { type NoteRecord } from './db.js';
-import { titleShown } from './titles.js';
-
 /**
  * What a drop would do, worked out without rendering anything.
  *
@@ -30,14 +27,6 @@ export type Moving =
 			name: string;
 	  }>
 	| Readonly<{ kind: 'note'; id: string; path: string; name: string }>;
-
-/** A note in the air, named as its row names it. */
-export const movingNote = (note: Pick<NoteRecord, 'id' | 'path' | 'title'>): Moving => ({
-	kind: 'note',
-	id: note.id,
-	path: note.path,
-	name: titleShown(note.title),
-});
 
 /** The move a drop would make: what the route hands to the store. */
 export type Move =

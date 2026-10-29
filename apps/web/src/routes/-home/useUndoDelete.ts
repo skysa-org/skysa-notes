@@ -45,9 +45,9 @@ export const useUndoDelete = ({
 		setDeleted(null);
 	}, []);
 	/** A note just deleted, with the text that goes back beside it, if any. */
-	const noteDeleted = useCallback((note: NoteRecord, displaced: DisplacedText | null = null) => {
+	const noteDeleted = useCallback((note: NoteRecord, displaced?: DisplacedText) => {
 		setDeleted(note);
-		setBeside(displaced);
+		setBeside(displaced ?? null);
 	}, []);
 
 	const undoDelete = () => {

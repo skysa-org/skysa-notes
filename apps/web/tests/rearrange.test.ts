@@ -1,8 +1,8 @@
 import { ROOT } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
-import { canDrop, dropMove, type Moving, movingNote } from '../src/store/rearrange.js';
-import { titleShown } from '../src/store/titles.js';
+import { canDrop, dropMove, type Moving } from '../src/store/rearrange.js';
+import { movingNote, titleShown } from '../src/store/titles.js';
 
 /**
  * Which drops are allowed, decided without a DOM. Every refusal here is one a

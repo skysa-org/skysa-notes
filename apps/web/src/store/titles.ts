@@ -4,6 +4,7 @@ import { t } from '../i18n/t.js';
 import { type NoteRecord } from './db.js';
 import { frontmatterOf } from './frontmatter.js';
 import { isUnnamed } from './notes.js';
+import { type Moving } from './rearrange.js';
 import { noteOpening, openingLines } from './visibleText.js';
 
 /**
@@ -84,3 +85,11 @@ export const shownName = (
 
 /** A note's name as it is shown, where it has none its first words (`shownName`). */
 export const nameShown = (note: NoteRecord): string => shownName(note).text;
+
+/** A note in the air, named as its row names it. */
+export const movingNote = (note: Pick<NoteRecord, 'id' | 'path' | 'title'>): Moving => ({
+	kind: 'note',
+	id: note.id,
+	path: note.path,
+	name: titleShown(note.title),
+});

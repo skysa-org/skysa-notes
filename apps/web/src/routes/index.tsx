@@ -300,9 +300,7 @@ const Home = () => {
 		setPanel,
 		setRest,
 		noteView,
-		onDeleted: (note) => {
-			noteDeleted(note);
-		},
+		onDeleted: noteDeleted,
 		pickUp,
 		moving,
 		onProblem: (message) => {
@@ -373,7 +371,7 @@ const Home = () => {
 			// takes its place (`useOpenPlace`). Not in the scratchpad, whose
 			// card or box closes instead.
 			onDeleted={(note, displaced) => {
-				noteDeleted(note, displaced ?? null);
+				noteDeleted(note, displaced);
 				scratch.deleted(note);
 			}}
 		/>

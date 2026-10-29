@@ -1,9 +1,6 @@
 import { isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 
-import { type Notice } from '../../components/notify.js';
-import { t } from '../../i18n/t.js';
 import { type SyncStateRecord } from '../../store/db.js';
-import { FolderExistsError } from '../../store/folders.js';
 
 /**
  * The small rules the shell reads about the place open: what can be made or
@@ -64,18 +61,3 @@ export const placeRow = (
 	onSelect: () => void
 ): { selected: boolean; onSelect: () => void } | undefined =>
 	shown === true ? { selected, onSelect } : undefined;
-
-/**
- * What a notebook the store refused says: its name taken, here or where it
- * was going, as a warning; anything else as `failed`, an error.
- */
-export const notebookRefused = (error: unknown, taken: 'here' | 'there', failed: string): Notice =>
-	error instanceof FolderExistsError
-		? {
-				message:
-					taken === 'here'
-						? t('shell.notebook.existsHere', { name: error.folderName })
-						: t('shell.notebook.existsThere', { name: error.folderName }),
-				tone: 'warning',
-			}
-		: { message: failed, tone: 'error' };
