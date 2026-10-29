@@ -5,8 +5,6 @@ import { t } from '../../i18n/t.js';
 import { type DeviceLock, setUpDeviceLock } from '../../secrets/deviceLock.js';
 import { sameIdentity, wipe } from '../../secrets/keys.js';
 import type { Age } from '../../secrets/loadAge.js';
-import type { SecretsLock } from '../../secrets/lock.js';
-import type { NotesDatabase } from '../../store/db.js';
 import {
 	changeUnlock,
 	enrol,
@@ -17,8 +15,7 @@ import {
 	type UnlockedKeys,
 } from '../../store/secretKeys.js';
 import { getPasswordsShown } from '../../store/vault.js';
-import type { KeyFileSync } from '../../sync/keyFile.js';
-import type { Making, Step } from './types.js';
+import type { Making, SecretsDialogProps, Step } from './types.js';
 import type { Chosen } from './UnlockEntry.js';
 import { useDeviceLock } from './useDeviceLock.js';
 
@@ -28,7 +25,8 @@ import { useDeviceLock } from './useDeviceLock.js';
  * step's work — setting the source up, enrolling, unlocking, replacing and
  * removing keys. Keys it makes or reads from what was typed are its own
  * (`own`), filled with zeros once they are kept, sealed, on the device, and as
- * the dialog closes; the lock's copies are the lock's to wipe.
+ * the dialog closes; the lock's copies are the lock's to wipe. Should the
+ * source leave the device while its keys are being kept, it closes the dialog.
  */
 export const useSecretsFlow = ({
 	database,
@@ -40,17 +38,12 @@ export const useSecretsFlow = ({
 	age,
 	givenDeviceLock,
 	onClose,
-}: {
-	database: NotesDatabase;
-	connectionId: string;
-	/** What the source is called, in the name of a passkey made for it. */
-	sourceName: string;
-	keyFile: Pick<KeyFileSync, 'refresh' | 'write'>;
-	lock: SecretsLock;
+}: Pick<
+	SecretsDialogProps,
+	'database' | 'connectionId' | 'sourceName' | 'keyFile' | 'lock' | 'onClose'
+> & {
 	rounds: number;
 	age: () => Promise<Age>;
-	/** Close the dialog: the source has left the device while its keys were being kept. */
-	onClose: () => void;
 	givenDeviceLock: DeviceLock | undefined;
 }) => {
 	const [read, setRead] = useState(false);

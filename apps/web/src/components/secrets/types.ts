@@ -1,5 +1,12 @@
+import type { RefObject } from 'react';
+
 import type { ReplaceScan } from '../../secrets/age.js';
+import type { DeviceLock } from '../../secrets/deviceLock.js';
+import type { Age } from '../../secrets/loadAge.js';
+import type { SecretsLock } from '../../secrets/lock.js';
+import type { NotesDatabase } from '../../store/db.js';
 import type { enrolment } from '../../store/secretKeys.js';
+import type { KeyFileSync } from '../../sync/keyFile.js';
 
 export type Enrolled = NonNullable<Awaited<ReturnType<typeof enrolment>>>;
 
@@ -42,3 +49,23 @@ export type Step =
 /** Where the dialog is when no flow is under way, as a step or a state to say. */
 export type Home =
 	Step | 'checking' | 'unavailable' | 'intro' | 'newer' | 'invalid' | 'device' | 'lost';
+
+export interface SecretsDialogProps {
+	database: NotesDatabase;
+	connectionId: string;
+	/** What the source is called: printed above its key, and in the name of a passkey made for it. */
+	sourceName: string;
+	keyFile: Pick<KeyFileSync, 'refresh' | 'write'>;
+	lock: SecretsLock;
+	onClose: () => void;
+	returnFocus?: RefObject<HTMLElement | null>;
+	/** PBKDF2's rounds; fewer in a test, where the full count takes most of a second. */
+	rounds?: number;
+	age?: () => Promise<Age>;
+	/** Which two groups of a new key are asked back, counted from 0. */
+	pickGroups?: () => readonly [number, number];
+	print?: () => Promise<void>;
+	copy?: (text: string) => Promise<void>;
+	/** The device's own lock, offered where it can keep a key (`secrets/deviceLock.ts`). */
+	deviceLock?: DeviceLock;
+}

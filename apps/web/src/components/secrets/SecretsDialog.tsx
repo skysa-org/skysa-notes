@@ -1,13 +1,10 @@
-import type { ReactNode, RefObject } from 'react';
+import type { ReactNode } from 'react';
 
 import { t } from '../../i18n/t.js';
-import type { DeviceLock } from '../../secrets/deviceLock.js';
-import { type Age, loadAge } from '../../secrets/loadAge.js';
-import type { SecretsLock } from '../../secrets/lock.js';
-import type { KeyFileRecord, NotesDatabase } from '../../store/db.js';
+import { loadAge } from '../../secrets/loadAge.js';
+import type { KeyFileRecord } from '../../store/db.js';
 import { PBKDF2_ROUNDS } from '../../store/secretKeys.js';
 import { setPasswordsShown } from '../../store/vault.js';
-import type { KeyFileSync } from '../../sync/keyFile.js';
 import { Dialog, DialogActions } from '../Dialog.js';
 import { PasteKey } from './PasteKey.js';
 import { Device, Lost, RemoveKey } from './steps/Device.js';
@@ -15,7 +12,7 @@ import { Different } from './steps/Different.js';
 import { Intro } from './steps/Intro.js';
 import { CheckKey, ShowKey } from './steps/NewKey.js';
 import { Rekey, RekeyReady } from './steps/Rekey.js';
-import type { Enrolled, Home, Purpose, Step } from './types.js';
+import type { Enrolled, Home, Purpose, SecretsDialogProps, Step } from './types.js';
 import { UnlockForm } from './UnlockDialog.js';
 import { ChooseUnlock } from './UnlockEntry.js';
 import { useSecretsFlow } from './useSecretsFlow.js';
@@ -34,26 +31,6 @@ import { useSecretsFlow } from './useSecretsFlow.js';
  *
  * What needs the curve is loaded as the first step that needs it is taken.
  */
-
-export interface SecretsDialogProps {
-	database: NotesDatabase;
-	connectionId: string;
-	/** What the source is called, printed above its key. */
-	sourceName: string;
-	keyFile: Pick<KeyFileSync, 'refresh' | 'write'>;
-	lock: SecretsLock;
-	onClose: () => void;
-	returnFocus?: RefObject<HTMLElement | null>;
-	/** PBKDF2's rounds; fewer in a test, where the full count takes most of a second. */
-	rounds?: number;
-	age?: () => Promise<Age>;
-	/** Which two groups of a new key are asked back, counted from 0. */
-	pickGroups?: () => readonly [number, number];
-	print?: () => Promise<void>;
-	copy?: (text: string) => Promise<void>;
-	/** The device's own lock, offered where it can keep a key (`secrets/deviceLock.ts`). */
-	deviceLock?: DeviceLock;
-}
 
 const GROUPS = 12;
 
