@@ -147,7 +147,6 @@ export const NoteView = ({
 	draft,
 	liveEdits,
 	renamings,
-	onProblem,
 	scratch,
 	ref: handle,
 }: NoteViewProps) => {
@@ -168,7 +167,6 @@ export const NoteView = ({
 		draft,
 		liveEdits,
 		onDeleted,
-		onProblem,
 		isScratch,
 	});
 	useImperativeHandle(handle, () => ({ deleteNote: deleteOne }), [deleteOne]);
@@ -260,7 +258,6 @@ export const NoteView = ({
 					focusEditor(body);
 				}}
 				onUserEdit={onUserEdit}
-				onProblem={onProblem}
 				onUnsupported={unsupported.report}
 				// A body from outside is on screen now. What was typed before it
 				// is not under whatever is typed next — a new sitting, so the next

@@ -14,7 +14,6 @@ import {
 } from '@skysa/core';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
-import type { AttachmentProblem } from '../../editor/attachHost.js';
 import { Icon } from '../../editor/icons.js';
 import { linkAddress, openLink } from '../../editor/links.js';
 import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
@@ -34,6 +33,7 @@ import { titleShown } from '../../store/titles.js';
 import type { NoteDraft } from '../note/types.js';
 import { useNoteSecrets } from '../secrets/noteSecrets.js';
 import { editedAt } from '../ui/editedAt.js';
+import { useNotices } from '../ui/notices.js';
 import { useFlash } from '../ui/useFlash.js';
 import { KEEP_OUT } from './keepOut.js';
 import { PasswordGenerator } from './PasswordGenerator.js';
@@ -115,7 +115,6 @@ export interface PasswordItemProps {
 	note: NoteRecord;
 	/** Given while `note` is a new item, begun and not stored (`NoteDraft`). */
 	draft: NoteDraft | undefined;
-	onProblem: (problem: AttachmentProblem) => void;
 	/** Delete it, with the route's undo. */
 	onDelete: (note: NoteRecord) => void;
 	/** It is no longer one to show: a new item let go. */
@@ -327,13 +326,13 @@ const SiteField = ({
 export const PasswordItem = ({
 	note,
 	draft,
-	onProblem,
 	onDelete,
 	onClose,
 	onOpen,
 	host: givenHost,
 }: PasswordItemProps) => {
-	const secrets = useNoteSecrets(note, { report: onProblem });
+	const { say } = useNotices();
+	const secrets = useNoteSecrets(note, { report: say });
 	const host = givenHost ?? secrets.host;
 	/** A new item, until Done keeps it. */
 	const [fresh, setFresh] = useState(draft !== undefined);
@@ -376,16 +375,18 @@ export const PasswordItem = ({
 	const locks = useRef(0);
 	/** `shown` as last drawn, for what reads it once the writes before it are made. */
 	const showing = useRef(shown);
-	const latest = useRef({ onProblem, onClose, onOpen });
+	const latest = useRef({ onClose, onOpen });
 	useEffect(() => {
-		latest.current = { onProblem, onClose, onOpen };
+		latest.current = { onClose, onOpen };
 		showing.current = shown;
 	});
 	const labelField = useRef<HTMLInputElement>(null);
 	const editButton = useRef<HTMLButtonElement>(null);
 
+	// Not through `latest`: `say` is the same function for as long as the
+	// shell is (`NoticesProvider`).
 	const notSaved = () => {
-		latest.current.onProblem({ message: t('passwords.item.notSaved'), tone: 'error' });
+		say({ message: t('passwords.item.notSaved'), tone: 'error' });
 	};
 
 	const write = (typed: { title: string; body: string }) => {

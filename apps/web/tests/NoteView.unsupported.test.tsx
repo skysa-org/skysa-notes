@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import type { StructuralDifference } from '@skysa/core';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
 import { noteById } from './noteRows.js';
+import { render } from './support/notices.js';
 
 /**
  * What happens to a note the rich editor would damage.

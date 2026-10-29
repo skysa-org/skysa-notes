@@ -1,11 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import type { Command } from '../src/commands/registry.js';
 import { NoteView } from '../src/components/note/NoteView.js';
-import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import {
 	generateIdentity,
 	parseRecipient,
@@ -17,6 +16,7 @@ import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { hearNotices, render } from './support/notices.js';
 
 /**
  * "Insert secret" in either editor, through the note view the app renders
@@ -35,17 +35,11 @@ const Palette = () => {
 	return null;
 };
 
-const Harness = ({
-	id,
-	onProblem,
-}: {
-	id: string;
-	onProblem: (problem: AttachmentProblem) => void;
-}) => {
+const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
 	return (
 		<>
-			<NoteView note={note} onDeleted={() => undefined} onProblem={onProblem} />
+			<NoteView note={note} onDeleted={() => undefined} />
 			<Palette />
 		</>
 	);
@@ -62,11 +56,12 @@ describe('"Insert secret" from the palette', () => {
 		async (mode) => {
 			await setDefaultEditorMode(db, mode);
 			const note = await createNote(db, { title: 'Day', body: 'Before.\n' });
-			const onProblem = vi.fn<(problem: AttachmentProblem) => void>();
+			const { said, Notices } = hearNotices();
 			render(
 				<CommandsProvider>
-					<Harness id={note.id} onProblem={onProblem} />
-				</CommandsProvider>
+					<Harness id={note.id} />
+				</CommandsProvider>,
+				{ notices: Notices }
 			);
 			await screen.findByDisplayValue('Day');
 			// The editor offers itself once it is built, which is after the note shows.
@@ -82,7 +77,7 @@ describe('"Insert secret" from the palette', () => {
 			});
 
 			await waitFor(() => {
-				const told = onProblem.mock.lastCall?.[0];
+				const told = said.at(-1);
 				expect(told?.message).toBe('This source has no vault set up.');
 				expect(told?.tone).toBe('warning');
 				// With the way on, rather than where to find it.
@@ -96,18 +91,19 @@ describe('"Insert secret" on the rich editor’s toolbar', () => {
 	it('reaches the note’s host, which says the source is not set up', async () => {
 		await setDefaultEditorMode(db, 'rich');
 		const note = await createNote(db, { title: 'Day', body: 'Before.\n' });
-		const onProblem = vi.fn<(problem: AttachmentProblem) => void>();
+		const { said, Notices } = hearNotices();
 		render(
 			<CommandsProvider>
-				<Harness id={note.id} onProblem={onProblem} />
-			</CommandsProvider>
+				<Harness id={note.id} />
+			</CommandsProvider>,
+			{ notices: Notices }
 		);
 		await screen.findByText(/Before\./u);
 
 		fireEvent.mouseDown(await screen.findByRole('button', { name: 'Insert secret' }));
 
 		await waitFor(() => {
-			const told = onProblem.mock.lastCall?.[0];
+			const told = said.at(-1);
 			expect(told?.message).toBe('This source has no vault set up.');
 			expect(told?.action?.label).toBe('Set up vault');
 		});
@@ -128,7 +124,7 @@ describe('a note open as its secrets are encrypted to a new key', () => {
 		});
 		render(
 			<CommandsProvider>
-				<Harness id={note.id} onProblem={() => undefined} />
+				<Harness id={note.id} />
 			</CommandsProvider>
 		);
 		const [, firstLine = ''] = armor.split('\n');

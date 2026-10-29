@@ -1,15 +1,15 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import type { Command } from '../src/commands/registry.js';
 import { NoteView } from '../src/components/note/NoteView.js';
-import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { hearNotices, render } from './support/notices.js';
 
 /**
  * A file beside an open note (#187), through the note view the app renders:
@@ -28,17 +28,11 @@ const Palette = () => {
 	return null;
 };
 
-const Harness = ({
-	id,
-	onProblem,
-}: {
-	id: string;
-	onProblem: (problem: AttachmentProblem) => void;
-}) => {
+const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
 	return (
 		<>
-			<NoteView note={note} onDeleted={() => undefined} onProblem={onProblem} />
+			<NoteView note={note} onDeleted={() => undefined} />
 			<Palette />
 		</>
 	);
@@ -52,11 +46,12 @@ afterEach(() => {
 describe('a file beside the open note', () => {
 	it('says so through the note view when it cannot be opened', async () => {
 		const note = await createNote(db, { title: 'Day', body: 'See [Q3.pdf](q3.pdf) now.\n' });
-		const onProblem = vi.fn();
+		const { said, Notices } = hearNotices();
 		render(
 			<CommandsProvider>
-				<Harness id={note.id} onProblem={onProblem} />
-			</CommandsProvider>
+				<Harness id={note.id} />
+			</CommandsProvider>,
+			{ notices: Notices }
 		);
 		const chip = await screen.findByRole('link', { name: 'Q3.pdf, PDF' });
 		vi.spyOn(window, 'open').mockReturnValue(null);
@@ -66,10 +61,9 @@ describe('a file beside the open note', () => {
 		fireEvent.dblClick(chip);
 
 		await waitFor(() => {
-			expect(onProblem).toHaveBeenCalledWith({
-				message: 'Q3.pdf could not be found beside this note.',
-				tone: 'warning',
-			});
+			expect(said).toEqual([
+				{ message: 'Q3.pdf could not be found beside this note.', tone: 'warning' },
+			]);
 		});
 	});
 });
@@ -79,7 +73,7 @@ describe('attaching files from the palette', () => {
 		const note = await createNote(db, { title: 'Day', body: 'Before.\n' });
 		render(
 			<CommandsProvider>
-				<Harness id={note.id} onProblem={vi.fn()} />
+				<Harness id={note.id} />
 			</CommandsProvider>
 		);
 		await screen.findByDisplayValue('Day');
@@ -140,16 +134,17 @@ describe('attaching files from the palette', () => {
 			body: 'After.\n',
 			folderPath: 'work',
 		});
-		const onProblem = vi.fn();
+		const { said, Notices } = hearNotices();
 		const { rerender } = render(
 			<CommandsProvider>
-				<Harness id={first.id} onProblem={onProblem} />
-			</CommandsProvider>
+				<Harness id={first.id} />
+			</CommandsProvider>,
+			{ notices: Notices }
 		);
 		await screen.findByDisplayValue('Day');
 		rerender(
 			<CommandsProvider>
-				<Harness id={second.id} onProblem={onProblem} />
+				<Harness id={second.id} />
 			</CommandsProvider>
 		);
 		await screen.findByDisplayValue('Work');
@@ -164,6 +159,6 @@ describe('attaching files from the palette', () => {
 		expect((await db.files.toArray()).map((file) => file.path)).toEqual([
 			expect.stringMatching(/^work\/q3-[0-9a-f]{8}\.pdf$/),
 		]);
-		expect(onProblem).not.toHaveBeenCalled();
+		expect(said).toEqual([]);
 	});
 });

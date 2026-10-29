@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import { createLiveEdits } from '../src/store/liveEdits.js';
 import { createNote, getNote, importNoteFile } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { noteById, updateNote } from './noteRows.js';
+import { render } from './support/notices.js';
 
 /**
  * The mode toggle, over the real editors. Which mode a note is in is a local

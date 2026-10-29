@@ -1,7 +1,6 @@
 import type { ScratchColor } from '@skysa/core';
 import type { Ref } from 'react';
 
-import type { AttachmentProblem } from '../../editor/attachHost.js';
 import type { EditorMode } from '../../editor/mode.js';
 import type { NoteRecord } from '../../store/db.js';
 import type { LiveEdits } from '../../store/liveEdits.js';
@@ -49,11 +48,6 @@ export interface NoteViewProps {
 	liveEdits?: LiveEdits;
 	/** A notebook being renamed, so the note's path says what is typed. */
 	renamings?: Renamings;
-	/**
-	 * Something done with a file beside the note that did not work — one that
-	 * could not be opened — for the route to say over the page (#187).
-	 */
-	onProblem?: (problem: AttachmentProblem) => void;
 	/**
 	 * Given for a scratch note (docs/ARCHITECTURE.md §7, "The scratchpad"): a
 	 * smaller editor, with no path, no editor tabs and no outline, the basic

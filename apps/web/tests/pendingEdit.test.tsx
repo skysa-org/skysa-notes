@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import type { RemoteEntry } from '@skysa/core';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { NoteView } from '../src/components/note/NoteView.js';
@@ -11,6 +11,7 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 import { updateNote } from './noteRows.js';
 import { flushAutosave } from './support/app.js';
+import { render } from './support/notices.js';
 
 /**
  * An edit still in the autosave window when a sync lands on its note.

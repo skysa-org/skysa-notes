@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { NoteView } from '../src/components/note/NoteView.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { getNote, importNoteFile } from '../src/store/notes.js';
+import { render } from './support/notices.js';
 
 /**
  * A note written on Windows, opened in the real Milkdown editor.

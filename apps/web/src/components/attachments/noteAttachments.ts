@@ -599,7 +599,7 @@ export interface NoteAttachmentsSources {
 	readonly db?: NotesDatabase;
 	/** Where to hear that a sync has run: the scheduler's status. */
 	readonly subscribe?: SyncScheduler['subscribe'];
-	/** Where a problem the editor has nowhere to show goes (`NoteViewProps.onProblem`). */
+	/** Told of a problem the editor has nowhere to show, in the user's words. */
 	readonly report?: (problem: AttachmentProblem) => void;
 	/** Store the note first, while it is a draft (`NoteViewProps.draft`). */
 	readonly store?: (() => Promise<boolean>) | undefined;

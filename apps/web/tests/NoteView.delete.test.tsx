@@ -1,15 +1,15 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteView } from '../src/components/note/NoteView.js';
 import type { NoteViewHandle } from '../src/components/note/types.js';
-import type { AttachmentProblem } from '../src/editor/attachHost.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, deleteNote, getNote } from '../src/store/notes.js';
+import { hearNotices, render } from './support/notices.js';
 
 /** A store that turns the next delete down, as a write IndexedDB refuses does. */
 const store = vi.hoisted(() => ({ refusing: false }));
@@ -64,7 +64,6 @@ const deleteOpen = (note: NoteRecord) => {
 };
 
 const deletions: NoteRecord[] = [];
-const problems: AttachmentProblem[] = [];
 
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
@@ -75,9 +74,6 @@ const Harness = ({ id }: { id: string }) => {
 			onDeleted={(deleted) => {
 				deletions.push(deleted);
 			}}
-			onProblem={(problem) => {
-				problems.push(problem);
-			}}
 		/>
 	);
 };
@@ -86,7 +82,6 @@ afterEach(() => {
 	cleanup();
 	store.refusing = false;
 	deletions.length = 0;
-	problems.length = 0;
 });
 
 describe('deleting a note the store will not delete', () => {
@@ -98,16 +93,15 @@ describe('deleting a note the store will not delete', () => {
 	 */
 	it('says so, and leaves the note as it was', async () => {
 		const note = await createNote(db, { title: 'Kept', body: 'still here\n' });
-		render(<Harness id={note.id} />);
+		const { said, Notices } = hearNotices();
+		render(<Harness id={note.id} />, { notices: Notices });
 		await screen.findByTestId('rich-editor');
 		store.refusing = true;
 
 		deleteOpen(note);
 
 		await waitFor(() => {
-			expect(problems).toEqual([
-				{ message: 'That note could not be deleted.', tone: 'error' },
-			]);
+			expect(said).toEqual([{ message: 'That note could not be deleted.', tone: 'error' }]);
 		});
 		expect(deletions).toEqual([]);
 		expect((await getNote(db, note.id))?.deletedLocally).toBe(0);

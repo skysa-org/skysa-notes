@@ -30,6 +30,7 @@ import { movingNote } from '../../store/titles.js';
 import { visibleBlocks } from '../../store/visibleText.js';
 import type { NoteViewHandle, ScratchEditing } from '../note/types.js';
 import { COARSE_POINTER, useMediaQuery } from '../ui/layout.js';
+import { useNotices } from '../ui/notices.js';
 import type { MarkChange } from './Scratchpad.js';
 
 /**
@@ -98,7 +99,6 @@ export const useScratchpad = ({
 	onDeleted,
 	pickUp,
 	moving,
-	onProblem,
 }: {
 	/** Whether the scratchpad is open. */
 	active: boolean;
@@ -120,8 +120,12 @@ export const useScratchpad = ({
 	pickUp: (what: Moving) => void;
 	/** What is being moved: nothing else is, while something is. */
 	moving: Moving | null;
-	onProblem: (message: string) => void;
 }) => {
+	const { say } = useNotices();
+	/** What did not happen to a card, over the page. */
+	const sayProblem = (message: string) => {
+		say({ message, tone: 'error' });
+	};
 	const router = useRouter();
 	const touch = useMediaQuery(COARSE_POINTER);
 	const notes = useScratchNotes(active ? connectionId : undefined);
@@ -218,7 +222,7 @@ export const useScratchpad = ({
 
 	const mark = (note: NoteRecord, change: MarkChange) => {
 		void setScratchMarks(db, note.id, change, scope(note)).catch(() => {
-			onProblem(t('scratchpad.problem.changed'));
+			sayProblem(t('scratchpad.problem.changed'));
 		});
 	};
 
@@ -234,7 +238,7 @@ export const useScratchpad = ({
 			return;
 		}
 		void deleteForUndo(db, note).then(onDeleted, () => {
-			onProblem(t('scratchpad.problem.deleted'));
+			sayProblem(t('scratchpad.problem.deleted'));
 		});
 	};
 
@@ -274,7 +278,7 @@ export const useScratchpad = ({
 		setNaming(undefined);
 		if (note === undefined) return;
 		void renameNote(db, note.id, name, scope(note)).then(carry, () => {
-			onProblem(t('scratchpad.problem.named'));
+			sayProblem(t('scratchpad.problem.named'));
 		});
 	};
 

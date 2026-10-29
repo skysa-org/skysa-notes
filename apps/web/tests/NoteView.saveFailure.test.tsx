@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import { createNote, getNote, purgeNote, undeleteNote } from '../src/store/notes
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { updateNote } from './noteRows.js';
 import { flushAutosave } from './support/app.js';
+import { render } from './support/notices.js';
 
 /**
  * A save the store refuses. The user is still typing, so the two things that

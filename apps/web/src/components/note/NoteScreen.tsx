@@ -12,7 +12,7 @@ import { PinButton, ScratchBar } from '../scratchpad/ScratchControls.js';
 import { FindBar } from './FindBar.js';
 import { NoteBody } from './NoteBody.js';
 import { TitleField } from './TitleField.js';
-import type { NoteDraft, NoteViewProps, ScratchScreen } from './types.js';
+import type { NoteDraft, ScratchScreen } from './types.js';
 import { UnsupportedBanner } from './unsupported.js';
 import type { NoteLayout } from './useNoteLayout.js';
 
@@ -212,7 +212,6 @@ export const NoteScreen = ({
 	onRename,
 	onTitleDone,
 	onUserEdit,
-	onProblem,
 	onUnsupported,
 	onAdopted,
 	onAdded,
@@ -239,7 +238,6 @@ export const NoteScreen = ({
 	onRename: (title: string) => void;
 	onTitleDone: () => void;
 	onUserEdit: (body: string, origin: string) => void;
-	onProblem: NoteViewProps['onProblem'];
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 	onAdded: (path: string) => void;
@@ -338,7 +336,6 @@ export const NoteScreen = ({
 			// for a phone, and its only way to a list.
 			toolbar={scratch === undefined ? layout.toolbar : 'bottom'}
 			onUserEdit={onUserEdit}
-			onProblem={onProblem}
 			draft={draft}
 			onUnsupported={onUnsupported}
 			onAdopted={onAdopted}

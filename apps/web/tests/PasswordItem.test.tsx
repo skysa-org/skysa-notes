@@ -8,7 +8,7 @@ import {
 	type VaultFields,
 	vaultPayload,
 } from '@skysa/core';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -20,10 +20,26 @@ import type { SecretHost } from '../src/editor/secretHost.js';
 import { openSecret } from '../src/secrets/age.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
+import type * as Notes from '../src/store/notes.js';
 import { createNote, draftNote, getNote } from '../src/store/notes.js';
 import { GENERATOR_DEFAULT, getGeneratorOptions } from '../src/store/vault.js';
 import { updateNote } from './noteRows.js';
 import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.js';
+import { hearNotices, render } from './support/notices.js';
+
+/** Writes of an item that the store refuses, while `refusing` is set. */
+const store = vi.hoisted(() => ({ refusing: false }));
+
+vi.mock('../src/store/notes.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof Notes>();
+	return {
+		...actual,
+		saveVaultItem: (...args: Parameters<typeof Notes.saveVaultItem>) =>
+			store.refusing
+				? Promise.reject(new Error('QuotaExceededError'))
+				: actual.saveVaultItem(...args),
+	};
+});
 
 /**
  * A password in the vault, in the note's column (docs/ARCHITECTURE.md §7,
@@ -72,7 +88,6 @@ const Harness = ({
 			note={note}
 			draft={draft}
 			host={host}
-			onProblem={() => undefined}
 			onDelete={onDelete}
 			onClose={onClose}
 			onOpen={() => undefined}
@@ -96,7 +111,6 @@ const Behind = ({ note, host }: { note: NoteRecord; host: SecretHost }) => (
 		note={note}
 		draft={undefined}
 		host={host}
-		onProblem={() => undefined}
 		onDelete={() => undefined}
 		onClose={() => undefined}
 		onOpen={() => undefined}
@@ -374,6 +388,30 @@ describe('editing a password', () => {
 		});
 	});
 
+	it('says so over the page where a change could not be kept', async () => {
+		const { host } = fakeHost();
+		const note = await item('GitHub');
+		const { said, Notices } = hearNotices();
+		const user = userEvent.setup();
+		render(<Harness id={note.id} host={host} />, { notices: Notices });
+		await user.click(await screen.findByRole('button', { name: 'Edit' }));
+		store.refusing = true;
+
+		try {
+			await user.type(await screen.findByLabelText('Username'), 'x');
+			await waitFor(() => {
+				expect(said).toContainEqual({
+					message:
+						'Changes to this password are not being saved on this device. Copy what you typed somewhere safe, then reload.',
+					tone: 'error',
+				});
+			});
+		} finally {
+			store.refusing = false;
+		}
+		expect(new Set(said.map((notice) => notice.message)).size).toBe(1);
+	});
+
 	it('keeps what a later version wrote beside the fields', async () => {
 		const { host } = fakeHost();
 		const later = JSON.stringify({ totp: 'otpauth://x', ...FIELDS });
@@ -601,7 +639,6 @@ describe('a password made by Generate', () => {
 					setMode: () => undefined,
 				}}
 				host={host}
-				onProblem={() => undefined}
 				onDelete={() => undefined}
 				onClose={() => undefined}
 				onOpen={() => undefined}
@@ -809,7 +846,6 @@ describe('a new password', () => {
 				note={stored ?? draft}
 				draft={{ store, setMode: () => undefined }}
 				host={host}
-				onProblem={() => undefined}
 				onDelete={() => undefined}
 				onClose={onClose}
 				onOpen={() => undefined}
@@ -954,7 +990,6 @@ describe('a new password', () => {
 				note={draft}
 				draft={{ store: storeOf(draft), setMode: () => undefined }}
 				host={host}
-				onProblem={() => undefined}
 				onDelete={() => undefined}
 				onClose={() => undefined}
 				onOpen={() => undefined}
