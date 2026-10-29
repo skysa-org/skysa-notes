@@ -57,14 +57,8 @@ import {
 } from '../sync/account.js';
 import { needsReconnect, syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
-import {
-	ActionsMenu,
-	GearMenu,
-	StatusLine,
-	SyncBar,
-	SyncDetails,
-	useMenuButtons,
-} from './account/StatusLine.js';
+import { ActionsMenu, GearMenu, useMenuButtons } from './account/PanelMenus.js';
+import { StatusLine, SyncBar, SyncDetails } from './account/StatusLine.js';
 import {
 	conflictMessage,
 	failureMessage,
