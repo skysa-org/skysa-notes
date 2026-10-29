@@ -383,6 +383,8 @@ export const PasswordItem = ({
 	const labelField = useRef<HTMLInputElement>(null);
 	const editButton = useRef<HTMLButtonElement>(null);
 
+	// Not through `latest`: `say` is the same function for as long as the
+	// shell is (`NoticesProvider`).
 	const notSaved = () => {
 		say({ message: t('passwords.item.notSaved'), tone: 'error' });
 	};

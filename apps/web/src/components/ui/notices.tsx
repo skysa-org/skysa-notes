@@ -93,6 +93,14 @@ export const useNotices = (): Notices => {
 	return notices;
 };
 
+/**
+ * What is said inside goes to `notices` rather than to the shell's toasts: for
+ * a test that reads every word of it, in order (`hearNotices`).
+ */
+export const NoticesTo = ({ notices, children }: { notices: Notices; children: ReactNode }) => (
+	<NoticesContext.Provider value={notices}>{children}</NoticesContext.Provider>
+);
+
 export const useShownNotices = (): ShownNotices => {
 	const shown = useContext(ShownContext);
 	if (shown === undefined) {

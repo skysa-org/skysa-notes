@@ -1305,7 +1305,7 @@ The bias still runs one way: a construct the editor cannot show — a footnote r
   - A file over 25 MB is refused before a byte of it is read. So is a `.md`, which every device would take for a note (`attachmentRefusal`).
   - A note begun and not stored yet (a draft, `draftNote`) is stored, as its first keystroke would store it, once the file's bytes are read and nothing is left to refuse it. A draft stored for a file that never went in would be an empty note in the user's folder.
   - The file goes beside the note it was put in. That note is read before anything is awaited, since the host follows whichever note is open now.
-  - A refusal or a failure is said through `onProblem` (the host's `report`), in the user's words, naming the file.
+  - A refusal or a failure is said over the page (the host's `report`, which the note view gives `useNotices`), in the user's words, naming the file.
 - **Rich mode** (`editor/attachDrop.ts`). Each file is a placeholder where it is going while it is added. The placeholder is a decoration that keeps its place through any edit meanwhile, not the document, so the note is never dirty for a file not in it yet, and a refused one leaves nothing.
   - Once added, each is put in, a picture as a picture and any other file as its chip, one after another in the order they came. Each goes in one transaction with no programmatic mark, so the note is dirty and saved as for anything typed. It is an undo step of its own, apart from what was typed beside it a moment before.
   - A paste takes the selection at once, as any paste does, and keeps it taken even where every file is then refused: undo brings it back. A drop goes where it lands.

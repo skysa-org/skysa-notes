@@ -122,7 +122,8 @@ export const useScratchpad = ({
 	moving: Moving | null;
 }) => {
 	const { say } = useNotices();
-	const onProblem = (message: string) => {
+	/** What did not happen to a card, over the page. */
+	const sayProblem = (message: string) => {
 		say({ message, tone: 'error' });
 	};
 	const router = useRouter();
@@ -221,7 +222,7 @@ export const useScratchpad = ({
 
 	const mark = (note: NoteRecord, change: MarkChange) => {
 		void setScratchMarks(db, note.id, change, scope(note)).catch(() => {
-			onProblem(t('scratchpad.problem.changed'));
+			sayProblem(t('scratchpad.problem.changed'));
 		});
 	};
 
@@ -237,7 +238,7 @@ export const useScratchpad = ({
 			return;
 		}
 		void deleteForUndo(db, note).then(onDeleted, () => {
-			onProblem(t('scratchpad.problem.deleted'));
+			sayProblem(t('scratchpad.problem.deleted'));
 		});
 	};
 
@@ -277,7 +278,7 @@ export const useScratchpad = ({
 		setNaming(undefined);
 		if (note === undefined) return;
 		void renameNote(db, note.id, name, scope(note)).then(carry, () => {
-			onProblem(t('scratchpad.problem.named'));
+			sayProblem(t('scratchpad.problem.named'));
 		});
 	};
 
