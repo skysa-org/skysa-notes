@@ -5,8 +5,6 @@ import { useCallback, useRef, useState } from 'react';
 import { CommandsProvider, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
-import { CompactBar } from '../components/CompactBar.js';
-import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
 import { NoteList } from '../components/NoteList.js';
@@ -14,10 +12,7 @@ import { noteMenuItems } from '../components/noteMenu.js';
 import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
 import { type Notice, NotifyContext } from '../components/notify.js';
 import { Passwords } from '../components/Passwords.js';
-import { NoteSearchField, SearchQuery } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { SourceTabs } from '../components/SourceTabs.js';
-import { Toast } from '../components/Toast.js';
 import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
 import { useLatest } from '../hooks/useLatest.js';
@@ -43,11 +38,13 @@ import { deleteNote, getNote } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { setNotebookPin, setNotePinned } from '../store/pins.js';
 import { createRenamings } from '../store/renaming.js';
-import { nameShown, titleShown } from '../store/titles.js';
+import { titleShown } from '../store/titles.js';
 import { findFolder, notesUnder } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import { useEnterCode, useKeepOnInstall, useShellCommands } from './-home/commands.js';
 import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
+import { HomeBar } from './-home/HomeBar.js';
+import { HomeToasts } from './-home/HomeToasts.js';
 import { NoteColumn, PasswordColumn } from './-home/NoteColumn.js';
 import { covered, emptyPaneOffers, placeRow } from './-home/rules.js';
 import { ScratchOverlays, ScratchPane } from './-home/ScratchParts.js';
@@ -498,56 +495,28 @@ const Home = () => {
 				 * panes below all mean something different depending on which of
 				 * these is lit.
 				 */}
-				<SearchQuery>
-					{(query, setQuery) =>
-						compact ? (
-							<CompactBar
-								folder={folder}
-								// In the scratchpad, the card open, named after
-								// "Scratchpad" if it has a name or words to go by.
-								note={scratch.barNote(openNote)}
-								scratchpad={inScratchpad}
-								passwords={inPasswords}
-								liveEdits={liveEdits}
-								renamings={renamings}
-								panel={panel}
-								onPanel={setPanel}
-								query={query}
-								onQuery={(next) => {
-									setQuery(next);
-									// The answers hang from the field, over whatever
-									// else is open; a dropdown left open under them
-									// would be a second list behind the first. Only
-									// when one is: shutting none draws the page again,
-									// once, for a letter that changed nothing in it.
-									if (panel !== null) setPanel(null);
-								}}
-								onChoose={openResult}
-								sourceName={resultSourceName}
-								showing={showing}
-								searchOpen={searchOpen}
-								onSearchOpen={setSearchOpen}
-								fieldRef={searchField}
-								onOrigins={setOrigins}
-							/>
-						) : (
-							<SourceTabs
-								returnTo={returnPath(href)}
-								enterCode={enterCode}
-								search={
-									<NoteSearchField
-										query={query}
-										onQuery={setQuery}
-										onChoose={openResult}
-										sourceName={resultSourceName}
-										showing={showing}
-										fieldRef={searchField}
-									/>
-								}
-							/>
-						)
-					}
-				</SearchQuery>
+				<HomeBar
+					compact={compact}
+					returnTo={returnPath(href)}
+					enterCode={enterCode}
+					folder={folder}
+					// In the scratchpad, the card open, named after
+					// "Scratchpad" if it has a name or words to go by.
+					note={scratch.barNote(openNote)}
+					scratchpad={inScratchpad}
+					passwords={inPasswords}
+					liveEdits={liveEdits}
+					renamings={renamings}
+					panel={panel}
+					onPanel={setPanel}
+					onChoose={openResult}
+					sourceName={resultSourceName}
+					showing={showing}
+					searchOpen={searchOpen}
+					onSearchOpen={setSearchOpen}
+					fieldRef={searchField}
+					onOrigins={setOrigins}
+				/>
 				{/*
 				 * Under the bar rather than over it: the bar is the top of the window
 				 * to a compact window's search, which hangs from it to the foot.
@@ -746,43 +715,18 @@ const Home = () => {
 					onRead={shareRead}
 					onAdded={shareAdded}
 				/>
-				<div className="toast-stack">
-					{deleted !== null && (
-						<DeletedNotice
-							// A second delete is a new notice with a new clock, not the
-							// first one's time running on under another note's name.
-							key={noteRef(deleted)}
-							title={nameShown(deleted)}
-							onUndo={undoDelete}
-							onDismiss={dismissDeleted}
-							keep={undoFailed === noteRef(deleted)}
-						/>
-					)}
-					{connectNotice !== undefined && (
-						<Toast
-							message={connectNotice.message}
-							tone={connectNotice.tone}
-							action={connectNotice.action}
-							onDismiss={dismissConnect}
-						/>
-					)}
-					{problem !== null && (
-						<Toast
-							message={problem.message}
-							tone={problem.tone}
-							action={problem.action}
-							onDismiss={dismissProblem}
-						/>
-					)}
-					{told !== null && (
-						<Toast
-							message={told.message}
-							tone={told.tone}
-							action={told.action}
-							onDismiss={dismissTold}
-						/>
-					)}
-				</div>
+				<HomeToasts
+					deleted={deleted}
+					undoDelete={undoDelete}
+					dismissDeleted={dismissDeleted}
+					undoFailed={undoFailed}
+					connectNotice={connectNotice}
+					dismissConnect={dismissConnect}
+					problem={problem}
+					dismissProblem={dismissProblem}
+					told={told}
+					dismissTold={dismissTold}
+				/>
 			</div>
 		</NotifyContext.Provider>
 	);

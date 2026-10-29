@@ -793,6 +793,28 @@ describe('searching in a compact window', () => {
 		expect(screen.getByRole('combobox', { name: 'Search notes' })).toHaveProperty('value', '');
 	});
 
+	it('shuts a dropdown open under the field as the first letter is typed', async () => {
+		// The answers hang from the field, over whatever else is open: a
+		// dropdown left open under them would be a second list behind the first.
+		widths = elementWidths({ '.compact-bar': 900 });
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp(900);
+
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notebooks');
+
+		// Typed without a press on the field, which would shut it on its own.
+		const field = screen.getByRole('combobox', { name: 'Search notes' });
+		act(() => {
+			field.focus();
+		});
+		expect(panel()).toBe('notebooks');
+		await user.type(field, 'h', { skipClick: true });
+		expect(panel()).toBeNull();
+		expect(await screen.findByRole('option', { name: /Minutes/ })).toBeDefined();
+	});
+
 	it('keeps a search going as the window narrows into a compact one', async () => {
 		// The query is held above both bars (`SearchQuery`), so the field the
 		// answers came from is still there, with what was typed in it, and
