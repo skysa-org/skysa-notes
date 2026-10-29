@@ -294,9 +294,11 @@ export const Sidebar = ({
 	const open = notebookOpen(selectedFolder);
 	const {
 		renaming,
+		typed,
 		renamed,
 		deleting,
 		going,
+		confirmDelete,
 		stopDeleting,
 		listing,
 		stopListing,
@@ -314,6 +316,7 @@ export const Sidebar = ({
 			setCreating({ parent: path });
 		},
 		onRenameFolder,
+		onDeleteFolder,
 		onPinFolder,
 		renamings,
 		onReveal,
@@ -379,10 +382,7 @@ export const Sidebar = ({
 					name={basename(deleting)}
 					noteCount={going === undefined ? 0 : notesUnder(going)}
 					fileCount={going === undefined ? 0 : filesUnder(going)}
-					onConfirm={() => {
-						stopDeleting();
-						onDeleteFolder?.(deleting);
-					}}
+					onConfirm={confirmDelete}
 					onCancel={stopDeleting}
 				/>
 			)}
@@ -402,9 +402,7 @@ export const Sidebar = ({
 				onDrop={drop}
 				onCancelMove={cancel}
 				renaming={renaming}
-				onDraft={(path, text) => {
-					renamings?.typed('notebook', path, text);
-				}}
+				onDraft={typed}
 				onRenamed={renamed}
 				onMenu={openMenu}
 				itemsFor={itemsFor}

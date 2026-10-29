@@ -24,9 +24,14 @@ interface NotebookMenuOptions {
 	pickUp: (moving: Moving) => void;
 	/** Open these notebooks, so that a row about to become a field is listed. */
 	openThese: (...paths: string[]) => void;
-	/** Make a notebook inside this one: the sidebar's field, which it keeps. */
+	/**
+	 * Make a notebook inside this one. The field is the sidebar's, not this
+	 * hook's: the header's `+`, an empty tree's "Create a notebook" and the
+	 * note list's ask open it too, and none of them is about a notebook.
+	 */
 	onNewInside: (path: string) => void;
 	onRenameFolder: ((path: string, name: string) => void) | undefined;
+	onDeleteFolder: ((path: string) => void) | undefined;
 	onPinFolder: ((path: string, pin: NotebookPin | undefined) => void) | undefined;
 	renamings: Renamings | undefined;
 	onReveal: (() => void) | undefined;
@@ -47,6 +52,7 @@ export const useNotebookMenu = ({
 	openThese,
 	onNewInside,
 	onRenameFolder,
+	onDeleteFolder,
 	onPinFolder,
 	renamings,
 	onReveal,
@@ -153,10 +159,18 @@ export const useNotebookMenu = ({
 	return {
 		/** The notebook whose row is its name's field, or null. */
 		renaming,
+		/** What is typed there, told to what else shows the name. */
+		typed: (path: string, text: string) => {
+			renamings?.typed('notebook', path, text);
+		},
 		renamed,
 		/** The notebook being asked about going, or null, and its node. */
 		deleting,
 		going,
+		confirmDelete: () => {
+			setDeleting(null);
+			if (deleting !== null) onDeleteFolder?.(deleting);
+		},
 		stopDeleting: () => {
 			setDeleting(null);
 		},

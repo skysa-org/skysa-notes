@@ -1,9 +1,11 @@
+import { ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import { Sidebar } from '../src/components/sidebar/Sidebar.js';
+import type { Moving } from '../src/store/rearrange.js';
 import { createRenamings } from '../src/store/renaming.js';
 import { buildFolderTree, withPins } from '../src/store/tree.js';
 
@@ -630,6 +632,43 @@ describe('deleting a notebook', () => {
 		);
 
 		expect(onDeleteFolder).toHaveBeenCalledWith('work');
+	});
+
+	it('is not offered from the palette during a move, nor with no notebook open', () => {
+		// Nor is a rename: a move is a mode, and the root, the scratchpad and the
+		// passwords are no notebook to rename or delete (`notebookOpen`).
+		const commands: { current: ReturnType<typeof useCommands> } = { current: [] };
+		const Commands = () => {
+			commands.current = useCommands();
+			return null;
+		};
+		const shown = (selectedFolder: string | undefined, moving: Moving | null) => (
+			<CommandsProvider>
+				<Sidebar
+					tree={counted}
+					selectedFolder={selectedFolder}
+					onSelectFolder={() => undefined}
+					onCreateFolder={() => undefined}
+					looseNoteCount={0}
+					moving={moving}
+				/>
+				<Commands />
+			</CommandsProvider>
+		);
+		const offered = () =>
+			['notebook.rename', 'notebook.delete'].map(
+				(id) => commands.current.find((command) => command.id === id)?.enabled
+			);
+		const { rerender } = render(shown('work', null));
+		expect(offered()).toEqual([true, true]);
+
+		rerender(shown('work', holding('personal', 'personal')));
+		expect(offered()).toEqual([false, false]);
+
+		for (const notNotebook of [undefined, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER]) {
+			rerender(shown(notNotebook, null));
+			expect(offered()).toEqual([false, false]);
+		}
 	});
 });
 
