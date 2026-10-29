@@ -21,8 +21,6 @@ import {
 } from '../../store/notes.js';
 import { scratchMarks } from '../../store/scratchpad.js';
 import { useOpeningNotice } from '../opening.js';
-import { useUnsupported } from '../unsupported.js';
-import { useFileCleanup } from '../useFileCleanup.js';
 import { focusEditor, inAField } from './focus.js';
 import { NoteScreen } from './NoteScreen.js';
 import type {
@@ -32,6 +30,8 @@ import type {
 	ScratchEditing,
 	ScratchScreen,
 } from './types.js';
+import { useUnsupported } from './unsupported.js';
+import { useFileCleanup } from './useFileCleanup.js';
 import { useNoteLayout } from './useNoteLayout.js';
 
 /** The open note: its title, its body, and the actions that act on it. */

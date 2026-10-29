@@ -8,13 +8,13 @@ import { type NoteRecord, noteRef } from '../../store/db.js';
 import type { LiveEdits } from '../../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
-import { FindBar } from '../FindBar.js';
 import { PinButton, ScratchBar } from '../ScratchControls.js';
-import { UnsupportedBanner } from '../unsupported.js';
+import { FindBar } from './FindBar.js';
 import { NoteBody } from './NoteBody.js';
 import { TitleField } from './TitleField.js';
 import type { NoteDraft, NoteViewProps, ScratchScreen } from './types.js';
-import type { useNoteLayout } from './useNoteLayout.js';
+import { UnsupportedBanner } from './unsupported.js';
+import type { NoteLayout } from './useNoteLayout.js';
 
 // Markdown is drawn as code: the `M↓` mark it had was a box of small strokes
 // that could not be told from the rich text icon beside it at a glance.
@@ -76,13 +76,6 @@ const ModeTabs = ({
 );
 
 /**
- * Everything below the provider.
- *
- * Split out because the bar and the editors have to be inside the same
- * `FindTargetProvider` — the editor offers itself to it and the bar reads it —
- * and because `NoteView` is at the complexity limit without it.
- */
-/**
  * Where the note is, with its notebook under the name being typed while it is
  * renamed. Its own component, so a keystroke redraws the path and not the note.
  */
@@ -137,7 +130,7 @@ const NoteActions = ({
 	lost: StructuralDifference | undefined;
 	retryable: boolean;
 	toggleMode: () => void;
-	layout: ReturnType<typeof useNoteLayout>;
+	layout: NoteLayout;
 	renamings: Renamings | undefined;
 }) => {
 	// Whether there is an outline to open. A button for a rail that would be
@@ -195,6 +188,12 @@ const NoteActions = ({
 	);
 };
 
+/**
+ * Everything below the provider.
+ *
+ * Split out because the bar and the editors have to be inside the same
+ * `FindTargetProvider`: the editor offers itself to it and the bar reads it.
+ */
 export const NoteScreen = ({
 	note,
 	mode,
@@ -228,7 +227,7 @@ export const NoteScreen = ({
 	/** A save was rejected, and what it held is still only in this tab. */
 	unsaved: boolean;
 	finding: number;
-	layout: ReturnType<typeof useNoteLayout>;
+	layout: NoteLayout;
 	onBody: (element: HTMLDivElement | null) => void;
 	toggleMode: () => void;
 	onClose: () => void;

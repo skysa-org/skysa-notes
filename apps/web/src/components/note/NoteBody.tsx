@@ -9,15 +9,15 @@ import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import { useNoteAttachments } from '../noteAttachments.js';
 import { useNoteSecrets } from '../noteSecrets.js';
-import { Outline } from '../Outline.js';
+import { Outline } from './Outline.js';
 import type { NoteDraft, NoteViewProps } from './types.js';
 
 /**
  * Whichever editor is open, with the outline beside it.
  *
- * Its own component so that `NoteView` stays inside the complexity limit, and
- * because the rail needs an element to look inside: `body` is the one both the
- * editor and the outline are under, and only this part of the tree cares.
+ * Its own component because the rail needs an element to look inside: `body`
+ * is the one both the editor and the outline are under, and only this part of
+ * the tree cares.
  */
 export const NoteBody = ({
 	note,

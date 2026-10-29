@@ -11,11 +11,6 @@ import type { ScratchMarks } from '../../store/scratchpad.js';
 export interface NoteViewProps {
 	note: NoteRecord | undefined;
 	/**
-	 * With the note as it was deleted, holding the text the editor held — which
-	 * is not always what the row holds: a save the store refused never got there.
-	 * It is what an undo puts back.
-	 */
-	/**
 	 * The note as it was deleted, holding the last text the store never took.
 	 * `beside` is such text where it is *not* the newest — an edit whose save
 	 * failed, with a later one stored since that was not typed over it. An undo

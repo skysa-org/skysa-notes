@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { Outline } from '../src/components/Outline.js';
+import { Outline } from '../src/components/note/Outline.js';
 import { RawEditor } from '../src/editor/RawEditor.js';
 
 /**

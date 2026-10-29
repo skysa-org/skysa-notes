@@ -1,10 +1,10 @@
 import type { StructuralDifference } from '@skysa/core';
 import { type ReactNode, useCallback, useState } from 'react';
 
-import { rich } from '../i18n/rich.js';
-import { t } from '../i18n/t.js';
-import { db, type NoteRecord, noteRef } from '../store/db.js';
-import { getNote, setNoteEditorMode } from '../store/notes.js';
+import { rich } from '../../i18n/rich.js';
+import { t } from '../../i18n/t.js';
+import { db, type NoteRecord, noteRef } from '../../store/db.js';
+import { getNote, setNoteEditorMode } from '../../store/notes.js';
 
 /**
  * A note the rich editor said it would damage, and the way back out.

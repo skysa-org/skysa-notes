@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type FileCleanupVisit, useFileCleanup } from '../src/components/useFileCleanup.js';
+import { type FileCleanupVisit, useFileCleanup } from '../src/components/note/useFileCleanup.js';
 import { type NoteRecord, noteRef } from '../src/store/db.js';
 import type { FileCleanup } from '../src/store/fileCleanup.js';
 

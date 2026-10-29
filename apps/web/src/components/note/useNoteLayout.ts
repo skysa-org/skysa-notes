@@ -97,3 +97,6 @@ export const useNoteLayout = (
 		toggleToolbar,
 	};
 };
+
+/** How the note is laid out in the room it has (`useNoteLayout`). */
+export type NoteLayout = ReturnType<typeof useNoteLayout>;
