@@ -8,16 +8,15 @@ import { CommandPalette } from '../components/CommandPalette.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
 import { NoteView, type NoteViewHandle, type ScratchEditing } from '../components/NoteView.js';
-import { type Notice, NotifyContext } from '../components/notify.js';
+import { type Notice } from '../components/notify.js';
 import { Passwords } from '../components/Passwords.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { usePasswords } from '../components/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
 import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
-import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
-import { db, noteRef, type SyncStateRecord } from '../store/db.js';
+import { db, noteRef } from '../store/db.js';
 import {
 	useActiveConnectionId,
 	useActiveSource,
@@ -34,7 +33,7 @@ import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { setNotebookPin } from '../store/pins.js';
 import { createRenamings } from '../store/renaming.js';
 import { findFolder, notesUnder } from '../store/tree.js';
-import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
+import { tabName } from '../sync/account.js';
 import {
 	useEnterCode,
 	useKeepOnInstall,
@@ -43,6 +42,7 @@ import {
 } from './-home/commands.js';
 import { useCodeAskedAgain, useConnectNotice } from './-home/connectNotice.js';
 import { HomeBar } from './-home/HomeBar.js';
+import { HomeLayout } from './-home/HomeLayout.js';
 import { HomeToasts } from './-home/HomeToasts.js';
 import { NoteColumn, PasswordColumn } from './-home/NoteColumn.js';
 import { NotesPane } from './-home/NotesPane.js';
@@ -66,18 +66,6 @@ import { parseSearch } from './search.js';
  * reopening the PWA at its start URL, or showing a source again, lands them
  * where they were. The matching is `-home/useOpenPlace.ts`.
  */
-
-/**
- * What the banner across the top says while a disconnected source is showing:
- * by its name and its storage's, where it has them (`sourceName`, which has a
- * name for every source with a provider).
- */
-const detachedText = (source: SyncStateRecord): string => {
-	const name = sourceName(source);
-	return source.provider === undefined || name === undefined
-		? t('shell.detached.unnamed')
-		: t('shell.detached.named', { source: name, provider: PROVIDER_LABELS[source.provider] });
-};
 
 const Home = () => {
 	const { connect, code, enter, share } = Route.useSearch();
@@ -378,20 +366,13 @@ const Home = () => {
 	);
 
 	return (
-		// `app-shell` is a three-column grid with exactly three children. A banner
-		// put inside it becomes a fourth grid item, takes the sidebar's column and
-		// pushes the note view into a clipped second row, so anything that sits
-		// above the panes goes in the frame around them instead. The toasts are
-		// not laid out at all — they are fixed to the viewport — but they are
-		// here for the same reason: a stack in the grid would take a column.
-		<NotifyContext.Provider value={setTold}>
-			<div className={frameClassName} inert={covered(held, scratch.modal)}>
-				{/*
-				 * Above everything, because it says which app this is: each source
-				 * is its own notes, its own notebooks and its own sync (§6), so the
-				 * panes below all mean something different depending on which of
-				 * these is lit.
-				 */}
+		<HomeLayout
+			notify={setTold}
+			frameClassName={frameClassName}
+			inert={covered(held, scratch.modal)}
+			source={source}
+			shell={{ ...shellProps, ...scratch.shellProps(panel) }}
+			bar={
 				<HomeBar
 					compact={compact}
 					returnTo={returnPath(href)}
@@ -414,179 +395,153 @@ const Home = () => {
 					fieldRef={searchField}
 					onOrigins={setOrigins}
 				/>
-				{/*
-				 * Under the bar rather than over it: the bar is the top of the window
-				 * to a compact window's search, which hangs from it to the foot.
-				 */}
-				<InstallBanner />
-				{/*
-				 * For as long as a detached source is the one showing, and not
-				 * dismissable: its notes look like any others, can be opened and
-				 * written in like any others, and sync nowhere. `role="note"` rather
-				 * than `status`, as a standing remark about what is on screen and not
-				 * news of something that has just happened.
-				 */}
-				{source?.detached !== undefined && (
-					<p className="banner" role="note">
-						{detachedText(source)}
-					</p>
-				)}
-				{paletteOpen && (
+			}
+			palette={
+				paletteOpen && (
 					<CommandPalette
 						onClose={() => {
 							setPaletteOpen(false);
 						}}
 					/>
-				)}
-
-				{/* `data-panel` is which pane a compact window is showing as a
-			    dropdown; the stylesheet ignores it in a wide one. */}
-				<div className="app-shell" {...shellProps} {...scratch.shellProps(panel)}>
-					{/* Positioned, like the two panes in a compact window, so it is
-				    never a grid item and takes no column. */}
-					<SourceDropdown
-						compact={compact}
-						enterCode={enterCode}
-						renamings={renamings}
-						returnTo={returnPath(href)}
-						onChosen={() => {
-							setPanel('notebooks');
-						}}
+				)
+			}
+			sourceDropdown={
+				<SourceDropdown
+					compact={compact}
+					enterCode={enterCode}
+					renamings={renamings}
+					returnTo={returnPath(href)}
+					onChosen={() => {
+						setPanel('notebooks');
+					}}
+				/>
+			}
+			sidebar={
+				<Sidebar
+					tree={tree}
+					selectedFolder={folder}
+					onSelectFolder={(path) => {
+						openFolder(path, afterFolder(path));
+					}}
+					onCreateFolder={onCreateFolder}
+					onRenameFolder={onRenameFolder}
+					onDeleteFolder={onDeleteFolder}
+					renamings={renamings}
+					looseNoteCount={looseNoteCount}
+					// In a compact window it is in the source dropdown instead,
+					// which is where a phone user goes for anything about storage.
+					{...(compact ? {} : { footer: <AccountPanel /> })}
+					moving={moving}
+					onPickUp={setMoving}
+					onDrop={onDropInto}
+					onCancelMove={cancelMove}
+					onReveal={() => {
+						if (compact) setPanel('notebooks');
+					}}
+					newNotebookAsked={newNotebookAsked}
+					openNotebooks={openNotebooks}
+					onOpenNotebooks={onOpenNotebooks}
+					onPinFolder={(path, pin) => {
+						if (activeConnection !== undefined)
+							void setNotebookPin(db, activeConnection, path, pin);
+					}}
+					scratchpad={placeRow(scratchpadShown, inScratchpad, scratch.show)}
+					passwords={placeRow(passwordsShown, inPasswords, passwords.show)}
+				/>
+			}
+			list={
+				inScratchpad ? (
+					<ScratchPane scratch={scratch} liveEdits={liveEdits} editor={noteEditor} />
+				) : inPasswords ? (
+					<Passwords
+						items={passwords.items}
+						selectedId={noteId}
+						onSelect={passwords.choose}
+						onAdd={passwords.add}
 					/>
-					<Sidebar
-						tree={tree}
-						selectedFolder={folder}
-						onSelectFolder={(path) => {
-							openFolder(path, afterFolder(path));
-						}}
-						onCreateFolder={onCreateFolder}
-						onRenameFolder={onRenameFolder}
-						onDeleteFolder={onDeleteFolder}
+				) : (
+					<NotesPane
+						notes={notes}
 						renamings={renamings}
-						looseNoteCount={looseNoteCount}
-						// In a compact window it is in the source dropdown instead,
-						// which is where a phone user goes for anything about storage.
-						{...(compact ? {} : { footer: <AccountPanel /> })}
+						selectedNoteId={noteId}
+						folderPath={folder}
+						select={select}
+						onCreateNote={onCreateNote}
+						onCreateNotebook={askNewNotebook}
+						// Both queries, not just the tree: the notebooks alone cannot tell
+						// an empty app from one whose notes all sit loose at the root.
+						storeLoaded={tree !== undefined && looseNoteCount !== undefined}
+						setMoving={setMoving}
+						cancelMove={cancelMove}
 						moving={moving}
-						onPickUp={setMoving}
-						onDrop={onDropInto}
-						onCancelMove={cancelMove}
-						onReveal={() => {
-							if (compact) setPanel('notebooks');
+						pickUp={pickUp}
+						unsavedNoteId={unsavedNoteId}
+						liveEdits={liveEdits}
+						pins={pins}
+						deleteNote={(note) => {
+							noteView.current?.deleteNote(note);
 						}}
-						newNotebookAsked={newNotebookAsked}
-						openNotebooks={openNotebooks}
-						onOpenNotebooks={onOpenNotebooks}
-						onPinFolder={(path, pin) => {
-							if (activeConnection !== undefined)
-								void setNotebookPin(db, activeConnection, path, pin);
-						}}
-						scratchpad={placeRow(scratchpadShown, inScratchpad, scratch.show)}
-						passwords={placeRow(passwordsShown, inPasswords, passwords.show)}
 					/>
-
-					{inScratchpad ? (
-						<ScratchPane scratch={scratch} liveEdits={liveEdits} editor={noteEditor} />
-					) : inPasswords ? (
-						<Passwords
-							items={passwords.items}
-							selectedId={noteId}
-							onSelect={passwords.choose}
-							onAdd={passwords.add}
-						/>
-					) : (
-						<NotesPane
-							notes={notes}
-							renamings={renamings}
-							selectedNoteId={noteId}
-							folderPath={folder}
-							select={select}
-							onCreateNote={onCreateNote}
-							onCreateNotebook={askNewNotebook}
-							// Both queries, not just the tree: the notebooks alone cannot tell
-							// an empty app from one whose notes all sit loose at the root.
-							storeLoaded={tree !== undefined && looseNoteCount !== undefined}
-							setMoving={setMoving}
-							cancelMove={cancelMove}
-							moving={moving}
-							pickUp={pickUp}
-							unsavedNoteId={unsavedNoteId}
-							liveEdits={liveEdits}
-							pins={pins}
-							deleteNote={(note) => {
-								noteView.current?.deleteNote(note);
-							}}
-						/>
-					)}
-
-					{inPasswords ? (
-						<PasswordColumn
-							openNote={openNote}
-							opening={opening}
-							compact={compact}
-							draft={place.noteDraft}
-							onProblem={setProblem}
-							onDelete={deletePassword}
-							// Not `select`, which would take down what the item had to
-							// say: why a new one could not be begun.
-							onClose={() => {
-								go(
-									{ folder: VAULT_FOLDER },
-									{ replace: true, notePath: undefined }
-								);
-							}}
-							onOpen={(note) => {
-								select(
-									{ folder: VAULT_FOLDER, note: note.id },
-									{ replace: true, note }
-								);
-							}}
-						/>
-					) : (
-						<NoteColumn
-							inScratchpad={inScratchpad}
-							compact={compact}
-							cardId={scratch.card?.id}
-							unseen={panel !== null}
-							editing={scratch.editing}
-							editor={noteEditor}
-						/>
-					)}
-				</div>
-
-				<ScratchOverlays scratch={scratch} editor={noteEditor} />
-
-				{/*
-				 * One stack for everything this screen floats over the page. Two
-				 * notices at once is ordinary — a failed create while the account
-				 * just connected is still being read — and in a stack they sit above
-				 * one another instead of on one another.
-				 *
-				 * The undo notice is here rather than placing itself, which is what
-				 * it did while it was the only other card on the screen.
-				 */}
-				<HeldImport source={held} />
-				<TakeShare
-					share={share}
-					source={source}
-					sources={sources}
-					onRead={shareRead}
-					onAdded={shareAdded}
-				/>
-				<HomeToasts
-					deleted={deleted}
-					undoDelete={undoDelete}
-					dismissDeleted={dismissDeleted}
-					undoFailed={undoFailed}
-					connectNotice={connectNotice}
-					dismissConnect={dismissConnect}
-					problem={problem}
-					dismissProblem={dismissProblem}
-					told={told}
-					dismissTold={dismissTold}
-				/>
-			</div>
-		</NotifyContext.Provider>
+				)
+			}
+			note={
+				inPasswords ? (
+					<PasswordColumn
+						openNote={openNote}
+						opening={opening}
+						compact={compact}
+						draft={place.noteDraft}
+						onProblem={setProblem}
+						onDelete={deletePassword}
+						// Not `select`, which would take down what the item had to
+						// say: why a new one could not be begun.
+						onClose={() => {
+							go({ folder: VAULT_FOLDER }, { replace: true, notePath: undefined });
+						}}
+						onOpen={(note) => {
+							select(
+								{ folder: VAULT_FOLDER, note: note.id },
+								{ replace: true, note }
+							);
+						}}
+					/>
+				) : (
+					<NoteColumn
+						inScratchpad={inScratchpad}
+						compact={compact}
+						cardId={scratch.card?.id}
+						unseen={panel !== null}
+						editing={scratch.editing}
+						editor={noteEditor}
+					/>
+				)
+			}
+			overlays={<ScratchOverlays scratch={scratch} editor={noteEditor} />}
+			floating={
+				<>
+					<HeldImport source={held} />
+					<TakeShare
+						share={share}
+						source={source}
+						sources={sources}
+						onRead={shareRead}
+						onAdded={shareAdded}
+					/>
+					<HomeToasts
+						deleted={deleted}
+						undoDelete={undoDelete}
+						dismissDeleted={dismissDeleted}
+						undoFailed={undoFailed}
+						connectNotice={connectNotice}
+						dismissConnect={dismissConnect}
+						problem={problem}
+						dismissProblem={dismissProblem}
+						told={told}
+						dismissTold={dismissTold}
+					/>
+				</>
+			}
+		/>
 	);
 };
 
