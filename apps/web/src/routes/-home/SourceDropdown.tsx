@@ -1,5 +1,5 @@
 import { AccountPanel } from '../../components/AccountPanel.js';
-import { SourcePanel } from '../../components/SourceTabs.js';
+import { SourcePanel } from '../../components/sources/SourcePanel.js';
 import type { Renamings } from '../../store/renaming.js';
 /**
  * What the source dropdown opens, in a compact window only: the sources, the

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import type { AccountSlot, SourceAsk } from '../SourceTabs.js';
+import type { AccountSlot, SourceAsk } from '../sources/SourcePanel.js';
 
 /**
  * What another source's `⋯` asked of this one (`SourceAsk`), once this one is

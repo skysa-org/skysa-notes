@@ -9,12 +9,9 @@ import gdrive16 from '../src/assets/providers/gdrive-16.png';
 import gdrive32 from '../src/assets/providers/gdrive-32.png';
 import gdrive48 from '../src/assets/providers/gdrive-48.png';
 import onedriveMark from '../src/assets/providers/onedrive.svg';
-import {
-	type AccountSlot,
-	SourcePanel,
-	SourceTabs,
-	useShowingSource,
-} from '../src/components/SourceTabs.js';
+import { type AccountSlot, SourcePanel } from '../src/components/sources/SourcePanel.js';
+import { SourceTabs } from '../src/components/sources/SourceTabs.js';
+import { useShowingSource } from '../src/components/sources/useShowingSource.js';
 import {
 	dropConnectCode,
 	heldConnectCode,

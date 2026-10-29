@@ -1,6 +1,6 @@
 import { CompactBar, type CompactBarProps } from '../../components/CompactBar.js';
 import { NoteSearchField, SearchQuery } from '../../components/SearchField.js';
-import { SourceTabs } from '../../components/SourceTabs.js';
+import { SourceTabs } from '../../components/sources/SourceTabs.js';
 
 /**
  * The bar across the top: in a compact window the dropdowns and the search

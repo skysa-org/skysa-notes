@@ -17,7 +17,7 @@ import { Connected } from './account/Connected.js';
 import { Detached } from './account/Detached.js';
 import { NotConnected } from './account/NotConnected.js';
 import { useDisconnects } from './account/useDisconnects.js';
-import type { AccountSlot } from './SourceTabs.js';
+import type { AccountSlot } from './sources/SourcePanel.js';
 
 /**
  * Where storage is connected, switched between and let go of: the sources this
