@@ -21,6 +21,7 @@ import {
 	type UnlockedKeys,
 	unlockKeys,
 } from '../src/store/secretKeys.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -87,7 +88,6 @@ const setup = async ({
 		const secrets = useNoteSecrets(
 			{ connectionId: 'c1' },
 			{
-				db,
 				lock,
 				copy,
 				keyFile: keyFileSync,
@@ -98,7 +98,7 @@ const setup = async ({
 		held.current = secrets;
 		return <>{secrets.dialog}</>;
 	};
-	render(<Probe />);
+	render(<Probe />, over(db));
 	const secrets = () => {
 		if (held.current === undefined) throw new Error('not rendered');
 		return held.current;

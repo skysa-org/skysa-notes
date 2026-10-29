@@ -144,7 +144,6 @@ const ConnectedFoot = ({
 	grants: Asked<Grant[]>;
 	onGrantsChanged: () => void;
 }) => {
-	const database = useDb();
 	const [about, setAbout] = useState(false);
 	const [details, setDetails] = useState(false);
 	const detailsButton = useRef<HTMLButtonElement>(null);
@@ -189,7 +188,6 @@ const ConnectedFoot = ({
 		<>
 			{secrets && (
 				<SecretsDialog
-					database={database}
 					connectionId={bound.connectionId}
 					sourceName={slot?.name ?? label}
 					keyFile={keyFile}

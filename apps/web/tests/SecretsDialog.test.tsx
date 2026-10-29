@@ -22,6 +22,7 @@ import { enrol, enrolment, MAX_TRIES, type Unlock, unlockKeys } from '../src/sto
 import { getPasswordsShown } from '../src/store/vault.js';
 import type { KeyFileWrite } from '../src/sync/keyFile.js';
 import { readQr } from './qrRead.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -73,7 +74,6 @@ const setup = async ({
 	const open = (props: Partial<SecretsDialogProps> = {}) =>
 		render(
 			<SecretsDialog
-				database={db}
 				connectionId="c1"
 				sourceName="Work"
 				keyFile={keyFile}
@@ -84,7 +84,8 @@ const setup = async ({
 				print={print}
 				copy={copy}
 				{...props}
-			/>
+			/>,
+			over(db)
 		);
 	return { db, lock, keyFile, print, copy, onClose, user, open };
 };

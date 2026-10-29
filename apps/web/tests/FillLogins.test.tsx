@@ -30,6 +30,7 @@ import type { NotesDatabase } from '../src/store/db.js';
 import { createNote, rewriteNoteBody } from '../src/store/notes.js';
 import { enrol, type Unlock } from '../src/store/secretKeys.js';
 import { setPasswordsShown } from '../src/store/vault.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -183,12 +184,12 @@ const setup = async ({
 	render(
 		<FillPage
 			channel={channel}
-			db={db}
 			lock={lock}
 			copy={copy}
 			close={close}
 			now={() => clock.current}
-		/>
+		/>,
+		over(db)
 	);
 	/** Unlocked with the PIN, in the dialog asked. */
 	const unlock = async () => {

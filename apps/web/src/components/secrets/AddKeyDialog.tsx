@@ -4,13 +4,12 @@ import { useState } from 'react';
 import { t } from '../../i18n/t.js';
 import { type Age, loadAge } from '../../secrets/loadAge.js';
 import type { SecretsLock } from '../../secrets/lock.js';
-import type { NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
 import { enrolment, replaceKeys } from '../../store/secretKeys.js';
 import { Dialog } from '../ui/Dialog.js';
 import { PasteKey } from './PasteKey.js';
 
 export interface AddKeyDialogProps {
-	database: NotesDatabase;
 	connectionId: string;
 	/** The secret the key has to open. */
 	armor: string;
@@ -36,7 +35,6 @@ export interface AddKeyDialogProps {
  * Vault dialog keeps it.
  */
 export const AddKeyDialog = ({
-	database,
 	connectionId,
 	armor,
 	lock,
@@ -44,6 +42,7 @@ export const AddKeyDialog = ({
 	onAdded,
 	onCancel,
 }: AddKeyDialogProps) => {
+	const database = useDb();
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const replacedElsewhere = useLiveQuery(async () => {

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import { t } from '../../i18n/t.js';
 import { loadAge } from '../../secrets/loadAge.js';
+import { useDb } from '../../store/database.js';
 import type { KeyFileRecord } from '../../store/db.js';
 import { PBKDF2_ROUNDS } from '../../store/secretKeys.js';
 import { setPasswordsShown } from '../../store/vault.js';
@@ -90,7 +91,6 @@ const SAID: Readonly<Record<'checking' | 'unavailable' | 'newer' | 'invalid', ()
 };
 
 export const SecretsDialog = ({
-	database,
 	connectionId,
 	sourceName,
 	keyFile,
@@ -104,6 +104,7 @@ export const SecretsDialog = ({
 	copy = copyText,
 	deviceLock: givenDeviceLock,
 }: SecretsDialogProps) => {
+	const database = useDb();
 	const {
 		read,
 		step,
@@ -128,7 +129,6 @@ export const SecretsDialog = ({
 		remove,
 		typed,
 	} = useSecretsFlow({
-		database,
 		connectionId,
 		sourceName,
 		keyFile,
@@ -173,7 +173,6 @@ export const SecretsDialog = ({
 		const form = (
 			<UnlockForm
 				extra={skip}
-				database={database}
 				connectionId={connectionId}
 				kind={kind}
 				lock={lock}

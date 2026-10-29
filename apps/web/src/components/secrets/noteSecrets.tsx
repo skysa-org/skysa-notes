@@ -9,12 +9,8 @@ import type { SecretsLock } from '../../secrets/lock.js';
 import { notEnrolled, notHere, type Why } from '../../secrets/sealHere.js';
 import { tabLock } from '../../secrets/tabLock.js';
 import { connectedSources } from '../../store/connection.js';
-import {
-	db as appDb,
-	type NoteRecord,
-	type NotesDatabase,
-	type UnlockKind,
-} from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord, NotesDatabase, UnlockKind } from '../../store/db.js';
 import { enrolment, type UnlockedKeys } from '../../store/secretKeys.js';
 import { tabName, UNKNOWN_LABEL } from '../../sync/account.js';
 import type { KeyFileSync } from '../../sync/keyFile.js';
@@ -46,7 +42,6 @@ import { UnlockDialog } from './UnlockDialog.js';
 export interface NoteSecretsOptions {
 	/** Where a problem the editor has nowhere to show goes: a toast. */
 	report?: (problem: AttachmentProblem) => void;
-	db?: NotesDatabase;
 	lock?: SecretsLock;
 	age?: () => Promise<Age>;
 	/** Words to the system clipboard. */
@@ -116,13 +111,13 @@ export const useNoteSecrets = (
 	note: Pick<NoteRecord, 'connectionId'>,
 	{
 		report = () => undefined,
-		db = appDb,
 		lock = tabLock,
 		age = loadAge,
 		copy = copyText,
 		keyFile = syncScheduler.keyFile,
 	}: NoteSecretsOptions = {}
 ): NoteSecrets => {
+	const db = useDb();
 	// Read when asked, not when the host was made: the editor keeps the host
 	// it was built with for as long as the note is open.
 	const latest = useRef({ connectionId: note.connectionId, report, db, lock, age, copy });
@@ -305,7 +300,6 @@ export const useNoteSecrets = (
 	const keyDialog =
 		adding === null ? null : (
 			<AddKeyDialog
-				database={db}
 				connectionId={adding.connectionId}
 				armor={adding.armor}
 				lock={lock}
@@ -322,7 +316,6 @@ export const useNoteSecrets = (
 	const secretsDialog =
 		secretsOf === null ? null : (
 			<SecretsDialog
-				database={db}
 				connectionId={secretsOf.connectionId}
 				sourceName={secretsOf.name}
 				keyFile={keyFile}
@@ -340,7 +333,6 @@ export const useNoteSecrets = (
 			(keyDialog ?? secretsDialog)
 		) : (
 			<UnlockDialog
-				database={db}
 				connectionId={asking.connectionId}
 				kind={asking.kind}
 				lock={lock}
