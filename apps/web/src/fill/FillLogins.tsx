@@ -9,6 +9,7 @@ import {
 	useState,
 } from 'react';
 
+import { copyText } from '../components/clipboard/systemClipboard.js';
 import { UnlockDialog } from '../components/secrets/UnlockDialog.js';
 import { openLink } from '../editor/links.js';
 import { t } from '../i18n/t.js';
@@ -98,8 +99,6 @@ interface Asking {
 }
 
 type Said = 'nothing' | 'copied' | 'notCopied' | 'changed' | 'pageGone';
-
-const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
 
 const closeWindow = () => {
 	window.close();

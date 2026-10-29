@@ -1,5 +1,6 @@
 import { MAX_ATTACHMENT_BYTES, readClipName } from '@skysa/core';
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/clipboard/ClipboardPanel.js';
 import type { SystemClipboard, SystemRead } from '../src/components/clipboard/systemClipboard.js';
 import { useFileDropGuard } from '../src/components/clipboard/useFileDropGuard.js';
+import { FLASH_MS } from '../src/components/ui/useFlash.js';
 import type { FileBrowser } from '../src/editor/fileActions.js';
 import type { ObjectUrlCache } from '../src/editor/objectUrls.js';
 import type { PictureShrinker } from '../src/pictures/shrinker.js';
@@ -432,6 +434,34 @@ describe('the clipboard panel', () => {
 		expect(said().className).toContain('clipboard-said-quiet');
 		expect(written.map((entry) => entry.type)).toEqual(['text/plain']);
 		expect(await written[0]?.blob.text()).toBe('first');
+	});
+
+	it('says it has copied for a moment, over the item and under the list', async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const { db } = await setup();
+			await seeded(db, [{ kind: 'text', text: 'first' }]);
+			const [item] = await waitFor(() => {
+				const [only] = items();
+				if (only === undefined) throw new Error('not listed yet');
+				return [only];
+			});
+
+			await userEvent
+				.setup({ advanceTimers: vi.advanceTimersByTime })
+				.click(within(item).getByRole('button', { name: /^Copy text/ }));
+			await waitFor(() => {
+				expect(said().textContent).toBe('Copied.');
+			});
+
+			act(() => {
+				vi.advanceTimersByTime(FLASH_MS);
+			});
+			expect(said().textContent).toBe('');
+			expect(items()[0]?.querySelector('.clipboard-done')).toBeNull();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('shows a picture as a thumbnail, and copies it as a PNG', async () => {

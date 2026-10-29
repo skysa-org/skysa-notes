@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { asPng, fromFiles, systemClipboard } from '../src/components/clipboard/systemClipboard.js';
+import {
+	asPng,
+	copyText,
+	fromFiles,
+	systemClipboard,
+} from '../src/components/clipboard/systemClipboard.js';
 
 /**
  * The browser's clipboard as the shared clipboard reads and writes it
@@ -109,6 +114,27 @@ describe('writing the clipboard', () => {
 		const blob = await asPng(png, 'image/png');
 		expect(blob.type).toBe('image/png');
 		expect(await blob.text()).toBe('png');
+	});
+});
+
+describe('a Copy button', () => {
+	it('puts the text on the clipboard', async () => {
+		const writeText = vi.fn(() => Promise.resolve());
+		vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+		await copyText('ab12 cd34');
+
+		expect(writeText).toHaveBeenCalledWith('ab12 cd34');
+	});
+
+	it('is refused, not thrown, where there is no clipboard', async () => {
+		// Outside a secure context there is none, and a throw would reach the
+		// button before anything was listening for it.
+		vi.stubGlobal('navigator', {});
+
+		const copying = copyText('ab12 cd34');
+
+		await expect(copying).rejects.toBeInstanceOf(TypeError);
 	});
 });
 

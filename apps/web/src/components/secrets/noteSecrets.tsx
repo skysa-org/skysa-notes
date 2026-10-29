@@ -19,6 +19,7 @@ import { enrolment, type UnlockedKeys } from '../../store/secretKeys.js';
 import { tabName, UNKNOWN_LABEL } from '../../sync/account.js';
 import type { KeyFileSync } from '../../sync/keyFile.js';
 import { syncScheduler } from '../../sync/runtime.js';
+import { copyText } from '../clipboard/systemClipboard.js';
 import { AddKeyDialog } from './AddKeyDialog.js';
 import { SecretsDialog } from './SecretsDialog.js';
 import { UnlockDialog } from './UnlockDialog.js';
@@ -75,8 +76,6 @@ interface Adding {
 	readonly armor: string;
 	readonly answer: (added: boolean) => void;
 }
-
-const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
 
 const warning = (message: string): AttachmentProblem => ({ message, tone: 'warning' });
 

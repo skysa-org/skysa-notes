@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { NoteDraft } from '../src/components/note/types.js';
 import { PasswordItem } from '../src/components/passwords/PasswordItem.js';
 import { editedAt } from '../src/components/ui/editedAt.js';
+import { FLASH_MS } from '../src/components/ui/useFlash.js';
 import type { SecretHost } from '../src/editor/secretHost.js';
 import { openSecret } from '../src/secrets/age.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
@@ -148,6 +149,24 @@ describe('a password, opened', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Copy username' }));
 		expect(host.copy).toHaveBeenLastCalledWith('ada@example.com');
+	});
+
+	it('says it has copied for a moment, and then says nothing', async () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const { host } = fakeHost();
+			const user = await show(await item('GitHub'), host);
+
+			await user.click(await screen.findByRole('button', { name: 'Copy password' }));
+			expect(await screen.findByText('Copied.')).toBeDefined();
+
+			act(() => {
+				vi.advanceTimersByTime(FLASH_MS);
+			});
+			expect(screen.queryByText('Copied.')).toBeNull();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('shows the passwords an Update replaced, each hidden until shown, and copies them', async () => {
