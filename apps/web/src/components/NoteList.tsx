@@ -21,7 +21,8 @@ import { titleShown } from '../store/titles.js';
 import { byParent, folderLabel } from '../store/tree.js';
 import { noteOpening, openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
-import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
+import { FloatingMenu, type MenuPoint, type OptionsMenuItem, useRowMenu } from './OptionsMenu.js';
+import { pickUpProps } from './pickUpProps.js';
 import { RowOptions } from './RowOptions.js';
 import {
 	besideOf,
@@ -271,24 +272,25 @@ const NoteRowView = ({
 				onClick={() => {
 					onSelect(row);
 				}}
-				onContextMenu={(event) => {
-					if (onMenu === undefined) return;
-					event.preventDefault();
-					onMenu(row, menuPoint(event));
-				}}
 				aria-current={selected ? 'true' : undefined}
 				// Said beside the name rather than in it, as a notebook's is.
 				aria-describedby={pinned ? pinId : undefined}
-				draggable={onPickUp !== undefined}
-				onDragStart={(event) => {
-					if (onPickUp === undefined) return;
-					// Firefox starts no drag without data on it, and the title is what
-					// another application receives if the note is dropped outside.
-					event.dataTransfer.effectAllowed = 'move';
-					event.dataTransfer.setData('text/plain', titleShown(note.title));
-					onPickUp(row);
-				}}
-				onDragEnd={onCancelMove}
+				{...pickUpProps({
+					text: titleShown(note.title),
+					onPickUp:
+						onPickUp === undefined
+							? undefined
+							: () => {
+									onPickUp(row);
+								},
+					onCancelMove,
+					onMenu:
+						onMenu === undefined
+							? undefined
+							: (at) => {
+									onMenu(row, at);
+								},
+				})}
 			>
 				<span className="note-title">
 					{titleShown(note.title)}
@@ -481,7 +483,7 @@ export const NoteList = ({
 	pinnedNoteIds,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
-	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
+	const { menu, openMenu, closeMenu } = useRowMenu<NoteRecord>();
 	const windowed = notes !== undefined && notes.length > WINDOWED_ABOVE;
 	/** The row the focus is in, or in its menu: drawn wherever it is scrolled to. */
 	const { focusedId, focusIn, focusOut } = useFocusedItem();
@@ -516,7 +518,7 @@ export const NoteList = ({
 			selectedNoteId,
 			movingNoteId,
 			focusedId,
-			menu?.note.id,
+			menu?.of.id,
 			...besideOf(order, focusedId),
 		].filter((id) => id !== undefined)
 	);
@@ -538,9 +540,6 @@ export const NoteList = ({
 		given.current.onCancelMove?.();
 	}, []);
 	const itemsFor = useCallback((note: NoteRecord) => given.current.menuFor?.(note) ?? [], []);
-	const openMenu = useCallback((note: NoteRecord, at: MenuPoint) => {
-		setMenu({ note, at });
-	}, []);
 	// Each row asks for its opening when it is drawn.
 	keepRows('notes', notes?.length ?? 0);
 	const placeholder = placeholderFor({
@@ -641,11 +640,9 @@ export const NoteList = ({
 			{menu !== null && menuFor !== undefined && (
 				<FloatingMenu
 					at={menu.at}
-					label={t('rows.note.menu', { name: titleShown(menu.note.title) })}
-					items={menuFor(menu.note)}
-					onClose={() => {
-						setMenu(null);
-					}}
+					label={t('rows.note.menu', { name: titleShown(menu.of.title) })}
+					items={menuFor(menu.of)}
+					onClose={closeMenu}
 				/>
 			)}
 		</section>
