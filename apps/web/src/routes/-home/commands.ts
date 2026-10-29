@@ -1,6 +1,6 @@
 import { basename } from '@skysa/core';
 import { useNavigate } from '@tanstack/react-router';
-import { type RefObject, useEffect, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useState } from 'react';
 
 import { parseChord } from '../../commands/chord.js';
 import { useCommand } from '../../commands/context.js';
@@ -12,6 +12,7 @@ import { useHoldsAnything } from '../../store/hooks.js';
 import { keeping } from '../../store/keeping.js';
 import { type Moving } from '../../store/rearrange.js';
 import { titleShown } from '../../store/titles.js';
+import { type Pane } from '../panel.js';
 import { type AppSearch } from '../search.js';
 import { canMakeNote, isNotebook } from './rules.js';
 
@@ -68,6 +69,27 @@ export const useEnterCode = (enter: AppSearch['enter'], compact: boolean): numbe
 		});
 	}, [enter, compact, navigate]);
 	return asked;
+};
+
+/**
+ * Something shared to the app (`share/TakeShare.tsx`): out of the URL once
+ * read, so a reload does not ask again, and the clipboard brought into view
+ * once it has it, which in a compact window is in the sources dropdown.
+ */
+export const useShareArrival = (compact: boolean, setPanel: (panel: Pane | null) => void) => {
+	const navigate = useNavigate({ from: '/' });
+	const shareRead = useCallback(() => {
+		void navigate({
+			search: ({ share: _share, ...rest }) => rest,
+			hash: true,
+			state: true,
+			replace: true,
+		});
+	}, [navigate]);
+	const shareAdded = useCallback(() => {
+		if (compact) setPanel('sources');
+	}, [compact, setPanel]);
+	return { shareRead, shareAdded };
 };
 
 /**

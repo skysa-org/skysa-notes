@@ -150,7 +150,7 @@ type Go = (
 
 /**
  * Going somewhere in the source showing, as the shell does over `Go`
- * (`select` in `routes/index.tsx`): `next` over the notebook and note open,
+ * (`select` in `routes/-home/useSelect.ts`): `next` over the notebook and note open,
  * pushed as a step of the user's own unless `replace` keeps the URL true to
  * what has changed under it.
  */

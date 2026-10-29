@@ -33,6 +33,21 @@ const twoSources = async () => {
 		title: 'Minutes',
 		body: 'Minutes\n\nthe heron meeting\n',
 	});
+	// Ahead of it, in a notebook ahead of its own, so arriving in the
+	// source with nothing remembered there would open somewhere else.
+	await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Archive' });
+	await createNote(db, {
+		connectionId: DROPBOX,
+		folderPath: 'Archive',
+		title: 'Agenda',
+		body: 'Agenda\n\nold\n',
+	});
+	await createNote(db, {
+		connectionId: DROPBOX,
+		folderPath: 'Work',
+		title: 'Agenda',
+		body: 'Agenda\n\nnew\n',
+	});
 	// Named, because binding made Dropbox the showing source and a note made
 	// without a source goes into the one showing.
 	await createFolder(db, {

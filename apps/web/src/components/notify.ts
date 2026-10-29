@@ -16,7 +16,7 @@ export interface Notice {
 
 /**
  * Where a component well inside the shell says something over the page: the
- * shell's stack of toasts (`routes/index.tsx`).
+ * shell's stack of toasts (`routes/-home/HomeToasts.tsx`).
  *
  * A context and not a prop, for the storage panel's import, which says how it
  * went. The panel is the sidebar's foot in a wide window and inside the sources

@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from '@testing-library/react';
+import { act, cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -70,6 +70,29 @@ describe('a rename the store refuses', () => {
 		expect(alert.textContent).toContain('That notebook could not be renamed.');
 		expect(await screen.findByRole('heading', { name: 'Work' })).toBeDefined();
 		expect((await listFolders(db)).map((folder) => folder.path)).toEqual(['Work']);
+	});
+
+	it('takes the message down at the next place the user goes', async () => {
+		const user = userEvent.setup();
+		await openApp('Minutes', 'Agenda');
+		await screen.findByRole('heading', { name: 'Work' });
+		store.refusing = true;
+		await user.click(screen.getByRole('button', { name: 'Options for “Work”' }));
+		const items = await screen.findByRole('group', { name: 'Notebook “Work”' });
+		await user.click(within(items).getByRole('button', { name: 'Rename' }));
+		await user.keyboard('Projects{Enter}');
+		await screen.findByRole('alert');
+
+		// It is about the name just tried, not about the app (`useSelect`).
+		// From the keyboard: a press anywhere takes an ordinary notice away
+		// by itself.
+		const agenda = screen.getByRole('button', { name: /^Agenda/ });
+		act(() => {
+			agenda.focus();
+		});
+		await user.keyboard('{Enter}');
+		await screen.findByDisplayValue('Agenda');
+		expect(screen.queryByRole('alert')).toBeNull();
 	});
 });
 
