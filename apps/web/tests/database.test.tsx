@@ -37,4 +37,28 @@ describe('the database a component is drawn over', () => {
 		});
 		expect(await db.notes.count()).toBe(0);
 	});
+
+	it('is never read from the one before, where the provider is given another', async () => {
+		const first = freshDatabase();
+		const second = freshDatabase();
+		const note = await createNote(first, { title: 'First' });
+		await createNote(second, { title: 'Second', id: note.id });
+		const current = { db: first };
+		const { result, rerender } = renderHook(() => useNote(note.id)?.title, {
+			wrapper: ({ children }: { children: ReactNode }) => (
+				<DatabaseProvider db={current.db}>{children}</DatabaseProvider>
+			),
+		});
+		await waitFor(() => {
+			expect(result.current).toBe('First');
+		});
+
+		current.db = second;
+		rerender();
+
+		expect(result.current).toBeUndefined();
+		await waitFor(() => {
+			expect(result.current).toBe('Second');
+		});
+	});
 });

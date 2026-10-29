@@ -50,8 +50,9 @@ import { getPasswordsShown, isVaultNote, listVaultNotes } from './vault.js';
  * resolved. That is a genuine "not loaded yet" and callers must handle it —
  * though the wait is a local IndexedDB round trip, not a network one.
  *
- * Each reads the database it is drawn over (`useDb`), and reads again where
- * that changes.
+ * Each reads the database it is drawn over (`useDb`), which does not change
+ * under it: a provider given another draws what it holds afresh
+ * (`DatabaseProvider`).
  */
 
 /**
@@ -251,12 +252,12 @@ export const useNoteRead = (id: string | undefined): NoteRecord | null | undefin
 	// not only to its id: one note, then another still being read, then the
 	// first again, and the answer held is the first asking's — read before
 	// the second, and perhaps changed since.
-	const asked = useMemo(() => ({ id, connectionId, db }), [id, connectionId, db]);
+	const asked = useMemo(() => ({ id, connectionId }), [id, connectionId]);
 	const read = useLiveQuery(async () => {
 		if (asked.id === undefined || asked.connectionId === undefined) return undefined;
 		const note = await getNote(db, asked.id, { connectionId: asked.connectionId });
 		return { asked, note: note === undefined || isTombstone(note) ? null : note };
-	}, [asked, db]);
+	}, [asked]);
 	return read?.asked === asked ? read.note : undefined;
 };
 
