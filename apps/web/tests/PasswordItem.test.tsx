@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { editedAt } from '../src/components/editedAt.js';
-import type { NoteDraft } from '../src/components/NoteView.js';
+import type { NoteDraft } from '../src/components/note/types.js';
 import { PasswordItem } from '../src/components/PasswordItem.js';
 import type { SecretHost } from '../src/editor/secretHost.js';
 import { openSecret } from '../src/secrets/age.js';

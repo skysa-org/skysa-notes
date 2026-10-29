@@ -3,7 +3,8 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type DisplacedText, NoteView, type NoteViewHandle } from '../src/components/NoteView.js';
+import { NoteView } from '../src/components/note/NoteView.js';
+import type { DisplacedText, NoteViewHandle } from '../src/components/note/types.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import type * as Notes from '../src/store/notes.js';

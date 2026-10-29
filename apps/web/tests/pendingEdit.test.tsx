@@ -3,7 +3,7 @@ import type { RemoteEntry } from '@skysa/core';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { NoteView } from '../src/components/NoteView.js';
+import { NoteView } from '../src/components/note/NoteView.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { deleteNote, getNote, saveNoteBody } from '../src/store/notes.js';

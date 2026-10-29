@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
-import { NoteView } from '../src/components/NoteView.js';
+import { NoteView } from '../src/components/note/NoteView.js';
 import { db, noteRef } from '../src/store/db.js';
 import { fileCleanup } from '../src/store/fileCleanup.js';
 import { useNote } from '../src/store/hooks.js';

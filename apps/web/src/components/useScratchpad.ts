@@ -22,7 +22,7 @@ import { scratchMarks } from '../store/scratchpad.js';
 import { movingNote } from '../store/titles.js';
 import { visibleBlocks } from '../store/visibleText.js';
 import { COARSE_POINTER, useMediaQuery } from './layout.js';
-import type { NoteViewHandle, ScratchEditing } from './NoteView.js';
+import type { NoteViewHandle, ScratchEditing } from './note/types.js';
 import type { MarkChange } from './Scratchpad.js';
 
 /**
