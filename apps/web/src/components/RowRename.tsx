@@ -12,11 +12,11 @@ export const rowIndent = (depth: number): string =>
 
 /**
  * A row's name, being typed: a notebook's in the sidebar, a source's in a
- * compact window's source dropdown. The same shape the source tabs use: the
- * row stays as it was — its box, its highlight, its count — and only the name
- * in it becomes a field, so nothing moves when it becomes editable. Not the
- * row's own button with a field in it, which HTML does not allow, but a box
- * drawn as the row is (`.row-editing`).
+ * compact window's source dropdown, and a source tab's in the bar
+ * (`className`). The row stays as it was — its box, its highlight, its count —
+ * and only the name in it becomes a field, so nothing moves when it becomes
+ * editable. Not the row's own button with a field in it, which HTML does not
+ * allow, but a box drawn as the row is (`.row-editing`), or as the tab is.
  *
  * Each keystroke is told (`onDraft`), so what else shows the name can say what
  * is typed (`store/renaming.ts`).
@@ -28,6 +28,8 @@ export const RowRename = ({
 	count,
 	maxLength,
 	mark,
+	className,
+	width = 0,
 	onDraft,
 	onDone,
 }: {
@@ -38,6 +40,20 @@ export const RowRename = ({
 	maxLength?: number;
 	/** In front of the field, where it is in front of the name on the row: a source's. */
 	mark?: ReactNode;
+	/**
+	 * A box of the caller's own instead of the row's: the source tab's, which
+	 * the field stands in for and whose classes it wears, so it has the tab's
+	 * padding, type and lit edge. No indent and no count, and the mark straight
+	 * in front of the field, as it is in the tab.
+	 */
+	className?: string;
+	/**
+	 * The box's width, pinned: the tab's own, measured on the way in. An input
+	 * is as wide as its `size`, not its text, so a box left to its content
+	 * would jump to a width of its own and push every tab after it sideways.
+	 * Nothing is pinned at 0, which is all jsdom ever measures.
+	 */
+	width?: number;
 	onDraft?: (text: string) => void;
 	/** The chosen name, or nothing at all when the rename was abandoned. */
 	onDone: (chosen?: string) => void;
@@ -88,6 +104,18 @@ export const RowRename = ({
 			}}
 		/>
 	);
+
+	if (className !== undefined) {
+		return (
+			<span
+				className={className}
+				{...(width > 0 ? { style: { width: `${String(width)}px` } } : {})}
+			>
+				{mark}
+				{input}
+			</span>
+		);
+	}
 
 	return (
 		<span
