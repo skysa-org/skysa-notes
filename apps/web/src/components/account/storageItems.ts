@@ -2,7 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 
 import { t } from '../../i18n/t.js';
 import { showsClipboard } from '../../store/clipboard.js';
-import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { getScratchpadShown, setScratchpadShown } from '../../store/scratchpad.js';
 import type { Unsynced } from '../../store/unsynced.js';
 import type { SchedulerStatus } from '../../sync/scheduler.js';
@@ -186,9 +187,9 @@ export const clipboardItem = (
  * the import into it asks (`importItems`).
  */
 export const useScratchpadItem = (
-	database: NotesDatabase,
 	connectionId: string
 ): { shown: boolean | undefined; items: OptionsMenuItem[] } => {
+	const database = useDb();
 	const shown = useLiveQuery(
 		() => getScratchpadShown(database, connectionId),
 		[database, connectionId]
@@ -218,11 +219,11 @@ export const useScratchpadItem = (
  * import holds it, as the clipboard is not.
  */
 export const useSecretsItem = (
-	database: NotesDatabase,
 	bound: SyncStateRecord,
 	phase: SchedulerStatus['phase'],
 	onChoose: () => void
 ): OptionsMenuItem[] => {
+	const database = useDb();
 	const connectionId = bound.connectionId;
 	const read = useLiveQuery(
 		async () => ({ record: await database.keyFiles.get(connectionId) }),

@@ -8,7 +8,8 @@ import {
 	moveUnsyncedTo,
 	releaseConnection,
 } from '../../store/connection.js';
-import { noteRef, type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { noteRef, type SyncStateRecord } from '../../store/db.js';
 import { holdsTextFor } from '../../store/detached.js';
 import { downloadProblem, hasUnsentDownload } from '../../store/exportNotes.js';
 import { settleEditors } from '../../store/heldEdits.js';
@@ -40,7 +41,6 @@ import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
  */
 
 export interface DetachedSourceProps {
-	database: NotesDatabase;
 	bound: SyncStateRecord;
 	/** Start connecting this source's account again, where the server lets the user. */
 	reconnect: ReactNode;
@@ -199,13 +199,13 @@ const DiscardConfirm = ({
 );
 
 export const DetachedSource = ({
-	database,
 	bound,
 	reconnect,
 	download,
 	onReleased,
 	notice = null,
 }: DetachedSourceProps) => {
+	const database = useDb();
 	const connectionId = bound.connectionId;
 	const unsynced = useLiveQuery(
 		() => unsyncedIn(database, connectionId),

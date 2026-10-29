@@ -6,6 +6,7 @@ import { Icon } from '../../editor/icons.js';
 import { failedAt, saying } from '../../errors/reached.js';
 import { t } from '../../i18n/t.js';
 import { credentialFor } from '../../store/credentials.js';
+import { useDb } from '../../store/database.js';
 import type { NotesDatabase } from '../../store/db.js';
 import { InfoDialog } from '../ui/InfoDialog.js';
 import type { Client } from './clients.js';
@@ -16,7 +17,8 @@ import { when } from './statusWords.js';
  * device list shows them; the disconnect question counts them, since what it
  * does depends on whether this is the last.
  */
-export const useGrants = (client: Client, database: NotesDatabase, connectionId: string) => {
+export const useGrants = (client: Client, connectionId: string) => {
+	const database = useDb();
 	const [grants, setGrants] = useState<Asked<Grant[]>>({ kind: 'asking' });
 
 	// Only the newest question's answer is kept, and none once the source has
@@ -65,12 +67,8 @@ export const stillSignedIn = (grants: Asked<Grant[]>): number | undefined =>
 const devicesLine = (count: number): string => t('account.devices.count', { count });
 
 /** Taking a device off the connection, and what went wrong if it did not come off. */
-const useRevoke = (
-	client: Client,
-	database: NotesDatabase,
-	connectionId: string,
-	onChanged: () => void
-) => {
+const useRevoke = (client: Client, connectionId: string, onChanged: () => void) => {
+	const database = useDb();
 	const [busy, setBusy] = useState<string | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
 	const revoke = (grantId: string) => {
@@ -183,14 +181,12 @@ const DeviceRows = ({
  */
 export const Devices = ({
 	client,
-	database,
 	connectionId,
 	grants,
 	onChanged,
 	gear,
 }: {
 	client: Client;
-	database: NotesDatabase;
 	/**
 	 * Which source these are the devices of. Named rather than looked up: it
 	 * pins every call in this component to one source, rather than re-reading
@@ -213,7 +209,7 @@ export const Devices = ({
 	 */
 	gear?: RefObject<HTMLButtonElement | null>;
 }) => {
-	const revoking = useRevoke(client, database, connectionId, onChanged);
+	const revoking = useRevoke(client, connectionId, onChanged);
 	const [open, setOpen] = useState(false);
 	const count = useRef<HTMLButtonElement>(null);
 

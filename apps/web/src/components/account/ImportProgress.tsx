@@ -4,7 +4,8 @@ import { useId, useState } from 'react';
 import { api, type ApiClient } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { t } from '../../i18n/t.js';
-import { db, type NotesDatabase, type SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../../sync/account.js';
 import { runSentence } from '../../sync/progress.js';
 import { syncScheduler, useSyncStatus } from '../../sync/runtime.js';
@@ -84,7 +85,6 @@ const outcomeMessage = (result: CancelImportResult, label: string): Cancelling =
 
 /** What an import is shown with; the app's own unless a test says otherwise. */
 interface ImportSeams {
-	database?: NotesDatabase;
 	client?: Pick<ApiClient, 'withCredential'>;
 	sync?: Pick<SyncScheduler, 'halt' | 'status' | 'subscribe'>;
 }
@@ -93,8 +93,9 @@ interface ImportSeams {
 const useCancel = (
 	source: SyncStateRecord,
 	label: string,
-	{ database = db, client = api, sync = syncScheduler }: ImportSeams
+	{ client = api, sync = syncScheduler }: ImportSeams
 ) => {
+	const database = useDb();
 	const [state, setState] = useState<Cancelling>({ kind: 'idle' });
 	const cancel = (onServer: boolean) => {
 		setState({ kind: 'busy' });

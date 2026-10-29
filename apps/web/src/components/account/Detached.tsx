@@ -1,5 +1,6 @@
 import { answer } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
+import { useDb } from '../../store/database.js';
 import type { SyncStateRecord } from '../../store/db.js';
 import type { Unsynced } from '../../store/unsynced.js';
 import { CONNECTABLE } from '../../sync/account.js';
@@ -33,7 +34,6 @@ interface DetachedProps extends LocalProps {
  */
 export const Detached = ({
 	client,
-	database,
 	config,
 	bound,
 	download,
@@ -43,6 +43,7 @@ export const Detached = ({
 	navigate,
 	slot,
 }: DetachedProps) => {
+	const database = useDb();
 	const settings = answer(config);
 	const provider = bound.provider;
 	const reconnectable =
@@ -59,7 +60,6 @@ export const Detached = ({
 			 */}
 			{slot !== undefined && <ActionsMenu slot={slot} items={[]} />}
 			<DetachedSource
-				database={database}
 				bound={bound}
 				download={download}
 				onReleased={onReleased}

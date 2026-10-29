@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
-import type { NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
 import {
 	bringsAnything,
 	importLibrary,
@@ -195,10 +195,10 @@ const nothingToImport = (plan: ImportPlan, into: ImportInto = 'library'): string
  * `pick` is the seam a test replaces, since jsdom opens no picker.
  */
 export const useImportNotes = (
-	database: NotesDatabase,
 	connectionId: string,
 	{ label, syncs, pick = pickFiles }: { label: string; syncs: boolean; pick?: Pick }
 ) => {
+	const database = useDb();
 	const [step, setStep] = useState<Step>({ kind: 'idle' });
 	// How it went is kept over the page, where it outlives the panel it was
 	// asked from (`Notices`).

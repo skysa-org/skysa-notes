@@ -6,7 +6,8 @@ import type { InstanceConfig } from '../../api/client.js';
 import { answer, type Asked } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
 import { noteLink } from '../../routes/place.js';
-import type { NotesDatabase, SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { SyncStateRecord } from '../../store/db.js';
 import { getNote } from '../../store/notes.js';
 import { isTombstone } from '../../store/rowStates.js';
 import { CONNECTABLE } from '../../sync/account.js';
@@ -26,7 +27,8 @@ import { UnreadableNotice } from './SyncNotices.js';
  * vault (docs/ARCHITECTURE.md §7, "Passwords in the vault"), which the link
  * would open in the note editor, its fence's words and all.
  */
-const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: string }) => {
+const StuckNote = ({ noteId }: { noteId: string }) => {
+	const database = useDb();
 	// Wrapped, so "not read yet" and "no such note" are not the same answer.
 	const found = useLiveQuery(
 		// The source being synced is the one showing, and so is this.
@@ -93,7 +95,6 @@ export const importingHere = (bound: SyncStateRecord): boolean => bound.importin
 
 interface SyncStateProps {
 	client: Client;
-	database: NotesDatabase;
 	sync: Sync;
 	bound: SyncStateRecord;
 	label: string;
@@ -117,7 +118,6 @@ interface SyncStateProps {
  */
 export const SyncState = ({
 	client,
-	database,
 	sync,
 	bound,
 	label,
@@ -128,6 +128,7 @@ export const SyncState = ({
 	rescanning,
 	onRescanning: setRescanning,
 }: SyncStateProps) => {
+	const database = useDb();
 	const status = useSyncStatus(sync);
 	const syncable = isSyncable(bound);
 	const message = statusMessage(status, label, syncable);
@@ -175,7 +176,7 @@ export const SyncState = ({
 			 * told about.
 			 */}
 			{status.phase === 'attention' && status.stuck?.noteId !== undefined && (
-				<StuckNote database={database} noteId={status.stuck.noteId} />
+				<StuckNote noteId={status.stuck.noteId} />
 			)}
 			{status.conflicts.length > 0 && (
 				<p className="muted">{conflictMessage(status.conflicts.length)}</p>

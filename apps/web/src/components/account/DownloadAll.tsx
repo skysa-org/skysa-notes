@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { t } from '../../i18n/t.js';
-import type { NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
 import {
 	downloadNotice,
 	downloadProblem,
@@ -21,11 +21,8 @@ import type { Offer } from './storageItems.js';
  * without a word is one the user goes on waiting for. So is an archive handed
  * over without the text an editor could not save (`downloadSource`).
  */
-export const useDownloadAll = (
-	database: NotesDatabase,
-	connectionId: string,
-	downloadAll: (library: Library) => void
-) => {
+export const useDownloadAll = (connectionId: string, downloadAll: (library: Library) => void) => {
+	const database = useDb();
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	const start = () => {
