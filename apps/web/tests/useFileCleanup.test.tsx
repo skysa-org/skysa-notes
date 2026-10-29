@@ -7,7 +7,7 @@ import type { FileCleanup } from '../src/store/fileCleanup.js';
 
 /**
  * What a visit to a note may have taken out of it, handed over as the note is
- * left (`components/useFileCleanup.ts`).
+ * left (`components/note/useFileCleanup.ts`).
  */
 
 const note = (id: string, body: string, connectionId = 'c1'): NoteRecord =>

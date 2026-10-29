@@ -1,15 +1,15 @@
 import type { ProviderKind } from '@skysa/core';
 import { type ReactNode, useRef, useState } from 'react';
 
-import type { ApiClient } from '../../api/client.js';
-import { failedAt, saying } from '../../errors/reached.js';
-import { t } from '../../i18n/t.js';
-import { heldConnectCode } from '../../store/connectCode.js';
-import { pileContents } from '../../store/connection.js';
-import { beginConnect } from '../../store/credentials.js';
-import type { NotesDatabase } from '../../store/db.js';
-import { PROVIDER_LABELS } from '../../sync/account.js';
-import { ConfirmDialog } from '../ui/ConfirmDialog.js';
+import type { ApiClient } from '../../../api/client.js';
+import { failedAt, saying } from '../../../errors/reached.js';
+import { t } from '../../../i18n/t.js';
+import { heldConnectCode } from '../../../store/connectCode.js';
+import { pileContents } from '../../../store/connection.js';
+import { beginConnect } from '../../../store/credentials.js';
+import type { NotesDatabase } from '../../../store/db.js';
+import { PROVIDER_LABELS } from '../../../sync/account.js';
+import { ConfirmDialog } from '../../ui/ConfirmDialog.js';
 
 /**
  * Start connecting a storage account.
