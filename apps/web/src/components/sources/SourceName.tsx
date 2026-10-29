@@ -135,13 +135,18 @@ export const RenameField = ({
 
 /**
  * A source's name as a screen reader is told it: one that syncs nowhere says
- * so. Said outright, in the bar and the source dropdown alike, rather than
- * left to be assembled from the spans `ShownSourceName` draws, which the name
- * from contents joins by its own rules. Exactly the visible words, so it still
- * satisfies WCAG 2.5.3.
+ * so, and a live one that needs connecting again (`reconnect`, where the place
+ * shows that) says that. Said outright, in the bar and the source dropdown
+ * alike, rather than left to be assembled from the spans `ShownSourceName`
+ * draws, which the name from contents joins by its own rules. The visible
+ * words are in it, so it still satisfies WCAG 2.5.3.
  */
-export const sourceLabel = (source: ConnectedSource, name: string): string =>
-	isLiveSource(source) ? name : t('sources.disconnected.label', { source: name });
+export const sourceLabel = (source: ConnectedSource, name: string, reconnect = false): string =>
+	!isLiveSource(source)
+		? t('sources.disconnected.label', { source: name })
+		: reconnect
+			? t('sources.reconnect', { source: name })
+			: name;
 
 /**
  * A source's name on screen, and a disconnected one's with the words that say

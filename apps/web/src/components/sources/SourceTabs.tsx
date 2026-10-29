@@ -178,6 +178,9 @@ const SourceTab = ({
 			<span>{words}</span>
 		</span>
 	);
+	// Only a source that syncs is asked to connect again: one that syncs
+	// nowhere is said as that, in its name, its tooltip and its mark alike.
+	const reconnecting = reconnect && isLiveSource(source);
 	return (
 		<button
 			type="button"
@@ -185,12 +188,8 @@ const SourceTab = ({
 			// Said outright (`sourceLabel`): the name from contents joins the
 			// spans below by its own rules, so "A source" and " — disconnected"
 			// came out as a name no caller could predict.
-			aria-label={
-				reconnect && isLiveSource(source)
-					? t('sources.reconnect', { source: name })
-					: sourceLabel(source, name)
-			}
-			{...(reconnect ? { title: t('sources.reconnect', { source: name }) } : {})}
+			aria-label={sourceLabel(source, name, reconnecting)}
+			{...(reconnecting ? { title: t('sources.reconnect', { source: name }) } : {})}
 			// The tab the user is on, said once. `aria-current` is what a screen
 			// reader announces; "showing" in the text as well would be read twice.
 			{...(source.active ? { 'aria-current': 'true' as const } : {})}
@@ -198,7 +197,7 @@ const SourceTab = ({
 				onShow(event.currentTarget.offsetWidth);
 			}}
 		>
-			<ProviderIcon kind={sourceKind(source)} alert={reconnect} />
+			<ProviderIcon kind={sourceKind(source)} alert={reconnecting} />
 			<ShownSourceName source={source} name={name} shown={shownName} />
 		</button>
 	);
