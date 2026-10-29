@@ -102,6 +102,37 @@ describe('a dialog’s way out', () => {
 		expect(onClose).not.toHaveBeenCalled();
 	});
 
+	it('is not a press begun outside it and let go in it', async () => {
+		const onClose = vi.fn();
+		const user = userEvent.setup();
+		render(<Asking onClose={onClose} />);
+		const backdrop = document.querySelector<HTMLElement>('.modal-backdrop');
+		if (backdrop === null) throw new Error('no backdrop');
+
+		await user.pointer([
+			{ keys: '[MouseLeft>]', target: backdrop },
+			{ target: screen.getByText('It goes for good.') },
+			{ keys: '[/MouseLeft]' },
+		]);
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it('is a press outside still when the page draws again while it is held', () => {
+		const first = vi.fn();
+		const onClose = vi.fn();
+		const { rerender } = render(<Asking onClose={first} />);
+		const backdrop = document.querySelector<HTMLElement>('.modal-backdrop');
+		if (backdrop === null) throw new Error('no backdrop');
+
+		fireEvent.pointerDown(backdrop);
+		// A handler made anew, as an inline one is on every draw.
+		rerender(<Asking onClose={onClose} />);
+		fireEvent.pointerUp(backdrop);
+		fireEvent.click(backdrop);
+		expect(onClose).toHaveBeenCalledTimes(1);
+		expect(first).not.toHaveBeenCalled();
+	});
+
 	it('waits while something it would not stop is under way: the ✕, a press outside and Escape', async () => {
 		const onClose = vi.fn();
 		const user = userEvent.setup();

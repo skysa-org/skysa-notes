@@ -88,7 +88,7 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	// the user on the page's body exactly as Escape used to.
 	useFocusBack(undefined, { onlyIfLost: true });
 	const backdrop = useRef<HTMLDivElement>(null);
-	usePressOutside(backdrop, onClose, undefined);
+	usePressOutside(backdrop, onClose);
 
 	const shown = useMemo(() => matching(commands, query), [commands, query]);
 	// The highlight is an index, so it has to be pulled back when the list under
@@ -119,8 +119,17 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 
 	return (
 		// A press begun and let go on the backdrop closes it, as it closes a
-		// dialog (`usePressOutside`).
-		<div ref={backdrop} className="palette-backdrop" role="presentation">
+		// dialog (`usePressOutside`). One that is not let go there leaves it
+		// open, and so must not take the focus from the field, where its keys
+		// are heard.
+		<div
+			ref={backdrop}
+			className="palette-backdrop"
+			role="presentation"
+			onMouseDown={(event) => {
+				if (event.target === event.currentTarget) event.preventDefault();
+			}}
+		>
 			<div
 				className="palette"
 				role="dialog"
@@ -206,10 +215,10 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 							// still sitting in the tab order — which is exactly how
 							// focus used to escape the dialog.
 							//
-							// `onMouseDown` rather than `onClick`, to match the
-							// backdrop: the pointer acts where the press began, and
-							// a press that does not move focus leaves the field
-							// holding it, so the keyboard still works afterwards.
+							// `onMouseDown` rather than `onClick`: the row acts as it
+							// is pressed, and a press that does not move focus
+							// leaves the field holding it, so the keyboard still
+							// works afterwards.
 							<li
 								key={command.id}
 								id={`palette-${command.id}`}
