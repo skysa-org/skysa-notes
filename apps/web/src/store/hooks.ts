@@ -5,10 +5,11 @@ import { startTransition, useEffect, useMemo, useRef, useState, useSyncExternalS
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import type { EditorMode } from '../editor/mode.js';
 import { type ConnectedSource, connectedSources, holdsPile } from './connection.js';
+import { useDb } from './database.js';
 import {
 	activeConnectionId,
-	db,
 	type NoteRecord,
+	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 	type SyncStateRecord,
 } from './db.js';
@@ -48,6 +49,10 @@ import { getPasswordsShown, isVaultNote, listVaultNotes } from './vault.js';
  * Every hook returns `undefined` on the first render, before the query has
  * resolved. That is a genuine "not loaded yet" and callers must handle it —
  * though the wait is a local IndexedDB round trip, not a network one.
+ *
+ * Each reads the database it is drawn over (`useDb`), which does not change
+ * under it: a provider given another draws what it holds afresh
+ * (`DatabaseProvider`).
  */
 
 /**
@@ -56,8 +61,10 @@ import { getPasswordsShown, isVaultNote, listVaultNotes } from './vault.js';
  * to — a detached one, above all, which looks like any other from its notes.
  */
 /** Every source on this device, in the order they were connected. */
-export const useSources = (): ConnectedSource[] | undefined =>
-	useLiveQuery(() => connectedSources(db), []);
+export const useSources = (): ConnectedSource[] | undefined => {
+	const db = useDb();
+	return useLiveQuery(() => connectedSources(db), [db]);
+};
 
 /**
  * The source whose first import is under way, or `null` for none. One at a
@@ -68,22 +75,31 @@ export const useSources = (): ConnectedSource[] | undefined =>
  * waiting to be taken up (`claimConnection`), and so whether the connection it
  * is for is bound yet. True until it is known.
  */
-export const useClaimingConnection = (): boolean =>
-	useLiveQuery(
+export const useClaimingConnection = (): boolean => {
+	const db = useDb();
+	return useLiveQuery(
 		async () => (await db.credentials.get(PENDING_CREDENTIAL_ID)) !== undefined,
-		[],
+		[db],
 		true
 	);
+};
 
 /**
  * A source's first import, which holds the app while it runs; nothing
  * otherwise. Every one, whatever its row's `lock` says (`Importing.lock`).
  */
-export const useHeldImport = (): SyncStateRecord | undefined =>
-	useLiveQuery(async () => (await db.syncState.toArray()).find(holdsPile), []);
+export const useHeldImport = (): SyncStateRecord | undefined => {
+	const db = useDb();
+	return useLiveQuery(async () => (await db.syncState.toArray()).find(holdsPile), [db]);
+};
 
-export const useActiveSource = (): SyncStateRecord | null | undefined =>
-	useLiveQuery(async () => (await db.syncState.get(await activeConnectionId(db))) ?? null, []);
+export const useActiveSource = (): SyncStateRecord | null | undefined => {
+	const db = useDb();
+	return useLiveQuery(
+		async () => (await db.syncState.get(await activeConnectionId(db))) ?? null,
+		[db]
+	);
+};
 
 /**
  * The showing source's notebooks, and what it has pinned on this device; both
@@ -125,6 +141,7 @@ const inNotebooks = (path: string): boolean => !isScratchPath(path) && !isVaultP
  * rows that did.
  */
 export const usePinnedTree = (connectionId: string | undefined): PinnedTree => {
+	const db = useDb();
 	const before = useRef<FolderNode[] | undefined>(undefined);
 	const result = useLiveQuery(async () => {
 		if (connectionId === undefined) return undefined;
@@ -142,7 +159,7 @@ export const usePinnedTree = (connectionId: string | undefined): PinnedTree => {
 		const kept = keptTree(before.current, withPins(tree, pins.notebooks, pins.bottomNotebooks));
 		before.current = kept;
 		return { connectionId, tree: kept, pinned: pinsKey(pins) };
-	}, [connectionId]);
+	}, [connectionId, db]);
 	const here = result?.connectionId === connectionId ? result : undefined;
 	const pinned = here?.pinned;
 	const pins = useMemo(() => (pinned === undefined ? undefined : pinsFromKey(pinned)), [pinned]);
@@ -171,6 +188,7 @@ export const useNotesUnderFolder = (
 	folderPath: string | undefined,
 	connectionId: string | undefined
 ): NoteRecord[] | undefined => {
+	const db = useDb();
 	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
 	const result = useLiveQuery(async () => {
 		if (folderPath === undefined) {
@@ -187,7 +205,7 @@ export const useNotesUnderFolder = (
 		);
 		before.current = new Map(notes.map((note) => [note.id, note]));
 		return { folderPath, connectionId, notes };
-	}, [folderPath, connectionId]);
+	}, [folderPath, connectionId, db]);
 	// `result?.folderPath === folderPath` would be true for an unresolved query
 	// of the root, where both sides are `undefined`, and then read `.notes` off
 	// nothing at all.
@@ -203,8 +221,10 @@ export const useNotesUnderFolder = (
  * observed set of a query over notes: the answer is a string, which is the same
  * string after a sync, and nothing downstream runs again.
  */
-export const useActiveConnectionId = (): string | undefined =>
-	useLiveQuery(() => activeConnectionId(db), []);
+export const useActiveConnectionId = (): string | undefined => {
+	const db = useDb();
+	return useLiveQuery(() => activeConnectionId(db), [db]);
+};
 
 /**
  * The note `id` names in the source showing; `null` once it has been read and
@@ -226,6 +246,7 @@ export const useActiveConnectionId = (): string | undefined =>
  */
 export const useNoteRead = (id: string | undefined): NoteRecord | null | undefined => {
 	// In the source showing: an id names a note only inside its source.
+	const db = useDb();
 	const connectionId = useActiveConnectionId();
 	// Each asking its own, so an answer is matched to the asking it was for and
 	// not only to its id: one note, then another still being read, then the
@@ -255,6 +276,7 @@ export const useSourceContents = (
 	connectionId: string | undefined,
 	key: string | undefined
 ): { folders: string[]; notes: NoteRecord[] } | undefined => {
+	const db = useDb();
 	const result = useLiveQuery(
 		async () =>
 			connectionId === undefined || key === undefined
@@ -265,7 +287,7 @@ export const useSourceContents = (
 						folders: await folderTree(db, { connectionId }),
 						notes: await listNotes(db, { connectionId }),
 					},
-		[connectionId, key]
+		[connectionId, key, db]
 	);
 	return result?.connectionId === connectionId && result?.key === key ? result : undefined;
 };
@@ -280,12 +302,13 @@ export const useSourceContents = (
  * from another tab that lands after this tab's is read over it.
  */
 export const useLastOpen = (connectionId: string | undefined): LastOpen | undefined => {
+	const db = useDb();
 	const result = useLiveQuery(async () => {
 		if (connectionId === undefined) return undefined;
 		// Before the read, so what was written by then is what the read sees.
 		const seen = lastWritten(db, connectionId);
 		return { connectionId, seen, lastOpen: await getLastOpen(db, connectionId) };
-	}, [connectionId]);
+	}, [connectionId, db]);
 	const mine = useSyncExternalStore(onWritten, () =>
 		connectionId === undefined ? undefined : lastWritten(db, connectionId)
 	);
@@ -301,12 +324,13 @@ export const useLastOpen = (connectionId: string | undefined): LastOpen | undefi
 export const useOpenNotebooks = (
 	connectionId: string | undefined
 ): ReadonlySet<string> | undefined => {
+	const db = useDb();
 	const result = useLiveQuery(
 		async () =>
 			connectionId === undefined
 				? undefined
 				: { connectionId, open: new Set(await getOpenNotebooks(db, connectionId)) },
-		[connectionId]
+		[connectionId, db]
 	);
 	return result?.connectionId === connectionId ? result?.open : undefined;
 };
@@ -350,8 +374,9 @@ export const useNoteToOpen = ({
 	tree: readonly FolderNode[] | undefined;
 	/** The remembered place has been read; until then `remembered` means nothing. */
 	ready: boolean;
-}): NoteToOpen | undefined =>
-	useLiveQuery(async () => {
+}): NoteToOpen | undefined => {
+	const db = useDb();
+	return useLiveQuery(async () => {
 		if (connectionId === undefined || folder === undefined || !ready) return undefined;
 		const pick = await pickNote(db, {
 			connectionId,
@@ -362,18 +387,23 @@ export const useNoteToOpen = ({
 			tree,
 		});
 		return { folder, open, pick };
-	}, [connectionId, folder, open, remembered, pinned, tree, ready]);
+	}, [connectionId, folder, open, remembered, pinned, tree, ready, db]);
+};
 
 /** The mode a note opens in unless it remembers one of its own. */
-export const useDefaultEditorMode = (): EditorMode | undefined =>
-	useLiveQuery(() => getDefaultEditorMode(db), []);
+export const useDefaultEditorMode = (): EditorMode | undefined => {
+	const db = useDb();
+	return useLiveQuery(() => getDefaultEditorMode(db), [db]);
+};
 
 /**
  * Whether a compact window shows the formatting toolbar, as it was last left
  * on this device — across a reload, and in step with another tab.
  */
-export const useFormatToolbarShown = (): boolean | undefined =>
-	useLiveQuery(() => getFormatToolbarShown(db), []);
+export const useFormatToolbarShown = (): boolean | undefined => {
+	const db = useDb();
+	return useLiveQuery(() => getFormatToolbarShown(db), [db]);
+};
 
 /**
  * Keep the code-block display settings and what is stored on this device in
@@ -386,7 +416,8 @@ export const useFormatToolbarShown = (): boolean | undefined =>
  * the value it already holds does not tell anybody.
  */
 export const useCodeDisplay = (store: CodeDisplayStore = codeDisplay): void => {
-	const stored = useLiveQuery(() => getCodeDisplay(db), []);
+	const db = useDb();
+	const stored = useLiveQuery(() => getCodeDisplay(db), [db]);
 
 	useEffect(() => {
 		if (stored !== undefined) store.set(stored);
@@ -399,7 +430,7 @@ export const useCodeDisplay = (store: CodeDisplayStore = codeDisplay): void => {
 			store.subscribe(() => {
 				void setCodeDisplay(db, store.get());
 			}),
-		[store]
+		[store, db]
 	);
 };
 
@@ -413,6 +444,7 @@ export const useCodeDisplay = (store: CodeDisplayStore = codeDisplay): void => {
  * it: an idle sync run counts nothing again.
  */
 export const useLooseNoteCount = (connectionId: string | undefined): number | undefined => {
+	const db = useDb();
 	const result = useLiveQuery(
 		async () =>
 			connectionId === undefined
@@ -421,7 +453,7 @@ export const useLooseNoteCount = (connectionId: string | undefined): number | un
 						connectionId,
 						count: (await listNotes(db, { connectionId, folderPath: ROOT })).length,
 					},
-		[connectionId]
+		[connectionId, db]
 	);
 	return result?.connectionId === connectionId ? result?.count : undefined;
 };
@@ -432,11 +464,13 @@ export const useLooseNoteCount = (connectionId: string | undefined): number | un
  * panel's button does, so the two are never offered for different libraries.
  * `undefined` while there is no source, or before the first read.
  */
-export const useHoldsAnything = (connectionId: string | undefined): boolean | undefined =>
-	useLiveQuery(
+export const useHoldsAnything = (connectionId: string | undefined): boolean | undefined => {
+	const db = useDb();
+	return useLiveQuery(
 		() => (connectionId === undefined ? undefined : holdsAnything(db, connectionId)),
-		[connectionId]
+		[connectionId, db]
 	);
+};
 
 /**
  * Notes matching what the user has typed, across every notebook. `undefined`
@@ -460,6 +494,7 @@ export const useHoldsAnything = (connectionId: string | undefined): boolean | un
  * once they have been.
  */
 export const useNoteSearch = (query: string, focused = false): NoteHit[] | undefined => {
+	const db = useDb();
 	const searching = query.trim() !== '';
 	const open = focused || searching;
 	// One index for each search, so the last one's goes with it.
@@ -475,8 +510,8 @@ export const useNoteSearch = (query: string, focused = false): NoteHit[] | undef
 	// for cannot answer "where did I write that". Opening a match is what takes
 	// them to the right place.
 	const read = useLiveQuery(
-		async () => (search === undefined ? undefined : { search, notes: await searchable() }),
-		[search]
+		async () => (search === undefined ? undefined : { search, notes: await searchable(db) }),
+		[search, db]
 	);
 	// `useLiveQuery` keeps its last value across a change of dependencies, so
 	// without this a search opened again would be answered from the read of the
@@ -540,12 +575,12 @@ export const useNoteSearch = (query: string, focused = false): NoteHit[] | undef
  * ("Passwords in the vault"). A password is found by its label alone: its
  * body is one fence, which the index makes nothing (`withoutArmor`).
  */
-const searchable = async (): Promise<NoteRecord[]> => {
+const searchable = async (db: NotesDatabase): Promise<NoteRecord[]> => {
 	const notes = await listNotesEverywhere(db);
 	/** The sources with a note `kept` holds, which this device shows them for. */
 	const shownIn = async (
 		kept: (note: NoteRecord) => boolean,
-		shown: (database: typeof db, connectionId: string) => Promise<boolean>
+		shown: (database: NotesDatabase, connectionId: string) => Promise<boolean>
 	): Promise<ReadonlySet<string>> => {
 		const sources = [...new Set(notes.filter(kept).map((note) => note.connectionId))];
 		return new Set(
@@ -574,17 +609,23 @@ const searchable = async (): Promise<NoteRecord[]> => {
  * has the cursor — as the search's own notes are: nobody is offered them
  * otherwise. `undefined` while not, and until first read.
  */
-export const useRecentNotes = (open: boolean, skip: string | undefined): NoteRecord[] | undefined =>
-	useLiveQuery(
+export const useRecentNotes = (
+	open: boolean,
+	skip: string | undefined
+): NoteRecord[] | undefined => {
+	const db = useDb();
+	return useLiveQuery(
 		() => (open ? listRecentNotes(db, skip) : Promise.resolve(undefined)),
-		[open, skip]
+		[open, skip, db]
 	);
+};
 
 /**
  * The notes of a source's scratchpad, newest made first; `undefined` until read
  * for this source.
  */
 export const useScratchNotes = (connectionId: string | undefined): NoteRecord[] | undefined => {
+	const db = useDb();
 	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
 	const result = useLiveQuery(async () => {
 		if (connectionId === undefined) {
@@ -597,7 +638,7 @@ export const useScratchNotes = (connectionId: string | undefined): NoteRecord[] 
 		const notes = keptRows(before.current, await listScratchNotes(db, connectionId));
 		before.current = new Map(notes.map((note) => [note.id, note]));
 		return { connectionId, notes };
-	}, [connectionId]);
+	}, [connectionId, db]);
 	return result?.connectionId === connectionId ? result?.notes : undefined;
 };
 
@@ -606,12 +647,13 @@ export const useScratchNotes = (connectionId: string | undefined): NoteRecord[] 
  * for this source.
  */
 export const useScratchpadShown = (connectionId: string | undefined): boolean | undefined => {
+	const db = useDb();
 	const result = useLiveQuery(
 		async () =>
 			connectionId === undefined
 				? undefined
 				: { connectionId, shown: await getScratchpadShown(db, connectionId) },
-		[connectionId]
+		[connectionId, db]
 	);
 	return result?.connectionId === connectionId ? result?.shown : undefined;
 };
@@ -621,6 +663,7 @@ export const useScratchpadShown = (connectionId: string | undefined): boolean | 
  * (docs/ARCHITECTURE.md §7, "Passwords in the vault").
  */
 export const useVaultItems = (connectionId: string | undefined): NoteRecord[] | undefined => {
+	const db = useDb();
 	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
 	const result = useLiveQuery(async () => {
 		if (connectionId === undefined) {
@@ -632,7 +675,7 @@ export const useVaultItems = (connectionId: string | undefined): NoteRecord[] | 
 		const notes = keptRows(before.current, await listVaultNotes(db, connectionId));
 		before.current = new Map(notes.map((note) => [note.id, note]));
 		return { connectionId, notes };
-	}, [connectionId]);
+	}, [connectionId, db]);
 	return result?.connectionId === connectionId ? result?.notes : undefined;
 };
 
@@ -641,12 +684,13 @@ export const useVaultItems = (connectionId: string | undefined): NoteRecord[] | 
  * for this source.
  */
 export const usePasswordsShown = (connectionId: string | undefined): boolean | undefined => {
+	const db = useDb();
 	const result = useLiveQuery(
 		async () =>
 			connectionId === undefined
 				? undefined
 				: { connectionId, shown: await getPasswordsShown(db, connectionId) },
-		[connectionId]
+		[connectionId, db]
 	);
 	return result?.connectionId === connectionId ? result?.shown : undefined;
 };
