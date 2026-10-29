@@ -1,7 +1,7 @@
 import { isWithin, rebasePath } from '@skysa/core';
 import { useEffect } from 'react';
 
-import type { Notice } from '../../components/ui/notify.js';
+import { type Notice, useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord } from '../../store/db.js';
 import {
@@ -37,27 +37,26 @@ export const useNotebookActions = ({
 	openNote,
 	select,
 	openFolder,
-	setProblem,
 	renamings,
 }: Readonly<{
 	folder: string | undefined;
 	openNote: NoteRecord | undefined;
 	select: Select;
 	openFolder: (path: string) => void;
-	setProblem: (notice: Notice | null) => void;
 	renamings: Renamings;
 }>) => {
+	const { say, moveOn } = useNotices();
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
 		// `createFolder` throws on a duplicate name, and the field has already
 		// closed by the time it does: without this the user types a name, presses
 		// Enter, and nothing whatsoever happens — plus an unhandled rejection.
-		setProblem(null);
+		moveOn();
 		void createFolder(db, { parentPath, name })
 			.then((created) => {
 				openFolder(created.path);
 			})
 			.catch((error: unknown) => {
-				setProblem(notebookRefused(error, 'here', t('shell.notebook.notMade')));
+				say(notebookRefused(error, 'here', t('shell.notebook.notMade')));
 			});
 	};
 
@@ -77,7 +76,7 @@ export const useNotebookActions = ({
 	}, [renamings, folder]);
 
 	const onRenameFolder = (path: string, name: string) => {
-		setProblem(null);
+		moveOn();
 		void renameFolder(db, path, name)
 			.catch((error: unknown) => {
 				// Not renamed: the name it had is the one to show.
@@ -92,12 +91,12 @@ export const useNotebookActions = ({
 				}
 			})
 			.catch((error: unknown) => {
-				setProblem(notebookRefused(error, 'here', t('shell.notebook.notRenamed')));
+				say(notebookRefused(error, 'here', t('shell.notebook.notRenamed')));
 			});
 	};
 
 	const onDeleteFolder = (path: string) => {
-		setProblem(null);
+		moveOn();
 		// Asked about before this is called: the sidebar puts the question, with
 		// the count of what goes with it, because everything beneath a notebook
 		// is tombstoned and pushed as a deletion.
@@ -119,7 +118,7 @@ export const useNotebookActions = ({
 				}
 			})
 			.catch(() => {
-				setProblem({ message: t('shell.notebook.notDeleted'), tone: 'error' });
+				say({ message: t('shell.notebook.notDeleted'), tone: 'error' });
 			});
 	};
 

@@ -2,7 +2,7 @@ import { isScratchPath, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { type RefObject, useCallback, useState } from 'react';
 
 import type { DisplacedText } from '../../components/note/types.js';
-import type { Notice } from '../../components/ui/notify.js';
+import { useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../../store/db.js';
 import { deleteForUndo, saveNoteBody, undeleteNote } from '../../store/notes.js';
@@ -28,14 +28,13 @@ const backDisconnected = (title: string, source: string | undefined): string =>
  */
 export const useUndoDelete = ({
 	select,
-	setProblem,
 	noteIdRef,
 }: Readonly<{
 	select: Select;
-	setProblem: (notice: Notice | null) => void;
 	/** The note open now, read once a delete has gone through. */
 	noteIdRef: Readonly<RefObject<string | undefined>>;
 }>) => {
+	const { say } = useNotices();
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
 	/** The note (`noteRef`) whose undo failed: its notice waits to be dismissed. */
 	const [undoFailed, setUndoFailed] = useState<string | null>(null);
@@ -77,7 +76,7 @@ export const useUndoDelete = ({
 					// them that stops being a detail: the note came back, which
 					// is what was asked for. It is a warning only where it came
 					// back somewhere the user cannot sync it from.
-					setProblem(
+					say(
 						home?.detached === undefined
 							? {
 									message: t('shell.note.back', {
@@ -111,7 +110,7 @@ export const useUndoDelete = ({
 			// deleted, still offered, and what it holds may be in no other place.
 			.catch(() => {
 				setUndoFailed(noteRef(deleted));
-				setProblem({
+				say({
 					message: t('shell.note.notBack'),
 					tone: 'error',
 				});
@@ -131,7 +130,7 @@ export const useUndoDelete = ({
 				}
 			},
 			() => {
-				setProblem({ message: t('passwords.item.notDeleted'), tone: 'error' });
+				say({ message: t('passwords.item.notDeleted'), tone: 'error' });
 			}
 		);
 	};

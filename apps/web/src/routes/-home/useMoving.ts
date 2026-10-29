@@ -1,7 +1,7 @@
 import { isScratchPath, isWithin, rebasePath } from '@skysa/core';
 import { type RefObject, useCallback, useEffect, useState } from 'react';
 
-import type { Notice } from '../../components/ui/notify.js';
+import { useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
 import { db } from '../../store/db.js';
 import { moveFolder } from '../../store/folders.js';
@@ -25,7 +25,6 @@ export const useMoving = ({
 	setPanel,
 	shutPanel,
 	select,
-	setProblem,
 	folder,
 	noteIdRef,
 }: Readonly<{
@@ -33,10 +32,10 @@ export const useMoving = ({
 	setPanel: (panel: Pane | null) => void;
 	shutPanel: () => Promise<void>;
 	select: Select;
-	setProblem: (notice: Notice | null) => void;
 	folder: string | undefined;
 	noteIdRef: Readonly<RefObject<string | undefined>>;
 }>) => {
+	const { say, moveOn } = useNotices();
 	const [moving, setMoving] = useState<Moving | null>(null);
 
 	const cancelMove = useCallback(() => {
@@ -63,7 +62,7 @@ export const useMoving = ({
 		// Back, which a step taken before it lands would be the one undone.
 		const shut = shutPanel();
 		if (move === undefined) return;
-		setProblem(null);
+		moveOn();
 
 		if (move.kind === 'note') {
 			// A scratch note made a note is followed into its notebook: making
@@ -91,7 +90,7 @@ export const useMoving = ({
 					}
 				})
 				.catch(() => {
-					setProblem({ message: t('shell.note.notMoved'), tone: 'error' });
+					say({ message: t('shell.note.notMoved'), tone: 'error' });
 				});
 			return;
 		}
@@ -109,7 +108,7 @@ export const useMoving = ({
 				}
 			})
 			.catch((error: unknown) => {
-				setProblem(notebookRefused(error, 'there', t('shell.notebook.notMoved')));
+				say(notebookRefused(error, 'there', t('shell.notebook.notMoved')));
 			});
 	};
 

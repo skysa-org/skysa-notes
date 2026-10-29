@@ -4,7 +4,7 @@ import { type RefObject, useCallback, useEffect, useState } from 'react';
 
 import { parseChord } from '../../commands/chord.js';
 import { useCommand } from '../../commands/context.js';
-import type { Notice } from '../../components/ui/notify.js';
+import { useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
 import { db, type NoteRecord, type SyncStateRecord } from '../../store/db.js';
 import { downloadNotice, downloadProblem, downloadSource } from '../../store/exportNotes.js';
@@ -136,13 +136,12 @@ const useNoteMove = (
 const useDownloadCommand = ({
 	connectionId,
 	source,
-	onProblem,
 }: {
 	connectionId: string | undefined;
 	/** The source showing: `null` for the device's own, `undefined` until read. */
 	source: SyncStateRecord | null | undefined;
-	onProblem: (notice: Notice) => void;
 }) => {
+	const { say } = useNotices();
 	const holds = useHoldsAnything(connectionId);
 	useCommand({
 		id: 'app.download',
@@ -154,10 +153,10 @@ const useDownloadCommand = ({
 			void downloadSource(db, connectionId)
 				.then((answer) => {
 					const notice = downloadNotice(answer);
-					if (notice !== null) onProblem({ message: notice, tone: 'warning' });
+					if (notice !== null) say({ message: notice, tone: 'warning' });
 				})
 				.catch((error: unknown) => {
-					onProblem({ message: downloadProblem(error), tone: 'error' });
+					say({ message: downloadProblem(error), tone: 'error' });
 				});
 		},
 	});
@@ -176,7 +175,6 @@ export const useShellCommands = ({
 	searchField,
 	connectionId,
 	source,
-	setProblem,
 	deleted,
 	undoDelete,
 	folder,
@@ -194,7 +192,6 @@ export const useShellCommands = ({
 	connectionId: string | undefined;
 	/** The source showing: `null` for the device's own, `undefined` until read. */
 	source: SyncStateRecord | null | undefined;
-	setProblem: (notice: Notice) => void;
 	/** The note just deleted, for the notice's undo to take back (`useUndoDelete`). */
 	deleted: NoteRecord | null;
 	undoDelete: () => void;
@@ -240,7 +237,7 @@ export const useShellCommands = ({
 		},
 	});
 
-	useDownloadCommand({ connectionId, source, onProblem: setProblem });
+	useDownloadCommand({ connectionId, source });
 
 	useCommand({
 		id: 'note.undoDelete',
