@@ -11,6 +11,7 @@ import {
 import { createFolder, deleteFolder } from '../src/store/folders.js';
 import {
 	createNote,
+	deleteForUndo,
 	deleteNote,
 	getNote,
 	listNotes,
@@ -56,6 +57,53 @@ const pushed = async (id: string) => {
 	await box.db.opQueue.clear();
 	await purgeNote(box.db, id);
 };
+
+describe('deleteForUndo', () => {
+	it('gives back the tombstone, deleted in the note’s own source whichever is showing', async () => {
+		const { db } = box;
+		await db.syncState.bulkPut([
+			{ connectionId: 'source-a', clientId: 'client' },
+			{ connectionId: 'source-b', clientId: 'client' },
+		]);
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'source-a' });
+		const note = await createNote(db, { title: 'Gone', body: 'the words\n' });
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'source-b' });
+
+		const deleted = await deleteForUndo(db, note);
+
+		expect(deleted.connectionId).toBe('source-a');
+		expect(deleted.deletedLocally).toBe(1);
+		expect((await getNote(db, note.id, { connectionId: 'source-a' }))?.deletedLocally).toBe(1);
+	});
+
+	it('reads the tombstone once what is settled has landed in it', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Gone', body: 'saved\n' });
+
+		const deleted = await deleteForUndo(db, note, {
+			// An edit held by the editor, retried into the tombstone.
+			settle: () =>
+				saveNoteBody(db, note.id, 'saved\nand typed after\n', {
+					origin: 'saved\n',
+					note,
+				}),
+		});
+
+		expect(deleted.body).toBe('saved\nand typed after\n');
+		expect(deleted.deletedLocally).toBe(1);
+	});
+
+	it('gives the note as it was where the tombstone cannot be read back', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Gone', body: 'the words\n' });
+
+		const deleted = await deleteForUndo(db, note, {
+			settle: () => pushed(note.id),
+		});
+
+		expect(deleted).toEqual(note);
+	});
+});
 
 describe('undeleteNote', () => {
 	it('restores the same row while the tombstone is there, and withdraws the delete', async () => {

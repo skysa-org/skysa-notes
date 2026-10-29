@@ -7,13 +7,7 @@ import { t } from '../../i18n/t.js';
 import { db, type NoteRecord, noteRef } from '../../store/db.js';
 import { beforeClosing } from '../../store/heldEdits.js';
 import { useDefaultEditorMode } from '../../store/hooks.js';
-import {
-	deleteNote,
-	getNote,
-	renameNote,
-	saveNoteBody,
-	setNoteEditorMode,
-} from '../../store/notes.js';
+import { deleteForUndo, renameNote, saveNoteBody, setNoteEditorMode } from '../../store/notes.js';
 import type { NoteViewProps } from './types.js';
 import { useUnsupported } from './unsupported.js';
 import { useFileCleanup } from './useFileCleanup.js';
@@ -169,16 +163,13 @@ export const useNoteSession = ({
 			// tombstone: restoring it brings them back with it. Only the open note's
 			// editor has any, but the flush is harmless for another.
 			flush();
-			// By the note's own source throughout: an id names a note only there, and
-			// the one showing may have changed by the time a continuation runs.
-			const home = { connectionId: target.connectionId };
-			void deleteNote(db, target.id, home)
-				// Everything out has come back, and what had failed has had one more
-				// try — into the tombstone, which keeps an edit and stays deleted.
-				.then(settle)
-				// Deleted either way; a row that cannot be read is the note as shown.
-				.then(() => getNote(db, target.id, home).catch(() => undefined))
-				.then((row) => {
+			// By the note's own source: an id names a note only there, and the
+			// one showing may have changed by the time a continuation runs.
+			// Settled once deleted: everything out has come back, and what had
+			// failed has had one more try — into the tombstone, which keeps an
+			// edit and stays deleted.
+			void deleteForUndo(db, target, { settle })
+				.then((deleted) => {
 					// Only now that it is deleted, and nothing before: a held edit
 					// retried after sync has purged the row would bring the note back
 					// (`saveNoteBody`), here and on the provider. What is let go is
@@ -188,7 +179,6 @@ export const useNoteSession = ({
 					// conflict copy is stored, and offered again it would be copied
 					// again.
 					const unstored = forget(noteRef(target));
-					const deleted = row ?? target;
 					if (unstored === undefined) {
 						onDeleted(deleted);
 						return;

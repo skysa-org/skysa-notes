@@ -18,10 +18,10 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof Notes>();
 	return {
 		...actual,
-		deleteNote: (...args: Parameters<typeof Notes.deleteNote>) =>
+		deleteForUndo: (...args: Parameters<typeof Notes.deleteForUndo>) =>
 			store.refusing
 				? Promise.reject(new Error('QuotaExceededError'))
-				: actual.deleteNote(...args),
+				: actual.deleteForUndo(...args),
 	};
 });
 
