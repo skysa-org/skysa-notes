@@ -358,5 +358,5 @@ export const useOpenWhenShown = (
 		const before = seen.current;
 		seen.current = { connectionId, shown };
 		if (before?.connectionId === connectionId && !before.shown && shown) opening.current();
-	}, [connectionId, shown]);
+	}, [connectionId, shown, opening]);
 };

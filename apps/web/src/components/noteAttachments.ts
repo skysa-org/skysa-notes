@@ -634,6 +634,9 @@ export const useNoteAttachments = (
 
 	const host = useMemo(
 		() =>
+			// Every ref here is read inside a closure that runs after render; the rule
+			// reports the call as a whole, so keep it that way: no `.current` as an argument.
+			// eslint-disable-next-line react-hooks/refs -- read when a view asks, never while rendering
 			createNoteAttachments({
 				db,
 				note: () => current.current,
@@ -646,8 +649,9 @@ export const useNoteAttachments = (
 					adding.current?.(path);
 				},
 			}),
-		// One per note, whatever else of it changes.
-		[note.id, db]
+		// One per note, whatever else of it changes; the rest are `useLatest` refs.
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- `note.id` is the key, not a value read
+		[note.id, db, read, told, storing, adding]
 	);
 	useEffect(
 		() => () => {

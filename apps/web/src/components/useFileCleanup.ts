@@ -60,6 +60,7 @@ export const useFileCleanup = (
 				cleanup.left(ref, opened.connectionId, []);
 				return;
 			}
+			// eslint-disable-next-line react-hooks/exhaustive-deps -- the note as it is when left, not as it was opened
 			const now = latest.current;
 			const pulled = now !== undefined && (now.bodyOrigin ?? '') !== typed.origin;
 			const bodies = pulled ? [typed.body, now.body] : [typed.body];
@@ -68,7 +69,7 @@ export const useFileCleanup = (
 			);
 			cleanup.left(ref, opened.connectionId, gone);
 		};
-	}, [ref, cleanup]);
+	}, [ref, cleanup, latest]);
 
 	const edited = useCallback((body: string, origin: string) => {
 		if (visit.current !== undefined)
