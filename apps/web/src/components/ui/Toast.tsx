@@ -72,7 +72,9 @@ export interface ToastProps {
  *
  * Touching anything else counts because a toast reports on a thing that is
  * over: reading it *is* acknowledging it, and a card left sitting over the
- * note about a notebook the user has since moved on from is clutter. Pointers
+ * note about a notebook the user has since moved on from is clutter. Not a
+ * touch in a dialog over the page (#443, 2026-10-25): that answers the
+ * dialog, and the toast is still to be read once the dialog has gone. Pointers
  * only, deliberately — a keystroke in the editor does not take it away, so an
  * error can be read with the cursor still in the text it is about.
  *
