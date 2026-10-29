@@ -12,7 +12,7 @@ import { type FolderNode, notesUnder } from '../../store/tree.js';
 import { PASSWORDS_LABEL } from '../../store/vault.js';
 import { AttachedFiles } from '../AttachedFiles.js';
 import { FloatingMenu, type MenuPoint } from '../OptionsMenu.js';
-import { filesUnder, nodeAt, opener, toggleWith, TreeBody, useDwell } from './FolderTree.js';
+import { TreeBody } from './FolderTree.js';
 import { DeleteConfirm, MoveHint, NewFolderField } from './NotebookFields.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 
@@ -169,6 +169,60 @@ const PlaceRow = ({
 		</button>
 	</div>
 );
+
+/** How long something dragged rests on a shut notebook before it opens. */
+const DWELL_MS = 600;
+/** Longer than this between two `dragover`s, and it had gone and come back. */
+const DWELL_GAP_MS = 600;
+
+/**
+ * A shut notebook opens under something dragged that rests on it, as a
+ * folder does in a file manager: before there was a chevron, every notebook
+ * was a place to drop, and a drag has no hand free to press one. Counted by
+ * the `dragover`s a browser sends while the pointer is there, moving or not,
+ * so there is no timer to cancel.
+ */
+const useDwell = (open: (path: string) => void) => {
+	const dwell = useRef<{ path: string; since: number; seen: number } | null>(null);
+	return (path: string) => {
+		const now = Date.now();
+		const last = dwell.current;
+		const since =
+			last !== null && last.path === path && now - last.seen < DWELL_GAP_MS
+				? last.since
+				: now;
+		if (now - since >= DWELL_MS) {
+			dwell.current = null;
+			open(path);
+			return;
+		}
+		dwell.current = { path, since, seen: now };
+	};
+};
+
+/** Notebooks opened, by whoever keeps which are open. */
+const opener =
+	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
+	(...paths: string[]) => {
+		onOpenNotebooks?.(paths, true);
+	};
+
+/** One notebook opened or shut, by whoever keeps which are open. */
+const toggleWith =
+	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
+	(path: string, open: boolean) => {
+		onOpenNotebooks?.([path], open);
+	};
+
+/** Every file beneath a notebook, which deleting it takes as well. */
+const filesUnder = (node: FolderNode): number =>
+	node.children.reduce((total, child) => total + filesUnder(child), node.fileCount);
+
+const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
+	nodes.reduce<FolderNode | undefined>(
+		(found, node) => found ?? (node.path === path ? node : nodeAt(node.children, path)),
+		undefined
+	);
 
 /**
  * The notebook open in the note list is shown in the sidebar too: when one is

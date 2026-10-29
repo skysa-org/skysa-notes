@@ -20,6 +20,14 @@ import { RowOptions } from '../RowOptions.js';
 import { rowIndent, RowRename } from '../RowRename.js';
 
 /**
+ * The notebook tree's rows: each notebook's, with its disclosure and its `⋯`,
+ * the top level's and the loose notes', and the keys that move between them
+ * (`TreeBody`). What the tree is, and why a notebook lists what is inside it
+ * only while it is open, is said on the sidebar that holds it (`Sidebar.tsx`),
+ * which also keeps the state these rows are handed.
+ */
+
+/**
  * A row's label while a move is on. Said outright rather than left to be read
  * off the row, which by then says the wrong thing: "Work" is where the user
  * would go, and during a move it is where the thing they are holding lands.
@@ -232,36 +240,6 @@ const Disclosure = ({
 			<Icon name="chevron" />
 		</button>
 	);
-};
-
-/** How long something dragged rests on a shut notebook before it opens. */
-const DWELL_MS = 600;
-/** Longer than this between two `dragover`s, and it had gone and come back. */
-const DWELL_GAP_MS = 600;
-
-/**
- * A shut notebook opens under something dragged that rests on it, as a
- * folder does in a file manager: before there was a chevron, every notebook
- * was a place to drop, and a drag has no hand free to press one. Counted by
- * the `dragover`s a browser sends while the pointer is there, moving or not,
- * so there is no timer to cancel.
- */
-export const useDwell = (open: (path: string) => void) => {
-	const dwell = useRef<{ path: string; since: number; seen: number } | null>(null);
-	return (path: string) => {
-		const now = Date.now();
-		const last = dwell.current;
-		const since =
-			last !== null && last.path === path && now - last.seen < DWELL_GAP_MS
-				? last.since
-				: now;
-		if (now - since >= DWELL_MS) {
-			dwell.current = null;
-			open(path);
-			return;
-		}
-		dwell.current = { path, since, seen: now };
-	};
 };
 
 /**
@@ -545,32 +523,8 @@ const FolderItemView = ({
 
 const FolderItem = memo(FolderItemView);
 
-/** Notebooks opened, by whoever keeps which are open. */
-export const opener =
-	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
-	(...paths: string[]) => {
-		onOpenNotebooks?.(paths, true);
-	};
-
-/** One notebook opened or shut, by whoever keeps which are open. */
-export const toggleWith =
-	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
-	(path: string, open: boolean) => {
-		onOpenNotebooks?.([path], open);
-	};
-
 /** The top level of the tree, which has no row of its own until one is needed. */
 const TOP_LEVEL_LABEL = t('notebooks.topLevel');
-
-/** Every file beneath a notebook, which deleting it takes as well. */
-export const filesUnder = (node: FolderNode): number =>
-	node.children.reduce((total, child) => total + filesUnder(child), node.fileCount);
-
-export const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
-	nodes.reduce<FolderNode | undefined>(
-		(found, node) => found ?? (node.path === path ? node : nodeAt(node.children, path)),
-		undefined
-	);
 
 interface TreeBodyProps extends Omit<FolderRowsProps, 'nodes' | 'depth' | 'openNotebooks'> {
 	/** Undefined until read, when every notebook is shut. */
