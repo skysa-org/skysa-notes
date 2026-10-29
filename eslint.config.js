@@ -302,7 +302,7 @@ export default tseslint.config(
 	// ---- React --------------------------------------------------------------
 
 	{
-		files: ['apps/web/**/*.tsx'],
+		files: ['apps/web/**/*.{ts,tsx}'],
 		extends: [
 			react.configs.flat.recommended,
 			react.configs.flat['jsx-runtime'], // new JSX transform — no `React` import needed
