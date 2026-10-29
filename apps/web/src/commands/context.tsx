@@ -8,6 +8,7 @@ import {
 	useSyncExternalStore,
 } from 'react';
 
+import { useLatest } from '../hooks/useLatest.js';
 import { type Chord, matchesChord } from './chord.js';
 import {
 	type Command,
@@ -60,17 +61,29 @@ const useOptionalRegistry = (): CommandRegistry | undefined => useContext(Comman
 /**
  * Declare a command for as long as this component is mounted.
  *
- * The command is re-registered whenever any part of it changes, which is every
- * render for a `run` that is not memoised — cheap, since registering is a `Map`
- * write, and right, since a stale `run` closes over stale state.
+ * Registered again when what the palette shows of it changes — its label,
+ * group, chord or whether it can run — and not for a new `run`, which a caller
+ * that does not memoise it hands over every render: each registration tells
+ * the palette, which would draw itself again for nothing (#455). The command
+ * runs the latest `run`, so it never closes over stale state.
  */
 export const useCommand = (command: Command): void => {
 	const registry = useOptionalRegistry();
 	const { id, label, group, chord, enabled, run } = command;
+	const latestRun = useLatest(run);
 	useEffect(() => {
 		if (registry === undefined) return;
-		return registry.register({ id, label, group, chord, enabled, run });
-	}, [registry, id, label, group, chord, enabled, run]);
+		return registry.register({
+			id,
+			label,
+			group,
+			chord,
+			enabled,
+			run: () => {
+				latestRun.current();
+			},
+		});
+	}, [registry, id, label, group, chord, enabled, latestRun]);
 };
 
 /**

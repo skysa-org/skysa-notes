@@ -130,6 +130,49 @@ describe('the registry', () => {
 	});
 });
 
+describe('a command declared with a new `run` each render', () => {
+	it('is not registered again, so the palette is not told of a change', () => {
+		// A screen that does not memoise its handlers hands over a fresh `run`
+		// on every render, and the palette would draw itself again each time.
+		const seen = new Set<readonly unknown[]>();
+		const Lists = () => {
+			seen.add(useCommands());
+			return null;
+		};
+		const shown = (run: () => void) => (
+			<CommandsProvider>
+				<Declares id="a" run={run} />
+				<Lists />
+			</CommandsProvider>
+		);
+		const { rerender } = render(shown(() => undefined));
+		const before = seen.size;
+
+		rerender(shown(() => undefined));
+		rerender(shown(() => undefined));
+
+		expect(seen.size).toBe(before);
+	});
+
+	it('runs the latest one', async () => {
+		const first = vi.fn();
+		const latest = vi.fn();
+		const shown = (run: () => void) => (
+			<CommandsProvider>
+				<Declares id="a" run={run} />
+				<Shortcuts />
+			</CommandsProvider>
+		);
+		const { rerender } = render(shown(first));
+		rerender(shown(latest));
+
+		await userEvent.keyboard('{Meta>}k{/Meta}');
+
+		expect(latest).toHaveBeenCalledOnce();
+		expect(first).not.toHaveBeenCalled();
+	});
+});
+
 describe('a chord', () => {
 	it('runs the command it belongs to', async () => {
 		const run = vi.fn();
