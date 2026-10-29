@@ -63,13 +63,13 @@ import {
 } from '../sync/account.js';
 import { needsReconnect, syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
-import type { SyncCount } from './account/statusWords.js';
 import {
 	conflictMessage,
 	failureMessage,
 	lineStatus,
 	refusalMessage,
 	statusMessage,
+	type SyncCount,
 	syncCount,
 	when,
 } from './account/statusWords.js';
