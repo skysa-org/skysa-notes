@@ -639,6 +639,38 @@ describe('a source already set up', () => {
 		expect(await heldAfter(h)).toEqual([h.source, h.old].map(encodeIdentity));
 	});
 
+	it('fills the key typed in with zeros once it is kept', async () => {
+		// The typed key's bytes are made inside the paste field; the dialog asks
+		// `age` what each key's recipient is, which is where they can be seen.
+		const seen: { bytes: Uint8Array; recipient: string }[] = [];
+		const age = async (): Promise<Age> => {
+			const real = await loadAge();
+			return {
+				...real,
+				recipientOf: (identity: Uint8Array) => {
+					const recipient = real.recipientOf(identity);
+					seen.push({ bytes: identity, recipient });
+					return recipient;
+				},
+			};
+		};
+		const h = await replacedOn();
+		h.open({ age });
+		await typeKey(h, encodeIdentity(h.source));
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await screen.findByText(
+			'This device opens the vault with the new key now, and still with the keys it had.'
+		);
+
+		const typedIn = seen.filter(
+			({ bytes, recipient }) => bytes !== h.source && recipient === recipientOf(h.source)
+		);
+		expect(typedIn.length).toBeGreaterThan(0);
+		expect(typedIn.every(({ bytes }) => bytes.every((byte) => byte === 0))).toBe(true);
+		// What was kept is the key, not the zeros.
+		expect(await heldAfter(h)).toEqual([h.source, h.old, h.extra].map(encodeIdentity));
+	});
+
 	it('keeps only the new key where the user says so', async () => {
 		const h = await replacedOn();
 		h.open();
