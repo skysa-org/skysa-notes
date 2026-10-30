@@ -9,6 +9,7 @@ import gdrive16 from '../src/assets/providers/gdrive-16.png';
 import gdrive32 from '../src/assets/providers/gdrive-32.png';
 import gdrive48 from '../src/assets/providers/gdrive-48.png';
 import onedriveMark from '../src/assets/providers/onedrive.svg';
+import { ShellTo } from '../src/components/shell/context.js';
 import { type AccountSlot, SourcePanel } from '../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../src/components/sources/SourceTabs.js';
 import { useShowingSource } from '../src/components/sources/useShowingSource.js';
@@ -850,13 +851,14 @@ describe('the source panel, in a compact window', () => {
 		const user = userEvent.setup();
 		const renamings = createRenamings();
 		render(
-			<SourcePanel
-				client={clientWith()}
-				returnTo="/"
-				navigate={() => undefined}
-				renamings={renamings}
-				account={() => null}
-			/>,
+			<ShellTo renamings={renamings}>
+				<SourcePanel
+					client={clientWith()}
+					returnTo="/"
+					navigate={() => undefined}
+					account={() => null}
+				/>
+			</ShellTo>,
 			over(db)
 		);
 
@@ -895,16 +897,17 @@ describe('the source panel, in a compact window', () => {
 		const renamings = createRenamings();
 		const given: AccountSlot[] = [];
 		render(
-			<SourcePanel
-				client={clientWith()}
-				returnTo="/"
-				navigate={() => undefined}
-				renamings={renamings}
-				account={(slot) => {
-					given.push(slot);
-					return null;
-				}}
-			/>,
+			<ShellTo renamings={renamings}>
+				<SourcePanel
+					client={clientWith()}
+					returnTo="/"
+					navigate={() => undefined}
+					account={(slot) => {
+						given.push(slot);
+						return null;
+					}}
+				/>
+			</ShellTo>,
 			over(db)
 		);
 

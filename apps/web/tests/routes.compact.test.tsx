@@ -209,6 +209,23 @@ describe('the compact bar', () => {
 		);
 	});
 
+	it('names a note by its name as it is typed, before it is given', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', title: 'Plans', body: 'Plans\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Plans');
+		});
+
+		await user.type(screen.getByLabelText('Note title'), ' for Q3');
+
+		// Deferred, as the list's rows are: a render behind the keystroke.
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Plans for Q3');
+		});
+	});
+
 	it('names a note with no name by the words it was last stored with, not as they are typed', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		await createNote(db, { folderPath: 'Work', body: 'Pick up' });

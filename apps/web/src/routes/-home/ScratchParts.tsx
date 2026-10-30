@@ -2,7 +2,6 @@ import { ScratchModal, Scratchpad } from '../../components/scratchpad/Scratchpad
 import type { useScratchpad } from '../../components/scratchpad/useScratchpad.js';
 import { NameDialog } from '../../components/ui/NameDialog.js';
 import { t } from '../../i18n/t.js';
-import type { LiveEdits } from '../../store/liveEdits.js';
 import { scratchMarks } from '../../store/scratchpad.js';
 import type { NotePane } from './NoteColumn.js';
 
@@ -17,11 +16,9 @@ type Scratch = ReturnType<typeof useScratchpad>;
 /** The scratchpad, in the notes' place. */
 export const ScratchPane = ({
 	scratch,
-	liveEdits,
 	editor,
 }: Readonly<{
 	scratch: Scratch;
-	liveEdits: LiveEdits;
 	editor: NotePane;
 }>) => (
 	<Scratchpad
@@ -36,7 +33,6 @@ export const ScratchPane = ({
 		onMark={scratch.mark}
 		onMove={scratch.offered}
 		onDelete={scratch.remove}
-		liveEdits={liveEdits}
 	/>
 );
 

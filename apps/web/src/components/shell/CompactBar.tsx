@@ -14,13 +14,14 @@ import { t } from '../../i18n/t.js';
 import type { Origins, Pane } from '../../routes/panel.js';
 import { KEEPS_PANEL, PANES } from '../../routes/panel.js';
 import type { NoteRecord } from '../../store/db.js';
-import { type LiveEdit, type LiveEdits, shownNote, useLiveEdit } from '../../store/liveEdits.js';
-import { type Renamings, shownFolder, useRenaming } from '../../store/renaming.js';
+import { type LiveEdit, shownNote, useLiveEdit } from '../../store/liveEdits.js';
+import { shownFolder, useRenaming } from '../../store/renaming.js';
 import { nameless, shownName } from '../../store/titles.js';
 import { folderLabel } from '../../store/tree.js';
 import { ProviderIcon } from '../sources/ProviderIcon.js';
 import { useShowingSource } from '../sources/useShowingSource.js';
 import { rems, useElementWidth, useFontsStatus } from '../ui/layout.js';
+import { useLiveEdits, useRenamings } from './context.js';
 import { middleEllipsis } from './middleEllipsis.js';
 import { NoteSearchField, type SearchFieldProps } from './SearchField.js';
 
@@ -255,10 +256,6 @@ export interface CompactBarProps {
 	folder: string | undefined;
 	/** The open note, if there is one. */
 	note: NoteRecord | undefined;
-	/** Its name as it is being typed, as the list says it (`NoteList`). */
-	liveEdits?: LiveEdits;
-	/** A notebook or source being renamed, so its dropdown says what is typed. */
-	renamings?: Renamings;
 	panel: Pane | null;
 	onPanel: (panel: Pane | null) => void;
 	query: string;
@@ -303,8 +300,6 @@ export interface CompactBarProps {
 export const CompactBar = ({
 	folder,
 	note,
-	liveEdits,
-	renamings,
 	panel,
 	onPanel,
 	query,
@@ -320,10 +315,12 @@ export const CompactBar = ({
 	passwords = false,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
-	const renaming = useRenaming(renamings);
+	// A notebook or source being renamed, so its dropdown says what is typed.
+	const renaming = useRenaming(useRenamings());
 	const source = useShowingSource(renaming);
 	const sourceValue = sourceWords(source);
-	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
+	// The note's name as it is being typed, as the list says it (`NoteList`).
+	const edit = useDeferredValue(useLiveEdit(useLiveEdits(), note));
 	const name = barName(note, edit);
 	const title = name?.text ?? t('shell.compact.noNote');
 	// Words are cut at their end, since how they start is what says which note

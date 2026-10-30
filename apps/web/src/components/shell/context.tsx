@@ -12,8 +12,8 @@ import { createRenamings, type Renamings } from '../../store/renaming.js';
  *
  * Shown with nothing outside it, as a pane drawn on its own — a test — shows
  * what is stored: the hooks answer `undefined` there, and every reader takes
- * that as nothing typed and nothing being renamed. Only the shell itself asks
- * for them to be there (`useShell`).
+ * that as nothing typed and nothing being renamed. Only the home route's own
+ * hooks, which never run outside it, ask for them to be there (`useShell`).
  */
 
 interface Shell {
@@ -53,7 +53,10 @@ export const ShellTo = ({
 	return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>;
 };
 
-/** The shell's, for the home route that is drawn inside it and hands them on. */
+/**
+ * The shell's, for the home route's own hooks (`useNotebookActions`): they run
+ * only inside it, so one drawn without a shell is a mistake, and says so.
+ */
 export const useShell = (): Shell => {
 	const shell = useContext(ShellContext);
 	if (shell === undefined) throw new Error('The shell is only available inside a ShellProvider');

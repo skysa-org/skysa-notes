@@ -5,8 +5,8 @@ import { useCommand } from '../../commands/context.js';
 import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
 import type { Moving } from '../../store/rearrange.js';
-import type { Renamings } from '../../store/renaming.js';
 import type { FolderNode } from '../../store/tree.js';
+import { useRenamings } from '../shell/context.js';
 import { type OptionsMenuItem, useRowMenu } from '../ui/OptionsMenu.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 
@@ -33,7 +33,6 @@ interface NotebookMenuOptions {
 	onRenameFolder: ((path: string, name: string) => void) | undefined;
 	onDeleteFolder: ((path: string) => void) | undefined;
 	onPinFolder: ((path: string, pin: NotebookPin | undefined) => void) | undefined;
-	renamings: Renamings | undefined;
 	onReveal: (() => void) | undefined;
 }
 
@@ -54,9 +53,10 @@ export const useNotebookMenu = ({
 	onRenameFolder,
 	onDeleteFolder,
 	onPinFolder,
-	renamings,
 	onReveal,
 }: NotebookMenuOptions) => {
+	// Where a name being typed is told, for what else on screen shows it.
+	const renamings = useRenamings();
 	const [renaming, setRenaming] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<string | null>(null);
 	const [listing, setListing] = useState<string | null>(null);

@@ -5,7 +5,6 @@ import { Icon, type IconName } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
 import type { Moving } from '../../store/rearrange.js';
-import type { Renamings } from '../../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../../store/scratchpad.js';
 import { type FolderNode, notesUnder } from '../../store/tree.js';
 import { PASSWORDS_LABEL } from '../../store/vault.js';
@@ -59,8 +58,6 @@ export interface SidebarProps {
 	onRenameFolder?: (path: string, name: string) => void;
 	/** Delete the notebook and everything in it. Asked about first. */
 	onDeleteFolder?: (path: string) => void;
-	/** Where a name being typed is told, for what else on screen shows it. */
-	renamings?: Renamings;
 	/**
 	 * Notes sitting at the root, in no notebook. Undefined while loading; zero
 	 * in the normal case, and then there is no row.
@@ -260,7 +257,6 @@ export const Sidebar = ({
 	onCancelMove,
 	onReveal,
 	newNotebookAsked = 0,
-	renamings,
 	openNotebooks,
 	onOpenNotebooks,
 	onPinFolder,
@@ -318,7 +314,6 @@ export const Sidebar = ({
 		onRenameFolder,
 		onDeleteFolder,
 		onPinFolder,
-		renamings,
 		onReveal,
 	});
 

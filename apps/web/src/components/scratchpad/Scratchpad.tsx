@@ -27,7 +27,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import { keepRows } from '../../store/kept.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../../store/liveEdits.js';
+import { shownNote, useLiveEdit } from '../../store/liveEdits.js';
 import { isUnnamed } from '../../store/notes.js';
 import {
 	cardLines,
@@ -39,6 +39,7 @@ import { handBack, SLICE_MS } from '../../store/slices.js';
 import { titleShown } from '../../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../../store/visibleText.js';
 import { useOpeningNotice } from '../note/opening.js';
+import { useLiveEdits } from '../shell/context.js';
 import { useElementWidth } from '../ui/layout.js';
 import { usePressAway } from '../ui/usePressAway.js';
 import {
@@ -88,7 +89,6 @@ export interface ScratchpadProps {
 	/** Make a card a note in a notebook; unsaid while something else is moving. */
 	onMove: ((note: NoteRecord) => void) | undefined;
 	onDelete: (note: NoteRecord) => void;
-	liveEdits: LiveEdits | undefined;
 }
 
 /**
@@ -320,7 +320,6 @@ const CardView = ({
 	note: row,
 	open,
 	opening: pressed,
-	liveEdits,
 	x,
 	y,
 	width,
@@ -337,7 +336,6 @@ const CardView = ({
 	open: boolean;
 	/** Pressed, and its note still being read (`openingId`). */
 	opening: boolean;
-	liveEdits: LiveEdits | undefined;
 	measure: Measure;
 	/** The focus came into the card, or into one of its menus, or went out (`useFocusedItem`). */
 	onFocusIn: (id: string) => void;
@@ -348,7 +346,7 @@ const CardView = ({
 	onDelete: (note: NoteRecord) => void;
 }) => {
 	// Deferred, as a note list row is: the card is a parse of what is typed.
-	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
+	const note = shownNote(row, useDeferredValue(useLiveEdit(useLiveEdits(), row)));
 	const marks = scratchMarks(row);
 	// A name its first heading gives it shows through as it is typed.
 	const named = !isUnnamed(row) || note.title !== row.title;
@@ -710,7 +708,6 @@ export const Scratchpad = ({
 	onMark,
 	onMove,
 	onDelete,
-	liveEdits,
 }: ScratchpadProps) => {
 	useFocusBack(openId);
 	const [scroller, setScroller] = useState<HTMLElement | null>(null);
@@ -775,7 +772,6 @@ export const Scratchpad = ({
 			note={note}
 			open={note.id === openId}
 			opening={note.id === openingId}
-			liveEdits={liveEdits}
 			{...place}
 			measure={measure}
 			// Followed even where every card is drawn, so that one the focus is

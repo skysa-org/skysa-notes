@@ -1,9 +1,11 @@
 import { ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
+import { ShellTo } from '../src/components/shell/context.js';
 import { Sidebar } from '../src/components/sidebar/Sidebar.js';
 import type { Moving } from '../src/store/rearrange.js';
 import { createRenamings } from '../src/store/renaming.js';
@@ -18,7 +20,15 @@ import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 const tree = buildFolderTree({ paths: ['personal', 'work', 'work/meetings'] });
 
-const renderSidebar = (props: Partial<Parameters<typeof Sidebar>[0]> = {}) =>
+/**
+ * The sidebar, inside a shell of the test's own where it is given what that
+ * holds: as Testing Library's wrapper, which `rerender` keeps, so a sidebar
+ * drawn again is the same one updated.
+ */
+const renderSidebar = (
+	props: Partial<Parameters<typeof Sidebar>[0]> = {},
+	shell: Omit<Parameters<typeof ShellTo>[0], 'children'> = {}
+) =>
 	render(
 		<Sidebar
 			tree={tree}
@@ -29,7 +39,12 @@ const renderSidebar = (props: Partial<Parameters<typeof Sidebar>[0]> = {}) =>
 			// Open, so the notebook inside it is listed: shutting is tested below.
 			openNotebooks={new Set(['work'])}
 			{...props}
-		/>
+		/>,
+		{
+			wrapper: ({ children }: { children: ReactNode }) => (
+				<ShellTo {...shell}>{children}</ShellTo>
+			),
+		}
 	);
 
 describe('Sidebar', () => {
@@ -488,7 +503,7 @@ describe('renaming a notebook', () => {
 		// Let go of when the write resolved, the old name would flicker back for
 		// the moment the store takes to bring the new one (`store/renaming.ts`).
 		const renamings = createRenamings();
-		renderSidebar({ selectedFolder: 'work', onRenameFolder: () => undefined, renamings });
+		renderSidebar({ selectedFolder: 'work', onRenameFolder: () => undefined }, { renamings });
 		await openMenu('work');
 		await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
 

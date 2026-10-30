@@ -7,10 +7,10 @@ import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/c
 import { useDb } from '../../store/database.js';
 import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { holdsAnything } from '../../store/exportNotes.js';
-import type { Renamings } from '../../store/renaming.js';
 import { isLiveSource } from '../../store/rowStates.js';
 import { CONNECTABLE, tabName } from '../../sync/account.js';
 import { secretsLabel } from '../secrets/secretsLabel.js';
+import { useRenamings } from '../shell/context.js';
 import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 import { RowOptions } from '../ui/RowOptions.js';
 import { RowRename } from '../ui/RowRename.js';
@@ -62,8 +62,6 @@ export interface SourcePanelProps {
 	account?: (slot: AccountSlot) => ReactNode;
 	/** A source was chosen, so the panel has done its job. */
 	onChosen?: () => void;
-	/** Where a name being typed is told, for the bar's dropdown above. */
-	renamings?: Renamings;
 	/** How many times the app's URL has asked for the code field (`useEnterCode`). */
 	enterCode?: number;
 }
@@ -92,10 +90,11 @@ export const SourcePanel = ({
 	navigate,
 	account,
 	onChosen,
-	renamings,
 	enterCode,
 }: SourcePanelProps) => {
 	const db = useDb();
+	// Where a name being typed is told, for the bar's dropdown above.
+	const renamings = useRenamings();
 	const choices = useSourceChoices(client);
 	const { ordered } = choices;
 	// State rather than a ref: the storage panel draws its menu into this, and
