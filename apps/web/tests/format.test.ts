@@ -52,6 +52,14 @@ const selecting = (word: string) => (ctx: Ctx) => {
 	);
 };
 
+/** A selection by position, or a cursor when `to` is left out. */
+const at =
+	(from: number, to = from) =>
+	(ctx: Ctx) => {
+		const view = ctx.get(editorViewCtx);
+		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)));
+	};
+
 const format = (ctx: Ctx): FormatState => readFormat(ctx.get(editorViewCtx).state);
 
 afterEach(async () => {
@@ -141,6 +149,26 @@ describe('readFormat', () => {
 	it('reports no link outside one', async () => {
 		const withCtx = await mount('plain\n');
 		withCtx(cursorIn('plain'));
+		expect(withCtx(format).link).toBeNull();
+	});
+
+	it('reports the link a selection holds, which is the one Link points elsewhere', async () => {
+		const withCtx = await mount('plain [bay](https://example.test/a) more\n');
+
+		withCtx(at(1, 'plain bay more'.length + 1));
+		expect(withCtx(format).link).toBe('https://example.test/a');
+	});
+
+	it('reports a link from either end, and not once the cursor has left it', async () => {
+		const withCtx = await mount('[bay](https://example.test/a) more\n');
+
+		withCtx(at(1));
+		expect(withCtx(format).link).toBe('https://example.test/a');
+
+		withCtx(at('bay'.length + 1));
+		expect(withCtx(format).link).toBe('https://example.test/a');
+
+		withCtx(at('bay '.length + 1));
 		expect(withCtx(format).link).toBeNull();
 	});
 });
