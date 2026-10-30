@@ -55,7 +55,6 @@ const renderPad = (props: Partial<ScratchpadProps> = {}) => {
 			takingId={undefined}
 			editor={undefined}
 			openId={undefined}
-			liveEdits={undefined}
 			{...calls}
 			{...props}
 		/>

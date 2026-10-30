@@ -73,7 +73,6 @@ const props = (changed: Partial<ScratchpadProps> = {}): ScratchpadProps => ({
 	onMark: () => undefined,
 	onMove: () => undefined,
 	onDelete: () => undefined,
-	liveEdits: undefined,
 	...changed,
 });
 

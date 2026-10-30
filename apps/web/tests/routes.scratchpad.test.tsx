@@ -139,6 +139,21 @@ describe('a card', () => {
 		expect(hashIn(router)).toBe('scratchpad');
 	});
 
+	it('names its card on the wall as its name is typed, before it is given', async () => {
+		await inbox();
+		const card = await scratch({ title: 'Trip', body: 'Lisbon\n' });
+		const { user } = await openScratchpad();
+		await user.click(await screen.findByRole('button', { name: /^Trip/ }));
+		const open = await screen.findByRole('dialog', { name: 'Scratch note' });
+
+		await user.type(within(open).getByLabelText('Note title'), ' plans');
+
+		// The card under the dialog, which is what shows once it closes.
+		const onWall = document.querySelector(`.scratch-card[data-id="${card.id}"]`);
+		expect(onWall?.textContent).toContain('Trip plans');
+		expect((await getNote(db, card.id))?.title).toBe('Trip');
+	});
+
 	it('closes from its own Close, leaving the scratchpad as it was', async () => {
 		await inbox();
 		await scratch({ body: 'Milk\n' });

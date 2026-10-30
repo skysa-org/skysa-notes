@@ -11,7 +11,7 @@ import { Passwords } from '../components/passwords/Passwords.js';
 import { usePasswords } from '../components/passwords/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/scratchpad/useScratchpad.js';
 import { CommandPalette } from '../components/shell/CommandPalette.js';
-import { ShellProvider, useShell } from '../components/shell/context.js';
+import { ShellProvider } from '../components/shell/context.js';
 import { ErrorScreen } from '../components/shell/ErrorScreen.js';
 import { Sidebar } from '../components/sidebar/Sidebar.js';
 import { NoticesProvider, useNotices } from '../components/ui/notices.js';
@@ -95,9 +95,6 @@ const Home = () => {
 	const looseNoteCount = useLooseNoteCount(activeConnection);
 
 	const { say } = useNotices();
-	// What is typed into the open note before it is saved, and a notebook or
-	// source being renamed, for the panes not yet reading them from the shell.
-	const { liveEdits, renamings } = useShell();
 	// Rarer than a duplicate notebook name — this one needs the store itself to
 	// refuse — but the same silence if it happens: the user types into a note
 	// that is nowhere, and the failure goes to the console.
@@ -217,7 +214,6 @@ const Home = () => {
 		openNote,
 		select,
 		openFolder,
-		renamings,
 	});
 
 	const { moving, setMoving, cancelMove, pickUp, onDropInto } = useMoving({
@@ -356,8 +352,6 @@ const Home = () => {
 					note={scratch.barNote(openNote)}
 					scratchpad={inScratchpad}
 					passwords={inPasswords}
-					liveEdits={liveEdits}
-					renamings={renamings}
 					panel={panel}
 					onPanel={setPanel}
 					onChoose={openResult}
@@ -382,7 +376,6 @@ const Home = () => {
 				<SourceDropdown
 					compact={compact}
 					enterCode={enterCode}
-					renamings={renamings}
 					returnTo={returnPath(href)}
 					onChosen={() => {
 						setPanel('notebooks');
@@ -399,7 +392,6 @@ const Home = () => {
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}
 					onDeleteFolder={onDeleteFolder}
-					renamings={renamings}
 					looseNoteCount={looseNoteCount}
 					// In a compact window it is in the source dropdown instead,
 					// which is where a phone user goes for anything about storage.
@@ -424,7 +416,7 @@ const Home = () => {
 			}
 			list={
 				inScratchpad ? (
-					<ScratchPane scratch={scratch} liveEdits={liveEdits} editor={noteEditor} />
+					<ScratchPane scratch={scratch} editor={noteEditor} />
 				) : inPasswords ? (
 					<Passwords
 						items={passwords.items}

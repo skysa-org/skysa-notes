@@ -75,7 +75,6 @@ const props = (notes: readonly NoteRecord[]): ScratchpadProps => ({
 	onMark: () => undefined,
 	onMove: () => undefined,
 	onDelete: () => undefined,
-	liveEdits: undefined,
 });
 
 const drawPad = (notes: readonly NoteRecord[]) => {

@@ -1,6 +1,7 @@
 import { isWithin, rebasePath } from '@skysa/core';
 import { useEffect } from 'react';
 
+import { useShell } from '../../components/shell/context.js';
 import { type Notice, useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
@@ -11,7 +12,6 @@ import {
 	FolderExistsError,
 	renameFolder,
 } from '../../store/folders.js';
-import type { Renamings } from '../../store/renaming.js';
 import type { Select } from './useOpenPlace.js';
 
 /**
@@ -38,15 +38,15 @@ export const useNotebookActions = ({
 	openNote,
 	select,
 	openFolder,
-	renamings,
 }: Readonly<{
 	folder: string | undefined;
 	openNote: NoteRecord | undefined;
 	select: Select;
 	openFolder: (path: string) => void;
-	renamings: Renamings;
 }>) => {
 	const db = useDb();
+	// A notebook's new name, being typed: the shell's, which the home route is drawn in.
+	const { renamings } = useShell();
 	const { say, moveOn } = useNotices();
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
 		// `createFolder` throws on a duplicate name, and the field has already

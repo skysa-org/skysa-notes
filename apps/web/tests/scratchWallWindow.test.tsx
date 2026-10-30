@@ -71,7 +71,6 @@ const props = (notes: readonly NoteRecord[], changed: Partial<ScratchpadProps> =
 	onMark: () => undefined,
 	onMove: () => undefined,
 	onDelete: () => undefined,
-	liveEdits: undefined,
 	...changed,
 });
 

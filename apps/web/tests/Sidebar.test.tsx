@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
+import { ShellTo } from '../src/components/shell/context.js';
 import { Sidebar } from '../src/components/sidebar/Sidebar.js';
 import type { Moving } from '../src/store/rearrange.js';
 import { createRenamings } from '../src/store/renaming.js';
@@ -18,18 +19,24 @@ import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 const tree = buildFolderTree({ paths: ['personal', 'work', 'work/meetings'] });
 
-const renderSidebar = (props: Partial<Parameters<typeof Sidebar>[0]> = {}) =>
+/** The sidebar, inside a shell of the test's own where it is given what that holds. */
+const renderSidebar = (
+	props: Partial<Parameters<typeof Sidebar>[0]> = {},
+	shell: Omit<Parameters<typeof ShellTo>[0], 'children'> = {}
+) =>
 	render(
-		<Sidebar
-			tree={tree}
-			selectedFolder="personal"
-			onSelectFolder={() => undefined}
-			onCreateFolder={() => undefined}
-			looseNoteCount={0}
-			// Open, so the notebook inside it is listed: shutting is tested below.
-			openNotebooks={new Set(['work'])}
-			{...props}
-		/>
+		<ShellTo {...shell}>
+			<Sidebar
+				tree={tree}
+				selectedFolder="personal"
+				onSelectFolder={() => undefined}
+				onCreateFolder={() => undefined}
+				looseNoteCount={0}
+				// Open, so the notebook inside it is listed: shutting is tested below.
+				openNotebooks={new Set(['work'])}
+				{...props}
+			/>
+		</ShellTo>
 	);
 
 describe('Sidebar', () => {
@@ -127,12 +134,14 @@ describe('Sidebar', () => {
 
 		const again = (asked: number) => {
 			rerender(
-				<Sidebar
-					{...props}
-					onSelectFolder={() => undefined}
-					looseNoteCount={0}
-					newNotebookAsked={asked}
-				/>
+				<ShellTo>
+					<Sidebar
+						{...props}
+						onSelectFolder={() => undefined}
+						looseNoteCount={0}
+						newNotebookAsked={asked}
+					/>
+				</ShellTo>
 			);
 		};
 		again(1);
@@ -488,7 +497,7 @@ describe('renaming a notebook', () => {
 		// Let go of when the write resolved, the old name would flicker back for
 		// the moment the store takes to bring the new one (`store/renaming.ts`).
 		const renamings = createRenamings();
-		renderSidebar({ selectedFolder: 'work', onRenameFolder: () => undefined, renamings });
+		renderSidebar({ selectedFolder: 'work', onRenameFolder: () => undefined }, { renamings });
 		await openMenu('work');
 		await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
 
