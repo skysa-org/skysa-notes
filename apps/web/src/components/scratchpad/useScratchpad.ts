@@ -12,7 +12,8 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
 import type { Pane } from '../../routes/panel.js';
 import type { Place } from '../../routes/place.js';
-import { db, type NoteRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord } from '../../store/db.js';
 import { settleEditors } from '../../store/heldEdits.js';
 import { useScratchNotes } from '../../store/hooks.js';
 import {
@@ -121,6 +122,7 @@ export const useScratchpad = ({
 	/** What is being moved: nothing else is, while something is. */
 	moving: Moving | null;
 }) => {
+	const db = useDb();
 	const { say } = useNotices();
 	/** What did not happen to a card, over the page. */
 	const sayProblem = (message: string) => {

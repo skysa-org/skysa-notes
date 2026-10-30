@@ -1,7 +1,8 @@
 import { EditorView } from '@codemirror/view';
+import { readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import {
@@ -13,7 +14,9 @@ import {
 import { createFolder, listFolders } from '../src/store/folders.js';
 import { getLastOpen } from '../src/store/lastOpen.js';
 import { createNote, getNote } from '../src/store/notes.js';
+import { getBottomPinnedNotebooks, getPinnedNotes } from '../src/store/pins.js';
 import { getRecentKeys } from '../src/store/recentNotes.js';
+import { setScratchpadShown } from '../src/store/scratchpad.js';
 import { noteUrl } from './entry.js';
 import { openApp } from './support/app.js';
 import { holdCredential } from './support/connection.js';
@@ -27,10 +30,8 @@ import { freshDatabase } from './support/db.js';
 
 const DROPBOX = 'c-dropbox';
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
-	expect(await db.notes.count()).toBe(0);
-	expect(await db.folders.count()).toBe(0);
 });
 
 const user = () => userEvent.setup();
@@ -45,6 +46,13 @@ const paths = async (database: NotesDatabase) =>
 	(await listFolders(database)).map((folder) => folder.path);
 
 describe('the home route over its own database', () => {
+	// Nothing the user did there is in the app's database.
+	afterEach(async () => {
+		expect(await db.notes.count()).toBe(0);
+		expect(await db.folders.count()).toBe(0);
+		expect(await db.prefs.toArray()).toEqual([]);
+	});
+
 	it('makes a notebook there', async () => {
 		const own = freshDatabase();
 		const acting = user();
@@ -205,7 +213,101 @@ describe('the home route over its own database', () => {
 		expect(await screen.findByDisplayValue('Sketch')).toBeDefined();
 	});
 
-	it('begins a note in an empty notebook there, whatever the app’s has', async () => {
+	it('pins a notebook and a note there', async () => {
+		const own = freshDatabase();
+		await createFolder(own, { parentPath: undefined, name: 'Work' });
+		const note = await createNote(own, { folderPath: 'Work', title: 'Alpha', body: 'Alpha\n' });
+		const acting = user();
+		await openApp('/', own);
+		await screen.findByDisplayValue('Alpha');
+
+		await menu(acting, 'Work', 'Pin to bottom');
+		await acting.click(screen.getByRole('button', { name: 'Options for “Alpha”' }));
+		await acting.click(await screen.findByRole('button', { name: 'Pin to top' }));
+
+		await waitFor(async () => {
+			expect(await getBottomPinnedNotebooks(own, LOCAL_CONNECTION_ID)).toEqual(['Work']);
+			expect(await getPinnedNotes(own, LOCAL_CONNECTION_ID)).toEqual([note.id]);
+		});
+	});
+
+	it('downloads what is there', async () => {
+		const archives: Blob[] = [];
+		vi.stubGlobal(
+			'URL',
+			class extends URL {
+				static override createObjectURL(blob: Blob) {
+					archives.push(blob);
+					return 'blob:skysa/app';
+				}
+
+				static override revokeObjectURL() {
+					return undefined;
+				}
+			}
+		);
+		const saved = (event: Event) => {
+			if (event.target instanceof HTMLAnchorElement) event.preventDefault();
+		};
+		document.addEventListener('click', saved);
+		onTestFinished(() => {
+			document.removeEventListener('click', saved);
+			vi.unstubAllGlobals();
+		});
+		const own = freshDatabase();
+		await createFolder(own, { parentPath: undefined, name: 'Work' });
+		const plan = await createNote(own, { folderPath: 'Work', title: 'Plan', body: '# Plan\n' });
+		const acting = user();
+		await openApp('/', own);
+		await screen.findByDisplayValue('Plan');
+
+		await acting.keyboard('{Control>}k{/Control}');
+		await acting.keyboard('download all{Enter}');
+
+		await waitFor(() => {
+			expect(archives).toHaveLength(1);
+		});
+		expect(new TextDecoder().decode(await archives[0]?.arrayBuffer())).toContain(plan.path);
+	});
+
+	it('pins and deletes a scratch card there', async () => {
+		const own = freshDatabase();
+		await createFolder(own, { parentPath: undefined, name: 'Inbox' });
+		await setScratchpadShown(own, LOCAL_CONNECTION_ID, true);
+		const card = await createNote(own, {
+			connectionId: LOCAL_CONNECTION_ID,
+			folderPath: SCRATCHPAD_FOLDER,
+			body: 'Milk\n',
+		});
+		const other = await createNote(own, {
+			connectionId: LOCAL_CONNECTION_ID,
+			folderPath: SCRATCHPAD_FOLDER,
+			body: 'Eggs\n',
+		});
+		const acting = user();
+		await openApp('/', own);
+		await acting.click(await screen.findByRole('button', { name: 'Scratchpad' }));
+		await screen.findByRole('button', { name: /^Milk/ });
+
+		const milk = document.querySelector<HTMLElement>(`[data-id="${card.id}"]`);
+		if (milk === null) throw new Error('no card');
+		await acting.click(within(milk).getByRole('button', { name: 'Pin' }));
+		await waitFor(async () => {
+			expect(readFrontmatter((await getNote(own, card.id))?.frontmatter ?? null).pinned).toBe(
+				true
+			);
+		});
+
+		await acting.click(await screen.findByRole('button', { name: 'Options for “Eggs”' }));
+		await acting.click(await screen.findByRole('button', { name: 'Delete' }));
+		await waitFor(async () => {
+			expect((await getNote(own, other.id))?.deletedLocally).toBe(1);
+		});
+	});
+});
+
+describe('an empty notebook over its own database', () => {
+	it('begins a note there, whatever the app’s database has', async () => {
 		const own = freshDatabase();
 		await createFolder(own, { parentPath: undefined, name: 'Work' });
 		// The same notebook in the app's database, with a note in it: asked of
@@ -214,15 +316,10 @@ describe('the home route over its own database', () => {
 		await createNote(db, { folderPath: 'Work', title: 'Elsewhere', body: 'Elsewhere\n' });
 		await openApp('/', own);
 
+		// Begun only once the store, asked again, has found the notebook empty
+		// (`useOpenPlace`): the app's would have answered with its note.
 		await waitFor(() => {
 			expect(screen.queryByLabelText<HTMLInputElement>('Note title')?.value).toBe('Untitled');
 		});
-		// Long enough for a note asked of the app's database to have opened.
-		await act(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 100));
-		});
-		expect(screen.queryByLabelText<HTMLInputElement>('Note title')?.value).toBe('Untitled');
-		await db.notes.clear();
-		await db.folders.clear();
 	});
 });

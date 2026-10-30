@@ -17,7 +17,8 @@ import { NoticesProvider, useNotices } from '../components/ui/notices.js';
 import { useLatest } from '../hooks/useLatest.js';
 import { t } from '../i18n/t.js';
 import { TakeShare } from '../share/TakeShare.js';
-import { db, noteRef } from '../store/db.js';
+import { useDb } from '../store/database.js';
+import { noteRef } from '../store/db.js';
 import {
 	useActiveConnectionId,
 	useActiveSource,
@@ -69,6 +70,7 @@ import { parseSearch } from './search.js';
  */
 
 const Home = () => {
+	const db = useDb();
 	const { connect, code, enter, share } = Route.useSearch();
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -87,7 +89,7 @@ const Home = () => {
 			if (activeConnection !== undefined)
 				void setNotebooksOpen(db, activeConnection, paths, open);
 		},
-		[activeConnection]
+		[activeConnection, db]
 	);
 	const sources = useSources();
 	const { tree, pins } = usePinnedTree(activeConnection);

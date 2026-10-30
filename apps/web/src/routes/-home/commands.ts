@@ -6,7 +6,8 @@ import { parseChord } from '../../commands/chord.js';
 import { useCommand } from '../../commands/context.js';
 import { useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
-import { db, type NoteRecord, type SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord, SyncStateRecord } from '../../store/db.js';
 import { downloadNotice, downloadProblem, downloadSource } from '../../store/exportNotes.js';
 import { useHoldsAnything } from '../../store/hooks.js';
 import { keeping } from '../../store/keeping.js';
@@ -141,6 +142,7 @@ const useDownloadCommand = ({
 	/** The source showing: `null` for the device's own, `undefined` until read. */
 	source: SyncStateRecord | null | undefined;
 }) => {
+	const db = useDb();
 	const { say } = useNotices();
 	const holds = useHoldsAnything(connectionId);
 	useCommand({
@@ -278,6 +280,7 @@ export const useShellCommands = ({
  * Chromium's alone.
  */
 export const useKeepOnInstall = () => {
+	const db = useDb();
 	useEffect(() => {
 		const installed = () => {
 			void keeping.ask(db, 'installed');
@@ -286,5 +289,5 @@ export const useKeepOnInstall = () => {
 		return () => {
 			window.removeEventListener('appinstalled', installed);
 		};
-	}, []);
+	}, [db]);
 };
