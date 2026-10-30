@@ -11,6 +11,7 @@ import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
 import type { NotesDatabase, UnlockKind } from '../src/store/db.js';
 import { enrol, FREE_TRIES, MAX_TRIES, TRY_WAIT_MS, type Unlock } from '../src/store/secretKeys.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -193,7 +194,6 @@ describe('unlocking', () => {
 		const user = userEvent.setup();
 		const form = (kind: UnlockKind) => (
 			<UnlockForm
-				database={db}
 				connectionId="c1"
 				kind={kind}
 				lock={lock}
@@ -202,7 +202,7 @@ describe('unlocking', () => {
 				now={() => clock.now}
 			/>
 		);
-		const { rerender } = render(form(unlock.kind));
+		const { rerender } = render(form(unlock.kind), over(db));
 		const tryPin = async (digits: string) => {
 			await user.type(screen.getByLabelText('PIN'), `${digits}{Enter}`);
 		};
@@ -428,7 +428,6 @@ describe('unlocking with the device’s own lock', () => {
 		const onCancel = vi.fn();
 		const user = userEvent.setup();
 		const props = {
-			database: db,
 			connectionId: 'c1',
 			kind: 'device',
 			lock,
@@ -437,7 +436,8 @@ describe('unlocking with the device’s own lock', () => {
 			deviceLock,
 		} as const;
 		render(
-			dialog ? <UnlockDialog {...props} onCancel={onCancel} /> : <UnlockForm {...props} />
+			dialog ? <UnlockDialog {...props} onCancel={onCancel} /> : <UnlockForm {...props} />,
+			over(db)
 		);
 		return {
 			db,
@@ -686,7 +686,6 @@ describe('in a dialog', () => {
 		const onCancel = vi.fn();
 		render(
 			<UnlockDialog
-				database={db}
 				connectionId="c1"
 				kind="pin"
 				lock={createSecretsLock({
@@ -699,7 +698,8 @@ describe('in a dialog', () => {
 				onUnlocked={() => undefined}
 				onRecovery={() => undefined}
 				onCancel={onCancel}
-			/>
+			/>,
+			over(db)
 		);
 
 		expect(rowOfCancel()).toEqual(['Cancel', 'Unlock']);

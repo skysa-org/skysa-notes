@@ -1,12 +1,14 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { fireEvent, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
+import { useNotices } from '../src/components/ui/notices.js';
 import { DatabaseProvider, useDb } from '../src/store/database.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
 import { freshDatabase } from './support/db.js';
+import { hearNotices, render } from './support/notices.js';
 
 /**
  * The database a component reads (#455): the one the provider above it names,
@@ -36,6 +38,31 @@ describe('the database a component is drawn over', () => {
 			expect(result.current.note?.title).toBe('Theirs');
 		});
 		expect(await db.notes.count()).toBe(0);
+	});
+
+	it('is the one given to the test’s render, beside what it says', async () => {
+		const own = freshDatabase();
+		const theirs = await createNote(own, { title: 'Theirs' });
+		const Says = () => {
+			const { say } = useNotices();
+			const note = useNote(theirs.id);
+			return (
+				<button
+					type="button"
+					onClick={() => {
+						say({ message: `${note?.title ?? ''} said.`, tone: 'success' });
+					}}
+				>
+					{note?.title}
+				</button>
+			);
+		};
+		const { said, Notices } = hearNotices();
+
+		render(<Says />, { notices: Notices, db: own });
+		fireEvent.click(await screen.findByRole('button', { name: 'Theirs' }));
+
+		expect(said).toEqual([{ message: 'Theirs said.', tone: 'success' }]);
 	});
 
 	it('is never read from the one before, where the provider is given another', async () => {

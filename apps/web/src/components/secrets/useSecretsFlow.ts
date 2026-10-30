@@ -5,6 +5,7 @@ import { t } from '../../i18n/t.js';
 import { type DeviceLock, setUpDeviceLock } from '../../secrets/deviceLock.js';
 import { sameIdentity, wipe } from '../../secrets/keys.js';
 import type { Age } from '../../secrets/loadAge.js';
+import { useDb } from '../../store/database.js';
 import {
 	changeUnlock,
 	enrol,
@@ -29,7 +30,6 @@ import { useDeviceLock } from './useDeviceLock.js';
  * source leave the device while its keys are being kept, it closes the dialog.
  */
 export const useSecretsFlow = ({
-	database,
 	connectionId,
 	sourceName,
 	keyFile,
@@ -38,14 +38,12 @@ export const useSecretsFlow = ({
 	age,
 	givenDeviceLock,
 	onClose,
-}: Pick<
-	SecretsDialogProps,
-	'database' | 'connectionId' | 'sourceName' | 'keyFile' | 'lock' | 'onClose'
-> & {
+}: Pick<SecretsDialogProps, 'connectionId' | 'sourceName' | 'keyFile' | 'lock' | 'onClose'> & {
 	rounds: number;
 	age: () => Promise<Age>;
 	givenDeviceLock: DeviceLock | undefined;
 }) => {
+	const database = useDb();
 	const [read, setRead] = useState(false);
 	const [step, setStep] = useState<Step | null>(null);
 	const [busy, setBusy] = useState(false);

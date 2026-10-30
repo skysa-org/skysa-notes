@@ -16,7 +16,7 @@ import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';
 import { tabLock } from '../secrets/tabLock.js';
-import { db as appDb, type NotesDatabase } from '../store/db.js';
+import { useDb } from '../store/database.js';
 import type { UnlockedKeys } from '../store/secretKeys.js';
 import type { FillChannel } from './channel.js';
 import {
@@ -56,7 +56,6 @@ import {
  */
 
 export interface FillLoginsOptions {
-	db?: NotesDatabase;
 	lock?: SecretsLock;
 	age?: () => Promise<Age>;
 	/** Words to the system clipboard. */
@@ -357,13 +356,13 @@ export const FillLogins = ({
 	site,
 	hello,
 	channel,
-	db = appDb,
 	lock = tabLock,
 	age = loadAge,
 	copy = copyText,
 	close = closeWindow,
 	now = Date.now,
 }: FillLoginsProps) => {
+	const db = useDb();
 	const [sources, setSources] = useState<FillSources | 'failed'>();
 	const [opening, setOpening] = useState<ReadonlyMap<string, Opening>>(() => new Map());
 	const [asking, setAsking] = useState<Asking | null>(null);
@@ -571,7 +570,6 @@ export const FillLogins = ({
 			{asking !== null && (
 				<UnlockDialog
 					key={asking.source.connectionId}
-					database={db}
 					connectionId={asking.source.connectionId}
 					kind={asking.source.unlock}
 					lock={lock}

@@ -3,6 +3,7 @@ import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } fr
 import { t } from '../../i18n/t.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock } from '../../secrets/deviceLock.js';
 import type { SecretsLock } from '../../secrets/lock.js';
+import { useDb } from '../../store/database.js';
 import type { NotesDatabase, UnlockKind } from '../../store/db.js';
 import {
 	enrolment,
@@ -35,7 +36,6 @@ import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEn
  */
 
 export interface UnlockFormProps {
-	database: NotesDatabase;
 	connectionId: string;
 	kind: UnlockKind;
 	lock: SecretsLock;
@@ -136,7 +136,6 @@ const answered = async (
 };
 
 const DeviceUnlockForm = ({
-	database,
 	connectionId,
 	lock,
 	onUnlocked,
@@ -147,6 +146,7 @@ const DeviceUnlockForm = ({
 	extra,
 	onAsked,
 }: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & Asking & { deviceLock: DeviceLock }) => {
+	const database = useDb();
 	const askId = useId();
 	const [busy, setBusy] = useState(false);
 	const [said, setSaid] = useState<Said>({ kind: 'nothing' });
@@ -285,7 +285,6 @@ export const UnlockForm = ({
 };
 
 const EnteredUnlockForm = ({
-	database,
 	connectionId,
 	kind,
 	lock,
@@ -300,6 +299,7 @@ const EnteredUnlockForm = ({
 		kind: EnteredKind;
 		now: () => number;
 	}) => {
+	const database = useDb();
 	const askId = useId();
 	const [entered, setEntered] = useState<Entered>(NOTHING_ENTERED);
 	const [busy, setBusy] = useState(false);

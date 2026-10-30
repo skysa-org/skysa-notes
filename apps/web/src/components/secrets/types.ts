@@ -4,7 +4,6 @@ import type { ReplaceScan } from '../../secrets/age.js';
 import type { DeviceLock } from '../../secrets/deviceLock.js';
 import type { Age } from '../../secrets/loadAge.js';
 import type { SecretsLock } from '../../secrets/lock.js';
-import type { NotesDatabase } from '../../store/db.js';
 import type { enrolment } from '../../store/secretKeys.js';
 import type { KeyFileSync } from '../../sync/keyFile.js';
 
@@ -51,7 +50,6 @@ export type Home =
 	Step | 'checking' | 'unavailable' | 'intro' | 'newer' | 'invalid' | 'device' | 'lost';
 
 export interface SecretsDialogProps {
-	database: NotesDatabase;
 	connectionId: string;
 	/** What the source is called: printed above its key, and in the name of a passkey made for it. */
 	sourceName: string;
