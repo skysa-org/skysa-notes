@@ -14,8 +14,8 @@ import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
 import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { barButton, nodeBar, removeNode, selectedKeys } from './attachment.js';
 import { iconElement } from './icons.js';
+import { barButton, nodeBar, removeNode, selectedKeys } from './nodeBar.js';
 import { secretHostCtx } from './secretHost.js';
 import {
 	addKeyButton,
