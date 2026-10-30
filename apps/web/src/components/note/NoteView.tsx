@@ -148,8 +148,6 @@ export const NoteView = ({
 	onCreateNotebook,
 	opening = false,
 	draft,
-	liveEdits,
-	renamings,
 	scratch,
 	ref: handle,
 }: NoteViewProps) => {
@@ -168,7 +166,6 @@ export const NoteView = ({
 	} = useNoteSession({
 		note,
 		draft,
-		liveEdits,
 		onDeleted,
 		isScratch,
 	});
@@ -254,8 +251,6 @@ export const NoteView = ({
 				}}
 				begun={draft !== undefined}
 				draft={draft}
-				liveEdits={liveEdits}
-				renamings={renamings}
 				onRename={rename}
 				onTitleDone={() => {
 					focusEditor(body);

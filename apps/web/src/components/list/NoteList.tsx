@@ -15,11 +15,12 @@ import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import { keepRows } from '../../store/kept.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../../store/liveEdits.js';
-import { type Renamings, shownFolder, useRenaming } from '../../store/renaming.js';
+import { shownNote, useLiveEdit } from '../../store/liveEdits.js';
+import { shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
 import { byParent, folderLabel } from '../../store/tree.js';
 import { noteOpening, openingLines } from '../../store/visibleText.js';
+import { useLiveEdits, useRenamings } from '../shell/context.js';
 import { editedAt } from '../ui/editedAt.js';
 import {
 	FloatingMenu,
@@ -102,16 +103,12 @@ export interface NoteListProps {
 	 * is what deleting it would do.
 	 */
 	unsavedNoteId?: string | undefined;
-	/** What is being typed into a note and not saved yet, to show in its row. */
-	liveEdits?: LiveEdits;
 	/**
 	 * What a note's row offers, from its `⋯` and from a right-click: the
 	 * note's own menu (`noteMenuItems`), about that note. Without it the `⋯` is
 	 * disabled and a right-click opens the browser's menu.
 	 */
 	menuFor?: (note: NoteRecord) => readonly OptionsMenuItem[];
-	/** A notebook being renamed, so the heading says what is typed. */
-	renamings?: Renamings;
 	/**
 	 * The notes pinned to the top of the list on this device (`store/pins.ts`),
 	 * to tint. The list comes in with them first (`pinnedFirst`).
@@ -196,7 +193,6 @@ interface NoteRowProps {
 	note: NoteRecord;
 	selected: boolean;
 	onSelect: (note: NoteRecord) => void;
-	liveEdits: LiveEdits | undefined;
 	/** Missing where the pane was rendered without anywhere to drag a note to. */
 	onPickUp?: ((note: NoteRecord) => void) | undefined;
 	onCancelMove: () => void;
@@ -229,7 +225,6 @@ const NoteRowView = ({
 	note: row,
 	selected,
 	onSelect,
-	liveEdits,
 	onPickUp,
 	onCancelMove,
 	moving,
@@ -242,9 +237,9 @@ const NoteRowView = ({
 	onFocusIn,
 	onFocusOut,
 }: NoteRowProps) => {
-	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
-	// preview is a parse.
-	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
+	// What is being typed into the note and not saved yet, deferred, so a
+	// keystroke is never kept waiting on a row's redraw: the preview is a parse.
+	const note = shownNote(row, useDeferredValue(useLiveEdit(useLiveEdits(), row)));
 	const pinId = useId();
 	return (
 		<li
@@ -331,16 +326,8 @@ const NoteRow = memo(NoteRowView);
  * under `Work`, as the pane's heading spells a path. As both are being typed
  * when either is being renamed, as the heading is.
  */
-const GroupName = ({
-	path,
-	folderPath,
-	renamings,
-}: {
-	path: string;
-	folderPath: string;
-	renamings: Renamings | undefined;
-}) => {
-	const renaming = useRenaming(renamings);
+const GroupName = ({ path, folderPath }: { path: string; folderPath: string }) => {
+	const renaming = useRenaming(useRenamings());
 	const shown = shownFolder(path, renaming);
 	const from = `${shownFolder(folderPath, renaming)}/`;
 	return shown.startsWith(from) ? shown.slice(from.length) : shown;
@@ -350,13 +337,11 @@ const GroupName = ({
 const NoteGroup = ({
 	path,
 	folderPath,
-	renamings,
 	measure,
 	children,
 }: {
 	path: string;
 	folderPath: string;
-	renamings: Renamings | undefined;
 	/** Where the list is windowed, how its name is measured. */
 	measure: Measure | undefined;
 	children: ReactNode;
@@ -370,7 +355,7 @@ const NoteGroup = ({
 				ref={measure}
 				data-id={measure === undefined ? undefined : path}
 			>
-				<GroupName path={path} folderPath={folderPath} renamings={renamings} />
+				<GroupName path={path} folderPath={folderPath} />
 			</h3>
 			<ul>{children}</ul>
 		</section>
@@ -381,14 +366,9 @@ const NoteGroup = ({
  * The open notebook's name, as it is being typed when it is being renamed.
  * Its own component, so a keystroke redraws the heading and not the list.
  */
-const Heading = ({
-	folderPath,
-	renamings,
-}: {
-	folderPath: string | undefined;
-	renamings: Renamings | undefined;
-}) => {
-	const renaming = useRenaming(renamings);
+const Heading = ({ folderPath }: { folderPath: string | undefined }) => {
+	// A notebook being renamed, so the heading says what is typed.
+	const renaming = useRenaming(useRenamings());
 	return folderPath === undefined
 		? t('notes.list.title')
 		: folderLabel(shownFolder(folderPath, renaming));
@@ -482,9 +462,7 @@ export const NoteList = ({
 	onCancelMove,
 	movingNoteId,
 	unsavedNoteId,
-	liveEdits,
 	menuFor,
-	renamings,
 	pinnedNoteIds,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
@@ -570,7 +548,6 @@ export const NoteList = ({
 				note={note}
 				selected={note.id === selectedNoteId}
 				onSelect={select}
-				liveEdits={liveEdits}
 				onPickUp={onPickUpNote === undefined || !stored ? undefined : pickUp}
 				onCancelMove={cancelMove}
 				moving={note.id === movingNoteId}
@@ -586,7 +563,7 @@ export const NoteList = ({
 		<section ref={setScroller} className="note-list" aria-label={t('notes.list.title')}>
 			<div className="pane-header">
 				<h2>
-					<Heading folderPath={folderPath} renamings={renamings} />
+					<Heading folderPath={folderPath} />
 				</h2>
 				<div className="pane-actions">
 					<button
@@ -630,7 +607,6 @@ export const NoteList = ({
 								key={run.path}
 								path={run.path}
 								folderPath={folderPath}
-								renamings={renamings}
 								measure={windowed ? nameHeights.measure : undefined}
 							>
 								{rows}

@@ -9,6 +9,7 @@ import { type NoteRecord, noteRef } from '../../store/db.js';
 import { beforeClosing } from '../../store/heldEdits.js';
 import { useDefaultEditorMode } from '../../store/hooks.js';
 import { deleteForUndo, renameNote, saveNoteBody, setNoteEditorMode } from '../../store/notes.js';
+import { useLiveEdits } from '../shell/context.js';
 import { useNotices } from '../ui/notices.js';
 import type { NoteViewProps } from './types.js';
 import { useUnsupported } from './unsupported.js';
@@ -49,14 +50,17 @@ const editorModeOf = (
 export const useNoteSession = ({
 	note,
 	draft,
-	liveEdits,
 	onDeleted,
 	isScratch,
-}: Pick<NoteViewProps, 'note' | 'draft' | 'liveEdits' | 'onDeleted'> & {
+}: Pick<NoteViewProps, 'note' | 'draft' | 'onDeleted'> & {
 	/** A scratch note, whose editor is always the rich one. */
 	isScratch: boolean;
 }) => {
 	const db = useDb();
+	// Where what is typed is said before it is saved, so the note list can
+	// show it as it is typed: without the shell, nothing else hears of an edit
+	// until autosave has stored it.
+	const liveEdits = useLiveEdits();
 	const { say } = useNotices();
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();

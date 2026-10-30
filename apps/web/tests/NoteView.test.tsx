@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
 import { NoteView } from '../src/components/note/NoteView.js';
+import { ShellTo } from '../src/components/shell/context.js';
 import { db, noteRef } from '../src/store/db.js';
 import { fileCleanup } from '../src/store/fileCleanup.js';
 import { useNote } from '../src/store/hooks.js';
@@ -265,11 +266,13 @@ describe('what was typed, around a switch and a save', () => {
 		const note = await createNote(db, { title: 'A note', body: 'Body.\n' });
 		const Live = () => {
 			const shown = useNote(note.id);
-			return <NoteView note={shown} onDeleted={() => undefined} liveEdits={liveEdits} />;
+			return <NoteView note={shown} onDeleted={() => undefined} />;
 		};
 		render(
 			<CommandsProvider>
-				<Live />
+				<ShellTo liveEdits={liveEdits}>
+					<Live />
+				</ShellTo>
 			</CommandsProvider>
 		);
 		await typeInRaw('Typed. ');

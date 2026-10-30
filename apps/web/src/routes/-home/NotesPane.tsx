@@ -15,7 +15,6 @@ import type { Select } from './useOpenPlace.js';
  */
 export const NotesPane = ({
 	notes,
-	renamings,
 	selectedNoteId,
 	folderPath,
 	select,
@@ -27,21 +26,18 @@ export const NotesPane = ({
 	moving,
 	pickUp,
 	unsavedNoteId,
-	liveEdits,
 	pins,
 	deleteNote,
 }: Readonly<
 	Pick<
 		NoteListProps,
 		| 'notes'
-		| 'renamings'
 		| 'selectedNoteId'
 		| 'folderPath'
 		| 'onCreateNote'
 		| 'onCreateNotebook'
 		| 'storeLoaded'
 		| 'unsavedNoteId'
-		| 'liveEdits'
 	> & {
 		select: Select;
 		/** Put a note in the air from its row, as a drag does (`useMoving`). */
@@ -59,7 +55,6 @@ export const NotesPane = ({
 	return (
 		<NoteList
 			notes={notes}
-			renamings={renamings}
 			selectedNoteId={selectedNoteId}
 			// A note listed from a notebook inside the open one opens that
 			// notebook with it, as a search result does: the sidebar then
@@ -78,7 +73,6 @@ export const NotesPane = ({
 			onCancelMove={cancelMove}
 			movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
 			unsavedNoteId={unsavedNoteId}
-			liveEdits={liveEdits}
 			// The note's own menu, about the note on the row its `⋯` or
 			// a right-click is on, which need not be the one open.
 			pinnedNoteIds={pins?.notes}

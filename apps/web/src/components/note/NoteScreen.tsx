@@ -5,10 +5,10 @@ import { Icon, type IconName } from '../../editor/icons.js';
 import { type EditorMode, MODE_LABELS } from '../../editor/mode.js';
 import { t } from '../../i18n/t.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
-import type { LiveEdits } from '../../store/liveEdits.js';
-import { type Renamings, shownFolder, useRenaming } from '../../store/renaming.js';
+import { shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
 import { PinButton, ScratchBar } from '../scratchpad/ScratchControls.js';
+import { useRenamings } from '../shell/context.js';
 import { FindBar } from './FindBar.js';
 import { NoteBody } from './NoteBody.js';
 import { TitleField } from './TitleField.js';
@@ -79,8 +79,8 @@ const ModeTabs = ({
  * Where the note is, with its notebook under the name being typed while it is
  * renamed. Its own component, so a keystroke redraws the path and not the note.
  */
-const NotePath = ({ path, renamings }: { path: string; renamings: Renamings | undefined }) => {
-	const shown = shownFolder(path, useRenaming(renamings));
+const NotePath = ({ path }: { path: string }) => {
+	const shown = shownFolder(path, useRenaming(useRenamings()));
 	return (
 		<span className="muted path" title={shown}>
 			{shown}
@@ -123,7 +123,6 @@ const NoteActions = ({
 	retryable,
 	toggleMode,
 	layout,
-	renamings,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -131,14 +130,13 @@ const NoteActions = ({
 	retryable: boolean;
 	toggleMode: () => void;
 	layout: NoteLayout;
-	renamings: Renamings | undefined;
 }) => {
 	// Whether there is an outline to open. A button for a rail that would be
 	// empty is a button that does nothing when pressed.
 	const outlined = useMemo(() => headings(note.body).length > 0, [note.body]);
 	return (
 		<div className="note-actions">
-			<NotePath path={note.path} renamings={renamings} />
+			<NotePath path={note.path} />
 			{layout.compact && mode === 'rich' && (
 				<button
 					type="button"
@@ -207,8 +205,6 @@ export const NoteScreen = ({
 	onClose,
 	begun,
 	draft,
-	liveEdits,
-	renamings,
 	onRename,
 	onTitleDone,
 	onUserEdit,
@@ -233,8 +229,6 @@ export const NoteScreen = ({
 	/** A draft: begun just now, stored nowhere yet (`NoteViewProps.draft`). */
 	begun: boolean;
 	draft: NoteDraft | undefined;
-	liveEdits: LiveEdits | undefined;
-	renamings: Renamings | undefined;
 	onRename: (title: string) => void;
 	onTitleDone: () => void;
 	onUserEdit: (body: string, origin: string) => void;
@@ -253,7 +247,6 @@ export const NoteScreen = ({
 			<TitleField
 				key={noteRef(note)}
 				note={note}
-				liveEdits={liveEdits}
 				// A scratch note's caret goes to its body (`ScratchEditing`).
 				startFocused={begun && scratch === undefined}
 				onRename={onRename}
@@ -268,7 +261,6 @@ export const NoteScreen = ({
 					retryable={retryable}
 					toggleMode={toggleMode}
 					layout={layout}
-					renamings={renamings}
 				/>
 			) : (
 				<div className="note-actions">

@@ -3,8 +3,6 @@ import type { Ref } from 'react';
 
 import type { EditorMode } from '../../editor/mode.js';
 import type { NoteRecord } from '../../store/db.js';
-import type { LiveEdits } from '../../store/liveEdits.js';
-import type { Renamings } from '../../store/renaming.js';
 import type { ScratchMarks } from '../../store/scratchpad.js';
 
 export interface NoteViewProps {
@@ -40,14 +38,6 @@ export interface NoteViewProps {
 	 * it is edited (`draftNote`). Leaving it unedited leaves nothing behind.
 	 */
 	draft?: NoteDraft | undefined;
-	/**
-	 * Where what is typed is said before it is saved, so the note list can show
-	 * it as it is typed (`store/liveEdits.ts`). Without it nothing else on
-	 * screen hears of an edit until autosave has stored it.
-	 */
-	liveEdits?: LiveEdits;
-	/** A notebook being renamed, so the note's path says what is typed. */
-	renamings?: Renamings;
 	/**
 	 * Given for a scratch note (docs/ARCHITECTURE.md §7, "The scratchpad"): a
 	 * smaller editor, with no path, no editor tabs and no outline, the basic
