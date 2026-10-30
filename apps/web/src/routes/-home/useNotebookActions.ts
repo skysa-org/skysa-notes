@@ -3,7 +3,8 @@ import { useEffect } from 'react';
 
 import { type Notice, useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
-import { db, type NoteRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord } from '../../store/db.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -45,6 +46,7 @@ export const useNotebookActions = ({
 	openFolder: (path: string) => void;
 	renamings: Renamings;
 }>) => {
+	const db = useDb();
 	const { say, moveOn } = useNotices();
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
 		// `createFolder` throws on a duplicate name, and the field has already

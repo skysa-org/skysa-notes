@@ -3,7 +3,8 @@ import { useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { type ConnectedSource, showConnection } from '../../store/connection.js';
-import { db, type NoteRecord, type SyncStateRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord, SyncStateRecord } from '../../store/db.js';
 import {
 	type NoteToOpen,
 	useLastOpen,
@@ -88,6 +89,7 @@ const useStanding = (
 	activeConnection: string | undefined,
 	sources: readonly ConnectedSource[] | undefined
 ): Standing => {
+	const db = useDb();
 	const source = entry.held?.connectionId;
 	const [seen, setSeen] = useState<{
 		index: number;
@@ -133,7 +135,7 @@ const useStanding = (
 		return () => {
 			asking.current = false;
 		};
-	}, [standing, source, offered, entry.index]);
+	}, [standing, source, offered, entry.index, db]);
 	return standing;
 };
 
@@ -221,6 +223,7 @@ const useRememberOpen = ({
 	openNote: NoteRecord | undefined;
 	lastOpen: LastOpen | undefined;
 }) => {
+	const db = useDb();
 	// The note in the URL, by id, and only once it is the one open: a note
 	// begun, or one a render behind the URL, is not.
 	const note =
@@ -234,11 +237,11 @@ const useRememberOpen = ({
 	useEffect(() => {
 		if (connectionId === undefined || folder === undefined || !read) return;
 		void rememberOpen(db, connectionId, folder, note);
-	}, [connectionId, folder, note, read]);
+	}, [connectionId, folder, note, read, db]);
 	useEffect(() => {
 		if (connectionId === undefined || note === undefined) return;
 		void rememberRecent(db, connectionId, note);
-	}, [connectionId, note]);
+	}, [connectionId, note, db]);
 };
 
 /**
@@ -292,6 +295,7 @@ export const useOpenPlace = ({
 	passwords: boolean | undefined;
 	onStoreFailed: () => void;
 }) => {
+	const db = useDb();
 	const router = useRouter();
 	const navigate = useNavigate({ from: '/' });
 	const entry = useEntry();
@@ -487,6 +491,7 @@ export const useOpenPlace = ({
 		draft,
 		activeConnection,
 		begin,
+		db,
 	]);
 
 	// The scratchpad, or the passwords, open as the place remembered or fallen

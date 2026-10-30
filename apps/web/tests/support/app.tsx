@@ -2,21 +2,24 @@ import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/rea
 import { act, render, screen } from '@testing-library/react';
 
 import { routeTree } from '../../src/routeTree.gen.js';
-import { db } from '../../src/store/db.js';
+import { db, type NotesDatabase } from '../../src/store/db.js';
 import { setDefaultEditorMode } from '../../src/store/prefs.js';
+import { over } from './database.js';
 
 /**
  * The whole app, from its router down, at the address `at`, once the sidebar
  * is drawn. The router renders nothing until it has resolved the route, so
  * "New notebook" is the first sign the app is up. Returns the router, for a
- * test that reads where it is (`tests/entry.ts`).
+ * test that reads where it is (`tests/entry.ts`). Drawn over `own` where
+ * one is given, as a `DatabaseProvider` would draw it, and over the app's
+ * database otherwise.
  */
-export const renderApp = async (at = '/') => {
+export const renderApp = async (at = '/', own?: NotesDatabase) => {
 	const router = createRouter({
 		routeTree,
 		history: createMemoryHistory({ initialEntries: [at] }),
 	});
-	render(<RouterProvider router={router} />);
+	render(<RouterProvider router={router} />, own === undefined ? undefined : over(own));
 	await screen.findByRole('button', { name: 'New notebook' });
 	return router;
 };
@@ -25,9 +28,9 @@ export const renderApp = async (at = '/') => {
  * The same, with notes opening in the markdown editor: most route tests type
  * into a note, and CodeMirror is the editor jsdom can type into.
  */
-export const openApp = async (at = '/') => {
-	await setDefaultEditorMode(db, 'raw');
-	return renderApp(at);
+export const openApp = async (at = '/', own?: NotesDatabase) => {
+	await setDefaultEditorMode(own ?? db, 'raw');
+	return renderApp(at, own);
 };
 
 /** What `pagehide` does: the pending save goes now, rather than in two seconds. */
