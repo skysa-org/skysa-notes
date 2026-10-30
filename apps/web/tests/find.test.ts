@@ -108,11 +108,19 @@ describe('locate', () => {
 
 describe('createFindTarget', () => {
 	/** An editor over a plain string: its own operations, recorded. */
-	const editor = (initial: string, { gone = false } = {}) => {
+	const editor = (
+		initial: string,
+		{ gone = false, goneOnEdit = false, goneOnShow = false } = {}
+	) => {
 		const state = { text: initial, cursor: { from: 0, to: 0 } as Match };
+		const life = { gone };
 		const asked: string[] = [];
+		/** An edit whose listeners take the editor away, where `goneOnEdit` says so. */
+		const edited = () => {
+			if (goneOnEdit) life.gone = true;
+		};
 		const target = createFindTarget({
-			gone: () => gone,
+			gone: () => life.gone,
 			found: (q) => {
 				asked.push('found');
 				return matchesIn(state.text, q);
@@ -120,6 +128,7 @@ describe('createFindTarget', () => {
 			cursor: () => state.cursor,
 			show: (q) => {
 				asked.push(`show ${q.search}`);
+				if (goneOnShow) life.gone = true;
 			},
 			reveal: (match) => {
 				asked.push(`reveal ${match.from}`);
@@ -129,6 +138,7 @@ describe('createFindTarget', () => {
 				asked.push(`replace ${match.from}`);
 				state.text = state.text.slice(0, match.from) + text + state.text.slice(match.to);
 				state.cursor = { from: match.from + text.length, to: match.from + text.length };
+				edited();
 			},
 			replaceEvery: (matches, text) => {
 				asked.push(`replace all ${matches.length}`);
@@ -136,6 +146,7 @@ describe('createFindTarget', () => {
 					state.text =
 						state.text.slice(0, match.from) + text + state.text.slice(match.to);
 				});
+				edited();
 			},
 			focus: () => {
 				asked.push('focus');
@@ -215,6 +226,39 @@ describe('createFindTarget', () => {
 		expect(target.count(query('one'))).toEqual({ total: 0, current: null });
 		expect(asked).toEqual([]);
 		expect(state.text).toBe('one two one');
+	});
+
+	it('asks nothing more of an editor its own edit took away', () => {
+		const one = editor('one two one', { goneOnEdit: true });
+		one.target.next(query('one'));
+		one.asked.length = 0;
+
+		one.target.replace(query('one', { replace: '1' }));
+
+		expect(one.asked).toEqual(['found', 'replace 0']);
+
+		const all = editor('one two one', { goneOnEdit: true });
+
+		all.target.replaceAll(query('one', { replace: '1' }));
+
+		expect(all.asked).toEqual(['found', 'replace all 2']);
+	});
+
+	it('asks nothing more of an editor that showing the matches took away', () => {
+		const { asked, target } = editor('one two one', { goneOnShow: true });
+
+		target.next(query('one'));
+
+		expect(asked).toEqual(['show one']);
+	});
+
+	it('looks for the matches once where Replace finds one first', () => {
+		const { state, asked, target } = editor('one two one');
+		state.cursor = { from: 4, to: 7 };
+
+		target.replace(query('one', { replace: '1' }));
+
+		expect(asked.filter((each) => each === 'found')).toEqual(['found']);
 	});
 
 	it('clears by showing nothing', () => {

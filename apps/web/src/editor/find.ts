@@ -177,9 +177,12 @@ export interface FindTarget {
  */
 export interface FindOps {
 	/**
-	 * The editor is gone, and nothing is to be asked of it. The rich editor's,
-	 * which a find bar can outlive by a moment (`findRich.ts`); none for an
-	 * editor that checks this itself.
+	 * The editor is gone, and nothing is to be asked of it. Asked before each
+	 * step, and again after each edit, since an edit's listeners may be what
+	 * takes the editor away. The rich editor's, which a find bar can outlive by
+	 * a moment (`findRich.ts`); none for the raw one, since CodeMirror's
+	 * `EditorView.update` returns without drawing once the view is destroyed
+	 * (`@codemirror/view` 6.43, `dist/index.js` at `if (this.destroyed)`).
 	 */
 	readonly gone?: () => boolean;
 	/** Every match in the note as it stands. */
@@ -228,9 +231,12 @@ export const createFindTarget = ({
 	replaceEvery,
 	focus,
 }: FindOps): FindTarget => {
-	const goTo = (query: FindQuery, back: boolean): void => {
+	/** Show the matches and go to the next; `matches` where they were just found. */
+	const goTo = (query: FindQuery, back: boolean, matches?: readonly Match[]): void => {
+		if (gone()) return;
 		show(query);
-		const target = step(found(query), cursor(), back);
+		if (gone()) return;
+		const target = step(matches ?? found(query), cursor(), back);
 		if (target !== undefined) reveal(target);
 	};
 
@@ -240,7 +246,7 @@ export const createFindTarget = ({
 			if (!gone()) show(query);
 		},
 		next: (query, back = false) => {
-			if (!gone()) goTo(query, back);
+			goTo(query, back);
 		},
 		replace: (query) => {
 			if (gone()) return;
@@ -249,9 +255,10 @@ export const createFindTarget = ({
 			// finds one. Without that, the first press of Replace — before
 			// anything has been found — would rewrite whatever the cursor
 			// happened to be sitting next to.
-			const on = found(query).find((match) => match.from === at.from && match.to === at.to);
+			const matches = found(query);
+			const on = matches.find((match) => match.from === at.from && match.to === at.to);
 			if (on === undefined) {
-				goTo(query, false);
+				goTo(query, false, matches);
 				return;
 			}
 			replaceOne(on, query.replace);
@@ -262,7 +269,7 @@ export const createFindTarget = ({
 			const matches = found(query);
 			if (matches.length === 0) return;
 			replaceEvery(matches, query.replace);
-			show(query);
+			if (!gone()) show(query);
 		},
 		clear: () => {
 			if (!gone()) show(EMPTY_QUERY);

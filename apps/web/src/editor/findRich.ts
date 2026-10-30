@@ -129,26 +129,6 @@ export const findPlugin = (): Plugin =>
 		},
 	});
 
-/**
- * Selects the match and brings it on screen — without taking focus; see `focus`.
- *
- * The scrolling is done here rather than by `tr.scrollIntoView()`, which is what
- * a transaction would normally use and which does nothing at all from a find
- * bar. ProseMirror scrolls by walking up for a scrollable parent *from the
- * current DOM selection*, and while the user is typing in the bar the DOM
- * selection is in the bar — so it scrolls the bar's ancestors, silently, and the
- * note stays where it was. Asking the match's own element to come into view
- * starts the walk from the right place.
- */
-const reveal = (view: EditorView, match: Match): void => {
-	view.dispatch(
-		view.state.tr.setSelection(TextSelection.create(view.state.doc, match.from, match.to))
-	);
-	const { node } = view.domAtPos(match.from);
-	const element = node instanceof Element ? node : node.parentElement;
-	element?.scrollIntoView({ block: 'center' });
-};
-
 export const richFindTarget = (view: EditorView): FindTarget =>
 	createFindTarget({
 		// Nothing should reach a destroyed view — the bar is handed a target by
@@ -166,10 +146,29 @@ export const richFindTarget = (view: EditorView): FindTarget =>
 		show: (query) => {
 			view.dispatch(view.state.tr.setMeta(key, query));
 		},
+		// Selected and brought on screen, without taking focus; see `focus`.
+		//
+		// The scrolling is done here rather than by `tr.scrollIntoView()`,
+		// which is what a transaction would normally use and which does nothing
+		// at all from a find bar. ProseMirror scrolls by walking up for a
+		// scrollable parent *from the current DOM selection*, and while the user
+		// is typing in the bar the DOM selection is in the bar — so it scrolls
+		// the bar's ancestors, silently, and the note stays where it was. Asking
+		// the match's own element to come into view starts the walk from the
+		// right place.
 		reveal: (match) => {
-			reveal(view, match);
+			view.dispatch(
+				view.state.tr.setSelection(
+					TextSelection.create(view.state.doc, match.from, match.to)
+				)
+			);
+			const { node } = view.domAtPos(match.from);
+			const element = node instanceof Element ? node : node.parentElement;
+			element?.scrollIntoView({ block: 'center' });
 		},
 		replaceOne: (match, text) => {
+			// Carries no programmatic marker, because it is the user replacing
+			// text and the note must be marked dirty by it. See `dirty.ts`.
 			view.dispatch(view.state.tr.insertText(text, match.from, match.to));
 		},
 		replaceEvery: (matches, text) => {

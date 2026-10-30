@@ -97,14 +97,6 @@ export const findExtension = (): Extension => [
 	}),
 ];
 
-/** Selects the match and brings it on screen — without taking focus; see `focus`. */
-const reveal = (view: EditorView, match: Match): void => {
-	view.dispatch({
-		selection: { anchor: match.from, head: match.to },
-		effects: EditorView.scrollIntoView(match.from, { y: 'center' }),
-	});
-};
-
 export const rawFindTarget = (view: EditorView): FindTarget =>
 	createFindTarget({
 		found: (query) => found(view.state, query),
@@ -115,10 +107,16 @@ export const rawFindTarget = (view: EditorView): FindTarget =>
 		show: (query) => {
 			view.dispatch({ effects: setQuery.of(query) });
 		},
+		// Selected and brought on screen, without taking focus; see `focus`.
 		reveal: (match) => {
-			reveal(view, match);
+			view.dispatch({
+				selection: { anchor: match.from, head: match.to },
+				effects: EditorView.scrollIntoView(match.from, { y: 'center' }),
+			});
 		},
 		replaceOne: (match, text) => {
+			// No annotation: this is the user replacing text, and the note must
+			// be marked dirty by it. See `dirty.ts`.
 			view.dispatch({
 				changes: { from: match.from, to: match.to, insert: text },
 				selection: { anchor: match.from + text.length },
