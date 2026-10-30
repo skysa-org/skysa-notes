@@ -4,6 +4,7 @@ import { redo, undo, undoDepth } from '@milkdown/kit/prose/history';
 import { Selection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { appChange } from '../src/editor/dirty.js';
 import {
 	adoptBody,
 	currentMarkdown,
@@ -844,9 +845,7 @@ describe('a U+0000 in what is pasted', () => {
 
 		withCtx((ctx) => {
 			const view = ctx.get(editorViewCtx);
-			view.dispatch(
-				view.state.tr.insertText(' the\u0000re', 6).setMeta('skysa/programmatic', true)
-			);
+			view.dispatch(appChange(view.state.tr.insertText(' the\u0000re', 6)));
 		});
 
 		expect(withCtx(currentMarkdown)).toBe('Hello there\n');

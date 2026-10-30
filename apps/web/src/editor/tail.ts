@@ -54,11 +54,11 @@ const offerTail = (view: EditorView): void => {
 
 	const end = view.state.doc.content.size;
 	const tr = view.state.tr.insert(end, type.create());
-	appChange(
-		tr.setSelection(TextSelection.near(tr.doc.resolve(end + 1))).setMeta(tailKey, OFFERED)
+	view.dispatch(
+		appChange(
+			tr.setSelection(TextSelection.near(tr.doc.resolve(end + 1))).setMeta(tailKey, OFFERED)
+		)
 	);
-
-	view.dispatch(tr);
 	view.focus();
 };
 

@@ -301,11 +301,11 @@ describe('a plugin answering an edit', () => {
 	const answering = (schema: Schema) => {
 		// Once: ProseMirror hands a plugin only the transactions since its last
 		// turn, so a marker on its own answer is not there to see next time.
-		const answered = { done: false };
+		const once = { done: false };
 		return new Plugin({
 			appendTransaction: (_trs, _before, after) => {
-				if (answered.done) return null;
-				answered.done = true;
+				if (once.done) return null;
+				once.done = true;
 				const list = after.doc.firstChild;
 				const item = list === null ? null : list.firstChild;
 				const paragraph = schema.nodes.paragraph;
