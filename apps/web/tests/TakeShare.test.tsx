@@ -7,6 +7,7 @@ import { SHARE_CACHE } from '../src/share/received.js';
 import { TakeShare, whatCame } from '../src/share/TakeShare.js';
 import type { SyncStateRecord } from '../src/store/db.js';
 import { fakeCaches } from './fakeCaches.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -74,10 +75,10 @@ const setup = async ({
 			sources={[{ connectionId: 'c1', provider: 'dropbox', boundAt: 1, active: true }]}
 			onRead={onRead}
 			onAdded={onAdded}
-			database={db}
 			sync={sync}
 			storage={storage}
-		/>
+		/>,
+		over(db)
 	);
 	const clips = () => db.clips.where('connectionId').equals('c1').toArray();
 	const left = () => urls(SHARE_CACHE);

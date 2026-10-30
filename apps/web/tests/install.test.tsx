@@ -6,6 +6,7 @@ import { InstallBanner } from '../src/install/InstallBanner.js';
 import { type Device, manualInstall } from '../src/install/installHow.js';
 import { createInstallPrompt } from '../src/install/installPrompt.js';
 import { getInstallDismissed } from '../src/store/prefs.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -175,14 +176,9 @@ const show = ({ userAgent = UA.windowsEdge, maxTouchPoints = 0 } = {}) => {
 	const target = new EventTarget();
 	const prompt = createInstallPrompt(target);
 	const view = () => (
-		<InstallBanner
-			database={db}
-			prompt={prompt}
-			device={device(userAgent, maxTouchPoints)}
-			name="Notes"
-		/>
+		<InstallBanner prompt={prompt} device={device(userAgent, maxTouchPoints)} name="Notes" />
 	);
-	const { rerender, unmount } = render(view());
+	const { rerender, unmount } = render(view(), over(db));
 	return { db, target, prompt, view, rerender, unmount };
 };
 
@@ -230,12 +226,8 @@ describe('the install banner', () => {
 		unmount();
 		const again = createInstallPrompt(target);
 		render(
-			<InstallBanner
-				database={db}
-				prompt={again}
-				device={device(UA.windowsEdge)}
-				name="Notes"
-			/>
+			<InstallBanner prompt={again} device={device(UA.windowsEdge)} name="Notes" />,
+			over(db)
 		);
 		offer(target);
 		expect(again.state().kind).toBe('ready');

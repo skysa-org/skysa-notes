@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import { FILE_ICONS, Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
-import { activeConnectionId, db, type NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { activeConnectionId } from '../../store/db.js';
 import {
 	type AttachedFile,
 	attachedFiles,
@@ -38,7 +39,6 @@ export interface AttachedFilesProps {
 	name: string;
 	path: string;
 	onClose: () => void;
-	database?: NotesDatabase;
 }
 
 /** A size as a person reads one. */
@@ -145,7 +145,8 @@ const FileRow = ({
 	);
 };
 
-export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFilesProps) => {
+export const AttachedFiles = ({ name, path, onClose }: AttachedFilesProps) => {
+	const database = useDb();
 	const [connectionId, setConnectionId] = useState<string>();
 	const [problem, setProblem] = useState<string>();
 

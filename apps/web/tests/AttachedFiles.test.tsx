@@ -6,6 +6,7 @@ import { AttachedFiles, sizeOf } from '../src/components/attachments/AttachedFil
 import { notebookMenuItems } from '../src/components/sidebar/NotebookMenu.js';
 import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -30,7 +31,7 @@ const seeded = async () => {
 };
 
 const show = (db: NotesDatabase, onClose = vi.fn()) => {
-	render(<AttachedFiles name="Trip" path="Trip" onClose={onClose} database={db} />);
+	render(<AttachedFiles name="Trip" path="Trip" onClose={onClose} />, over(db));
 	return onClose;
 };
 

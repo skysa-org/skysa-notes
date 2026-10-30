@@ -22,6 +22,7 @@ import type { PictureShrinker } from '../src/pictures/shrinker.js';
 import { addClips, type ClipInput } from '../src/store/clipboard.js';
 import type { NotesDatabase } from '../src/store/db.js';
 import type { FileRead } from '../src/sync/fileReads.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 /**
@@ -145,14 +146,14 @@ const setup = async ({
 	const { unmount } = render(
 		<ClipboardPanel
 			connectionId="c1"
-			database={db}
 			sync={sync}
 			system={system}
 			browser={browser}
 			urls={urls}
 			pick={pick}
 			{...(shrinker === undefined ? {} : { shrinker })}
-		/>
+		/>,
+		over(db)
 	);
 	const rows = () => db.clips.where('connectionId').equals('c1').toArray();
 	return { db, sync, written, saved, pick, rows, drawn, held, unmount };

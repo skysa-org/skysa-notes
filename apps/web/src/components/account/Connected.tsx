@@ -432,7 +432,6 @@ export const Connected = ({
 			{showsClipboard(bound) && (
 				<ClipboardPanel
 					connectionId={connectionId}
-					database={database}
 					sync={sync}
 					{...(pick === undefined ? {} : { pick })}
 				/>
