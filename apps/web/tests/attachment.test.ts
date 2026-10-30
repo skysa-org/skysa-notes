@@ -1,6 +1,6 @@
 import { editorViewCtx } from '@milkdown/kit/core';
 import { DOMParser as ProseParser, DOMSerializer } from '@milkdown/kit/prose/model';
-import { NodeSelection, Selection } from '@milkdown/kit/prose/state';
+import { NodeSelection, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -9,6 +9,7 @@ import {
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
+import { ATTACHMENT } from '../src/editor/attachment.js';
 import { currentMarkdown } from '../src/editor/rich.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
@@ -437,6 +438,18 @@ describe('a chip', () => {
 			view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		vi.spyOn(window, 'open').mockReturnValue(null);
 		view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
+		enter();
+		expect(asked).toEqual([]);
+
+		// A cursor just in front of a chip is in the words, not on the chip:
+		// the element there is the chip's, but the selection is not.
+		const chip = { current: -1 };
+		view.state.doc.descendants((node, pos) => {
+			if (node.type.name === ATTACHMENT) chip.current = pos;
+		});
+		view.dispatch(
+			view.state.tr.setSelection(TextSelection.create(view.state.doc, chip.current))
+		);
 		enter();
 		expect(asked).toEqual([]);
 

@@ -15,7 +15,7 @@ import {
 	type Shown,
 	type ShowOptions,
 } from './attachHost.js';
-import { barButton, nameIn, selectedKeys } from './attachment.js';
+import { barButton, nameIn, nodeBar, removeNode, selectedKeys } from './attachment.js';
 import { openFile, saveFile } from './fileActions.js';
 
 /**
@@ -180,14 +180,11 @@ const imageView =
 		const opener = barButton('open', t('editor.image.openFull'));
 		const saver = barButton('download', t('editor.attachment.download'));
 		const remover = barButton('trash', t('editor.attachment.remove'));
-		const actions = document.createElement('span');
-		actions.setAttribute('class', 'attachment-actions note-image-actions');
-		actions.setAttribute('hidden', '');
-		actions.append(opener, saver, remover);
+		const bar = nodeBar(view, [opener, saver, remover], 'note-image-actions');
 
 		const dom = document.createElement('span');
 		dom.setAttribute('class', 'note-image');
-		dom.append(img, reason, action, actions);
+		dom.append(img, reason, action, bar.dom);
 
 		const reasonFor = (next: State, alt: string): string | undefined => {
 			const mb = megabytes(size.current);
@@ -351,9 +348,9 @@ const imageView =
 
 		/** Say the bar is busy while `work` runs: the whole picture may be a download. */
 		const busy = (work: () => Promise<void>) => {
-			actions.setAttribute('aria-busy', 'true');
+			bar.dom.setAttribute('aria-busy', 'true');
 			void work().finally(() => {
-				actions.removeAttribute('aria-busy');
+				bar.dom.removeAttribute('aria-busy');
 			});
 		};
 
@@ -375,21 +372,11 @@ const imageView =
 			if (state.current === 'large') wanted.current = true;
 			show(showing.current.src);
 		});
-		actions.addEventListener('mousedown', (event) => {
-			// The picture stays selected, and with it the bar.
-			event.preventDefault();
-		});
 		opener.addEventListener('click', () => {
 			openFull();
 		});
 		saver.addEventListener('click', () => {
 			busy(() => saveFile(request()));
-		});
-		// Back to the picture, still selected, from a bar reached with Tab.
-		actions.addEventListener('keydown', (event) => {
-			if (event.key !== 'Escape') return;
-			event.preventDefault();
-			view.focus();
 		});
 		selectedKeys.set(dom, {
 			open: openFull,
@@ -397,14 +384,11 @@ const imageView =
 				(own() ? opener : remover).focus();
 			},
 		});
-		// The user taking the picture out of the note: an edit like any other,
-		// so the note is dirty and saved.
-		remover.addEventListener('click', () => {
-			const at = getPos();
-			if (at === undefined) return;
-			view.dispatch(view.state.tr.delete(at, at + held.current.nodeSize));
-			view.focus();
-		});
+		// The user taking the picture out of the note.
+		remover.addEventListener(
+			'click',
+			removeNode(view, getPos, () => held.current)
+		);
 
 		// What a link resolves to can change under a picture that is not shown —
 		// a file that arrives with a pull, a network that comes back — and is
@@ -439,18 +423,16 @@ const imageView =
 			// What ProseMirror does for a node selected whole, and the bar.
 			selectNode: () => {
 				dom.classList.add('ProseMirror-selectednode');
-				actions.removeAttribute('hidden');
+				bar.show();
 			},
 
 			deselectNode: () => {
 				dom.classList.remove('ProseMirror-selectednode');
-				actions.setAttribute('hidden', '');
+				bar.hide();
 			},
 
 			/** The buttons are the view's own; pressing one is not editing. */
-			stopEvent: (event) =>
-				event.target === action ||
-				(event.target instanceof Node && actions.contains(event.target)),
+			stopEvent: (event) => event.target === action || bar.holds(event),
 
 			destroy: () => {
 				unsubscribe();

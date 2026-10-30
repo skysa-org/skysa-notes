@@ -5,6 +5,7 @@ import { $view } from '@milkdown/kit/utils';
 import { cell } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
+import { removeNode } from './attachment.js';
 import type { CodeDisplayStore } from './codeDisplay.js';
 import { iconElement, type IconName } from './icons.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
@@ -155,12 +156,11 @@ const codeBlockView =
 				.catch(() => undefined);
 		});
 
-		const remove = toolButton(t('editor.codeBlock.delete'), 'trash', () => {
-			const at = getPos();
-			if (at === undefined) return;
-			view.dispatch(view.state.tr.delete(at, at + held.current.nodeSize));
-			view.focus();
-		});
+		const remove = toolButton(
+			t('editor.codeBlock.delete'),
+			'trash',
+			removeNode(view, getPos, () => held.current)
+		);
 
 		const wrap = toolButton(
 			t('editor.codeBlock.wrap'),

@@ -14,7 +14,7 @@ import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
 import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { barButton, selectedKeys } from './attachment.js';
+import { barButton, nodeBar, removeNode, selectedKeys } from './attachment.js';
 import { iconElement } from './icons.js';
 import { secretHostCtx } from './secretHost.js';
 import {
@@ -397,10 +397,7 @@ const secretView = (ctx: Ctx) => {
 		said.setAttribute('role', 'status');
 
 		const remover = barButton('trash', t('editor.secret.remove'));
-		const actions = document.createElement('span');
-		actions.setAttribute('class', 'attachment-actions secret-actions');
-		actions.setAttribute('hidden', '');
-		actions.append(remover);
+		const actions = nodeBar(view, [remover], 'secret-actions');
 
 		const line = document.createElement('div');
 		line.setAttribute('class', 'secret-line');
@@ -408,7 +405,7 @@ const secretView = (ctx: Ctx) => {
 
 		const bar = document.createElement('div');
 		bar.setAttribute('class', 'secret-bar');
-		bar.append(line, actions);
+		bar.append(line, actions.dom);
 
 		const slot = document.createElement('div');
 		slot.setAttribute('class', 'secret-slot');
@@ -460,25 +457,12 @@ const secretView = (ctx: Ctx) => {
 			});
 		};
 		reveal.addEventListener('click', open);
-		actions.addEventListener('mousedown', (event) => {
-			// The block stays selected, and with it the bar.
-			event.preventDefault();
-		});
-		// Back to the block, still selected, from a bar reached with Tab.
-		actions.addEventListener('keydown', (event) => {
-			if (event.key !== 'Escape') return;
-			event.preventDefault();
-			view.focus();
-		});
-		// The user taking the secret out of the note: an edit like any other,
-		// so the note is dirty and saved, and undone as one. A panel open on it
-		// goes with it (`leftBehind`).
-		remover.addEventListener('click', () => {
-			const at = getPos();
-			if (at === undefined) return;
-			view.dispatch(view.state.tr.delete(at, at + held.current.nodeSize));
-			view.focus();
-		});
+		// The user taking the secret out of the note. A panel open on it goes
+		// with it (`leftBehind`).
+		remover.addEventListener(
+			'click',
+			removeNode(view, getPos, () => held.current)
+		);
 		selectedKeys.set(dom, {
 			open: () => {
 				open();
@@ -507,18 +491,17 @@ const secretView = (ctx: Ctx) => {
 			},
 			selectNode: () => {
 				dom.setAttribute('data-selected', '');
-				actions.removeAttribute('hidden');
+				actions.show();
 			},
 			deselectNode: () => {
 				dom.removeAttribute('data-selected');
-				actions.setAttribute('hidden', '');
+				actions.hide();
 			},
 			/** The panel, Reveal and the bar are the view's own: pressing or typing in them is not editing. */
 			stopEvent: (event) =>
-				event.target instanceof Node &&
-				(slot.contains(event.target) ||
-					reveal.contains(event.target) ||
-					actions.contains(event.target)),
+				(event.target instanceof Node &&
+					(slot.contains(event.target) || reveal.contains(event.target))) ||
+				actions.holds(event),
 			ignoreMutation: () => true,
 			destroy: () => {
 				gone.current = true;
