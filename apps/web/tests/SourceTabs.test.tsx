@@ -813,6 +813,17 @@ describe('the source panel, in a compact window', () => {
 		await waitFor(() => {
 			expect(given.at(-1)?.asked).toEqual({ connectionId: 'c2', action: 'disconnect' });
 		});
+		// Shown before the user goes back: the ask is asked as the press is
+		// made, and OneDrive shown once its write lands, and an ask is let go of
+		// on a change of source the panel has drawn. Gone back to before then,
+		// under load (CI's coverage run), the panel never drew OneDrive at all.
+		await waitFor(() => {
+			expect(
+				within(panel())
+					.getByRole('button', { name: 'OneDrive' })
+					.getAttribute('aria-current')
+			).toBe('true');
+		});
 
 		// Not answered yet (a disconnect still out, say), and the user goes back.
 		await showConnection(db, 'c1');
