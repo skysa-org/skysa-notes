@@ -50,7 +50,7 @@ export const isUserEdit = (update: ChangeLike): boolean => {
  * body that changed underneath, a mode switch — carries it; anything the user
  * types does not.
  */
-export const PROGRAMMATIC_META = 'skysa/programmatic';
+const PROGRAMMATIC_META = 'skysa/programmatic';
 
 /**
  * The transaction a dispatch began with. Plugins answer a change with changes of
@@ -69,10 +69,21 @@ const rootOf = (transaction: Transaction): Transaction => {
  * the body that was just replaced, and it saves as a conflict copy. The same
  * tidying after the user's own keystroke is still the user.
  */
+export const isAppChange = (transaction: Transaction): boolean =>
+	transaction.getMeta(PROGRAMMATIC_META) === true ||
+	rootOf(transaction).getMeta(PROGRAMMATIC_META) === true;
+
+/**
+ * Mark a transaction as the app's own — what it puts into the editor, rather
+ * than anything typed — and hand it back. The only way the marker is set, so
+ * that what counts as the app's is decided here and nowhere else.
+ */
+export const appChange = (transaction: Transaction): Transaction =>
+	transaction.setMeta(PROGRAMMATIC_META, true);
+
+/** A change to the document that is the user's: not the app's (`isAppChange`). */
 export const isUserTransaction = (transaction: Transaction): boolean =>
-	transaction.docChanged &&
-	transaction.getMeta(PROGRAMMATIC_META) !== true &&
-	rootOf(transaction).getMeta(PROGRAMMATIC_META) !== true;
+	transaction.docChanged && !isAppChange(transaction);
 
 /**
  * Counts user edits. A count rather than a boolean because a single dispatch can

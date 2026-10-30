@@ -3,7 +3,7 @@ import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
 import { t } from '../i18n/t.js';
-import { PROGRAMMATIC_META } from './dirty.js';
+import { appChange } from './dirty.js';
 
 /**
  * A way out of a block that ends the note.
@@ -54,11 +54,11 @@ const offerTail = (view: EditorView): void => {
 
 	const end = view.state.doc.content.size;
 	const tr = view.state.tr.insert(end, type.create());
-	tr.setSelection(TextSelection.near(tr.doc.resolve(end + 1)))
-		.setMeta(tailKey, OFFERED)
-		.setMeta(PROGRAMMATIC_META, true);
-
-	view.dispatch(tr);
+	view.dispatch(
+		appChange(
+			tr.setSelection(TextSelection.near(tr.doc.resolve(end + 1))).setMeta(tailKey, OFFERED)
+		)
+	);
 	view.focus();
 };
 
@@ -121,10 +121,10 @@ export const tailPlugin = new Plugin<boolean>({
 		const start = state.doc.content.size - last.nodeSize;
 		if (state.selection.from >= start) return null;
 
-		return state.tr
-			.delete(start, state.doc.content.size)
-			.setMeta(PROGRAMMATIC_META, true)
-			.setMeta('addToHistory', false);
+		return appChange(state.tr.delete(start, state.doc.content.size)).setMeta(
+			'addToHistory',
+			false
+		);
 	},
 
 	props: {

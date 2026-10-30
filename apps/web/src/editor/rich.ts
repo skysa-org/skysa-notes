@@ -53,7 +53,7 @@ import { codeDisplay, type CodeDisplayStore } from './codeDisplay.js';
 import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
 import { copiedText } from './copiedText.js';
 import { deleteSelectedNode } from './deleteSelected.js';
-import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
+import { appChange, holdUserEdits, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
 import { htmlViewPlugin } from './htmlView.js';
@@ -625,9 +625,7 @@ const forgetHistory = (view: EditorView): void => {
 	if (plugin === undefined || init === undefined) return;
 
 	view.dispatch(
-		view.state.tr
-			.setMeta(plugin, { historyState: init({}, view.state) as unknown })
-			.setMeta(PROGRAMMATIC_META, true)
+		appChange(view.state.tr.setMeta(plugin, { historyState: init({}, view.state) as unknown }))
 	);
 };
 
@@ -668,10 +666,9 @@ export const adoptBody = (ctx: Ctx, body: string): Adoption => {
 	const release = holdUserEdits(userEditKey.get(view.state));
 	try {
 		view.dispatch(
-			view.state.tr
-				.replace(0, view.state.doc.content.size, new Slice(doc.content, 0, 0))
-				.setMeta(PROGRAMMATIC_META, true)
-				.setMeta('addToHistory', false)
+			appChange(
+				view.state.tr.replace(0, view.state.doc.content.size, new Slice(doc.content, 0, 0))
+			).setMeta('addToHistory', false)
 		);
 		forgetHistory(view);
 	} finally {

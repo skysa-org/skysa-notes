@@ -10,7 +10,7 @@ import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/
 import { cell } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { PROGRAMMATIC_META } from './dirty.js';
+import { isAppChange } from './dirty.js';
 import { type Ancestor, ancestor, ancestors, isTask, LIST_ITEM } from './lists.js';
 
 /**
@@ -263,7 +263,7 @@ const continuity = (
 ): Transaction | null => {
 	if (!trs.some((tr) => tr.docChanged)) return null;
 	if (trs.some((tr) => tr.getMeta(TASK_TOGGLE) === true)) return null;
-	if (trs.some((tr) => tr.getMeta(PROGRAMMATIC_META) === true)) return null;
+	if (trs.some(isAppChange)) return null;
 
 	const item = ancestor(after.selection.$from, [LIST_ITEM]);
 	if (item === null) return null;
