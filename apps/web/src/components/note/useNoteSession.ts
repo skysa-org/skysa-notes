@@ -4,7 +4,8 @@ import { type EditorMode, otherMode } from '../../editor/mode.js';
 import { type SaveContext, useAutosave } from '../../editor/useAutosave.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
-import { db, type NoteRecord, noteRef } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { type NoteRecord, noteRef } from '../../store/db.js';
 import { beforeClosing } from '../../store/heldEdits.js';
 import { useDefaultEditorMode } from '../../store/hooks.js';
 import { deleteForUndo, renameNote, saveNoteBody, setNoteEditorMode } from '../../store/notes.js';
@@ -55,6 +56,7 @@ export const useNoteSession = ({
 	/** A scratch note, whose editor is always the rich one. */
 	isScratch: boolean;
 }) => {
+	const db = useDb();
 	const { say } = useNotices();
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
@@ -91,7 +93,7 @@ export const useNoteSession = ({
 				return saved;
 			});
 		},
-		[noteId, ref, liveEdits]
+		[noteId, ref, liveEdits, db]
 	);
 
 	const autosave = useAutosave<Edit>({
@@ -149,7 +151,7 @@ export const useNoteSession = ({
 			// A name is an edit: the draft is stored, and then named.
 			void draft.store().then((stored) => (stored ? named() : landed()));
 		},
-		[draft, note, liveEdits]
+		[draft, note, liveEdits, db]
 	);
 
 	/**
@@ -200,7 +202,7 @@ export const useNoteSession = ({
 				}
 			);
 		},
-		[flush, forget, onDeleted, say, settle]
+		[flush, forget, onDeleted, say, settle, db]
 	);
 
 	const mode = editorModeOf(note, locked, isScratch, defaultMode);
@@ -225,7 +227,7 @@ export const useNoteSession = ({
 		// next starts from the stored body rather than from what this one held.
 		rebased();
 		void setNoteEditorMode(db, noteId, otherMode(mode), { connectionId: note?.connectionId });
-	}, [rebased, mode, noteId, note?.connectionId, locked, retry, draft]);
+	}, [rebased, mode, noteId, note?.connectionId, locked, retry, draft, db]);
 
 	return {
 		mode,

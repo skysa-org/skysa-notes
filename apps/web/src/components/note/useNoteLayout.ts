@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { useCommand } from '../../commands/context.js';
 import type { RichEditorProps } from '../../editor/RichEditor.js';
 import { t } from '../../i18n/t.js';
-import { db } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
 import { useFormatToolbarShown } from '../../store/hooks.js';
 import { setFormatToolbarShown } from '../../store/prefs.js';
 import {
@@ -47,6 +47,7 @@ export const useNoteLayout = (
 	body: Element | null,
 	scratch: boolean
 ) => {
+	const db = useDb();
 	const compact = useMediaQuery(COMPACT);
 	const width = useElementWidth(body);
 	const outlineFits = width === undefined || width >= rems(OUTLINE_FITS_AT);
@@ -84,7 +85,7 @@ export const useNoteLayout = (
 	const toolbar: RichEditorProps['toolbar'] = compact ? bottom : 'top';
 	const toggleToolbar = useCallback(() => {
 		void setFormatToolbarShown(db, !toolbarShown);
-	}, [toolbarShown]);
+	}, [toolbarShown, db]);
 
 	return {
 		compact,

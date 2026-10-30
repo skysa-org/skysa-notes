@@ -6,7 +6,8 @@ import { FindTargetProvider } from '../../editor/findTarget.js';
 import { otherMode } from '../../editor/mode.js';
 import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
-import { db, type NoteRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord } from '../../store/db.js';
 import { setScratchMarks } from '../../store/notes.js';
 import { scratchMarks } from '../../store/scratchpad.js';
 import { focusEditor, inAField } from './focus.js';
@@ -123,8 +124,9 @@ const scratchScreen = (
 			};
 
 /** Pin or colour a scratch note, storing it first if it is a draft. */
-const useScratchMarking = (note: NoteRecord | undefined, draft: NoteDraft | undefined) =>
-	useCallback(
+const useScratchMarking = (note: NoteRecord | undefined, draft: NoteDraft | undefined) => {
+	const db = useDb();
+	return useCallback(
 		(change: MarkChange) => {
 			if (note === undefined) return;
 			const { id, connectionId } = note;
@@ -135,8 +137,9 @@ const useScratchMarking = (note: NoteRecord | undefined, draft: NoteDraft | unde
 			}
 			void draft.store().then((stored) => (stored ? marked() : undefined));
 		},
-		[note, draft]
+		[note, draft, db]
 	);
+};
 
 export const NoteView = ({
 	note,

@@ -3,7 +3,8 @@ import { type ReactNode, useCallback, useState } from 'react';
 
 import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
-import { db, type NoteRecord, noteRef } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { type NoteRecord, noteRef } from '../../store/db.js';
 import { getNote, setNoteEditorMode } from '../../store/notes.js';
 
 /**
@@ -65,6 +66,7 @@ export const useUnsupported = (
 		failing: boolean;
 	}
 ): Unsupported => {
+	const db = useDb();
 	const [held, setHeld] = useState<Held | null>(null);
 	const ref = note === undefined ? undefined : noteRef(note);
 	const body = note?.body;
@@ -115,7 +117,7 @@ export const useUnsupported = (
 				if (row === undefined) return;
 				setHeld((was) => (was?.ref === at ? { ...was, retryWhen: row.body } : was));
 			});
-	}, [note, rebased, retryable, settle]);
+	}, [note, rebased, retryable, settle, db]);
 
 	return { lost: current?.lost, retryable, report, edited, retry };
 };

@@ -25,6 +25,7 @@ import { createNote, draftNote, getNote } from '../src/store/notes.js';
 import { GENERATOR_DEFAULT, getGeneratorOptions } from '../src/store/vault.js';
 import { updateNote } from './noteRows.js';
 import { fakeHost, identity, sealed, sealedForAnother } from './secretHostFake.js';
+import { freshDatabase } from './support/db.js';
 import { hearNotices, render } from './support/notices.js';
 
 /** Writes of an item that the store refuses, while `refusing` is set. */
@@ -575,6 +576,34 @@ describe('a password made by Generate', () => {
 		await waitFor(async () => {
 			expect(await getGeneratorOptions(db)).toEqual({ length: 12, symbols: false });
 		});
+	});
+
+	it('keeps what was chosen, and the password, in the database it is drawn over', async () => {
+		const { host } = fakeHost();
+		const own = freshDatabase();
+		const note = await createNote(own, {
+			...scope,
+			folderPath: VAULT_FOLDER,
+			title: 'Own',
+			body: vaultBody(sealed(vaultPayload(FIELDS))),
+		});
+		const user = userEvent.setup();
+		render(<Harness id={note.id} host={host} />, { db: own });
+		await ready(user);
+		const length = screen.getByLabelText('Length');
+		await user.clear(length);
+		await user.type(length, '12');
+
+		await user.click(generate());
+
+		await waitFor(async () => {
+			expect(await getGeneratorOptions(own)).toMatchObject({ length: 12 });
+		});
+		await waitFor(async () => {
+			expect((await getNote(own, note.id, scope))?.body).not.toBe(note.body);
+		});
+		expect(await db.notes.count()).toBe(0);
+		expect(await getGeneratorOptions(db)).toEqual(GENERATOR_DEFAULT);
 	});
 
 	it('holds a length out of reach to 8 to 64 once it is left', async () => {
