@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useContext, useState } from 'react';
+import { createContext, type ReactNode, useContext, useMemo, useState } from 'react';
 
 import { createLiveEdits, type LiveEdits } from '../../store/liveEdits.js';
 import { createRenamings, type Renamings } from '../../store/renaming.js';
@@ -33,13 +33,23 @@ export const ShellProvider = ({ children }: { children: ReactNode }) => {
 	return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>;
 };
 
-/** A test's own, to look into: the shell as given. */
+/** A test's own, to look into: the shell as given, and one of its own for what is not. */
 export const ShellTo = ({
-	liveEdits = createLiveEdits(),
-	renamings = createRenamings(),
+	liveEdits,
+	renamings,
 	children,
 }: Partial<Shell> & { children: ReactNode }) => {
-	const [shell] = useState((): Shell => ({ liveEdits, renamings }));
+	const [own] = useState((): Shell => ({
+		liveEdits: createLiveEdits(),
+		renamings: createRenamings(),
+	}));
+	const shell = useMemo(
+		(): Shell => ({
+			liveEdits: liveEdits ?? own.liveEdits,
+			renamings: renamings ?? own.renamings,
+		}),
+		[liveEdits, renamings, own]
+	);
 	return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>;
 };
 

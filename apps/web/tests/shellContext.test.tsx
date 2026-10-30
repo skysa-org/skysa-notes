@@ -67,6 +67,25 @@ describe('the shell', () => {
 		expect(seen[0]).not.toBe(seen[1]);
 	});
 
+	it('follows what a test gives it, and keeps its own for what it does not', () => {
+		const first = createLiveEdits();
+		const second = createLiveEdits();
+		let given = first;
+		const { result, rerender } = renderHook(useBoth, {
+			wrapper: ({ children }: { children: ReactNode }) => (
+				<ShellTo liveEdits={given}>{children}</ShellTo>
+			),
+		});
+		const renamings = result.current.renamings;
+		expect(result.current.liveEdits).toBe(first);
+
+		given = second;
+		rerender();
+
+		expect(result.current.liveEdits).toBe(second);
+		expect(result.current.renamings).toBe(renamings);
+	});
+
 	it('is a test’s own where one is given', () => {
 		const liveEdits = createLiveEdits();
 		const renamings = createRenamings();

@@ -359,6 +359,25 @@ describe('NoteList', () => {
 			expect(onSelectNote).toHaveBeenCalledWith(notes[3]);
 		});
 
+		it('draws outside a shell, with nothing typed and nothing being renamed', () => {
+			render(
+				<NoteList
+					notes={notes}
+					selectedNoteId={undefined}
+					onSelectNote={() => undefined}
+					onCreateNote={() => undefined}
+					folderPath="work"
+					storeLoaded
+				/>
+			);
+
+			expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('work');
+			expect(
+				screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+			).toEqual(['meetings', 'meetings/q3']);
+			expect(screen.getByRole('button', { name: /^Budget/ })).toBeDefined();
+		});
+
 		it('names a notebook inside as it is being renamed', () => {
 			const renamings = createRenamings();
 			renderList({ notes }, { renamings });
