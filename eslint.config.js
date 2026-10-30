@@ -39,6 +39,15 @@ const RESTRICTED_SYNTAX = [
 			"a re-export of nothing but types is 'export type { … } from', which loads nothing.",
 	},
 	{
+		// The rich editor's marker for a change the app made (#456): set with
+		// `appChange` and asked with `isAppChange`, so that what counts as the
+		// app's is decided in `apps/web/src/editor/dirty.ts` and nowhere else.
+		selector:
+			"Literal[value='skysa/programmatic'], TemplateElement[value.cooked='skysa/programmatic']",
+		message:
+			"mark the app's own change with appChange(tr) and ask with isAppChange(tr), from editor/dirty.ts (#456).",
+	},
+	{
 		selector: 'AwaitExpression > ImportExpression',
 		message:
 			'Await with dynamic imports (await import()) is not allowed. Use static imports at the top of the file instead.',

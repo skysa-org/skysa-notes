@@ -50,6 +50,7 @@ export const isUserEdit = (update: ChangeLike): boolean => {
  * body that changed underneath, a mode switch — carries it; anything the user
  * types does not.
  */
+// eslint-disable-next-line no-restricted-syntax -- the one place the marker is named
 const PROGRAMMATIC_META = 'skysa/programmatic';
 
 /**
