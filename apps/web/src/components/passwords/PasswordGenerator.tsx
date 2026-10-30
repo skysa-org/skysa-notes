@@ -21,7 +21,7 @@ import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../
  */
 export const PasswordGenerator = ({ onMade }: { onMade: (password: string) => void }) => {
 	const db = useDb();
-	const stored = useLiveQuery(() => getGeneratorOptions(db), []);
+	const stored = useLiveQuery(() => getGeneratorOptions(db), [db]);
 	/**
 	 * What was chosen here, which goes before the store's: a write is not read
 	 * back at once, and a length typed and a box ticked straight after would

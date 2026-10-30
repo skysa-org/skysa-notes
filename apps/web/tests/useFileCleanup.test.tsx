@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { type FileCleanupVisit, useFileCleanup } from '../src/components/note/useFileCleanup.js';
 import { type NoteRecord, noteRef } from '../src/store/db.js';
-import type { FileCleanup } from '../src/store/fileCleanup.js';
+import { type FileCleanup, fileCleanup, fileCleanupFor } from '../src/store/fileCleanup.js';
+import { over } from './support/database.js';
+import { freshDatabase } from './support/db.js';
 
 /**
  * What a visit to a note may have taken out of it, handed over as the note is
@@ -125,5 +127,23 @@ describe('a visit to a note', () => {
 		unmount();
 
 		expect(spy.left).toHaveBeenCalledWith(noteRef(plan), 'c1', ['Work/a.png']);
+	});
+});
+
+describe('the cleanup a visit is handed to', () => {
+	it('is the one for the database the note is drawn over', () => {
+		const own = freshDatabase();
+		const theirs = vi.spyOn(fileCleanupFor(own), 'left');
+		const apps = vi.spyOn(fileCleanup, 'left');
+		const plan = note('plan', '![a](a.png)\n');
+		const { result, unmount } = renderHook(() => useFileCleanup(plan), over(own));
+
+		result.current.edited('Nothing linked now.\n', '');
+		unmount();
+
+		expect(theirs).toHaveBeenCalledWith(noteRef(plan), 'c1', ['Work/a.png']);
+		expect(apps).not.toHaveBeenCalled();
+		theirs.mockRestore();
+		apps.mockRestore();
 	});
 });

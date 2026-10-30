@@ -129,5 +129,20 @@ export const createFileCleanup = ({
 	};
 };
 
+const cleanups = new WeakMap<NotesDatabase, FileCleanup>();
+
+/**
+ * The one for a database, made as it is first asked for: what a note left may
+ * no longer link is looked at in the database the note was open in
+ * (`useDb`), with the visits to that database's notes and no other's.
+ */
+export const fileCleanupFor = (db: NotesDatabase): FileCleanup => {
+	const held = cleanups.get(db);
+	if (held !== undefined) return held;
+	const made = createFileCleanup({ db });
+	cleanups.set(db, made);
+	return made;
+};
+
 /** The app's one. */
-export const fileCleanup = createFileCleanup();
+export const fileCleanup = fileCleanupFor(appDb);
