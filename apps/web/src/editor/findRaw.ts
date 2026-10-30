@@ -2,10 +2,10 @@ import { type EditorState, type Extension, StateEffect, StateField } from '@code
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 
 import {
+	createFindTarget,
 	EMPTY_QUERY,
 	type FindQuery,
 	type FindTarget,
-	locate,
 	type Match,
 	matchesIn,
 } from './find.js';
@@ -97,12 +97,6 @@ export const findExtension = (): Extension => [
 	}),
 ];
 
-/** Where `next` should start looking from, and what `replace` acts on. */
-const cursorOf = (view: EditorView): Match => ({
-	from: view.state.selection.main.from,
-	to: view.state.selection.main.to,
-});
-
 /** Selects the match and brings it on screen — without taking focus; see `focus`. */
 const reveal = (view: EditorView, match: Match): void => {
 	view.dispatch({
@@ -111,81 +105,33 @@ const reveal = (view: EditorView, match: Match): void => {
 	});
 };
 
-/**
- * The match to move to from where the cursor is.
- *
- * Wrapping, in both directions, because a bar with no "start again" button has
- * to do it itself. Forward: the first match beginning after the selection ends —
- * *ends*, so that pressing next on a match moves off it rather than finding it
- * again. Backward: the last one beginning before the selection starts.
- */
-const step = (matches: readonly Match[], cursor: Match, back: boolean): Match | undefined => {
-	if (matches.length === 0) return undefined;
-	if (back) {
-		const before = matches.filter((match) => match.from < cursor.from);
-		return before.at(-1) ?? matches.at(-1);
-	}
-	return matches.find((match) => match.from >= cursor.to) ?? matches[0];
-};
-
-export const rawFindTarget = (view: EditorView): FindTarget => {
-	const show = (query: FindQuery): void => {
-		view.dispatch({ effects: setQuery.of(query) });
-	};
-	const foundNow = (query: FindQuery) => found(view.state, query);
-
-	const goTo = (query: FindQuery, back: boolean): void => {
-		show(query);
-		const target = step(foundNow(query), cursorOf(view), back);
-		if (target !== undefined) reveal(view, target);
-	};
-
-	return {
-		count: (query) => locate(foundNow(query), cursorOf(view)),
-		highlight: show,
-		next: (query, back = false) => {
-			goTo(query, back);
+export const rawFindTarget = (view: EditorView): FindTarget =>
+	createFindTarget({
+		found: (query) => found(view.state, query),
+		cursor: () => ({
+			from: view.state.selection.main.from,
+			to: view.state.selection.main.to,
+		}),
+		show: (query) => {
+			view.dispatch({ effects: setQuery.of(query) });
 		},
-		replace: (query) => {
-			const cursor = cursorOf(view);
-			// Only a selection that *is* a match is replaced, and otherwise this
-			// finds one. Without that, the first press of Replace — before
-			// anything has been found — would rewrite whatever the cursor
-			// happened to be sitting next to.
-			const on = foundNow(query).find(
-				(match) => match.from === cursor.from && match.to === cursor.to
-			);
-			if (on === undefined) {
-				goTo(query, false);
-				return;
-			}
-			// No annotation: this is the user replacing text, and the note must
-			// be marked dirty by it. See `dirty.ts`.
+		reveal: (match) => {
+			reveal(view, match);
+		},
+		replaceOne: (match, text) => {
 			view.dispatch({
-				changes: { from: on.from, to: on.to, insert: query.replace },
-				selection: { anchor: on.from + query.replace.length },
+				changes: { from: match.from, to: match.to, insert: text },
+				selection: { anchor: match.from + text.length },
 			});
-			goTo(query, false);
 		},
-		replaceAll: (query) => {
-			const matches = foundNow(query);
-			if (matches.length === 0) return;
+		replaceEvery: (matches, text) => {
 			// One transaction, so one entry in the undo history: a replace-all the
 			// user regrets is undone by one press of undo, not by one per match.
 			view.dispatch({
-				changes: matches.map((match) => ({
-					from: match.from,
-					to: match.to,
-					insert: query.replace,
-				})),
+				changes: matches.map((match) => ({ from: match.from, to: match.to, insert: text })),
 			});
-			show(query);
-		},
-		clear: () => {
-			show(EMPTY_QUERY);
 		},
 		focus: () => {
 			view.focus();
 		},
-	};
-};
+	});

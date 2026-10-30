@@ -167,3 +167,108 @@ export interface FindTarget {
 	 */
 	readonly focus: () => void;
 }
+
+/**
+ * What an editor does for the bar, below the line where the two editors have
+ * nothing in common (`FindTarget`): where its matches are, where its cursor is,
+ * and how it shows, selects and replaces text. Above that line — which match
+ * is next, what Replace does when the cursor is not on one — is
+ * `createFindTarget`'s, once, so that next and replace mean the same in both.
+ */
+export interface FindOps {
+	/**
+	 * The editor is gone, and nothing is to be asked of it. The rich editor's,
+	 * which a find bar can outlive by a moment (`findRich.ts`); none for an
+	 * editor that checks this itself.
+	 */
+	readonly gone?: () => boolean;
+	/** Every match in the note as it stands. */
+	readonly found: (query: FindQuery) => readonly Match[];
+	/** Where `next` starts looking from, and what `replace` acts on. */
+	readonly cursor: () => Match;
+	/** Show the matches of `query`; `EMPTY_QUERY` shows none. */
+	readonly show: (query: FindQuery) => void;
+	/** Select the match and bring it on screen, without taking focus (`FindTarget.focus`). */
+	readonly reveal: (match: Match) => void;
+	/**
+	 * Put `text` in the match's place. The user's edit, so it marks the note
+	 * dirty (`dirty.ts`): no programmatic marker.
+	 */
+	readonly replaceOne: (match: Match, text: string) => void;
+	/** Put `text` in every match's place, in one edit that one undo takes back. */
+	readonly replaceEvery: (matches: readonly Match[], text: string) => void;
+	readonly focus: () => void;
+}
+
+/**
+ * The match to move to from where the cursor is.
+ *
+ * Wrapping, in both directions, because a bar with no "start again" button has
+ * to do it itself. Forward: the first match beginning after the selection ends —
+ * *ends*, so that pressing next on a match moves off it rather than finding it
+ * again. Backward: the last one beginning before the selection starts.
+ */
+const step = (matches: readonly Match[], cursor: Match, back: boolean): Match | undefined => {
+	if (matches.length === 0) return undefined;
+	if (back) {
+		const before = matches.filter((match) => match.from < cursor.from);
+		return before.at(-1) ?? matches.at(-1);
+	}
+	return matches.find((match) => match.from >= cursor.to) ?? matches[0];
+};
+
+/** The bar's target over an editor's own operations. */
+export const createFindTarget = ({
+	gone = () => false,
+	found,
+	cursor,
+	show,
+	reveal,
+	replaceOne,
+	replaceEvery,
+	focus,
+}: FindOps): FindTarget => {
+	const goTo = (query: FindQuery, back: boolean): void => {
+		show(query);
+		const target = step(found(query), cursor(), back);
+		if (target !== undefined) reveal(target);
+	};
+
+	return {
+		count: (query) => (gone() ? { total: 0, current: null } : locate(found(query), cursor())),
+		highlight: (query) => {
+			if (!gone()) show(query);
+		},
+		next: (query, back = false) => {
+			if (!gone()) goTo(query, back);
+		},
+		replace: (query) => {
+			if (gone()) return;
+			const at = cursor();
+			// Only a selection that *is* a match is replaced, and otherwise this
+			// finds one. Without that, the first press of Replace — before
+			// anything has been found — would rewrite whatever the cursor
+			// happened to be sitting next to.
+			const on = found(query).find((match) => match.from === at.from && match.to === at.to);
+			if (on === undefined) {
+				goTo(query, false);
+				return;
+			}
+			replaceOne(on, query.replace);
+			goTo(query, false);
+		},
+		replaceAll: (query) => {
+			if (gone()) return;
+			const matches = found(query);
+			if (matches.length === 0) return;
+			replaceEvery(matches, query.replace);
+			show(query);
+		},
+		clear: () => {
+			if (!gone()) show(EMPTY_QUERY);
+		},
+		focus: () => {
+			if (!gone()) focus();
+		},
+	};
+};

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { EMPTY_QUERY, type FindQuery, locate, matchesIn } from '../src/editor/find.js';
+import {
+	createFindTarget,
+	EMPTY_QUERY,
+	type FindQuery,
+	locate,
+	type Match,
+	matchesIn,
+} from '../src/editor/find.js';
 
 /**
  * The engine both editors share. What is worth pinning is the behaviour the two
@@ -96,5 +103,123 @@ describe('locate', () => {
 	/** Past the last one, the next `next` wraps to the first — so it reads as 1. */
 	it('wraps round when the cursor is past the last match', () => {
 		expect(locate(matches, { from: 40, to: 40 })).toEqual({ total: 3, current: 1 });
+	});
+});
+
+describe('createFindTarget', () => {
+	/** An editor over a plain string: its own operations, recorded. */
+	const editor = (initial: string, { gone = false } = {}) => {
+		const state = { text: initial, cursor: { from: 0, to: 0 } as Match };
+		const asked: string[] = [];
+		const target = createFindTarget({
+			gone: () => gone,
+			found: (q) => {
+				asked.push('found');
+				return matchesIn(state.text, q);
+			},
+			cursor: () => state.cursor,
+			show: (q) => {
+				asked.push(`show ${q.search}`);
+			},
+			reveal: (match) => {
+				asked.push(`reveal ${match.from}`);
+				state.cursor = match;
+			},
+			replaceOne: (match, text) => {
+				asked.push(`replace ${match.from}`);
+				state.text = state.text.slice(0, match.from) + text + state.text.slice(match.to);
+				state.cursor = { from: match.from + text.length, to: match.from + text.length };
+			},
+			replaceEvery: (matches, text) => {
+				asked.push(`replace all ${matches.length}`);
+				[...matches].reverse().forEach((match) => {
+					state.text =
+						state.text.slice(0, match.from) + text + state.text.slice(match.to);
+				});
+			},
+			focus: () => {
+				asked.push('focus');
+			},
+		});
+		return { state, asked, target };
+	};
+
+	it('steps forward off the match it is on, and wraps', () => {
+		const { state, target } = editor('a x a x a');
+		target.next(query('a'));
+		expect(state.cursor).toEqual({ from: 0, to: 1 });
+		target.next(query('a'));
+		expect(state.cursor).toEqual({ from: 4, to: 5 });
+		target.next(query('a'));
+		target.next(query('a'));
+		expect(state.cursor).toEqual({ from: 0, to: 1 });
+	});
+
+	it('steps back to the one before, and wraps to the last', () => {
+		const { state, target } = editor('a x a x a');
+		target.next(query('a'), true);
+		expect(state.cursor).toEqual({ from: 8, to: 9 });
+		target.next(query('a'), true);
+		expect(state.cursor).toEqual({ from: 4, to: 5 });
+	});
+
+	it('finds a match first where the cursor is not on one, and replaces nothing', () => {
+		const { state, asked, target } = editor('one two one');
+		state.cursor = { from: 4, to: 7 };
+
+		target.replace(query('one', { replace: '1' }));
+
+		expect(state.text).toBe('one two one');
+		expect(state.cursor).toEqual({ from: 8, to: 11 });
+		expect(asked).not.toContain('replace 8');
+	});
+
+	it('replaces the match it is on, and goes to the next', () => {
+		const { state, target } = editor('one two one');
+		target.next(query('one'));
+
+		target.replace(query('one', { replace: '1' }));
+
+		expect(state.text).toBe('1 two one');
+		expect(state.cursor).toEqual({ from: 6, to: 9 });
+	});
+
+	it('replaces every match in one edit, and shows what is left', () => {
+		const { state, asked, target } = editor('one two one');
+
+		target.replaceAll(query('one', { replace: '1' }));
+
+		expect(state.text).toBe('1 two 1');
+		expect(asked.filter((each) => each.startsWith('replace'))).toEqual(['replace all 2']);
+		expect(asked.at(-1)).toBe('show one');
+		expect(target.count(query('one'))).toEqual({ total: 0, current: null });
+	});
+
+	it('counts where the cursor is among the matches', () => {
+		const { target } = editor('a x a x a');
+		target.next(query('a'));
+		target.next(query('a'));
+		expect(target.count(query('a'))).toEqual({ total: 3, current: 2 });
+	});
+
+	it('asks nothing of an editor that is gone', () => {
+		const { state, asked, target } = editor('one two one', { gone: true });
+
+		target.highlight(query('one'));
+		target.next(query('one'));
+		target.replace(query('one', { replace: '1' }));
+		target.replaceAll(query('one', { replace: '1' }));
+		target.clear();
+		target.focus();
+
+		expect(target.count(query('one'))).toEqual({ total: 0, current: null });
+		expect(asked).toEqual([]);
+		expect(state.text).toBe('one two one');
+	});
+
+	it('clears by showing nothing', () => {
+		const { asked, target } = editor('one');
+		target.clear();
+		expect(asked).toEqual(['show ']);
 	});
 });

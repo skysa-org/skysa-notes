@@ -3,10 +3,10 @@ import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
 import {
+	createFindTarget,
 	EMPTY_QUERY,
 	type FindQuery,
 	type FindTarget,
-	locate,
 	type Match,
 	matchesIn,
 } from './find.js';
@@ -129,11 +129,6 @@ export const findPlugin = (): Plugin =>
 		},
 	});
 
-const cursorOf = (view: EditorView): Match => ({
-	from: view.state.selection.from,
-	to: view.state.selection.to,
-});
-
 /**
  * Selects the match and brings it on screen — without taking focus; see `focus`.
  *
@@ -154,65 +149,30 @@ const reveal = (view: EditorView, match: Match): void => {
 	element?.scrollIntoView({ block: 'center' });
 };
 
-/** See `findRaw.ts`: the same rule, so that next means the same in both. */
-const step = (matches: readonly Match[], cursor: Match, back: boolean): Match | undefined => {
-	if (matches.length === 0) return undefined;
-	if (back) {
-		const before = matches.filter((match) => match.from < cursor.from);
-		return before.at(-1) ?? matches.at(-1);
-	}
-	return matches.find((match) => match.from >= cursor.to) ?? matches[0];
-};
-
-export const richFindTarget = (view: EditorView): FindTarget => {
-	// Nothing should reach a destroyed view — the bar is handed a target by the
-	// editor that owns it and gives it back on unmount — but the two are undone
-	// by separate machinery (React's cleanup, and Milkdown's `destroy`, which
-	// gets there two awaits later), so the order is a property of somebody
-	// else's internals rather than of this file. ProseMirror sets `docView` to
-	// null on destroy and dereferences it on the next update, so being wrong
-	// about that order is a TypeError rather than a no-op. CodeMirror already
-	// checks this itself, which is why `findRaw.ts` has no such guard.
-	const gone = () => view.isDestroyed;
-	const show = (query: FindQuery): void => {
-		if (gone()) return;
-		view.dispatch(view.state.tr.setMeta(key, query));
-	};
-	const found = (query: FindQuery) => (gone() ? [] : richMatches(view.state.doc, query));
-
-	const goTo = (query: FindQuery, back: boolean): void => {
-		if (gone()) return;
-		show(query);
-		const target = step(found(query), cursorOf(view), back);
-		if (target !== undefined) reveal(view, target);
-	};
-
-	return {
-		count: (query) =>
-			gone() ? { total: 0, current: null } : locate(found(query), cursorOf(view)),
-		highlight: show,
-		next: (query, back = false) => {
-			goTo(query, back);
+export const richFindTarget = (view: EditorView): FindTarget =>
+	createFindTarget({
+		// Nothing should reach a destroyed view — the bar is handed a target by
+		// the editor that owns it and gives it back on unmount — but the two are
+		// undone by separate machinery (React's cleanup, and Milkdown's
+		// `destroy`, which gets there two awaits later), so the order is a
+		// property of somebody else's internals rather than of this file.
+		// ProseMirror sets `docView` to null on destroy and dereferences it on
+		// the next update, so being wrong about that order is a TypeError rather
+		// than a no-op. CodeMirror already checks this itself, which is why
+		// `findRaw.ts` has no such guard.
+		gone: () => view.isDestroyed,
+		found: (query) => richMatches(view.state.doc, query),
+		cursor: () => ({ from: view.state.selection.from, to: view.state.selection.to }),
+		show: (query) => {
+			view.dispatch(view.state.tr.setMeta(key, query));
 		},
-		replace: (query) => {
-			if (gone()) return;
-			const cursor = cursorOf(view);
-			const on = found(query).find(
-				(match) => match.from === cursor.from && match.to === cursor.to
-			);
-			if (on === undefined) {
-				goTo(query, false);
-				return;
-			}
-			// Carries no programmatic marker, because it is the user replacing
-			// text and the note must be marked dirty by it. See `dirty.ts`.
-			view.dispatch(view.state.tr.insertText(query.replace, on.from, on.to));
-			goTo(query, false);
+		reveal: (match) => {
+			reveal(view, match);
 		},
-		replaceAll: (query) => {
-			if (gone()) return;
-			const matches = found(query);
-			if (matches.length === 0) return;
+		replaceOne: (match, text) => {
+			view.dispatch(view.state.tr.insertText(text, match.from, match.to));
+		},
+		replaceEvery: (matches, text) => {
 			// Applied last-first so that each replacement's positions are still
 			// the ones this list was built from, and all in one transaction so
 			// that one undo takes the whole thing back.
@@ -220,19 +180,12 @@ export const richFindTarget = (view: EditorView): FindTarget => {
 				[...matches]
 					.reverse()
 					.reduce(
-						(transaction, match) =>
-							transaction.insertText(query.replace, match.from, match.to),
+						(transaction, match) => transaction.insertText(text, match.from, match.to),
 						view.state.tr
 					)
 			);
-			show(query);
-		},
-		clear: () => {
-			show(EMPTY_QUERY);
 		},
 		focus: () => {
-			if (gone()) return;
 			view.focus();
 		},
-	};
-};
+	});
