@@ -397,22 +397,22 @@ const secretView = (ctx: Ctx) => {
 		said.setAttribute('role', 'status');
 
 		const remover = barButton('trash', t('editor.secret.remove'));
-		const actions = nodeBar(view, [remover], 'secret-actions');
+		const bar = nodeBar(view, [remover], 'secret-actions');
 
 		const line = document.createElement('div');
 		line.setAttribute('class', 'secret-line');
 		line.append(label, reveal, said);
 
-		const bar = document.createElement('div');
-		bar.setAttribute('class', 'secret-bar');
-		bar.append(line, actions.dom);
+		const row = document.createElement('div');
+		row.setAttribute('class', 'secret-bar');
+		row.append(line, bar.dom);
 
 		const slot = document.createElement('div');
 		slot.setAttribute('class', 'secret-slot');
 
 		const dom = document.createElement('div');
 		dom.setAttribute('class', 'secret-block');
-		dom.append(bar, slot);
+		dom.append(row, slot);
 
 		/**
 		 * The panel its block has, if it is the first block with that armor:
@@ -491,17 +491,17 @@ const secretView = (ctx: Ctx) => {
 			},
 			selectNode: () => {
 				dom.setAttribute('data-selected', '');
-				actions.show();
+				bar.show();
 			},
 			deselectNode: () => {
 				dom.removeAttribute('data-selected');
-				actions.hide();
+				bar.hide();
 			},
 			/** The panel, Reveal and the bar are the view's own: pressing or typing in them is not editing. */
 			stopEvent: (event) =>
 				(event.target instanceof Node &&
 					(slot.contains(event.target) || reveal.contains(event.target))) ||
-				actions.holds(event),
+				bar.holds(event),
 			ignoreMutation: () => true,
 			destroy: () => {
 				gone.current = true;

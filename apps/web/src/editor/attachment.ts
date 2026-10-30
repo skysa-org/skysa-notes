@@ -215,7 +215,7 @@ export const removeNode =
 const open = (host: AttachmentHost, node: ProseNode, browser?: FileBrowser): Promise<void> =>
 	openFile({ host, href: attributeOf(node, 'href'), label: shownName(node), browser });
 
-/** What the keyboard can do with a chip, or a picture, selected whole (`selectedKey`). */
+/** What the keyboard can do with a chip, a picture or a secret selected whole (`selectedKey`). */
 export interface SelectedKeys {
 	/** Open it, answering whether it does: a picture on the web opens nothing. */
 	readonly open: () => boolean;
@@ -367,8 +367,10 @@ export const selectedKey = (view: EditorView, event: KeyboardEvent): boolean => 
 	if (event.key !== 'Enter' && event.key !== 'Tab') return false;
 	const { selection } = view.state;
 	if (!(selection instanceof NodeSelection)) return false;
+	const at = view.nodeDOM(selection.from);
+	if (at === null) return false;
 	// Only a node whose view says what they do: a chip, a picture, a secret.
-	const keys = selectedKeys.get(view.nodeDOM(selection.from) ?? view.dom);
+	const keys = selectedKeys.get(at);
 	if (keys === undefined) return false;
 	if (event.key === 'Enter') return keys.open();
 	keys.toBar();

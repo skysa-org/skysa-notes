@@ -9,7 +9,7 @@ import {
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
-import { ATTACHMENT } from '../src/editor/attachment.js';
+import { ATTACHMENT, selectedKey } from '../src/editor/attachment.js';
 import { currentMarkdown } from '../src/editor/rich.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
@@ -465,6 +465,20 @@ describe('a chip', () => {
 		enter();
 
 		expect(asked).toEqual(['b.png']);
+	});
+
+	it('leaves Enter and Tab alone on a node selected whole whose view has no keys', async () => {
+		const { view } = await mount('A [a.zip](a.zip) b.\n\n---\n');
+		const rule = { current: -1 };
+		view.state.doc.descendants((node, pos) => {
+			if (node.type.name === 'hr') rule.current = pos;
+		});
+		view.dispatch(
+			view.state.tr.setSelection(NodeSelection.create(view.state.doc, rule.current))
+		);
+
+		expect(selectedKey(view, new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(false);
+		expect(selectedKey(view, new KeyboardEvent('keydown', { key: 'Tab' }))).toBe(false);
 	});
 
 	it('is taken out of the note by Remove, as an edit, leaving the words around it', async () => {
