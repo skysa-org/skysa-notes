@@ -2,9 +2,10 @@ import { useDeferredValue, useEffect, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../../store/liveEdits.js';
+import { shownNote, useLiveEdit } from '../../store/liveEdits.js';
 import { isUnnamed } from '../../store/notes.js';
 import { titleShown } from '../../store/titles.js';
+import { useLiveEdits } from '../shell/context.js';
 
 /**
  * `draft` is null except while the user is actually typing in the field, so a
@@ -15,15 +16,12 @@ import { titleShown } from '../../store/titles.js';
  */
 export const TitleField = ({
 	note,
-	liveEdits,
 	startFocused,
 	onRename,
 	onDone,
 	blankWhenUnnamed = false,
 }: {
 	note: NoteRecord;
-	/** Where the name is said as it is typed, for the list to show it. */
-	liveEdits: LiveEdits | undefined;
 	/**
 	 * In the field as it mounts, with the whole name selected: a note just
 	 * begun has no name yet, and naming it is the first thing to do.
@@ -39,6 +37,8 @@ export const TitleField = ({
 	 */
 	blankWhenUnnamed?: boolean;
 }) => {
+	// Where the name is said as it is typed, for the list to show it.
+	const liveEdits = useLiveEdits();
 	const [draft, setDraft] = useState<string | null>(null);
 	const field = useRef<HTMLInputElement>(null);
 	// Deferred: the title a body gives is a parse of it, and the keystroke in

@@ -11,6 +11,7 @@ import { Passwords } from '../components/passwords/Passwords.js';
 import { usePasswords } from '../components/passwords/usePasswords.js';
 import { useOpenWhenShown, useScratchpad } from '../components/scratchpad/useScratchpad.js';
 import { CommandPalette } from '../components/shell/CommandPalette.js';
+import { ShellProvider, useShell } from '../components/shell/context.js';
 import { ErrorScreen } from '../components/shell/ErrorScreen.js';
 import { Sidebar } from '../components/sidebar/Sidebar.js';
 import { NoticesProvider, useNotices } from '../components/ui/notices.js';
@@ -30,10 +31,8 @@ import {
 	useScratchpadShown,
 	useSources,
 } from '../store/hooks.js';
-import { createLiveEdits } from '../store/liveEdits.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { setNotebookPin } from '../store/pins.js';
-import { createRenamings } from '../store/renaming.js';
 import { findFolder, notesUnder } from '../store/tree.js';
 import { tabName } from '../sync/account.js';
 import {
@@ -96,10 +95,9 @@ const Home = () => {
 	const looseNoteCount = useLooseNoteCount(activeConnection);
 
 	const { say } = useNotices();
-	/** What is typed into the open note before it is saved, for the list to show. */
-	const [liveEdits] = useState(createLiveEdits);
-	/** A notebook or source being renamed, for everything else that names it. */
-	const [renamings] = useState(createRenamings);
+	// What is typed into the open note before it is saved, and a notebook or
+	// source being renamed, for the panes not yet reading them from the shell.
+	const { liveEdits, renamings } = useShell();
 	// Rarer than a duplicate notebook name — this one needs the store itself to
 	// refuse — but the same silence if it happens: the user types into a note
 	// that is nowhere, and the failure goes to the console.
@@ -323,8 +321,6 @@ const Home = () => {
 			note={openNote}
 			opening={opening}
 			draft={place.noteDraft}
-			liveEdits={liveEdits}
-			renamings={renamings}
 			scratch={scratchNote}
 			{...emptyPaneOffers({
 				folder,
@@ -439,7 +435,6 @@ const Home = () => {
 				) : (
 					<NotesPane
 						notes={notes}
-						renamings={renamings}
 						selectedNoteId={noteId}
 						folderPath={folder}
 						select={select}
@@ -453,7 +448,6 @@ const Home = () => {
 						moving={moving}
 						pickUp={pickUp}
 						unsavedNoteId={unsavedNoteId}
-						liveEdits={liveEdits}
 						pins={pins}
 						deleteNote={(note) => {
 							noteView.current?.deleteNote(note);
@@ -529,12 +523,15 @@ const Home = () => {
  * mounted screen, so a registry with the same lifetime as the screen is one
  * that cannot hold a command whose `run` closes over a component that has gone.
  * The notices are the shell's to show (`HomeToasts`), and outside the shell
- * nothing would show them.
+ * nothing would show them. So are what is typed and not saved yet, and a
+ * name being typed (`ShellProvider`): a second screen would hold its own.
  */
 const HomeWithCommands = () => (
 	<CommandsProvider>
 		<NoticesProvider>
-			<Home />
+			<ShellProvider>
+				<Home />
+			</ShellProvider>
 		</NoticesProvider>
 	</CommandsProvider>
 );

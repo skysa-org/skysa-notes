@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NoteList } from '../src/components/list/NoteList.js';
+import { ShellTo } from '../src/components/shell/context.js';
 import type { NoteRecord } from '../src/store/db.js';
 import { createRenamings } from '../src/store/renaming.js';
 
@@ -22,17 +23,23 @@ const note = (title: string, body = ''): NoteRecord =>
 		dirty: 0,
 	}) as NoteRecord;
 
-const renderList = (props: Partial<Parameters<typeof NoteList>[0]> = {}) =>
+/** The list, inside a shell of the test's own where it is given what that holds. */
+const renderList = (
+	props: Partial<Parameters<typeof NoteList>[0]> = {},
+	shell: Omit<Parameters<typeof ShellTo>[0], 'children'> = {}
+) =>
 	render(
-		<NoteList
-			notes={[note('Alpha')]}
-			selectedNoteId={undefined}
-			onSelectNote={() => undefined}
-			onCreateNote={() => undefined}
-			folderPath="work"
-			storeLoaded
-			{...props}
-		/>
+		<ShellTo {...shell}>
+			<NoteList
+				notes={[note('Alpha')]}
+				selectedNoteId={undefined}
+				onSelectNote={() => undefined}
+				onCreateNote={() => undefined}
+				folderPath="work"
+				storeLoaded
+				{...props}
+			/>
+		</ShellTo>
 	);
 
 const createButton = () => screen.getByRole('button', { name: 'New note' });
@@ -354,7 +361,7 @@ describe('NoteList', () => {
 
 		it('names a notebook inside as it is being renamed', () => {
 			const renamings = createRenamings();
-			renderList({ notes, renamings });
+			renderList({ notes }, { renamings });
 
 			act(() => {
 				renamings.typed('notebook', 'work/meetings', 'Standups');
