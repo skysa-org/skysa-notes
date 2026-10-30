@@ -37,17 +37,17 @@ const selectAll = (ctx: Ctx) => {
 	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 6)));
 };
 
-/**
- * Put the cursor in the middle of a word, wherever in the document it is. The
- * list and link commands act on where the selection is rather than on what it
- * covers, so a fixed pair of offsets cannot say what they are being asked.
- */
-/** The cursor at a position. */
+/** The cursor at a position: for the edge of a word, which `cursorIn` does not land on. */
 const cursorAt = (pos: number) => (ctx: Ctx) => {
 	const view = ctx.get(editorViewCtx);
 	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
 };
 
+/**
+ * Put the cursor in the middle of a word, wherever in the document it is. The
+ * list and link commands act on where the selection is rather than on what it
+ * covers, so a fixed pair of offsets cannot say what they are being asked.
+ */
 const cursorIn = (word: string) => (ctx: Ctx) => {
 	const view = ctx.get(editorViewCtx);
 	const { state } = view;
