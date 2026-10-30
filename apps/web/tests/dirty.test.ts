@@ -5,11 +5,11 @@ import { EditorView as ProseView } from '@milkdown/kit/prose/view';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+	appChange,
 	holdUserEdits,
 	isUserEdit,
 	isUserTransaction,
 	programmatic,
-	PROGRAMMATIC_META,
 	ProgrammaticChange,
 	userEditKey,
 	userEditPlugin,
@@ -91,7 +91,7 @@ describe('the same rule for the rich editor', () => {
 
 	it('does not count a change the app made', () => {
 		const state = stateWith(() => undefined);
-		const after = state.apply(typed(state).setMeta(PROGRAMMATIC_META, true));
+		const after = state.apply(appChange(typed(state)));
 		expect(userEditKey.getState(after)).toBe(0);
 	});
 
@@ -135,9 +135,7 @@ describe('the same rule for the rich editor', () => {
 	describe('a change appended by another plugin', () => {
 		it("is the app's when it follows a change the app made", () => {
 			const state = tidiedStateWith(() => undefined);
-			const { state: after, transactions } = state.applyTransaction(
-				typed(state).setMeta(PROGRAMMATIC_META, true)
-			);
+			const { state: after, transactions } = state.applyTransaction(appChange(typed(state)));
 
 			expect(transactions).toHaveLength(2);
 			expect(after.doc.textContent).toBe('ba!');
@@ -210,9 +208,13 @@ describe('the same rule for the rich editor', () => {
 
 			const release = holdUserEdits(reports);
 			view.dispatch(
-				view.state.tr
-					.replaceWith(1, view.state.doc.content.size - 1, schema.text('pulled'))
-					.setMeta(PROGRAMMATIC_META, true)
+				appChange(
+					view.state.tr.replaceWith(
+						1,
+						view.state.doc.content.size - 1,
+						schema.text('pulled')
+					)
+				)
 			);
 			release();
 
@@ -253,7 +255,7 @@ describe('the same rule for the rich editor', () => {
 		it('is true only for an unmarked change to the document', () => {
 			const state = stateWith(() => undefined);
 			expect(isUserTransaction(typed(state))).toBe(true);
-			expect(isUserTransaction(typed(state).setMeta(PROGRAMMATIC_META, true))).toBe(false);
+			expect(isUserTransaction(appChange(typed(state)))).toBe(false);
 			expect(isUserTransaction(state.tr)).toBe(false);
 		});
 

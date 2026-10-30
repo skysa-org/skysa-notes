@@ -1,12 +1,14 @@
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { sinkListItemCommand, splitListItemCommand } from '@milkdown/kit/preset/commonmark';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import type { Schema } from '@milkdown/kit/prose/model';
+import { EditorState, Plugin, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { appChange } from '../src/editor/dirty.js';
 import { currentMarkdown } from '../src/editor/rich.js';
-import { toggleTaskCommand } from '../src/editor/tasks.js';
+import { taskPlugin, toggleTaskCommand } from '../src/editor/tasks.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
@@ -286,5 +288,56 @@ describe('the item after a task', () => {
 		});
 
 		expect(withCtx(currentMarkdown)).toBe('- [x] <br />\n');
+	});
+});
+
+describe('a plugin answering an edit', () => {
+	/**
+	 * An item the plugin puts after the task, empty, with the cursor in it: the
+	 * case `continuity` turns into an unticked task. A plugin earlier in the list
+	 * than this one sees it only in the round after the edit it answered, by
+	 * itself, without the edit that began the dispatch.
+	 */
+	const answering = (schema: Schema) => {
+		// Once: ProseMirror hands a plugin only the transactions since its last
+		// turn, so a marker on its own answer is not there to see next time.
+		const answered = { done: false };
+		return new Plugin({
+			appendTransaction: (_trs, _before, after) => {
+				if (answered.done) return null;
+				answered.done = true;
+				const list = after.doc.firstChild;
+				const item = list === null ? null : list.firstChild;
+				const paragraph = schema.nodes.paragraph;
+				if (list === null || item === null || paragraph === undefined) return null;
+				const end = list.nodeSize - 1;
+				const tr = after.tr.insert(
+					end,
+					item.type.create({ ...item.attrs, checked: null }, paragraph.create())
+				);
+				return tr.setSelection(TextSelection.near(tr.doc.resolve(end + 2)));
+			},
+		});
+	};
+
+	/** The checklist, after `edit` and what the plugin answers it with. */
+	const answered = async (edit: (tr: Transaction) => Transaction) => {
+		const { withCtx } = await mount('- [ ] one\n');
+		const start = withCtx((ctx) => ctx.get(editorViewCtx).state);
+		const state = EditorState.create({
+			doc: start.doc,
+			plugins: [taskPlugin, answering(start.schema)],
+		});
+		const typed = state.tr.insertText('!', 'one'.length + 3);
+		const { state: next } = state.applyTransaction(edit(typed));
+		return next.doc.firstChild?.lastChild?.attrs.checked as boolean | null | undefined;
+	};
+
+	it('makes the item it adds after a task a task, after the user’s edit', async () => {
+		expect(await answered((tr) => tr)).toBe(false);
+	});
+
+	it('leaves it as the plugin made it after the app’s, as it leaves the app’s own', async () => {
+		expect(await answered(appChange)).toBeNull();
 	});
 });
