@@ -4,6 +4,7 @@ import type { EditorState } from '@milkdown/kit/prose/state';
 import { createStore } from '../store/emitter.js';
 import { CODE_BLOCK_NODE, LINK_MARK } from './commands.js';
 import { listAround, type ListKind } from './lists.js';
+import { markRunIn } from './markRun.js';
 
 /**
  * What the editor's selection is, in the terms the toolbar draws itself in.
@@ -81,16 +82,13 @@ const headingLevel = (state: EditorState): number => {
 	return typeof level === 'number' ? level : 0;
 };
 
-const linkAt = (state: EditorState): string | null => {
+/** Where the link Link and Remove act on goes (`markRunIn`), for the form to show. */
+const linkHref = (state: EditorState): string | null => {
 	const type = state.schema.marks[LINK_MARK];
 	if (type === undefined) return null;
 
-	const { $from } = state.selection;
-	const mark =
-		(state.storedMarks ?? $from.marks()).find((held) => held.type === type) ??
-		$from.nodeAfter?.marks.find((held) => held.type === type);
-
-	const href: unknown = mark?.attrs.href;
+	const { from, to } = state.selection;
+	const href: unknown = markRunIn(state.doc, from, to, type)?.mark.attrs.href;
 	return typeof href === 'string' ? href : null;
 };
 
@@ -113,7 +111,7 @@ export const readFormat = (state: EditorState): FormatState => ({
 	marks: activeMarks(state),
 	list: listAround(state)?.kind ?? null,
 	codeBlock: state.selection.$from.parent.type.name === CODE_BLOCK_NODE,
-	link: linkAt(state),
+	link: linkHref(state),
 	...indentable(state),
 });
 

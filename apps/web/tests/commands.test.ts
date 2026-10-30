@@ -37,6 +37,12 @@ const selectAll = (ctx: Ctx) => {
 	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 6)));
 };
 
+/** The cursor at a position: for the edge of a word, which `cursorIn` does not land on. */
+const cursorAt = (pos: number) => (ctx: Ctx) => {
+	const view = ctx.get(editorViewCtx);
+	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
+};
+
 /**
  * Put the cursor in the middle of a word, wherever in the document it is. The
  * list and link commands act on where the selection is rather than on what it
@@ -168,6 +174,26 @@ describe('links', () => {
 		withCtx(setLink('https://example.test/b'));
 
 		expect(withCtx(currentMarkdown)).toBe('[plain](https://example.test/b)\n');
+	});
+
+	// Where the toolbar's form shows the link (format.test.ts): a cursor just
+	// past it is still in it, so Link and Remove act on it there too.
+	it('points a link somewhere else from just past its end, where the form shows it', async () => {
+		const withCtx = await mount('[plain](https://example.test/a) more\n');
+		withCtx(cursorAt('plain'.length + 1));
+
+		withCtx(setLink('https://example.test/b'));
+
+		expect(withCtx(currentMarkdown)).toBe('[plain](https://example.test/b) more\n');
+	});
+
+	it('takes the link off from just past its end, too', async () => {
+		const withCtx = await mount('[plain](https://example.test/a) more\n');
+		withCtx(cursorAt('plain'.length + 1));
+
+		withCtx(clearLink);
+
+		expect(withCtx(currentMarkdown)).toBe('plain more\n');
 	});
 
 	it('leaves the words and takes the link off them', async () => {
