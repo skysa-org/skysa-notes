@@ -31,13 +31,8 @@ import { pickFiles } from '../../editor/pickFiles.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { copyTurns, nearestCopy } from '../../pictures/copies.js';
 import { noShrinker, type PictureShrinker, pictureShrinker } from '../../pictures/shrinker.js';
-import {
-	db as appDb,
-	type FileRecord,
-	type NoteRecord,
-	type NotesDatabase,
-	type PictureRecord,
-} from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { FileRecord, NoteRecord, NotesDatabase, PictureRecord } from '../../store/db.js';
 import { createEmitter } from '../../store/emitter.js';
 import { heldFile, holdsBytes } from '../../store/fileCache.js';
 import {
@@ -596,7 +591,6 @@ export const createNoteAttachments = ({
 
 export interface NoteAttachmentsSources {
 	readonly readFile?: NoteAttachmentsOptions['readFile'];
-	readonly db?: NotesDatabase;
 	/** Where to hear that a sync has run: the scheduler's status. */
 	readonly subscribe?: SyncScheduler['subscribe'];
 	/** Told of a problem the editor has nowhere to show, in the user's words. */
@@ -620,13 +614,13 @@ export const useNoteAttachments = (
 	note: NoteRecord,
 	{
 		readFile = syncScheduler.readFile,
-		db = appDb,
 		subscribe = syncScheduler.subscribe,
 		report,
 		store,
 		onAdded,
 	}: NoteAttachmentsSources = {}
 ): NoteAttachments => {
+	const db = useDb();
 	const current = useRef<Pick<NoteRecord, 'connectionId' | 'id' | 'path'>>(note);
 	useEffect(() => {
 		current.current = note;

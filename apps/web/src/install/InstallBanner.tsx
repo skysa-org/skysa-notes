@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { useMediaQuery } from '../components/ui/layout.js';
 import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
-import { db as appDatabase, type NotesDatabase } from '../store/db.js';
+import { useDb } from '../store/database.js';
 import { dismissInstall, getInstallDismissed } from '../store/prefs.js';
 import { type Device, type ManualInstall, manualInstall, thisDevice } from './installHow.js';
 import { type InstallPrompt, installPrompt } from './installPrompt.js';
@@ -22,7 +22,6 @@ import { type InstallPrompt, installPrompt } from './installPrompt.js';
  */
 
 export interface InstallBannerProps {
-	database?: NotesDatabase;
 	/** What the browser has said about installing. Injected for tests. */
 	prompt?: InstallPrompt;
 	/** Which browser this is, for one that has no install event. Injected for tests. */
@@ -37,11 +36,11 @@ const MANUAL: Readonly<Record<ManualInstall, (name: string) => string>> = {
 };
 
 export const InstallBanner = ({
-	database = appDatabase,
 	prompt = installPrompt,
 	device = thisDevice(),
 	name = import.meta.env.VITE_APP_NAME ?? t('install.thisApp'),
 }: InstallBannerProps) => {
+	const database = useDb();
 	const dismissed = useLiveQuery(() => getInstallDismissed(database), [database]);
 	// An installed app opens in a window of its own (`display: standalone` in
 	// the manifest), and Chromium moves a tab into one as it installs.

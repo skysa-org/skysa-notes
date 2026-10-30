@@ -17,6 +17,7 @@ import { createNote, draftNote } from '../src/store/notes.js';
 import { heldCopy, heldPicture, keepPicture } from '../src/store/pictures.js';
 import type { FileRead } from '../src/sync/fileReads.js';
 import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
+import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 
 const bufferOf = (value: string): ArrayBuffer => new TextEncoder().encode(value).buffer;
@@ -972,8 +973,8 @@ describe('the host of the open note', () => {
 		};
 		const hook = renderHook(
 			({ current }: { current: NoteRecord }) =>
-				useNoteAttachments(current, { readFile, db, subscribe }),
-			{ initialProps: { current: note } }
+				useNoteAttachments(current, { readFile, subscribe }),
+			{ initialProps: { current: note }, ...over(db) }
 		);
 		const heard = vi.fn();
 		hook.result.current.changed(heard);
@@ -1045,11 +1046,10 @@ describe('the host of the open note', () => {
 			({ report }: { report: (problem: AttachmentProblem) => void }) =>
 				useNoteAttachments(note, {
 					readFile: vi.fn(),
-					db,
 					subscribe: () => () => undefined,
 					report,
 				}),
-			{ initialProps: { report: first } }
+			{ initialProps: { report: first }, ...over(db) }
 		);
 
 		hook.rerender({ report: second });

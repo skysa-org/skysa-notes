@@ -27,7 +27,8 @@ import { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
 import { type PictureShrinker, pictureShrinker } from '../../pictures/shrinker.js';
 import { addClips, type ClipInput, listClips, removeClip } from '../../store/clipboard.js';
-import type { ClipKey, ClipRecord, NotesDatabase } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { ClipKey, ClipRecord } from '../../store/db.js';
 import type { FileRead } from '../../sync/fileReads.js';
 import type { SyncScheduler } from '../../sync/scheduler.js';
 import { sizeOf } from '../attachments/AttachedFiles.js';
@@ -61,7 +62,6 @@ type Sync = Pick<SyncScheduler, 'clipboard'>;
 
 export interface ClipboardPanelProps {
 	connectionId: string;
-	database: NotesDatabase;
 	sync: Sync;
 	/** The browser's clipboard. Injected: jsdom has none. */
 	system?: SystemClipboard;
@@ -272,7 +272,6 @@ const ClipPicture = ({
 	connectionId,
 	name,
 	version,
-	database,
 	urls,
 	shrinker,
 }: {
@@ -280,10 +279,10 @@ const ClipPicture = ({
 	name: string;
 	/** The version of it this device has (`ClipAt`). */
 	version: string | undefined;
-	database: NotesDatabase;
 	urls: ObjectUrlCache;
 	shrinker: PictureShrinker;
 }) => {
+	const database = useDb();
 	const here = useLiveQuery(async () => {
 		const key: ClipKey = [connectionId, name];
 		const [bytes, thumbs] = await Promise.all([
@@ -374,7 +373,6 @@ interface ItemProps extends Required<Omit<ClipboardPanelProps, 'pick'>> {
 const ClipItem = ({
 	clip,
 	connectionId,
-	database,
 	sync,
 	system,
 	browser,
@@ -383,6 +381,7 @@ const ClipItem = ({
 	say,
 	done,
 }: ItemProps) => {
+	const database = useDb();
 	const read = readClipName(clip.name);
 	if (read === undefined) return null;
 	const pending = clip.state === 'pending';
@@ -441,7 +440,6 @@ const ClipItem = ({
 							connectionId={connectionId}
 							name={clip.name}
 							version={clip.version}
-							database={database}
 							urls={urls}
 							shrinker={shrinker}
 						/>
@@ -485,7 +483,6 @@ const ClipItem = ({
 
 export const ClipboardPanel = ({
 	connectionId,
-	database,
 	sync,
 	system = systemClipboard(),
 	pick = pickFiles,
@@ -493,6 +490,7 @@ export const ClipboardPanel = ({
 	urls = thumbnails,
 	shrinker = pictureShrinker(),
 }: ClipboardPanelProps) => {
+	const database = useDb();
 	const clips = useLiveQuery(() => listClips(database, connectionId), [database, connectionId]);
 	const [said, say] = useSaying();
 	const dragged = useFilesDragged();
@@ -600,7 +598,6 @@ export const ClipboardPanel = ({
 							key={clip.name}
 							clip={clip}
 							connectionId={connectionId}
-							database={database}
 							sync={sync}
 							system={system}
 							browser={browser}

@@ -6,7 +6,8 @@ import { InfoDialog } from '../components/ui/InfoDialog.js';
 import { LOCALE, t } from '../i18n/t.js';
 import { addClips, setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import type { ConnectedSource } from '../store/connection.js';
-import { db as appDatabase, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
+import { useDb } from '../store/database.js';
+import type { SyncStateRecord } from '../store/db.js';
 import { isLiveSource } from '../store/rowStates.js';
 import { tabName } from '../sync/account.js';
 import { syncScheduler } from '../sync/runtime.js';
@@ -41,7 +42,6 @@ export interface TakeShareProps {
 	onRead: () => void;
 	/** What was shared is on the clipboard: show it, where it is out of sight. */
 	onAdded: () => void;
-	database?: NotesDatabase;
 	sync?: Pick<SyncScheduler, 'clipboard'>;
 	/** Where the worker kept it. Injected: jsdom has no Cache Storage. */
 	storage?: CacheStorage;
@@ -108,10 +108,10 @@ export const TakeShare = ({
 	sources,
 	onRead,
 	onAdded,
-	database = appDatabase,
 	sync = syncScheduler,
 	storage,
 }: TakeShareProps) => {
+	const database = useDb();
 	const [held, setHeld] = useState<Held | null>(null);
 	// An id is read once, however often the effect runs before the URL lets go of it.
 	const read = useRef(new Set<string>());
