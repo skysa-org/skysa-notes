@@ -3,7 +3,7 @@ import { type RefObject, useCallback, useEffect, useState } from 'react';
 
 import { useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
-import { db } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
 import { moveFolder } from '../../store/folders.js';
 import { settleEditors } from '../../store/heldEdits.js';
 import { moveNote } from '../../store/notes.js';
@@ -35,6 +35,7 @@ export const useMoving = ({
 	folder: string | undefined;
 	noteIdRef: Readonly<RefObject<string | undefined>>;
 }>) => {
+	const db = useDb();
 	const { say, moveOn } = useNotices();
 	const [moving, setMoving] = useState<Moving | null>(null);
 

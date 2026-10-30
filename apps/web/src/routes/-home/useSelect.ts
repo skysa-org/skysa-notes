@@ -1,6 +1,7 @@
 import { useNotices } from '../../components/ui/notices.js';
 import { showConnection } from '../../store/connection.js';
-import { db, type NoteRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord } from '../../store/db.js';
 import { noteIsUnder, rememberOpen } from '../../store/lastOpen.js';
 import type { Pane } from '../panel.js';
 import { type Place, placeFolder } from '../place.js';
@@ -35,6 +36,7 @@ export const useSelect = ({
 	setSearchOpen: (open: boolean) => void;
 	dismissConnect: () => void;
 }>) => {
+	const db = useDb();
 	const { moveOn } = useNotices();
 	const { folder, noteId, openNote, openedOver, go } = place;
 

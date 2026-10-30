@@ -4,7 +4,8 @@ import { type RefObject, useCallback, useState } from 'react';
 import type { DisplacedText } from '../../components/note/types.js';
 import { useNotices } from '../../components/ui/notices.js';
 import { t } from '../../i18n/t.js';
-import { activeConnectionId, db, type NoteRecord, noteRef } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { activeConnectionId, type NoteRecord, noteRef } from '../../store/db.js';
 import { deleteForUndo, saveNoteBody, undeleteNote } from '../../store/notes.js';
 import { nameShown } from '../../store/titles.js';
 import { sourceName } from '../../sync/account.js';
@@ -34,6 +35,7 @@ export const useUndoDelete = ({
 	/** The note open now, read once a delete has gone through. */
 	noteIdRef: Readonly<RefObject<string | undefined>>;
 }>) => {
+	const db = useDb();
 	const { say } = useNotices();
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
 	/** The note (`noteRef`) whose undo failed: its notice waits to be dismissed. */

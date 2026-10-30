@@ -2,7 +2,8 @@ import { parentPath } from '@skysa/core';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { NoteDraft } from '../../components/note/types.js';
-import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import { LOCAL_CONNECTION_ID, type NoteRecord } from '../../store/db.js';
 import { keeping } from '../../store/keeping.js';
 import { createNote, draftNote, setNoteEditorMode } from '../../store/notes.js';
 
@@ -27,6 +28,7 @@ export const useDrafts = ({
 	storedNote: NoteRecord | undefined;
 	onStoreFailed: () => void;
 }) => {
+	const db = useDb();
 	const [draft, setDraft] = useState<NoteRecord | null>(null);
 	/** Each draft is stored once, however many edits ask, and asked again where that failed. */
 	const storing = useRef(new Map<string, Promise<boolean>>());
@@ -81,7 +83,7 @@ export const useDrafts = ({
 			storing.current.set(note.id, stored);
 			return stored;
 		},
-		[onStoreFailed]
+		[onStoreFailed, db]
 	);
 
 	const noteDraft = useMemo((): NoteDraft | undefined => {
@@ -102,7 +104,7 @@ export const useDrafts = ({
 				);
 			},
 		};
-	}, [open, store]);
+	}, [open, store, db]);
 
 	return { draft, open, begin, noteDraft };
 };
