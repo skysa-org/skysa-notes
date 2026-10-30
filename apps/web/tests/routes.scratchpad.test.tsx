@@ -149,8 +149,11 @@ describe('a card', () => {
 		await user.type(within(open).getByLabelText('Note title'), ' plans');
 
 		// The card under the dialog, which is what shows once it closes.
-		const onWall = document.querySelector(`.scratch-card[data-id="${card.id}"]`);
-		expect(onWall?.textContent).toContain('Trip plans');
+		// Deferred, as the list's rows are: a render behind the keystroke.
+		await waitFor(() => {
+			const onWall = document.querySelector(`.scratch-card[data-id="${card.id}"]`);
+			expect(onWall?.textContent).toContain('Trip plans');
+		});
 		expect((await getNote(db, card.id))?.title).toBe('Trip');
 	});
 

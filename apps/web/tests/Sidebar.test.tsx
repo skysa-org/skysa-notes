@@ -1,6 +1,7 @@
 import { ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
@@ -19,24 +20,31 @@ import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 const tree = buildFolderTree({ paths: ['personal', 'work', 'work/meetings'] });
 
-/** The sidebar, inside a shell of the test's own where it is given what that holds. */
+/**
+ * The sidebar, inside a shell of the test's own where it is given what that
+ * holds: as Testing Library's wrapper, which `rerender` keeps, so a sidebar
+ * drawn again is the same one updated.
+ */
 const renderSidebar = (
 	props: Partial<Parameters<typeof Sidebar>[0]> = {},
 	shell: Omit<Parameters<typeof ShellTo>[0], 'children'> = {}
 ) =>
 	render(
-		<ShellTo {...shell}>
-			<Sidebar
-				tree={tree}
-				selectedFolder="personal"
-				onSelectFolder={() => undefined}
-				onCreateFolder={() => undefined}
-				looseNoteCount={0}
-				// Open, so the notebook inside it is listed: shutting is tested below.
-				openNotebooks={new Set(['work'])}
-				{...props}
-			/>
-		</ShellTo>
+		<Sidebar
+			tree={tree}
+			selectedFolder="personal"
+			onSelectFolder={() => undefined}
+			onCreateFolder={() => undefined}
+			looseNoteCount={0}
+			// Open, so the notebook inside it is listed: shutting is tested below.
+			openNotebooks={new Set(['work'])}
+			{...props}
+		/>,
+		{
+			wrapper: ({ children }: { children: ReactNode }) => (
+				<ShellTo {...shell}>{children}</ShellTo>
+			),
+		}
 	);
 
 describe('Sidebar', () => {
@@ -134,14 +142,12 @@ describe('Sidebar', () => {
 
 		const again = (asked: number) => {
 			rerender(
-				<ShellTo>
-					<Sidebar
-						{...props}
-						onSelectFolder={() => undefined}
-						looseNoteCount={0}
-						newNotebookAsked={asked}
-					/>
-				</ShellTo>
+				<Sidebar
+					{...props}
+					onSelectFolder={() => undefined}
+					looseNoteCount={0}
+					newNotebookAsked={asked}
+				/>
 			);
 		};
 		again(1);

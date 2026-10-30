@@ -220,7 +220,10 @@ describe('the compact bar', () => {
 
 		await user.type(screen.getByLabelText('Note title'), ' for Q3');
 
-		expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Plans for Q3');
+		// Deferred, as the list's rows are: a render behind the keystroke.
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Plans for Q3');
+		});
 	});
 
 	it('names a note with no name by the words it was last stored with, not as they are typed', async () => {

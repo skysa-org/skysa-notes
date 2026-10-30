@@ -45,7 +45,9 @@ export const useNotebookActions = ({
 	openFolder: (path: string) => void;
 }>) => {
 	const db = useDb();
-	// A notebook's new name, being typed: the shell's, which the home route is drawn in.
+	// A notebook's new name, being typed: the shell's, which the home route is
+	// drawn in. Asked of `useShell`, which throws without one, since this runs
+	// in the home route and nowhere else.
 	const { renamings } = useShell();
 	const { say, moveOn } = useNotices();
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
