@@ -18,7 +18,8 @@ import { Icon } from '../../editor/icons.js';
 import { linkAddress, openLink } from '../../editor/links.js';
 import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
 import { t } from '../../i18n/t.js';
-import { db, type NoteRecord } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
+import type { NoteRecord } from '../../store/db.js';
 import {
 	deleteNote,
 	type EditBase,
@@ -331,6 +332,7 @@ export const PasswordItem = ({
 	onOpen,
 	host: givenHost,
 }: PasswordItemProps) => {
+	const db = useDb();
 	const { say } = useNotices();
 	const secrets = useNoteSecrets(note, { report: say });
 	const host = givenHost ?? secrets.host;

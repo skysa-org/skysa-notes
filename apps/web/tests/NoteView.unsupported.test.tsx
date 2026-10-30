@@ -8,10 +8,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
 import { NoteView } from '../src/components/note/NoteView.js';
 import { UnsupportedBanner } from '../src/components/note/unsupported.js';
-import { db } from '../src/store/db.js';
+import { db, type NotesDatabase } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
 import { noteById } from './noteRows.js';
+import { freshDatabase } from './support/db.js';
 import { render } from './support/notices.js';
 
 /**
@@ -52,12 +53,14 @@ const Harness = ({ id }: { id: string }) => {
 	return <NoteView note={note} onDeleted={() => undefined} />;
 };
 
-const open = async (body: string) => {
-	const note = await createNote(db, { title: 'Exotic', body });
+/** The note, open in markdown, in `own` — the app's database unless a test gives its own. */
+const open = async (body: string, own: NotesDatabase = db) => {
+	const note = await createNote(own, { title: 'Exotic', body });
 	const { container } = render(
 		<CommandsProvider>
 			<Harness id={note.id} />
-		</CommandsProvider>
+		</CommandsProvider>,
+		{ db: own }
 	);
 	await screen.findByTestId('raw-editor');
 	await waitFor(() => {
@@ -135,6 +138,19 @@ describe('a note the rich editor cannot represent', () => {
 		});
 		expect(screen.queryByRole('status')).toBeNull();
 		expect(await noteById(db, note.id)).toMatchObject({ body: 'keep\n', editorMode: 'rich' });
+	});
+
+	it('writes the retry to the database it is drawn over', async () => {
+		const user = userEvent.setup();
+		const own = freshDatabase();
+		const { note, retype } = await open('keep\nEXOTIC\n', own);
+
+		retype('keep\n');
+		await user.click(richTab());
+
+		expect(await screen.findByTestId('rich-editor')).toBeDefined();
+		expect(await noteById(own, note.id)).toMatchObject({ body: 'keep\n', editorMode: 'rich' });
+		expect(await db.notes.count()).toBe(0);
 	});
 
 	it('takes the keyboard shortcut as the same request', async () => {

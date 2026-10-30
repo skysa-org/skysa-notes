@@ -2,8 +2,9 @@ import { basename, linkedFiles } from '@skysa/core';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { useLatest } from '../../hooks/useLatest.js';
+import { useDb } from '../../store/database.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
-import { type FileCleanup, fileCleanup } from '../../store/fileCleanup.js';
+import { type FileCleanup, fileCleanupFor } from '../../store/fileCleanup.js';
 import { namesFile } from '../../store/fileLinks.js';
 
 /**
@@ -40,8 +41,11 @@ export interface FileCleanupVisit {
 
 export const useFileCleanup = (
 	note: NoteRecord | undefined,
-	cleanup: FileCleanup = fileCleanup
+	/** The database's own unless a test gives another (`fileCleanupFor`). */
+	given?: FileCleanup
 ): FileCleanupVisit => {
+	const db = useDb();
+	const cleanup = given ?? fileCleanupFor(db);
 	const ref = note === undefined ? undefined : noteRef(note);
 	const latest = useLatest(note);
 	const visit = useRef<Visit | undefined>(undefined);

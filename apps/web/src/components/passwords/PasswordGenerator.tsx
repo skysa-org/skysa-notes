@@ -8,7 +8,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useId, useState } from 'react';
 
 import { t } from '../../i18n/t.js';
-import { db } from '../../store/db.js';
+import { useDb } from '../../store/database.js';
 import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../../store/vault.js';
 
 /**
@@ -20,7 +20,8 @@ import { GENERATOR_DEFAULT, getGeneratorOptions, setGeneratorOptions } from '../
  * empty, or holding what is not a number, leaves it as it was.
  */
 export const PasswordGenerator = ({ onMade }: { onMade: (password: string) => void }) => {
-	const stored = useLiveQuery(() => getGeneratorOptions(db), []);
+	const db = useDb();
+	const stored = useLiveQuery(() => getGeneratorOptions(db), [db]);
 	/**
 	 * What was chosen here, which goes before the store's: a write is not read
 	 * back at once, and a length typed and a box ticked straight after would
