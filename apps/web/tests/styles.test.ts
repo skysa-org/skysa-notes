@@ -50,7 +50,7 @@ describe('the stylesheet', () => {
 			`[data-sample-level='${String(level)}']`,
 		]),
 	])('draws %s', (selector) => {
-		expect(allStyles()).toContain(selector);
+		expect(withoutComments(allStyles())).toContain(selector);
 	});
 
 	it.each([
