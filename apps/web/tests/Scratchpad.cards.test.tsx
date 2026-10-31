@@ -401,7 +401,7 @@ describe('the box to take a note in', () => {
 	});
 
 	it('stays open for an Escape a panel of its toolbar answered', () => {
-		// As the toolbar's panels hear it: first, on the document (`FormatToolbar`).
+		// As the toolbar's panels hear it: first, on the document (`useDismiss`).
 		const claim = (event: KeyboardEvent) => {
 			event.preventDefault();
 		};

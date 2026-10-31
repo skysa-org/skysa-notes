@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type FitInput, fitToolbar, sameFit } from '../src/editor/toolbarFit.js';
+import { type FitInput, fitToolbar, sameFit } from '../src/editor/toolbar/toolbarFit.js';
 
 /**
  * The arithmetic behind the toolbar's overflow menu. The component measures;

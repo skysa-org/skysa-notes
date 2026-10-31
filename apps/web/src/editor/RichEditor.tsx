@@ -23,17 +23,14 @@ import { useEditorBinding } from './editorBinding.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
-import {
-	BASIC_SLOTS,
-	FormatToolbar,
-	type FormatToolbarProps,
-	type ToolbarPlacement,
-} from './FormatToolbar.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
 import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
 import type { SecretHost } from './secretHost.js';
 import { SlashMenu } from './SlashMenu.js';
+import { FormatToolbar } from './toolbar/FormatToolbar.js';
+import { BASIC_SLOTS } from './toolbar/slots.js';
+import type { FormatToolbarProps, ToolbarPlacement } from './toolbar/types.js';
 
 /**
  * Rich text mode. The editor lives in `rich.ts`; this is the React side of it —
