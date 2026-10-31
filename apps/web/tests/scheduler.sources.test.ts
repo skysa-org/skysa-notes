@@ -6,7 +6,7 @@ import {
 	serializeEncryptionFile,
 } from '@skysa/core';
 import type { FakeProvider } from '@skysa/core/testing';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import type { NotesDatabase } from '../src/store/db.js';
@@ -21,7 +21,10 @@ import {
 	reaches,
 	remote,
 	started,
+	stopSchedulers,
 } from './support/scheduler.js';
+
+afterEach(stopSchedulers);
 
 describe('files beside notes, read for showing (#187)', () => {
 	/** A file on the remote, mirrored as a row by a sync. */

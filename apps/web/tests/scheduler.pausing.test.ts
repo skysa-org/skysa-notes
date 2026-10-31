@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, showConnection } from '../src/store/connection.js';
 import type { NotesDatabase } from '../src/store/db.js';
@@ -19,7 +19,10 @@ import {
 	reaches,
 	remote,
 	started,
+	stopSchedulers,
 } from './support/scheduler.js';
+
+afterEach(stopSchedulers);
 
 describe('pausing', () => {
 	it('aborts the run under way, and says it is paused whatever that run comes to', async () => {

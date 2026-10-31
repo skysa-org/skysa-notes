@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
@@ -16,7 +16,10 @@ import {
 	quiet,
 	reaches,
 	started,
+	stopSchedulers,
 } from './support/scheduler.js';
+
+afterEach(stopSchedulers);
 
 describe('the change relay', () => {
 	/** Links as the scheduler asks for them, with a way to say another device pushed. */

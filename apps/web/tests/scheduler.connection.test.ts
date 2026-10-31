@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import type { NotesDatabase } from '../src/store/db.js';
@@ -24,8 +24,11 @@ import {
 	reaches,
 	remote,
 	started,
+	stopSchedulers,
 	tokenServer,
 } from './support/scheduler.js';
+
+afterEach(stopSchedulers);
 
 /**
  * Let `c1` go and connect the same account again. The credential goes with the

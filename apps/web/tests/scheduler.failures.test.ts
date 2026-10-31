@@ -1,5 +1,5 @@
 import { RateLimitError } from '@skysa/core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApiClient } from '../src/api/client.js';
 import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
@@ -21,7 +21,10 @@ import {
 	quiet,
 	reaches,
 	started,
+	stopSchedulers,
 } from './support/scheduler.js';
+
+afterEach(stopSchedulers);
 
 describe('failures', () => {
 	it('retries with a backoff that doubles, up to its cap, and resets on success', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNote, saveNoteBody } from '../src/store/notes.js';
 import { createSyncScheduler, type SchedulerEvent } from '../src/sync/scheduler.js';
@@ -14,8 +14,11 @@ import {
 	reaches,
 	remote,
 	started,
+	stopSchedulers,
 	tokenServer,
 } from './support/scheduler.js';
+
+afterEach(stopSchedulers);
 
 describe('with no connection', () => {
 	it('says notes are kept on this device, and asks nothing of anyone', async () => {

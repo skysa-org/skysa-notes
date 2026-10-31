@@ -4,7 +4,7 @@
  */
 import { AuthError, CLIPBOARD_FOLDER, type StorageProvider } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
-import { afterEach, expect, vi } from 'vitest';
+import { expect, vi } from 'vitest';
 
 import type { ApiClient } from '../../src/api/client.js';
 import { bindConnection } from '../../src/store/connection.js';
@@ -32,14 +32,14 @@ export const BACKOFF = 5000;
 
 export const cleanups: (() => Promise<void> | void)[] = [];
 
-// Registered on import, for each test file that starts a scheduler through `started`.
-afterEach(async () => {
+/** What each test started, stopped: `afterEach(stopSchedulers)` in a file that uses `started`. */
+export const stopSchedulers = async (): Promise<void> => {
 	await Promise.all(
 		cleanups.splice(0).map(async (cleanup) => {
 			await cleanup();
 		})
 	);
-});
+};
 
 type FakeEnvironment = ReturnType<typeof fakeEnvironment>;
 
