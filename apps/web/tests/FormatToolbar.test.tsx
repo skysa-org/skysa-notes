@@ -18,7 +18,7 @@ import { destroyRichEditors, mountRich } from './support/editor.js';
  * A toolbar tested against a stub can be wrong about both and still pass.
  */
 
-const harness = async (body: string, only?: readonly string[]) => {
+const harness = async (body: string, only?: typeof BASIC_SLOTS) => {
 	const { editor } = await mountRich({ body });
 
 	const withCtx = <T,>(action: (ctx: Ctx) => T): T => editor.action(action);
@@ -489,6 +489,57 @@ describe('FormatToolbar', () => {
 		expect(document.activeElement).toBe(bold);
 		expect(bold.getAttribute('tabindex')).toBe('0');
 		expect(style.getAttribute('tabindex')).toBe('-1');
+	});
+});
+
+/**
+ * What each command says it reports on, read through the button it draws: a
+ * name here that is not the schema's lights nothing, and nothing else notices.
+ */
+describe('FormatToolbar, on the text under the cursor', () => {
+	it.each([
+		['Bold', '**word**\n'],
+		['Italic', '*word*\n'],
+		['Bulleted list', '- word\n'],
+		['Numbered list', '1. word\n'],
+		['Task list', '- [ ] word\n'],
+		['Code block', '```\nword\n```\n'],
+	])('lights %s over %j, and only that', async (name, body) => {
+		const editor = await harness(body);
+		editor.withCtx(cursorIn('word'));
+		editor.redraw();
+
+		const pressed = screen
+			.getAllByRole('button', { pressed: true })
+			.map((button) => button.getAttribute('aria-label'));
+		expect(pressed).toEqual([name]);
+	});
+
+	it.each([
+		['Strikethrough', '~~word~~\n'],
+		['Code', '`word`\n'],
+	])('lights %s in its menu over %j', async (name, body) => {
+		const editor = await harness(body);
+		editor.withCtx(cursorIn('word'));
+		editor.redraw();
+
+		await userEvent.click(screen.getByRole('button', { name: 'More formatting' }));
+
+		expect(screen.getByRole('button', { name }).getAttribute('aria-pressed')).toBe('true');
+	});
+
+	// The first item cannot go deeper, having nothing to go under, and can come out.
+	it('greys each indent button by its own direction', async () => {
+		const editor = await harness('- word\n- other\n');
+		editor.withCtx(cursorIn('word'));
+		editor.redraw();
+
+		expect(
+			screen.getByRole('button', { name: 'Increase indent' }).getAttribute('aria-disabled')
+		).toBe('true');
+		expect(
+			screen.getByRole('button', { name: 'Decrease indent' }).hasAttribute('aria-disabled')
+		).toBe(false);
 	});
 });
 

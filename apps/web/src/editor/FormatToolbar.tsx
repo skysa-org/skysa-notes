@@ -29,7 +29,7 @@ import {
 	TEXT_STYLES,
 } from './commands.js';
 import type { FormatState } from './format.js';
-import { Icon, type IconName } from './icons.js';
+import { Icon } from './icons.js';
 import { onPress, type PressedBy } from './press.js';
 import { fitToolbar, sameFit } from './toolbarFit.js';
 
@@ -63,60 +63,15 @@ export interface FormatToolbarProps {
 	run: (apply: (ctx: Ctx) => void, by?: PressedBy) => void;
 }
 
-const ICONS: Record<string, IconName> = {
-	strong: 'bold',
-	emphasis: 'italic',
-	strike: 'strike',
-	code: 'code',
-	'code-block': 'code-block',
-	attach: 'paperclip',
-	'insert-secret': 'lock',
-	'clear-formatting': 'clear',
-	'bullet-list': 'bullets',
-	'ordered-list': 'numbers',
-	'task-list': 'tasks',
-	outdent: 'outdent',
-	indent: 'indent',
-};
-
-/** The mark a toggle button reports on, where it reports on one. */
-const MARKS: Record<string, string> = {
-	strong: 'strong',
-	emphasis: 'emphasis',
-	strike: 'strike_through',
-	code: 'inlineCode',
-};
-
-/** The block a toggle button reports on, where it reports on one. */
-const BLOCKS: Record<string, keyof FormatState> = {
-	'code-block': 'codeBlock',
-};
-
-const LISTS: Record<string, FormatState['list']> = {
-	'bullet-list': 'bullet',
-	'ordered-list': 'ordered',
-	'task-list': 'task',
-};
-
-/**
- * Whether the button is one that is on or off: a mark, a list, a block. One
- * that only does something — indents, clears, attaches — is not pressed or
- * unpressed, and a screen reader is not told it is.
- */
-const toggles = (command: EditorCommand): boolean =>
-	MARKS[command.id] !== undefined ||
-	LISTS[command.id] !== undefined ||
-	BLOCKS[command.id] !== undefined;
+/** Whether the button is one that is on or off (`EditorCommand.reflects`). */
+const toggles = (command: EditorCommand): boolean => command.reflects !== undefined;
 
 /** Whether the button should be drawn as already applied. */
-const isOn = (command: EditorCommand, format: FormatState): boolean => {
-	const mark = MARKS[command.id];
-	if (mark !== undefined) return format.marks.includes(mark);
-	const list = LISTS[command.id];
-	if (list !== undefined) return format.list === list;
-	const block = BLOCKS[command.id];
-	if (block !== undefined) return format[block] === true;
-	return false;
+const isOn = ({ reflects }: EditorCommand, format: FormatState): boolean => {
+	if (reflects === undefined) return false;
+	if ('mark' in reflects) return format.marks.includes(reflects.mark);
+	if ('list' in reflects) return format.list === reflects.list;
+	return format[reflects.block];
 };
 
 /**
@@ -124,17 +79,30 @@ const isOn = (command: EditorCommand, format: FormatState): boolean => {
  * not what would happen — which includes the first item of a list, where
  * `sinkListItem` refuses.
  */
-const isOff = (command: EditorCommand, format: FormatState): boolean => {
-	if (command.id === 'indent') return !format.canIndent;
-	if (command.id === 'outdent') return !format.canOutdent;
+const isOff = ({ needs, reflects }: EditorCommand, format: FormatState): boolean => {
+	if (needs !== undefined) return !format[needs];
 	// A code block holds no marks — the schema says so — so the buttons that
 	// would add one are grey there rather than lit and inert.
-	if (MARKS[command.id] !== undefined) return format.codeBlock;
-	return false;
+	return reflects !== undefined && 'mark' in reflects && format.codeBlock;
 };
 
 /** The groups the bar's controls are drawn in. */
 type Group = 'textStyle' | 'textFormatting' | 'lists' | 'indentation' | 'insert' | 'link';
+
+/** Every slot the bar has, by id. */
+type SlotId =
+	| 'text-style'
+	| 'strong'
+	| 'emphasis'
+	| 'more-formatting'
+	| 'bullet-list'
+	| 'ordered-list'
+	| 'task-list'
+	| 'indentation'
+	| 'code-block'
+	| 'attach'
+	| 'insert-secret'
+	| 'link';
 
 /**
  * The bar's slots, in the order they are drawn, and the group each is drawn
@@ -143,7 +111,7 @@ type Group = 'textStyle' | 'textFormatting' | 'lists' | 'indentation' | 'insert'
  * control.
  */
 interface Slot {
-	id: string;
+	id: SlotId;
 	group: Group;
 }
 
@@ -173,7 +141,10 @@ const GROUP_LABELS: Readonly<Record<Group, string>> = {
 };
 
 /** The slot a tab stop is in, where it is not a slot of its own. */
-const SLOT_OF_STOP: Record<string, string> = { outdent: 'indentation', indent: 'indentation' };
+const SLOT_OF_STOP: Readonly<Record<string, SlotId>> = {
+	outdent: 'indentation',
+	indent: 'indentation',
+};
 
 /**
  * The bar a scratch note has (docs/ARCHITECTURE.md §7, "The scratchpad"): the
@@ -181,7 +152,7 @@ const SLOT_OF_STOP: Record<string, string> = { outdent: 'indentation', indent: '
  * out — no headings, no code blocks — but a photo or a receipt is as quickly
  * kept as a line of text (the owner's ask, 2026-10-07).
  */
-export const BASIC_SLOTS: readonly string[] = [
+export const BASIC_SLOTS: readonly SlotId[] = [
 	'strong',
 	'emphasis',
 	'bullet-list',
@@ -208,7 +179,7 @@ const firstStop = (slots: readonly Slot[]): string => {
  * style never does — it is the widest control, but it is also the one that
  * says what the cursor is in.
  */
-const GIVE_UP_ORDER: readonly string[] = [
+const GIVE_UP_ORDER: readonly SlotId[] = [
 	'code-block',
 	'indentation',
 	'more-formatting',
@@ -231,18 +202,6 @@ const COMMANDS_BY_ID = new Map(
 	])
 );
 
-/**
- * Which slots fit, measured.
- *
- * Every slot's width is taken from the screen while it is on it and kept once
- * it has gone, so the bar can tell when one would fit again without drawing it
- * to find out. Measured after every render as well as on a resize, because a
- * render can change a width: the text style reads "Plain text" in one
- * paragraph and "Heading 1" in the next.
- *
- * A bar with no width — jsdom, where nothing is laid out, or a toolbar not on
- * screen — is left alone, with everything in it.
- */
 /** What the bar has measured, kept between renders. */
 interface FitMemory {
 	widths: Map<string, number>;
@@ -447,6 +406,16 @@ const useDismiss = (
 	}, [open, close, host]);
 };
 
+/** What makes a control the bar's roving tab stop (`useRoving`). */
+type Stop = ReturnType<ReturnType<typeof useRoving>['stop']>;
+
+/** What a control with a panel of its own is given. */
+interface PanelProps extends FormatToolbarProps {
+	open: boolean;
+	setOpen: (open: boolean) => void;
+	stop: Stop;
+}
+
 const ToolbarButton = ({
 	command,
 	format,
@@ -454,9 +423,9 @@ const ToolbarButton = ({
 	stop,
 }: FormatToolbarProps & {
 	command: EditorCommand;
-	stop: ReturnType<ReturnType<typeof useRoving>['stop']>;
+	stop: Stop;
 }) => {
-	const icon = ICONS[command.id];
+	const { icon } = command;
 	const on = isOn(command, format);
 	const off = isOff(command, format);
 
@@ -587,7 +556,7 @@ const ToolbarPopover = ({
 	trigger: ReactNode;
 	open: boolean;
 	setOpen: (open: boolean) => void;
-	stop: ReturnType<ReturnType<typeof useRoving>['stop']>;
+	stop: Stop;
 	children: ReactNode;
 }) => {
 	const host = useRef<HTMLDivElement>(null);
@@ -668,17 +637,7 @@ const ToolbarPopover = ({
 };
 
 /** Plain text, or one of the six headings. */
-const TextStyleMenu = ({
-	format,
-	run,
-	open,
-	setOpen,
-	stop,
-}: FormatToolbarProps & {
-	open: boolean;
-	setOpen: (open: boolean) => void;
-	stop: ReturnType<ReturnType<typeof useRoving>['stop']>;
-}) => {
+const TextStyleMenu = ({ format, run, open, setOpen, stop }: PanelProps) => {
 	const current = TEXT_STYLES.find((style) => style.level === format.level);
 	const shown = current?.command.label ?? t('editor.commands.plainText');
 
@@ -720,7 +679,7 @@ const MenuCommand = ({
 	run,
 	close,
 }: FormatToolbarProps & { command: EditorCommand; close: () => void }) => {
-	const icon = ICONS[command.id];
+	const { icon } = command;
 	return (
 		<button
 			type="button"
@@ -739,17 +698,7 @@ const MenuCommand = ({
 };
 
 /** Strikethrough, code, and taking it all off again. */
-const MoreFormatting = ({
-	format,
-	run,
-	open,
-	setOpen,
-	stop,
-}: FormatToolbarProps & {
-	open: boolean;
-	setOpen: (open: boolean) => void;
-	stop: ReturnType<ReturnType<typeof useRoving>['stop']>;
-}) => (
+const MoreFormatting = ({ format, run, open, setOpen, stop }: PanelProps) => (
 	<ToolbarPopover
 		id="more-formatting"
 		label={t('editor.toolbar.moreFormatting')}
@@ -858,17 +807,7 @@ const LinkForm = ({
  * browser's: the selection outlives the blur, and the editor is handed focus
  * back the moment the panel closes.
  */
-const LinkPanel = ({
-	format,
-	run,
-	open,
-	setOpen,
-	stop,
-}: FormatToolbarProps & {
-	open: boolean;
-	setOpen: (open: boolean) => void;
-	stop: ReturnType<ReturnType<typeof useRoving>['stop']>;
-}) => (
+const LinkPanel = ({ format, run, open, setOpen, stop }: PanelProps) => (
 	<ToolbarPopover
 		id="link"
 		label={t('editor.toolbar.link')}
@@ -895,7 +834,7 @@ const LinkPanel = ({
 export type ToolbarPlacement = 'top' | 'bottom';
 
 /** The commands a slot stands for, as rows in the overflow menu. */
-const commandsIn = (slot: string): readonly EditorCommand[] => {
+const commandsIn = (slot: SlotId): readonly EditorCommand[] => {
 	if (slot === 'more-formatting') return MORE_INLINE_COMMANDS;
 	if (slot === 'indentation') return INDENT_COMMANDS;
 	const command = COMMANDS_BY_ID.get(slot);
@@ -972,7 +911,7 @@ export const FormatToolbar = ({
 }: FormatToolbarProps & {
 	placement?: ToolbarPlacement;
 	/** The slots to draw, by id (`BASIC_SLOTS`); every one, unsaid. */
-	only?: readonly string[];
+	only?: readonly SlotId[];
 }) => {
 	const root = useRef<HTMLDivElement>(null);
 	const slots = useMemo(
@@ -1001,7 +940,7 @@ export const FormatToolbar = ({
 		/>
 	);
 
-	const slot = (id: string): ReactNode => {
+	const slot = (id: SlotId): ReactNode => {
 		switch (id) {
 			case 'text-style':
 				return (
@@ -1044,7 +983,7 @@ export const FormatToolbar = ({
 		.filter(({ id }) => !hidden.has(id))
 		.reduce(
 			(drawn, { id, group }) => drawn.set(group, [...(drawn.get(group) ?? []), id]),
-			new Map<Group, string[]>()
+			new Map<Group, SlotId[]>()
 		);
 
 	return (
