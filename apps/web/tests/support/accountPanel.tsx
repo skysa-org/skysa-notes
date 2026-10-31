@@ -231,7 +231,6 @@ export const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 
 export type FakeSync = ReturnType<typeof fakeSync>;
 
-/** The panel at `url`, inside a router, since it reads where it is. */
 /**
  * What the shell does with what the panel keeps over the page (`Notices`):
  * one toast, until it is dismissed.
@@ -252,6 +251,7 @@ export const WithNotices = ({ children }: { children: ReactNode }) => (
 	</NoticesProvider>
 );
 
+/** The panel at `url`, inside a router, since it reads where it is. */
 export const renderPanel = (
 	client: Client,
 	database: NotesDatabase,
