@@ -1,0 +1,5 @@
+# A commit here changed no words, only where the lines break.
+# git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# One sentence per line in ARCHITECTURE (#675)
+cfe87a5e5b9419f48ce0205092179f2427572910
