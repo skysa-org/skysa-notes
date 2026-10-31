@@ -2,9 +2,9 @@ import { liftListItem, sinkListItem } from '@milkdown/kit/prose/schema-list';
 import type { EditorState } from '@milkdown/kit/prose/state';
 
 import { createStore } from '../store/emitter.js';
-import { CODE_BLOCK_NODE, LINK_MARK } from './commands.js';
 import { listAround, type ListKind } from './lists.js';
 import { markRunIn } from './markRun.js';
+import { CODE_BLOCK_NODE, LINK_MARK } from './rich/schema.js';
 
 /**
  * What the editor's selection is, in the terms the toolbar draws itself in.

@@ -6,12 +6,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	ALL_COMMANDS,
 	BLOCK_COMMANDS,
-	clearLink,
 	INLINE_COMMANDS,
 	INSERT_COMMANDS,
-	setLink,
 	SLASH_COMMANDS,
 } from '../src/editor/commands.js';
+import { clearLink, setLink } from '../src/editor/rich/actions/link.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
