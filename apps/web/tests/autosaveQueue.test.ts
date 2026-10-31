@@ -220,7 +220,24 @@ describe('createHeld, when a newer edit stands for an older one', () => {
 });
 
 describe('createHeld, trying again', () => {
-	it('tries each failed edit once a round, with the save it was made for', async () => {
+	it('tries an edit with the save it was made for, not the last one issued', async () => {
+		const { held, issue } = queue();
+		const mine = vi.fn<Save<string>>(() => Promise.reject(new Error('refused')));
+		const another = vi.fn<Save<string>>();
+
+		issue('one', mine);
+		await settle();
+		issue('other', another, { key: 'b' });
+		mine.mockClear();
+		another.mockClear();
+
+		held.retry(new Set());
+
+		expect(mine).toHaveBeenCalledExactlyOnceWith('one');
+		expect(another).not.toHaveBeenCalled();
+	});
+
+	it('tries each failed edit once a round', async () => {
 		const { held, issue } = queue();
 		const save = vi.fn<Save<string>>(() => Promise.reject(new Error('refused')));
 
@@ -319,9 +336,9 @@ describe('createHeld, asked to forget a note', () => {
 
 	it('says so when what it let go is not the newest for the note', () => {
 		const { held, issue } = queue({ supersedes: () => false });
-		const second = out();
+		const first = out();
 
-		issue('one', () => second.promise);
+		issue('one', () => first.promise);
 		issue('two', vi.fn<Save<string>>());
 
 		expect(held.forget('a')).toEqual({ value: 'one', displaced: true });

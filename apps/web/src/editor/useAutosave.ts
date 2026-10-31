@@ -23,21 +23,7 @@ import { type Attempt, createHeld, type Save, type Unstored } from './autosaveQu
  * which is the order `save` was called in.
  *
  * A write that rejects is said (`failing`) and its edit held, to be tried again
- * by the next flush or on a slow timer. What a retry may never do is put an
- * older body over a newer one, so:
- * - a retry round writes what is pending first, and an edit is let go the
- *   moment a newer one that stands for it has been issued — so an old body is
- *   only ever retried when nothing newer exists for its note;
- * - one edit stands for another only when it was typed after it, into the same
- *   note, in the same sitting, and `supersedes` agrees. A sitting ends whenever
- *   the editor is rebuilt from the stored body (another note, another mode):
- *   text typed after that was not typed on top of an edit that never reached
- *   the store, and does not contain it;
- * - an edit that is still held when something newer has been issued for its
- *   note is handed to `save` as `displaced`, to be kept beside the note rather
- *   than written over it.
- * Edits of different origins are never merged by any of this (docs/ARCHITECTURE.md §7):
- * neither stands for the other, and each is attempted on its own.
+ * by the next flush or on a slow timer (`autosaveQueue.ts`).
  */
 
 const AUTOSAVE_DELAY_MS = 2000;
