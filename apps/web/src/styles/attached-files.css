@@ -15,7 +15,7 @@
 	grid-template-areas:
 		'icon name size'
 		'icon notes action';
-	column-gap: 0.625rem;
+	column-gap: var(--space-s);
 	align-items: center;
 	padding: var(--space-s) 0;
 	border-block-start: 1px solid var(--border);

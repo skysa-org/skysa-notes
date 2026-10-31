@@ -106,7 +106,7 @@
 .modal button,
 .fill-page button:not(.icon, .link-button) {
 	font: inherit;
-	padding: 0.35rem var(--space-m);
+	padding: var(--space-xs) var(--space-m);
 	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--bg);
@@ -358,7 +358,7 @@
 .group-field,
 .unlock-field {
 	width: 100%;
-	padding: 0.35rem var(--space-s);
+	padding: var(--space-xs) var(--space-s);
 	font: inherit;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);

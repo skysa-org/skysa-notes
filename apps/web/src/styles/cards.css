@@ -162,7 +162,7 @@
 
 .scratch-close {
 	margin-inline-start: auto;
-	padding: 0.3rem 0.8rem;
+	padding: var(--space-2xs) var(--space-m);
 	font: inherit;
 	font-size: var(--text-m);
 	font-weight: 600;
@@ -260,7 +260,7 @@
 .scratch-card-open {
 	display: flex;
 	flex-direction: column;
-	gap: 0.3rem;
+	gap: var(--space-2xs);
 	width: 100%;
 	padding: var(--space-m) var(--space-m) var(--space-2xs);
 	font: inherit;
@@ -282,7 +282,7 @@
    the card's size. */
 .scratch-card-picture[data-state='ready'] {
 	display: block;
-	margin-block: 0.2rem;
+	margin-block: var(--space-2xs);
 }
 
 .scratch-card-picture {
@@ -307,7 +307,7 @@
 .scratch-card-picture[data-room] {
 	display: block;
 	overflow: hidden;
-	margin-block: 0.2rem;
+	margin-block: var(--space-2xs);
 	border-radius: var(--radius-xs);
 }
 
@@ -572,7 +572,7 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	box-sizing: border-box;
 	width: 100%;
 	margin-block-end: var(--space-l);
-	padding: 0.4rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	font: inherit;
 	color: var(--fg);
 	background: var(--bg);

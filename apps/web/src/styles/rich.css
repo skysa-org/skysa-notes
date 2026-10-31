@@ -204,7 +204,7 @@
 .secret-bar {
 	display: flex;
 	gap: var(--space-s);
-	padding: 0.4rem var(--space-m);
+	padding: var(--space-xs) var(--space-m);
 }
 
 /* What it is, Reveal, and why not: centred against the bar beside it, which
@@ -259,7 +259,7 @@
 .secret-label-field {
 	flex: 1;
 	min-inline-size: 0;
-	padding: 0.35rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);
@@ -323,7 +323,7 @@
 .secret-words {
 	box-sizing: border-box;
 	inline-size: 100%;
-	padding: var(--space-s) 0.6rem;
+	padding: var(--space-s);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);
@@ -401,7 +401,7 @@
 	font: inherit;
 	font-size: var(--text-xs);
 	max-inline-size: 9rem;
-	padding: 0.15rem 0.2rem;
+	padding: var(--space-3xs) var(--space-2xs);
 	border: 1px solid transparent;
 	border-radius: var(--radius-xs);
 	background: none;
@@ -587,7 +587,7 @@
 .note-image-action {
 	font: inherit;
 	font-size: var(--text-s);
-	padding: 0.15rem var(--space-s);
+	padding: var(--space-3xs) var(--space-s);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-xs);
 	background: var(--bg);
@@ -765,7 +765,7 @@
 	align-items: center;
 	gap: 0.4em;
 	max-width: min(24rem, 100%);
-	padding: var(--space-2xs) 0.55rem;
+	padding: var(--space-2xs) var(--space-s);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);

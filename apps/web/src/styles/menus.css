@@ -30,7 +30,7 @@
 	font: inherit;
 	font-size: var(--text-m);
 	text-align: start;
-	padding: 0.4rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	border: 0;
 	border-radius: var(--radius-s);
 	background: none;
@@ -51,7 +51,7 @@
 .toolbar-button {
 	font: inherit;
 	font-size: var(--text-s);
-	padding: 0.3rem var(--control-inline);
+	padding: var(--space-2xs) var(--control-inline);
 	border: 0;
 	border-radius: var(--radius-s);
 	background: none;
@@ -62,7 +62,7 @@
 .toolbar-button {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.2rem;
+	gap: var(--space-2xs);
 	min-height: 1.75rem;
 }
 

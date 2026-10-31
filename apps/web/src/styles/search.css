@@ -59,7 +59,7 @@
 .search-result {
 	display: flex;
 	flex-direction: column;
-	gap: 0.15rem;
+	gap: var(--space-3xs);
 	padding: var(--row-block) var(--gutter);
 	color: var(--fg);
 	cursor: pointer;

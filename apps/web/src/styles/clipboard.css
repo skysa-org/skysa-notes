@@ -45,7 +45,7 @@
 }
 
 .clipboard > :not(:first-child) {
-	margin-block-start: 0.35rem;
+	margin-block-start: var(--space-xs);
 }
 
 .clipboard > .clipboard-said:empty {
@@ -154,7 +154,7 @@
 	list-style: none;
 	display: flex;
 	flex-direction: column;
-	gap: 0.35rem;
+	gap: var(--space-xs);
 }
 
 .clipboard-item {

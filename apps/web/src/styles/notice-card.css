@@ -39,7 +39,7 @@
 .update-prompt button,
 .toast button {
 	flex: none;
-	padding: 0.35rem var(--space-m);
+	padding: var(--space-xs) var(--space-m);
 }
 
 .update-prompt button.ghost,

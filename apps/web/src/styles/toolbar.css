@@ -124,7 +124,7 @@
 	align-items: center;
 	gap: var(--space-s);
 	width: 100%;
-	padding: 0.4rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	font: inherit;
 	font-size: var(--text-m);
 	text-align: start;
@@ -181,9 +181,9 @@
 .toolbar-link {
 	display: flex;
 	flex-direction: column;
-	gap: 0.35rem;
+	gap: var(--space-xs);
 	min-width: 15rem;
-	padding: 0.35rem;
+	padding: var(--space-xs);
 }
 
 .toolbar-link label {
@@ -193,16 +193,16 @@
 
 .toolbar-link input {
 	font-size: var(--text-m);
-	padding: 0.35rem var(--space-s);
+	padding: var(--space-xs) var(--space-s);
 }
 
 .toolbar-link .dialog-actions {
-	gap: 0.35rem;
+	gap: var(--space-xs);
 }
 
 .toolbar-link .dialog-actions button {
 	font-size: var(--text-m);
-	padding: 0.3rem 0.7rem;
+	padding: var(--space-2xs) var(--space-m);
 }
 
 .toolbar-link .dialog-actions button:disabled {

@@ -21,7 +21,7 @@
 
 .error-actions button {
 	font: inherit;
-	padding: 0.35rem var(--space-m);
+	padding: var(--space-xs) var(--space-m);
 	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--surface);
@@ -41,7 +41,7 @@
 /* A store error can be one long line; it wraps rather than widening the page. */
 .error-screen pre {
 	margin: var(--space-s) 0 0;
-	padding: 0.6rem var(--space-m);
+	padding: var(--space-s) var(--space-m);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);

@@ -74,7 +74,7 @@
 	align-items: center;
 	gap: var(--space-3xs);
 	margin-block-start: var(--space-2xs);
-	padding: 0.2rem var(--space-2xs);
+	padding: var(--space-2xs);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);

@@ -79,7 +79,7 @@
 
 .palette-chord {
 	flex: none;
-	padding: 0.1rem 0.35rem;
+	padding: var(--space-3xs) var(--space-xs);
 	font-family: inherit;
 	font-size: var(--text-xs);
 	border: 1px solid var(--border);
