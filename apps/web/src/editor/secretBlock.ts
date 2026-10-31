@@ -18,18 +18,15 @@ import { iconElement } from './icons.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from './nodeBar.js';
 import { secretHostCtx } from './secretHost.js';
 import {
-	addKeyButton,
 	createSecretPanels,
 	DRAFT,
 	insertSecret,
-	keepAll,
-	keepSecretsWith,
 	leftBehind,
-	lockAll,
-	NOT_REVEALED,
 	reveal as revealSecret,
+	revealControl,
 	type SecretDocument,
 	type SecretPanels,
+	secretSession,
 } from './secretPanels.js';
 
 /**
@@ -334,15 +331,7 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 		},
 		view: (view) => {
 			const doc = documentOf(view);
-			const stopLock = host.locked(() => {
-				lockAll(doc, panels);
-			});
-			const stopReceiving = host.receive(() => {
-				void insertSecret(doc, host, panels);
-			});
-			const stopKeeping = keepSecretsWith(view, () => {
-				keepAll(doc, panels);
-			});
+			const endSession = secretSession(view, doc, host, panels);
 			return {
 				update: (updated, before) => {
 					if (updated.state.doc === before.doc || panels.all().length === 0) return;
@@ -351,15 +340,7 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 					// be the first of them now.
 					panels.refresh();
 				},
-				destroy: () => {
-					stopKeeping();
-					stopLock();
-					stopReceiving();
-					// The editor is going: the words with it. What they held is in
-					// the note already, a character still being composed included,
-					// where its owner asked first (`keepSecrets`).
-					panels.takeAll();
-				},
+				destroy: endSession,
 			};
 		},
 	});
@@ -387,21 +368,19 @@ const secretView = (ctx: Ctx) => {
 		};
 		named();
 
-		const reveal = document.createElement('button');
-		reveal.setAttribute('type', 'button');
-		reveal.setAttribute('class', 'secret-reveal');
-		reveal.append(t('editor.secret.reveal'));
-
-		const said = document.createElement('span');
-		said.setAttribute('class', 'secret-note');
-		said.setAttribute('role', 'status');
-
 		const remover = barButton('trash', t('editor.secret.remove'));
 		const bar = nodeBar(view, [remover], 'secret-actions');
 
 		const line = document.createElement('div');
 		line.setAttribute('class', 'secret-line');
-		line.append(label, reveal, said);
+		line.append(label);
+		const { button: reveal, press } = revealControl({
+			into: line,
+			host,
+			armor: () => valueOf(held.current),
+			press: (armor) => revealSecret(doc, host, panels, armor),
+			gone: () => gone.current,
+		});
 
 		const row = document.createElement('div');
 		row.setAttribute('class', 'secret-bar');
@@ -439,24 +418,6 @@ const secretView = (ctx: Ctx) => {
 			queueMicrotask(show);
 		};
 
-		/** "Add its key", where the last Reveal found it made with a key the device does not have. */
-		const adding = cell<HTMLButtonElement | undefined>(undefined);
-		const open = () => {
-			said.replaceChildren();
-			adding.current?.remove();
-			adding.current = undefined;
-			reveal.setAttribute('disabled', '');
-			const armor = valueOf(held.current);
-			void revealSecret(doc, host, panels, armor).then((problem) => {
-				reveal.removeAttribute('disabled');
-				if (problem === undefined) return;
-				said.replaceChildren(NOT_REVEALED[problem]());
-				if (problem !== 'other' || gone.current) return;
-				adding.current = addKeyButton(host, armor, open);
-				line.append(adding.current);
-			});
-		};
-		reveal.addEventListener('click', open);
 		// The user taking the secret out of the note. A panel open on it goes
 		// with it (`leftBehind`).
 		remover.addEventListener(
@@ -465,7 +426,7 @@ const secretView = (ctx: Ctx) => {
 		);
 		selectedKeys.set(dom, {
 			open: () => {
-				open();
+				press();
 				return true;
 			},
 			toBar: () => {
