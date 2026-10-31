@@ -49,6 +49,25 @@ const sources = (folder: string): readonly string[] =>
 	});
 
 describe('the stylesheet', () => {
+	// The scale drifted to 21 sizes one literal at a time. The rest are written
+	// by hand on purpose: the editors' own text, and what `pt` and `px` are for.
+	it('takes the size of words from the scale', () => {
+		const sizes = [...withoutComments(allStyles()).matchAll(/font-size:\s*([^;]+);/g)].map(
+			(match) => match[1] ?? ''
+		);
+		const onPurpose = new Set(['1.6rem', '1.3rem', '1.1rem', '0.9rem', '16px', '16pt', '14pt']);
+
+		expect(sizes.length).toBeGreaterThan(0);
+		expect(
+			sizes.filter(
+				(size) =>
+					!size.startsWith('var(--text-') &&
+					!/[\d.]em$/.test(size) &&
+					!onPurpose.has(size)
+			)
+		).toEqual([]);
+	});
+
 	// Unlayered, ProseMirror's sheets win every tie with the app's: they arrive
 	// with the editor's chunk, after it.
 	it("keeps the editor's vendored sheets under the app's, in a layer", () => {

@@ -59,10 +59,12 @@
 	--shadow-l: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
 	--shadow-xl: 0 1rem 2.5rem rgb(0 0 0 / 25%);
 
-	/* Words, by size, for the app around a note. A note's own text is not one of
-	   these (the headings in `rich.css`, the Markdown editor's in `shell.css`), nor
-	   a size in `em`, which follows the words around it, nor the 16px a field needs
-	   so that Safari on a phone does not zoom into it. */
+	/* Words, by size, for the app around a note. The editors' own text is not one
+	   of these (the headings in `rich.css`, the Markdown editor's in `shell.css`),
+	   nor a size in `em`, which follows the words around it. `--text-field-floor`
+	   is not a step: it is what Safari on a phone needs of a field or it zooms in,
+	   and it stays 16px whatever `--text-body` becomes. */
+	--text-field-floor: 1rem;
 	--text-xs: 0.75rem;
 	--text-s: 0.8125rem;
 	--text-m: 0.875rem;
