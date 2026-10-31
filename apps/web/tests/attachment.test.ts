@@ -1,6 +1,6 @@
 import { editorViewCtx } from '@milkdown/kit/core';
 import { DOMParser as ProseParser, DOMSerializer } from '@milkdown/kit/prose/model';
-import { NodeSelection, Selection } from '@milkdown/kit/prose/state';
+import { NodeSelection, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -9,6 +9,7 @@ import {
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
+import { ATTACHMENT, selectedKey } from '../src/editor/attachment.js';
 import { currentMarkdown } from '../src/editor/rich.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
@@ -440,6 +441,18 @@ describe('a chip', () => {
 		enter();
 		expect(asked).toEqual([]);
 
+		// A cursor just in front of a chip is in the words, not on the chip:
+		// the element there is the chip's, but the selection is not.
+		const chip = { current: -1 };
+		view.state.doc.descendants((node, pos) => {
+			if (node.type.name === ATTACHMENT) chip.current = pos;
+		});
+		view.dispatch(
+			view.state.tr.setSelection(TextSelection.create(view.state.doc, chip.current))
+		);
+		enter();
+		expect(asked).toEqual([]);
+
 		// A picture opens full size, as a chip opens (`image.ts`), rather than
 		// being split out of its paragraph.
 		const picture = { current: -1 };
@@ -452,6 +465,20 @@ describe('a chip', () => {
 		enter();
 
 		expect(asked).toEqual(['b.png']);
+	});
+
+	it('leaves Enter and Tab alone on a node selected whole whose view has no keys', async () => {
+		const { view } = await mount('A [a.zip](a.zip) b.\n\n---\n');
+		const rule = { current: -1 };
+		view.state.doc.descendants((node, pos) => {
+			if (node.type.name === 'hr') rule.current = pos;
+		});
+		view.dispatch(
+			view.state.tr.setSelection(NodeSelection.create(view.state.doc, rule.current))
+		);
+
+		expect(selectedKey(view, new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(false);
+		expect(selectedKey(view, new KeyboardEvent('keydown', { key: 'Tab' }))).toBe(false);
 	});
 
 	it('is taken out of the note by Remove, as an edit, leaving the words around it', async () => {
