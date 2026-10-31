@@ -86,7 +86,7 @@
 }
 
 .toolbar-style {
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	white-space: nowrap;
 }
 
@@ -126,7 +126,7 @@
 	width: 100%;
 	padding: 0.4rem 0.6rem;
 	font: inherit;
-	font-size: 0.9rem;
+	font-size: var(--text-m);
 	text-align: start;
 	color: var(--fg);
 	background: none;
@@ -162,7 +162,7 @@
 }
 
 [data-sample-level='2'] {
-	font-size: 1.1rem;
+	font-size: var(--text-l);
 	font-weight: 600;
 }
 
@@ -174,7 +174,7 @@
 [data-sample-level='4'],
 [data-sample-level='5'],
 [data-sample-level='6'] {
-	font-size: 0.9rem;
+	font-size: var(--text-m);
 	font-weight: 600;
 }
 
@@ -192,7 +192,7 @@
 }
 
 .toolbar-link input {
-	font-size: 0.9rem;
+	font-size: var(--text-m);
 	padding: 0.35rem 0.5rem;
 }
 
@@ -201,7 +201,7 @@
 }
 
 .toolbar-link .dialog-actions button {
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	padding: 0.3rem 0.7rem;
 }
 
@@ -213,7 +213,7 @@
 .banner {
 	margin: 0;
 	padding: var(--space-s) var(--gutter);
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	color: var(--muted);
 	border-block-end: 1px solid var(--border);
 	background: var(--surface);

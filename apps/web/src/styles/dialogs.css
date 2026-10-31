@@ -46,7 +46,7 @@
 	max-width: 28rem;
 	max-height: 100%;
 	overflow: hidden;
-	font-size: 0.9rem;
+	font-size: var(--text-m);
 	line-height: 1.6;
 }
 
@@ -78,7 +78,7 @@
 	flex: 1;
 	min-width: 0;
 	margin: 0;
-	font-size: 1.1rem;
+	font-size: var(--text-l);
 	overflow-wrap: anywhere;
 }
 

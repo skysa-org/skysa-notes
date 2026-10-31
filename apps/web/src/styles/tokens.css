@@ -59,12 +59,15 @@
 	--shadow-l: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
 	--shadow-xl: 0 1rem 2.5rem rgb(0 0 0 / 25%);
 
-	/* Words, by size. A size in `em` follows the words around it, and is not
-	   one of these. */
+	/* Words, by size, for the app around a note. A note's own text is not one of
+	   these (the headings in `rich.css`, the Markdown editor's in `shell.css`), nor
+	   a size in `em`, which follows the words around it, nor the 16px a field needs
+	   so that Safari on a phone does not zoom into it. */
 	--text-xs: 0.75rem;
 	--text-s: 0.8125rem;
 	--text-m: 0.875rem;
 	--text-body: 1rem;
+	--text-l: 1.125rem;
 	--text-xl: 1.25rem;
 
 	/* What is over what, across the whole page. `1` and `2` inside a component

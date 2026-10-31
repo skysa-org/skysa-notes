@@ -28,7 +28,7 @@
 	flex: none;
 	padding: 0.75rem;
 	font: inherit;
-	font-size: 0.95rem;
+	font-size: var(--text-body);
 	border: 0;
 	border-block-end: 1px solid var(--border);
 	background: transparent;

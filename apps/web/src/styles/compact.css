@@ -258,7 +258,7 @@
 	min-width: 0;
 	padding: 0.35rem calc(var(--crumb) / 2);
 	font: inherit;
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	color: var(--fg);
 	background: none;
 	border: 0;
@@ -429,7 +429,7 @@
 	margin: var(--space-s) var(--gutter);
 	padding: 0.35rem 0.5rem;
 	font: inherit;
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--bg);
