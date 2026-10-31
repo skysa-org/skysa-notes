@@ -31,7 +31,7 @@
 	max-height: min(36rem, 70dvh);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
-	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+	box-shadow: var(--shadow-l);
 }
 
 /* The bar is the top of the window, so under it to the foot is the window
