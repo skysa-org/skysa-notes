@@ -26,6 +26,41 @@
 	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
 
+/* A button with words on it. Each says its own padding, until those are one
+   step. The buttons of `.modal`, `.account`, `.clipboard`, `.fill-page`,
+   `.note-actions` and `.error-actions` look much the same (`.error-actions`' are
+   on `--surface`) and are not here on purpose: each holds its place in the
+   cascade over rules of the same weight, `.modal button` and `.note-actions
+   button` over `button.danger`, `button.icon` and `button.row`, and the
+   `:not(.icon)` ones over `button.row:hover` and `button.row.pinned`. From here
+   they would lose to those. */
+.update-prompt button,
+.toast button,
+.connect-code-form button,
+.toolbar-link .dialog-actions button,
+.install-banner button.install-banner-install {
+	font: inherit;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-s);
+	background: var(--bg);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+/* A place to type or choose. Each says its own padding, and its size of words. */
+.connect-code-form input,
+.toolbar-link input,
+.passwords-filter input,
+.password-form input,
+.password-form select,
+.password-form textarea {
+	font: inherit;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-s);
+	background: var(--bg);
+	color: var(--fg);
+}
+
 /* The bar of small icon buttons that hangs off a block in the editor: a code
    block's, a file chip's, a picture's, a secret's (which sits in its block's
    line instead, `.secret-actions`). The block's text is selectable; the

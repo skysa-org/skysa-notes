@@ -15,13 +15,7 @@
 
 .install-banner button.install-banner-install {
 	flex: none;
-	font: inherit;
 	padding: 0.25rem 0.75rem;
-	border-radius: var(--radius-s);
-	border: 1px solid var(--border);
-	background: var(--bg);
-	color: var(--fg);
-	cursor: pointer;
 }
 
 .install-banner button.icon {

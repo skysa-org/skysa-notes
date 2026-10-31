@@ -41,6 +41,36 @@ const primitiveDeclarations = (selector: string): string =>
 		.join(' ');
 
 describe('the stylesheet', () => {
+	it.each([
+		'.update-prompt button',
+		'.toast button',
+		'.connect-code-form button',
+		'.toolbar-link .dialog-actions button',
+		'.install-banner button.install-banner-install',
+		'.connect-code-form input',
+		'.toolbar-link input',
+		'.passwords-filter input',
+		'.password-form input',
+		'.password-form select',
+		'.password-form textarea',
+	])('draws %s as a control', (selector) => {
+		const control = primitiveDeclarations(selector);
+
+		if (selector.endsWith('button') || selector.endsWith('-install')) {
+			expect(control).toContain('cursor: pointer');
+		}
+
+		for (const declaration of [
+			'font: inherit',
+			'border: 1px solid var(--border)',
+			'border-radius: var(--radius-s)',
+			'background: var(--bg)',
+			'color: var(--fg)',
+		]) {
+			expect(control).toContain(declaration);
+		}
+	});
+
 	// Each of these is nothing without its surface: see-through, over whatever is
 	// behind it.
 	it.each([
