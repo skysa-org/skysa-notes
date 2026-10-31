@@ -1,4 +1,4 @@
-import { createStore } from '../store/emitter.js';
+import { createStore } from './emitter.js';
 
 /**
  * How code blocks are shown: wrapped or scrolling, numbered or not.

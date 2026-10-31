@@ -2,7 +2,7 @@ import { SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { createCodeDisplayStore } from '../src/lib/codeDisplay.js';
+import { createCodeDisplayStore } from '../src/store/codeDisplay.js';
 import { bindConnection, finishImport } from '../src/store/connection.js';
 import { ACTIVE_CONNECTION_KEY, db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';

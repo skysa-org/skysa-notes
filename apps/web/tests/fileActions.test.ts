@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { type FileBrowser, openFile, saveFile } from '../src/components/attachments/fileActions.js';
 import {
 	type AttachmentHost,
 	type AttachmentProblem,
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
-import { type FileBrowser, openFile, saveFile } from '../src/lib/fileActions.js';
 
 /**
  * Opening and saving a file beside a note (#187), against a browser that

@@ -25,7 +25,6 @@ import {
 } from '@skysa/core';
 import Dexie from 'dexie';
 
-import type { EditorMode } from '../lib/editorMode.js';
 import {
 	activeConnectionId,
 	type ConnectionScope,
@@ -38,6 +37,7 @@ import {
 } from './db.js';
 import { deletedHere } from './deletedHere.js';
 import { ensureDetached } from './detached.js';
+import type { EditorMode } from './editorMode.js';
 import { carryLinkedFiles } from './files.js';
 import { ensureFolder } from './folders.js';
 import { frontmatterOf } from './frontmatter.js';

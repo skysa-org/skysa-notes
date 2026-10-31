@@ -558,7 +558,7 @@ export default tseslint.config(
 								'pictures',
 								'commands',
 							],
-							'the store is the data layer: it does not import the sync layer or the UI.'
+							'the store is the data layer: it does not import the sync layer, the UI or the editors.'
 						),
 					],
 				},
@@ -591,6 +591,36 @@ export default tseslint.config(
 			],
 		},
 	},
+	{
+		// The bottom layer: plain browser helpers, for anything above to use.
+		files: ['apps/web/src/lib/**/*.{ts,tsx}'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						NOT_ABOVE(
+							[
+								'components',
+								'editor',
+								'store',
+								'routes',
+								'sync',
+								'secrets',
+								'fill',
+								'share',
+								'install',
+								'pictures',
+								'commands',
+							],
+							'lib/ is the bottom layer: it imports nothing of the app.'
+						),
+					],
+				},
+			],
+		},
+	},
+
 	{
 		// The editors are views over a note's markdown (CLAUDE.md): they may use
 		// the store and shared UI pieces, but not the screens that hold them or

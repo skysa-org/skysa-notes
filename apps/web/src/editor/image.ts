@@ -7,8 +7,8 @@ import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $prose, $view } from '@milkdown/kit/utils';
 import { cell, classifyHref } from '@skysa/core';
 
+import { openFile, saveFile } from '../components/attachments/fileActions.js';
 import { t } from '../i18n/t.js';
-import { openFile, saveFile } from '../lib/fileActions.js';
 import {
 	attachHostCtx,
 	type AttachmentHost,

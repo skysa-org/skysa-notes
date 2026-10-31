@@ -6,7 +6,7 @@ import { cell } from '@skysa/core';
 
 import { iconElement, type IconName } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
-import type { CodeDisplayStore } from '../lib/codeDisplay.js';
+import type { CodeDisplayStore } from '../store/codeDisplay.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
 import { removeNode } from './nodeBar.js';
 

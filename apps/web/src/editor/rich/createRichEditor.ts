@@ -25,7 +25,7 @@ import { $prose } from '@milkdown/kit/utils';
 import { toLf } from '@skysa/core';
 
 import { t } from '../../i18n/t.js';
-import { codeDisplay, type CodeDisplayStore } from '../../lib/codeDisplay.js';
+import { codeDisplay, type CodeDisplayStore } from '../../store/codeDisplay.js';
 import { richCaretAboveKeyboard } from '../aboveKeyboard.js';
 import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from '../attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from '../attachHost.js';

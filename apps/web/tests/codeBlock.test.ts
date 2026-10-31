@@ -4,7 +4,7 @@ import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
-import { type CodeDisplayStore, createCodeDisplayStore } from '../src/lib/codeDisplay.js';
+import { type CodeDisplayStore, createCodeDisplayStore } from '../src/store/codeDisplay.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

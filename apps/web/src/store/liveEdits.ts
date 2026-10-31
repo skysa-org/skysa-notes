@@ -17,7 +17,7 @@ import { titleAfterEdit } from './notes.js';
  * the old text into the gap.
  *
  * A store rather than React state, and the same shape as
- * `lib/codeDisplay.ts`, so that a keystroke redraws the one row and the
+ * `store/codeDisplay.ts`, so that a keystroke redraws the one row and the
  * name field that show it, not every pane in the app.
  */
 

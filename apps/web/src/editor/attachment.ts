@@ -5,9 +5,9 @@ import type { MarkdownNode } from '@milkdown/kit/transformer';
 import { $nodeSchema, $view } from '@milkdown/kit/utils';
 import { cell, fileKind, isAttachmentHref } from '@skysa/core';
 
+import { type FileBrowser, openFile, saveFile } from '../components/attachments/fileActions.js';
 import { FILE_ICONS, iconElement } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
-import { type FileBrowser, openFile, saveFile } from '../lib/fileActions.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { opensOnClick } from './links.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from './nodeBar.js';

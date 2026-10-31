@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { lineStarts, NUMBERED_LINE_LIMIT } from '../src/editor/codeTools.js';
-import { createCodeDisplayStore } from '../src/lib/codeDisplay.js';
+import { createCodeDisplayStore } from '../src/store/codeDisplay.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

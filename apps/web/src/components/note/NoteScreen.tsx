@@ -2,8 +2,8 @@ import { frontmatterIsEditable, headings, type StructuralDifference } from '@sky
 import { type ReactNode, useMemo } from 'react';
 
 import { t } from '../../i18n/t.js';
-import { type EditorMode, MODE_LABELS } from '../../lib/editorMode.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
+import { type EditorMode, MODE_LABELS } from '../../store/editorMode.js';
 import { shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
 import { PinButton, ScratchBar } from '../scratchpad/ScratchControls.js';
