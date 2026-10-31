@@ -27,6 +27,7 @@ import {
 	type HeldUrl,
 	type ObjectUrlCache,
 } from '../../editor/objectUrls.js';
+import { createOffers } from '../../editor/offers.js';
 import { pickFiles } from '../../editor/pickFiles.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { copyTurns, nearestCopy } from '../../pictures/copies.js';
@@ -229,13 +230,7 @@ export const createNoteAttachments = ({
 			...size,
 		};
 	};
-	// Every editor that has offered itself and not gone, in the order they
-	// offered. The last is the one open now. More than one only while one
-	// editor is giving way to another, and that can go either way round: the
-	// new one can be built before the old one has gone, and a rich editor
-	// still being built when it is let go of is built — and offers itself —
-	// before it goes.
-	const receivers = new Set<FileReceiver>();
+	const receivers = createOffers<FileReceiver>();
 
 	/**
 	 * The bytes of a file, from the device where they are, and otherwise as
@@ -558,19 +553,14 @@ export const createNoteAttachments = ({
 
 		add: (file, { pasted }) => add(file, pasted),
 
-		receive: (receiver) => {
-			receivers.add(receiver);
-			return () => {
-				receivers.delete(receiver);
-			};
-		},
+		receive: receivers.offer,
 
 		pick: () => {
 			void pickFiles().then((files) => {
 				if (files.length === 0) return;
 				// The editor open when they were chosen, which is the one the
 				// user is looking at; none, where the note has gone meanwhile.
-				const into = [...receivers].at(-1);
+				const into = receivers.current();
 				if (into === undefined) report(closedProblem(files.map((file) => file.name)));
 				else into(files);
 			});

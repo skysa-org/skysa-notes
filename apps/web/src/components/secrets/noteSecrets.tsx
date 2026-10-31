@@ -2,6 +2,7 @@ import { AgeError, cell } from '@skysa/core';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AttachmentProblem } from '../../editor/attachHost.js';
+import { createOffers } from '../../editor/offers.js';
 import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
 import { t } from '../../i18n/t.js';
 import { type Age, loadAge } from '../../secrets/loadAge.js';
@@ -130,7 +131,7 @@ export const useNoteSecrets = (
 	/** The unlock being asked for, which a second secret waits on too. */
 	const waiting = useRef<Promise<boolean> | undefined>(undefined);
 	/** The editor open now, offering itself for "Insert secret". */
-	const receiver = useRef<(() => void) | undefined>(undefined);
+	const [receivers] = useState(createOffers<() => void>);
 	/** The source's Vault dialog, open over the note, and what the source is called. */
 	const [secretsOf, setSecretsOf] = useState<Readonly<{
 		connectionId: string;
@@ -283,19 +284,14 @@ export const useNoteSecrets = (
 					was.current = now;
 				});
 			},
-			receive: (insert) => {
-				receiver.current = insert;
-				return () => {
-					if (receiver.current === insert) receiver.current = undefined;
-				};
-			},
+			receive: receivers.offer,
 		}),
-		[opening, unlocked, unlockedNow, said, db]
+		[opening, unlocked, unlockedNow, said, db, receivers]
 	);
 
 	const insert = useCallback(() => {
-		receiver.current?.();
-	}, []);
+		receivers.current()?.();
+	}, [receivers]);
 
 	const keyDialog =
 		adding === null ? null : (
