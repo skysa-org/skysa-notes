@@ -12,7 +12,7 @@ import type { SchedulerStatus, StuckOp } from '../src/sync/scheduler.js';
 /**
  * What the storage panel says about how syncing is going, as tables: the
  * scheduler's status in, the words out (`account/statusWords.ts`). The panel's
- * own tests (`AccountPanel.test.tsx`) keep where the words are drawn — the
+ * own tests (`AccountPanel.status.test.tsx`) keep where the words are drawn — the
  * line, its tooltip under who the account is, the sentence above the line, the
  * bar — and leave every wording to these.
  */
