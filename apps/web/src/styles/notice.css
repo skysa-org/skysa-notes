@@ -1,0 +1,75 @@
+/* The card every notice floating over the page is made of. The new-version
+   prompt was the first and gave it its name; the undo notice, the stale-tab
+   bar and the toasts are the same shape. The look lives here and the placing
+   lives with each of them, so a notice that joins a stack is not also told
+   where on the viewport to be. */
+.update-prompt,
+.toast {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--surface);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.update-prompt {
+	position: fixed;
+	inset-block-end: 1rem;
+	inset-inline: 1rem;
+	margin-inline: auto;
+	max-width: 28rem;
+}
+
+/* Up into place from the foot of the page, where every notice sits. */
+.update-prompt,
+.toast-stack > * {
+	--arrive-y: 0.5rem;
+	animation: arrive var(--duration-l) var(--ease-out);
+}
+
+.update-prompt span,
+.toast span {
+	flex: 1;
+	/* A name with no break in it — a scratch note that is only a URL — wraps
+	   where it has to, rather than holding the card's buttons out past its
+	   edge. */
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.update-prompt button,
+.toast button {
+	flex: none;
+	font: inherit;
+	padding: 0.35rem 0.75rem;
+	border-radius: 0.375rem;
+	border: 1px solid var(--border);
+	background: var(--bg);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+.update-prompt button.ghost,
+.toast button.ghost {
+	border-color: transparent;
+	background: transparent;
+	color: var(--muted);
+}
+
+/* A notice's way out (`DismissButton`): an × in the corner, the card leaving
+   it room, so that it does not stand beside Undo, or a link, as a second
+   button of the same weight. */
+.toast {
+	position: relative;
+	padding-inline-end: calc(var(--toast-close) + 0.75rem);
+	--toast-close: 1.75rem;
+}
+
+.toast button.toast-close {
+	position: absolute;
+	inset-block-start: 0.375rem;
+	inset-inline-end: 0.375rem;
+}

@@ -1,0 +1,565 @@
+/* One line, as wide as a reader's line and no wider, until it is pressed. */
+.take-note {
+	position: relative;
+	width: 100%;
+	max-width: 36rem;
+	margin-inline: auto;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--bg);
+	box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+	transition: box-shadow var(--duration-state) var(--ease-out);
+}
+
+/* What is in the box, at its own height while the box eases to it. */
+.take-note-inner {
+	border-radius: inherit;
+}
+
+.take-note.taking {
+	box-shadow: 0 4px 16px rgb(0 0 0 / 0.14);
+}
+
+.take-note-prompt {
+	display: block;
+	width: 100%;
+	padding: var(--space-m) var(--gutter);
+	font: inherit;
+	text-align: start;
+	color: var(--muted);
+	background: none;
+	border: 0;
+	border-radius: inherit;
+	cursor: text;
+}
+
+/* Holds the focus between a press and the editor it opens (`TakeNote`):
+   there to be focused, and nowhere to be seen. 16px, so that a phone does not
+   zoom in to it. */
+.focus-keeper {
+	position: absolute;
+	inset-block-start: 0;
+	inset-inline-start: 0;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	font-size: 16px;
+	border: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* The editor of a scratch note: a title and a pin over the note, the basic
+   bar under it, and the note's own bar under that. In the box it is as tall
+   as what is in it, and grows as it is written in. */
+.scratch-editor .note-header {
+	border-block-end: 0;
+	padding-block-end: 0;
+}
+
+.scratch-editor .note-title-input::placeholder {
+	color: var(--muted);
+	font-weight: 600;
+}
+
+.scratch-editor .format-toolbar {
+	background: transparent;
+}
+
+.scratch-editor .format-toolbar-bottom {
+	padding-block-end: var(--space-2xs);
+}
+
+.scratch-editor .editor-rich-surface {
+	padding-block-end: var(--gutter);
+}
+
+.take-note .scratch-editor {
+	overflow: visible;
+	border-radius: inherit;
+}
+
+/* `.note-body` lays the editor out in a row, so the editor keeps its share of
+   the width there and gives up only its scrolling. */
+.take-note .note-body,
+.take-note .editor-rich [data-milkdown-root] {
+	flex: none;
+	overflow: visible;
+}
+
+.take-note .editor {
+	overflow: visible;
+}
+
+.take-note .editor-rich-surface {
+	min-height: 4.5rem;
+}
+
+/* The basic toolbar and the note's own bar on one row (`toolbarEnd`): the
+   toolbar has what the bar leaves it, and puts what does not fit there behind
+   its More tools, as it would at the window's edge. */
+.editor-toolbar-row {
+	display: flex;
+	align-items: center;
+	border-block-start: 1px solid var(--border);
+}
+
+/* No width of its own to ask for (`width: 0`), so the row is never wider than
+   the box it is in for want of room for every tool: the toolbar is given the
+   room, and measures what fits in it. */
+.editor-toolbar-row .format-toolbar {
+	flex: 1 1 0;
+	width: 0;
+	border-block-start: 0;
+}
+
+/* Ruled off from the tools as their groups are from each other, so on a
+   phone, where some tools are behind More tools, its `⋯` is the note's and
+   reads as apart from the toolbar's. */
+.editor-toolbar-row .scratch-bar {
+	flex: none;
+	padding-inline-start: var(--space-2xs);
+	border-inline-start: 1px solid var(--border);
+}
+
+.scratch-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2xs);
+	padding: var(--space-2xs) calc(var(--gutter) - var(--control-inline));
+}
+
+/* A card open in a compact window (`CardSheet`) is the one whose foot is the
+   window's, so the phone's home indicator is kept clear of its tools there
+   and not in the box on the wall or the dialog. The row's, kept clear as one:
+   given to the note's bar alone, it made the bar taller than the toolbar
+   beside it, its buttons at its top and the toolbar's in its middle. Clear
+   by as much as a note's own bar is (`.format-toolbar-bottom`). */
+.card-sheet .editor-toolbar-row {
+	padding-block-end: max(0px, env(safe-area-inset-bottom) - var(--space-2xs));
+}
+
+/* In Markdown, the note's bar alone under the note. */
+.card-sheet .note-view > .scratch-bar {
+	padding-block-end: max(var(--space-2xs), env(safe-area-inset-bottom));
+}
+
+.scratch-close {
+	margin-inline-start: auto;
+	padding: 0.3rem 0.8rem;
+	font: inherit;
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.scratch-close:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* Two groups, the pinned and the rest, a step further apart than anything
+   else on the page, and each named only while there are both. */
+.scratch-group + .scratch-group {
+	margin-block-start: var(--space-l);
+}
+
+.scratch-group-name {
+	margin: 0 0 var(--space-s);
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+
+/* Until the wall has a width to place cards by, and where nothing is laid
+   out: a grid of cards at their widest, near enough for one frame. */
+.scratch-wall {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 15rem));
+	justify-content: center;
+	align-items: start;
+	gap: 12px;
+}
+
+/* Placed (`masonry.ts`): each card at its own place, the wall as tall as its
+   tallest column. Physical, since the places are. */
+.scratch-wall.placed {
+	display: block;
+	position: relative;
+}
+
+.scratch-wall.placed > .scratch-card {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transition: transform var(--duration-m) var(--ease-out);
+}
+
+.scratch-card {
+	position: relative;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--bg);
+	transition: box-shadow var(--duration-state) var(--ease-out);
+}
+
+.scratch-card[data-color] {
+	border-color: transparent;
+}
+
+/* Open, it is where its editor is, grown out of this place on the wall
+   (`cardMotion.ts`), and the place is kept for it to go back into. */
+.scratch-card[data-open] {
+	opacity: 0;
+}
+
+/* A card open in a compact window (`CardSheet`): no box of its own, so the
+   note pane in it is the column's. */
+.card-sheet {
+	display: contents;
+}
+
+@media (prefers-color-scheme: dark) {
+	.scratch-card {
+		background: var(--surface);
+	}
+}
+
+@media (hover: hover) {
+	.scratch-card:not([data-color]):hover {
+		box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+	}
+}
+
+.scratch-card-open {
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+	width: 100%;
+	padding: var(--space-m) var(--space-m) var(--space-2xs);
+	font: inherit;
+	font-size: 0.875rem;
+	line-height: 1.5;
+	text-align: start;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: inherit;
+	overflow-wrap: anywhere;
+	cursor: pointer;
+}
+
+/* A picture in a card, where it is in the note: whole, as wide as the card
+   and no taller than about six of its lines (`PICTURE_LINES`). Until it is
+   got, its words, in the room it will take (below), or among the others
+   where it takes none. A chip is the editor's own (`.attachment-chip`), at
+   the card's size. */
+.scratch-card-picture[data-state='ready'] {
+	display: block;
+	margin-block: 0.2rem;
+}
+
+.scratch-card-picture {
+	--card-picture-most: 8rem;
+}
+
+.scratch-card-picture > img {
+	display: block;
+	width: auto;
+	max-width: 100%;
+	height: auto;
+	max-height: var(--card-picture-most);
+	border-radius: 0.25rem;
+}
+
+/* The room it takes (`CardEmbed.tsx`, `Room`, #276), so the card is as tall
+   before it arrives as after and the wall does not place it again when it
+   does: the same as it is drawn in, where its size was known before, and
+   else the tallest a card draws a picture, the picture drawn whole inside it
+   and never larger than it is. Its words meanwhile, in it. Where its size is
+   known, the picture fills it, whichever copy it is. */
+.scratch-card-picture[data-room] {
+	display: block;
+	overflow: hidden;
+	margin-block: 0.2rem;
+	border-radius: 0.25rem;
+}
+
+.scratch-card-picture[data-room]:not([data-state='ready']) {
+	background: var(--hover-bg);
+}
+
+.scratch-card-picture[data-room='sized'] {
+	inline-size: min(
+		100%,
+		var(--card-picture-width),
+		calc(var(--card-picture-most) * var(--card-picture-ratio))
+	);
+	aspect-ratio: var(--card-picture-ratio);
+}
+
+.scratch-card-picture[data-room='tallest'] {
+	block-size: var(--card-picture-most);
+}
+
+.scratch-card-picture[data-room] > img {
+	width: 100%;
+	height: 100%;
+	max-height: none;
+}
+
+.scratch-card-picture[data-room='tallest'] > img {
+	object-fit: scale-down;
+	object-position: left top;
+}
+
+.scratch-card-chip {
+	/* As in the note (`.attachment`): chips side by side stand apart, and
+	   none before the first in its line. */
+	margin: var(--space-3xs);
+	vertical-align: bottom;
+}
+
+/* Words are not elements, so a chip after them is a first child too: the line
+   says when it starts with what it embeds (`CardLine`). */
+.scratch-card-words[data-embed-first] > .scratch-card-chip:first-child {
+	margin-inline-start: 0;
+}
+
+/* The whole card opens it, its foot included, all but the tools along that
+   foot: the button is pressed anywhere on the card, and the tools' row lets a
+   press between and beside them through to it. */
+.scratch-card-open::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+}
+
+.scratch-card-title {
+	font-size: 0.95rem;
+	font-weight: 600;
+}
+
+/* A card's lines set as the note's are: an item's bullet, number or box
+   before its words, which wrap under themselves; a heading's words heavier;
+   a quote ruled off; code in the code face; and a task that is done struck
+   through, as the editor has it. */
+.scratch-card-line {
+	display: flex;
+	gap: 0.4em;
+}
+
+.scratch-card-words {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.scratch-card-marker {
+	flex: none;
+	min-width: 1em;
+	text-align: center;
+	color: var(--muted);
+}
+
+.scratch-card-box {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 0.85em;
+	height: 0.85em;
+	margin: 0.3em 0.075em 0;
+	border: 1.5px solid var(--muted);
+	border-radius: 0.2em;
+	color: var(--bg);
+}
+
+.scratch-card-box[data-checked='true'] {
+	background: var(--muted);
+}
+
+.scratch-card-box > .toolbar-icon {
+	width: 0.7em;
+	height: 0.7em;
+}
+
+.scratch-card-line[data-heading] {
+	font-weight: 600;
+}
+
+.scratch-card-line[data-quote] {
+	padding-inline-start: 0.6em;
+	border-inline-start: 2px solid var(--border);
+	color: var(--muted);
+}
+
+.scratch-card-line[data-code],
+.scratch-card-words code {
+	font-family: var(--font-mono);
+	font-size: 0.9em;
+}
+
+.scratch-card-line[data-done] > .scratch-card-words {
+	color: var(--muted);
+	text-decoration: line-through;
+}
+
+.scratch-card-link {
+	text-decoration: underline;
+}
+
+/* A link that opens in the browser when pressed, rather than the card.
+   Positioned, so that it is over the press stretched across the card
+   (`.scratch-card-open::before`) rather than under it: that is what a press on
+   it lands on, and the card's press asks what it landed on. */
+.scratch-card-link[data-href] {
+	position: relative;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.scratch-card-link[data-href]:hover {
+		color: var(--brand);
+	}
+}
+
+.scratch-card-open > .dot {
+	position: absolute;
+	inset-block-start: 0.5rem;
+	inset-inline-end: 0.5rem;
+}
+
+/* What can be done to a card, along its foot: shown with the pointer over it
+   or the focus in it, and always on a touch screen, which has no hover to
+   show them on. A pin that is on stays, to say so. Their room is kept either
+   way, so a card is the same height with them and without. */
+.scratch-card-tools {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 0 var(--space-2xs) var(--space-2xs);
+	pointer-events: none;
+}
+
+.scratch-card-tools > * {
+	pointer-events: auto;
+	opacity: 0;
+	transition: opacity var(--duration-state) var(--ease-out);
+}
+
+.scratch-card:focus-within .scratch-card-tools > *,
+.scratch-card-tools > .pin-button[aria-pressed='true'] {
+	opacity: 1;
+}
+
+@media (hover: hover) {
+	.scratch-card:hover .scratch-card-tools > * {
+		opacity: 1;
+	}
+}
+
+@media (hover: none) {
+	.scratch-card-tools > * {
+		opacity: 1;
+	}
+}
+
+.scratch-card-tools > .pin-button[aria-pressed='true'] {
+	color: var(--on-fg);
+}
+
+/* A note's colour and `⋯` are lit while their menu is open, as the toolbar's
+   menus beside them are (`.toolbar-button-on`), on the card and under the
+   editor alike. On a card, its tools stay shown while one is open: the menu is
+   drawn outside the card, so the pointer on it is not on the card. */
+.scratch-card-tools button.icon.icon-quiet[aria-expanded='true'],
+.scratch-bar button.icon.icon-quiet[aria-expanded='true'] {
+	color: var(--on-fg);
+	background: var(--on-bg);
+}
+
+.scratch-card-tools:has([aria-expanded='true']) > * {
+	opacity: 1;
+}
+
+.scratch-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-s);
+	margin-block-start: 3rem;
+	text-align: center;
+}
+
+.scratch-empty > .toolbar-icon {
+	width: 2rem;
+	height: 2rem;
+}
+
+/* A card open in a wide window: its editor in a dialog over the wall, as tall
+   as what is in it, and scrolling inside itself past most of the window. */
+.scratch-modal {
+	--arrive-y: 0.5rem;
+	--arrive-scale: 0.98;
+	display: flex;
+	flex-direction: column;
+	width: min(40rem, 100%);
+	max-height: min(85dvh, 48rem);
+	border: 1px solid var(--border);
+	border-radius: 0.75rem;
+	background: var(--bg);
+	box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+	overflow: hidden;
+	outline: none;
+	animation: arrive var(--duration-l) var(--ease-out);
+}
+
+.scratch-modal > .note-view {
+	flex: 0 1 auto;
+	min-height: 0;
+	border-radius: inherit;
+}
+
+.scratch-modal .note-body {
+	flex: 0 1 auto;
+	min-height: 0;
+}
+
+.scratch-modal .editor-rich [data-milkdown-root] {
+	flex: 0 1 auto;
+}
+
+.scratch-modal .editor-rich-surface {
+	min-height: 8rem;
+}
+
+/* A menu opened from inside the dialog, which is drawn on the page's body
+   beside it, goes over it rather than under its backdrop. */
+body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
+	z-index: 110;
+}
+
+/* The name a note is asked for before it goes into a notebook (`NameDialog`). */
+.name-field {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	margin-block-end: 1rem;
+	padding: 0.4rem 0.6rem;
+	font: inherit;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+}

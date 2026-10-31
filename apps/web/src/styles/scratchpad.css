@@ -1,0 +1,161 @@
+/* ---- Scratchpad ---------------------------------------------------------- */
+
+/*
+ * A source's scratchpad (`Scratchpad.tsx`, docs/ARCHITECTURE.md §7, "The
+ * scratchpad"): a box to take a note in, and its notes under it as a wall of
+ * cards. In a wide window it has the notes' column and the note's together;
+ * in a compact one it is the notes' dropdown.
+ *
+ * A card's colour is the clipboard's glow in that colour: a gradient of it
+ * over the card, an edge in it and a glow outside. Each colour has a value
+ * for each theme, the dark one lifted as `--accent` is, so the glow reads
+ * against a dark page.
+ */
+:root {
+	--scratch-red: #dc2626;
+	--scratch-orange: #ea580c;
+	--scratch-yellow: #ca8a04;
+	--scratch-green: #16a34a;
+	--scratch-teal: #0d9488;
+	--scratch-blue: #2563eb;
+	--scratch-purple: #9333ea;
+	--scratch-pink: #db2777;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--scratch-red: #f87171;
+		--scratch-orange: #fb923c;
+		--scratch-yellow: #facc15;
+		--scratch-green: #4ade80;
+		--scratch-teal: #2dd4bf;
+		--scratch-blue: #60a5fa;
+		--scratch-purple: #c084fc;
+		--scratch-pink: #f472b6;
+	}
+}
+
+[data-color='red'] {
+	--tint: var(--scratch-red);
+}
+
+[data-color='orange'] {
+	--tint: var(--scratch-orange);
+}
+
+[data-color='yellow'] {
+	--tint: var(--scratch-yellow);
+}
+
+[data-color='green'] {
+	--tint: var(--scratch-green);
+}
+
+[data-color='teal'] {
+	--tint: var(--scratch-teal);
+}
+
+[data-color='blue'] {
+	--tint: var(--scratch-blue);
+}
+
+[data-color='purple'] {
+	--tint: var(--scratch-purple);
+}
+
+[data-color='pink'] {
+	--tint: var(--scratch-pink);
+}
+
+/* A scratch note's editor is a surface of its own, coloured or not: a card
+   opening in a compact window grows over the wall from the card's place, and
+   goes back into it the same way, and would show the cards through it. */
+.scratch-editor {
+	background: var(--bg);
+}
+
+/* The glow, wherever a scratch note is coloured: its card, its editor, and
+   the dialog a card opens in. */
+.scratch-card[data-color],
+.scratch-editor[data-color] {
+	--scratch-glow: 22%;
+	background: linear-gradient(
+		160deg,
+		var(--bg) 0%,
+		color-mix(in srgb, var(--tint) 14%, var(--bg)) 100%
+	);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--tint) 42%, transparent),
+		0 0 12px color-mix(in srgb, var(--tint) var(--scratch-glow), transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+	.scratch-card[data-color],
+	.scratch-editor[data-color] {
+		--scratch-glow: 28%;
+		background: linear-gradient(
+			160deg,
+			color-mix(in srgb, var(--tint) 24%, var(--surface)) 0%,
+			var(--surface) 78%
+		);
+	}
+}
+
+/* A colour the system takes away still says there is one. */
+@media (forced-colors: active) {
+	.scratch-card[data-color],
+	.scratch-editor[data-color] {
+		outline: 2px solid CanvasText;
+		outline-offset: -2px;
+	}
+}
+
+/* A colour to choose, before its name in the menu; an empty ring for none. */
+.swatch {
+	flex: none;
+	width: 1rem;
+	height: 1rem;
+	border-radius: 50%;
+	background: var(--tint, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent);
+}
+
+.toolbar-item[aria-pressed='true'] {
+	font-weight: 600;
+}
+
+.toolbar-item[aria-pressed='true'] > .swatch {
+	box-shadow:
+		0 0 0 2px var(--bg),
+		0 0 0 3.5px var(--fg);
+}
+
+/* Its row, above the notebooks' heading, apart from them by the same rule,
+   and as tall as the headings at the top of the other columns (`.pane-header`
+   with a button in it), so the rules under the three line up. Its mark on
+   the gutter, where their words begin. The passwords' row (docs/ARCHITECTURE.md
+   §7, "Passwords in the vault") is the same row under the notebooks, ruled
+   off above them, between the tree, which scrolls, and the account's foot. */
+.scratchpad-row {
+	border-block-end: 1px solid var(--border);
+}
+
+.passwords-row {
+	border-block-start: 1px solid var(--border);
+}
+
+/* A row across rather than a column, so `start`: the touch screen's
+   `justify-content: center` for rows, which centres their words top to
+   bottom, would centre these side to side. */
+.place-row > button.row {
+	flex-direction: row;
+	justify-content: start;
+	align-items: center;
+	gap: var(--space-s);
+	min-block-size: calc(var(--control) + 2 * var(--bar-block));
+}
+
+.place-row .toolbar-icon {
+	flex: none;
+	color: var(--muted);
+}

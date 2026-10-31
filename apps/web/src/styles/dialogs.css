@@ -1,0 +1,694 @@
+/* ---- A tab a newer build has superseded --------------------------------- */
+
+/* A wrapper only so there is something to make inert; it must not become a
+   box, or the shell inside loses the height it takes from the page. */
+.tab-gate {
+	display: contents;
+}
+
+/* A dialog over everything (`Dialog`), held to what can be seen of the page:
+   the window, or, where a phone's keyboard covers the bottom of the window
+   rather than making it shorter, what the keyboard leaves (`--viewport-*`,
+   set from the visual viewport). One row, as tall as the backdrop, so the
+   card in it is never taller than that. */
+.modal-backdrop {
+	position: fixed;
+	inset: var(--viewport-top, 0px) 0 auto;
+	z-index: 100;
+	display: grid;
+	grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+	place-items: center;
+	height: var(--viewport-height, 100%);
+	/* A phone's dialog is all but the window's width, and its sides a little
+	   narrower (`--dialog-pad`), for a row of three buttons to fit in one
+	   line: by the window's width, without a media query (the layout module
+	   alone says where a compact window begins). */
+	padding: clamp(0.75rem, 3vw, 1rem);
+	background: rgb(0 0 0 / 0.4);
+	animation: dim-in var(--duration-l) var(--ease-out);
+}
+
+/* Mounted but not drawn yet (`hidden`): the grid above would draw it anyway. */
+.modal-backdrop[hidden] {
+	display: none;
+}
+
+/* As wide as there is room for, up to a reading width, whatever it holds: a
+   short question as wide as a long one, so a phone's buttons have the width
+   of the window to sit in. The title at the top and the row at the foot stay
+   where they are; what is between them scrolls, where it is more than there
+   is room for. */
+.modal {
+	display: flex;
+	flex-direction: column;
+	--dialog-pad: clamp(1.25rem, 5vw, 1.5rem);
+	width: 100%;
+	max-width: 28rem;
+	max-height: 100%;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--surface);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+	font-size: 0.9rem;
+	line-height: 1.6;
+}
+
+/* A dialog rises into the middle of the page as its backdrop dims, as the
+   palette does into the top of it. */
+.modal,
+.palette {
+	--arrive-y: 0.5rem;
+	--arrive-scale: 0.98;
+	animation: arrive var(--duration-l) var(--ease-out);
+}
+
+/* The title, and the ✕ where there is a way out. A line under them only
+   while what is under them has been scrolled. */
+.modal-head {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+	padding: 1.25rem var(--dialog-pad) 0.75rem;
+}
+
+.modal[data-scrolled] .modal-head {
+	box-shadow: 0 1px 0 var(--border);
+}
+
+.modal h2 {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+	font-size: 1.1rem;
+	overflow-wrap: anywhere;
+}
+
+/* The ✕: quiet, as the app's other ones are, and level with the title. */
+.modal button.modal-close {
+	margin: -0.125rem -0.625rem 0 0;
+	padding: 0;
+}
+
+.modal-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: 0 var(--dialog-pad) 1.25rem;
+	/* A field the focus moves to is scrolled clear of the row over it. */
+	scroll-padding-block: 0.75rem calc(var(--dialog-foot, 0px) + 0.75rem);
+}
+
+.modal-body:has(.dialog-foot) {
+	padding-block-end: 0;
+}
+
+/* The fill window's buttons are a dialog's, as it is one in a window of its own. */
+.modal button,
+.fill-page button:not(.icon, .link-button) {
+	font: inherit;
+	padding: 0.35rem 0.75rem;
+	border-radius: 0.375rem;
+	border: 1px solid var(--border);
+	background: var(--bg);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+/* The row at a dialog's foot (`DialogActions`): over what scrolls under it,
+   with a line between the two only while there is more under it. */
+.dialog-foot {
+	position: sticky;
+	bottom: 0;
+	z-index: 1;
+	margin: 0 calc(-1 * var(--dialog-pad));
+	padding: 0.5rem var(--dialog-pad) 1.25rem;
+	background: var(--surface);
+}
+
+.modal[data-more] .dialog-foot {
+	padding-block-start: 0.75rem;
+	box-shadow: 0 -1px 0 var(--border);
+}
+
+/* A dialog's buttons (`DialogActions`), over everything or asked in place:
+   one row at its end, the way out and whatever else can be done on the left,
+   and the answer on the right — on a line of its own, where the row wraps,
+   still on the right. */
+.dialog-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+/* The answer's slot places it and marks it for the focus; its button sits in
+   the row as the others do. */
+.dialog-primary {
+	display: contents;
+}
+
+.dialog-primary > * {
+	margin-inline-start: auto;
+}
+
+/* What is under way, over the row: room kept for it, so the card does not jump. */
+.modal .dialog-status {
+	min-height: 1.6em;
+	margin: 0 0 0.5rem;
+}
+
+.modal p {
+	margin: 0 0 1rem;
+}
+
+/* What a step can go on to besides its answer (the Vault dialog's
+   `Options`): a list in the dialog's middle, a row each saying where it goes,
+   rather than more buttons in the row at its foot. */
+.dialog-options {
+	display: grid;
+	margin: 0 0 1rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	overflow: hidden;
+}
+
+.modal button.dialog-option {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	min-height: 2.75rem;
+	padding: 0.5rem 0.75rem;
+	border: 0;
+	border-radius: 0;
+	background: none;
+	text-align: start;
+}
+
+.modal button.dialog-option + .dialog-option {
+	border-block-start: 1px solid var(--border);
+}
+
+/* A switch in a row of its own (`role="switch"`): what it is, and under that
+   what it does, with the track at the row's end, the thumb at its end while it
+   is on. The passwords' in the Vault dialog. */
+.dialog-switch-words {
+	display: grid;
+	gap: 0.125rem;
+}
+
+.dialog-switch-words .muted {
+	font-size: 0.8125rem;
+}
+
+.switch-track {
+	position: relative;
+	flex: none;
+	inline-size: 2.25rem;
+	block-size: 1.25rem;
+	border-radius: 999px;
+	background: var(--border);
+	transition: background-color var(--duration-s) var(--ease-out);
+}
+
+.switch-thumb {
+	position: absolute;
+	inset-block-start: 0.125rem;
+	inset-inline-start: 0.125rem;
+	inline-size: 1rem;
+	block-size: 1rem;
+	border-radius: 50%;
+	background: var(--bg);
+	transition: inset-inline-start var(--duration-s) var(--ease-out);
+}
+
+[aria-checked='true'] > .switch-track {
+	background: var(--accent);
+}
+
+[aria-checked='true'] > .switch-track > .switch-thumb {
+	inset-inline-start: 1.125rem;
+}
+
+/* The chevron turned to point on, to the step the row goes to. */
+.dialog-option-icon {
+	flex: none;
+	width: 1rem;
+	height: 1rem;
+	color: var(--muted);
+	rotate: -90deg;
+}
+
+@media (hover: hover) {
+	.modal button.dialog-option:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* What is done with what a step shows or asks for, beside it: Print and Copy
+   under a new key, Scan QR code under the key's groups. The row at the foot
+   keeps to going on. */
+.dialog-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 0.75rem;
+	margin: 0 0 1rem;
+}
+
+.modal .dialog-tools .secrets-said {
+	flex: 1 1 8rem;
+	margin: 0;
+	color: var(--muted);
+}
+
+/* The answer the question expects, filled, so it is the one the eye lands on;
+   it has the focus too. A question asked in the storage panel draws it the
+   same way. */
+.modal button.primary,
+.account button.primary,
+.fill-page button.primary {
+	color: var(--on-brand);
+	background: var(--brand);
+	border-color: var(--brand);
+}
+
+.import-body p,
+.run-body p {
+	margin: 0 0 0.75rem;
+}
+
+/* The bar in the app's own blue. A `progress` with no value is the browser's
+   own "cannot say how far" animation, which is kept: it is the honest drawing
+   of a scan still listing what there is to download. */
+.run-bar {
+	display: block;
+	width: 100%;
+	height: 0.5rem;
+	margin: 0 0 0.25rem;
+	accent-color: var(--brand);
+}
+
+/* The file it is on, lightly, under the bar: one line, a path longer than
+   the card cut in the middle (`MiddleCut`) — the start gives way to an
+   ellipsis, and the end, which names the file, stays whole. */
+.run-file {
+	display: flex;
+	min-width: 0;
+	margin: 0 0 1rem;
+	color: var(--muted);
+	font-size: 0.8125rem;
+	white-space: nowrap;
+}
+
+.run-file-start {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.run-file-end {
+	flex: none;
+}
+
+.import-problem {
+	color: var(--bad);
+}
+
+/* An answer that deletes, in the colour a toast uses to say something went
+   wrong; `.modal button` would otherwise have it the colour of the text. The
+   storage panel's Disconnect is the same news, so it is drawn the same way. */
+.modal button.danger,
+.account button.danger {
+	color: var(--bad);
+	border-color: color-mix(in srgb, var(--bad) 50%, var(--border));
+}
+
+.secrets-step h3 {
+	margin: 0 0 0.5rem;
+	font-size: 1rem;
+}
+
+.modal .secrets-error {
+	color: var(--bad);
+}
+
+/* Sync has stopped until the source is connected again (`SyncState`): an
+   error, said in the colour of one, as the dot on the source's mark is. */
+.account .account-problem {
+	color: var(--bad);
+}
+
+/* What is said as it happens: room kept for it, so the card does not jump. */
+.modal .secrets-said {
+	min-height: 1.6em;
+	margin: 0 0 0.5rem;
+}
+
+.secrets-said p {
+	margin: 0;
+}
+
+/* Asking the device's own lock, nothing is typed for a line to push about:
+   the room is let go of while there is nothing to say. */
+.modal .unlock-device .secrets-said:empty {
+	min-height: 0;
+	margin: 0;
+}
+
+.secrets-field {
+	display: grid;
+	gap: 0.25rem;
+	margin: 0 0 0.75rem;
+}
+
+.group-field,
+.unlock-field {
+	width: 100%;
+	padding: 0.35rem 0.5rem;
+	font: inherit;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.group-field {
+	font-family: var(--font-mono);
+	text-transform: uppercase;
+}
+
+/* A key typed back (`PasteKey.tsx`), in its groups, numbered and laid out as
+   it is shown and printed: three rows of four. Each group's number is over
+   it, so a phone's narrow card leaves the field the room for its five. */
+.recovery-entry {
+	margin: 0 0 0.75rem;
+	font-family: var(--font-mono);
+}
+
+.recovery-cells {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 0.5rem;
+}
+
+.recovery-cell {
+	display: grid;
+	gap: 0.125rem;
+}
+
+.recovery-cell span {
+	color: var(--muted);
+	font-size: 0.75rem;
+}
+
+.recovery-cell .group-field {
+	padding-inline: 0.25rem;
+	text-align: center;
+	letter-spacing: 0.05em;
+}
+
+.unlock-field {
+	margin: 0 0 0.75rem;
+}
+
+/* The key, in its twelve groups, numbered: the check asks for two by their
+   numbers. Three rows of four on a phone as on a desktop, so a printed key
+   and a written one look alike. */
+.recovery-key {
+	margin: 0 0 1rem;
+	font-family: var(--font-mono);
+	container: recovery-key / inline-size;
+}
+
+.recovery-prefix {
+	display: block;
+	margin: 0 0 0.25rem;
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+.recovery-groups {
+	display: grid;
+	grid-template-columns: repeat(4, max-content);
+	gap: 0.25rem 1rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* Three to a row where four would run past a phone's dialog, and be missed
+   as the key is written down. */
+@container recovery-key (width < 22rem) {
+	.recovery-groups {
+		grid-template-columns: repeat(3, max-content);
+	}
+}
+
+.recovery-groups li {
+	font-size: 1rem;
+	letter-spacing: 0.05em;
+	white-space: nowrap;
+}
+
+.recovery-groups li::before {
+	content: counter(list-item);
+	display: inline-block;
+	min-width: 1.5em;
+	color: var(--muted);
+	font-size: 0.75rem;
+	letter-spacing: 0;
+}
+
+/* What Print prints, and only then. */
+.recovery-print {
+	display: none;
+}
+
+/* The key as a QR code, under its groups (`RecoveryQr`): white around it
+   whatever the theme, which is its quiet zone, and sized for a camera across
+   a desk to read from the screen. On the groups' edge, as Print and Copy
+   under it are. */
+.recovery-qr {
+	display: block;
+	inline-size: 10rem;
+	block-size: 10rem;
+	margin: 0 0 1rem;
+	border-radius: 0.25rem;
+}
+
+/* Reading the key from a QR code with the camera (`ScanKey`). */
+.scan-key {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.5rem;
+	margin-block-start: 0.75rem;
+}
+
+.scan-key-video {
+	inline-size: 100%;
+	max-block-size: 16rem;
+	border-radius: 0.5rem;
+	background: #000;
+	object-fit: cover;
+}
+
+.scan-key-video[hidden] {
+	display: none;
+}
+
+.scan-key-said {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.875rem;
+}
+
+/* Which way the device unlocks: one of three, or four where the device's own
+   lock is offered, as a row of toggles. */
+.unlock-kinds {
+	display: flex;
+	gap: 0.25rem;
+	margin: 0 0 0.75rem;
+}
+
+/* Where the kinds are chosen (`ChooseUnlock`): a container, so the choice
+   folds to the room the form has rather than to the window's. */
+.choose-unlock {
+	container: choose-unlock / inline-size;
+}
+
+/* All four kinds, with the device's own lock offered, crush one another in a
+   row as narrow as a phone's dialog: two by two there (2026-10-15, the
+   owner's ask). Three fit in a row at any width. */
+@container choose-unlock (width < 24rem) {
+	.unlock-kinds:has(> :nth-child(4)) {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.unlock-kinds button {
+		text-wrap: balance;
+	}
+}
+
+.modal .unlock-kinds button[aria-checked='true'] {
+	color: var(--on-fg);
+	background: var(--on-bg);
+	border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.unlock-pattern {
+	display: grid;
+	justify-items: center;
+	margin: 0 0 0.5rem;
+}
+
+.pattern {
+	display: grid;
+	justify-items: center;
+}
+
+/* The grid takes the drag itself: the page must not scroll under the finger,
+   nor select the dots as text. */
+.pattern-grid {
+	position: relative;
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	width: min(14rem, 70vw);
+	aspect-ratio: 1;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.pattern-lines {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+.pattern-lines polyline {
+	fill: none;
+	stroke: var(--brand);
+	stroke-width: 8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	opacity: 0.5;
+}
+
+.modal .pattern-dot {
+	display: grid;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+	touch-action: none;
+}
+
+.pattern-dot span {
+	width: 1rem;
+	height: 1rem;
+	border-radius: 50%;
+	background: var(--muted);
+	transition: transform var(--duration-s) var(--ease-out);
+	pointer-events: none;
+}
+
+.pattern-dot[aria-pressed='true'] span {
+	background: var(--brand);
+	transform: scale(1.5);
+}
+
+.modal .pattern-dot:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: -0.5rem;
+}
+
+.modal .pattern-count {
+	min-height: 1.6em;
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+/* Printing the recovery key prints that and nothing else: not the app behind
+   the dialog, nor the rest of the dialog. The page made for print is drawn in
+   the page's flow, from its top, and keeps its own margin round it rather
+   than leaving it to the page's (`@page`): a browser's print dialog has a
+   margin setting of its own, None among them, and the key had come out
+   against the left edge of the paper (2026-10-15). The page's own margin is
+   none, so the two do not add up where a browser takes it; one that keeps its
+   own as well prints a wider one. On the page the key is printed on alone
+   (`page`), so nothing else the browser prints loses its margin. */
+@media print {
+	@page recovery-key {
+		margin: 0;
+	}
+
+	html:has(.recovery-print) {
+		page: recovery-key;
+	}
+
+	body:has(.recovery-print) > :not(.modal-backdrop) {
+		display: none;
+	}
+
+	body:has(.recovery-print) .modal-backdrop {
+		position: static;
+		display: block;
+		height: auto;
+		padding: 0;
+		background: none;
+	}
+
+	body:has(.recovery-print) .modal {
+		display: block;
+		max-width: none;
+		max-height: none;
+		width: auto;
+		overflow: visible;
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
+	}
+
+	/* Everything in the dialog but the page made for print, and what holds it. */
+	body:has(.recovery-print)
+		.modal
+		:not(:has(.recovery-print), .recovery-print, .recovery-print *) {
+		display: none;
+	}
+
+	body:has(.recovery-print) .modal-body {
+		overflow: visible;
+		padding: 0;
+	}
+
+	body:has(.recovery-print) .recovery-print {
+		display: block;
+		padding: 2cm;
+		color: #000;
+	}
+
+	.recovery-print h1 {
+		font-size: 14pt;
+	}
+
+	/* Beside the groups on paper, at a size a phone reads from a hand's width. */
+	.recovery-print .recovery-qr {
+		inline-size: 4cm;
+		block-size: 4cm;
+		margin: 0.5cm 0;
+	}
+
+	.recovery-print .recovery-groups li {
+		font-size: 16pt;
+	}
+}

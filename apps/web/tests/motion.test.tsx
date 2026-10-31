@@ -1,12 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FloatingMenu, OptionsMenu } from '../src/components/ui/OptionsMenu.js';
+import { allStyles } from './support/styles.js';
 
 /**
  * Everything that moves, moving alike: the stylesheet's motion is spelled in
@@ -20,10 +17,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-const styles = readFileSync(
-	join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles.css'),
-	'utf8'
-).replace(/\/\*[\s\S]*?\*\//g, '');
+const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '');
 
 /** Every `transition` and `animation` declaration, longhands included. */
 const motion = (): string[] =>

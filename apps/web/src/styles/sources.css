@@ -1,0 +1,401 @@
+/* ---- The sources, across the top --------------------------------------- */
+
+/* A row above the three panes, in the frame rather than in the grid, for the
+   reason `app-shell` gives. It does not scroll the page: the tabs overflow
+   sideways instead, so twelve accounts cost the notes no height. */
+.source-tabs {
+	display: flex;
+	/* The search field is the tallest thing here and sets the bar's height.
+	   The tabs sit on the bar's bottom edge, where their lit edge meets its
+	   border, rather than being stretched or floated up to the top. */
+	align-items: flex-end;
+	gap: 0.25rem;
+	/* The first tab's name over the notebooks' heading, and the search's
+	   right-hand edge on the gutter the note's buttons end on. */
+	padding-inline: calc(var(--gutter) - var(--tab-inline)) var(--gutter);
+	border-block-end: 1px solid var(--border);
+	background: var(--surface);
+}
+
+.source-tabs nav {
+	/* Not `flex: 1`: the way to another account sits right after the last
+	   tab, with the tabs, and the search takes what is left of the bar. */
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow-x: auto;
+	/* The bar is short and the scrollbar under it would be most of its height. */
+	scrollbar-width: none;
+}
+
+.source-tabs nav::-webkit-scrollbar {
+	display: none;
+}
+
+.source-tabs ul {
+	display: flex;
+	gap: 0.25rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* The tab and the `+` after it share one line box — `--tab-line` — so that
+   the two sit on the same baseline whatever size their glyphs are. */
+.source-tabs {
+	--tab-line: 1.36rem;
+	--tab-inline: var(--space-m);
+}
+
+.source-tab {
+	display: flex;
+	align-items: baseline;
+	max-width: 14rem;
+	min-width: 0;
+	padding: var(--space-s) var(--tab-inline);
+	font: inherit;
+	font-size: 0.85rem;
+	line-height: var(--tab-line);
+	white-space: nowrap;
+	color: var(--muted);
+	background: none;
+	border: 0;
+	/* The lit edge, transparent on the rest, so that a tab does not change
+	   height when it becomes the one showing. */
+	border-block-end: 2px solid transparent;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.source-tab:hover {
+		color: var(--fg);
+		background: color-mix(in srgb, var(--fg) 6%, transparent);
+	}
+}
+
+/* Which storage a source is (`ProviderIcon`): the provider's own mark, or a
+   glyph in the colour of the words beside it. As tall as a line of them. */
+.provider-icon {
+	display: block;
+	flex: none;
+	width: 1rem;
+	height: 1rem;
+}
+
+/* A source that needs connecting again (`ProviderIcon`'s `alert`): a red dot
+   on the mark's top corner, in the colour a toast says something went wrong
+   in, ringed in the bar's colour so it stands off the mark under it. */
+.provider-icon-alert {
+	position: relative;
+	display: block;
+	flex: none;
+}
+
+.provider-icon-badge {
+	position: absolute;
+	inset-block-start: -0.1875rem;
+	inset-inline-end: -0.1875rem;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 50%;
+	background: var(--bad);
+	box-shadow: 0 0 0 1.5px var(--surface);
+}
+
+/* Centred on the name rather than sat on its baseline, which an image's
+   bottom edge is. */
+.source-tab > .provider-icon,
+.source-tab > .provider-icon-alert {
+	align-self: center;
+	margin-inline-end: var(--space-xs);
+}
+
+/* Not colour alone: the weight and the underline say it too, and the
+   `aria-current` on the button says it to a screen reader. */
+.source-tab-active {
+	color: var(--fg);
+	font-weight: 600;
+	border-block-end-color: var(--fg);
+}
+
+/* The name, as wide as it would be in bold whether or not it is. Bold is wider
+   than regular, so a tab that only went bold when lit grew when pressed and
+   shoved every tab after it sideways. A hidden copy of the name, in bold, sits
+   under the visible one in the same grid cell and holds the width; the visible
+   one is what clips with an ellipsis when the tab is at its widest. */
+.source-tab-name {
+	display: inline-grid;
+	/* One track that can shrink to nothing: an `auto` track cannot go below
+	   the widest thing in it, and the hidden copy is exactly as wide as the
+	   name, so a long name could never be clipped. */
+	grid-template-columns: minmax(0, 1fr);
+	flex: 0 1 auto;
+	min-width: 0;
+}
+
+.source-tab-name > span,
+.source-tab-name::after {
+	grid-area: 1 / 1;
+	/* Hidden on both, or the copy's own width is the least the track can be. */
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.source-tab-name > span {
+	text-overflow: ellipsis;
+}
+
+.source-tab-name::after {
+	content: attr(data-name);
+	font-weight: 600;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+.source-tab-detached {
+	flex: none;
+	/* `pre`, not `nowrap`: the text begins with a space, and as a flex item of
+	   its own that space would otherwise be dropped. */
+	white-space: pre;
+	color: var(--warn);
+	font-weight: 400;
+}
+
+/* A name being typed is the tab it replaces: it wears `.source-tab` and
+   `.source-tab-active`, so the padding, the type and the lit edge are the same
+   ones, and the bar cannot move as a name becomes editable. Its width is
+   pinned inline to what the tab measured on the way in, because an `input` is
+   as wide as its `size` and not as wide as its text. */
+.source-tab-editing {
+	cursor: text;
+}
+
+/* The tab under the pointer lights up because pressing it does something.
+   This one is already pressed. */
+@media (hover: hover) {
+	.source-tab-editing:hover {
+		background: none;
+	}
+}
+
+/* No box of its own: the tab around it is the box. What is left of it after
+   the mark, however few characters that is: an input will not otherwise go
+   narrower than its `size`. The field is a row's (`.row-rename`), whose focus
+   ring is off for the same reason: the caret says where the focus is, and the
+   tab it sits in is already lit and bold. */
+.source-tab-editing .row-rename {
+	width: 100%;
+}
+
+.source-add {
+	position: relative;
+	display: flex;
+	align-items: flex-end;
+}
+
+/* The same box as a tab — the padding, the line and the transparent edge — so
+   the `+` sits on the tabs' baseline and not somewhere in the bar's middle. */
+/* No radius: the bar is the top of the window, and a rounded corner up against
+   the window's edge reads as a mistake in the rendering. */
+.source-add-button {
+	padding: 0.5rem 0.6rem;
+	font: inherit;
+	font-size: 1rem;
+	line-height: var(--tab-line);
+	color: var(--muted);
+	background: none;
+	border: 0;
+	border-block-end: 2px solid transparent;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.source-add-button:hover {
+		color: var(--fg);
+		background: var(--hover-bg);
+	}
+}
+
+/* Its words, while nothing is connected: sized as a tab's name is, beside
+   the `+` that keeps the size it has everywhere else. */
+.source-add-label {
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+/* Lit while its menu is open, as a toolbar button is (`.toolbar-button-on`). */
+.source-add-button-on {
+	color: var(--fg);
+	background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+/* The menu is a `.toolbar-panel`, hung under the `+`; only the heading and a
+   failure notice are its own. */
+.source-add-heading,
+.source-add-menu .muted {
+	margin: 0;
+	padding: 0.4rem 0.6rem;
+	font-size: 0.75rem;
+	color: var(--muted);
+}
+
+.source-add-heading {
+	padding-block-end: 0.2rem;
+	/* The panel is as wide as its widest row, and this is meant to be it. */
+	white-space: nowrap;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+/* What an operator says in front of the connect buttons (`ConnectChoice`):
+   the whole of the menu while it stands in front of them, a muted line while
+   it sits beside them. Wrapped, and held to a measure, so a long message does
+   not stretch the menu to its own width. */
+.connect-gate,
+.connect-gate-note {
+	margin: 0;
+	padding: 0.4rem 0.6rem;
+	max-width: 18rem;
+	font-size: 0.8rem;
+}
+
+.connect-gate {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.4rem;
+}
+
+.connect-gate p {
+	margin: 0;
+}
+
+/* A button, so it centres its words by default; this one reads as the line of
+   text it sits among. */
+.connect-gate .link-button {
+	text-align: start;
+}
+
+.connect-gate-note {
+	color: var(--muted);
+}
+
+/* The gate's code step (`ConnectCodeForm`): its label over the field, the
+   button that uses it beside the field, and under both why a code was
+   refused, as the editor toolbar's link field has its label over it. */
+.connect-code-form {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	align-self: stretch;
+}
+
+.connect-code-form label {
+	color: var(--muted);
+}
+
+.connect-code-said {
+	color: var(--bad);
+}
+
+.connect-code-row {
+	display: flex;
+	gap: 0.4rem;
+}
+
+.connect-code-form input {
+	flex: 1;
+	min-width: 0;
+	font: inherit;
+	font-size: 0.9rem;
+	padding: 0.35rem 0.5rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+}
+
+.connect-code-form button {
+	font: inherit;
+	padding: 0.35rem 0.7rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+/* Its two words in one cell, the one not said hidden, so it is as wide as the
+   longer: the menu is only as wide as it has to be, and would otherwise
+   widen while the code is asked about. */
+.connect-code-use {
+	display: grid;
+	/* In the middle of a button made taller than its words, as on a phone. */
+	align-items: center;
+}
+
+.connect-code-use > span {
+	grid-area: 1 / 1;
+}
+
+.connect-code-use > [aria-hidden='true'] {
+	visibility: hidden;
+}
+
+/* Blank, there is nothing to ask about. */
+.connect-code-form button:disabled {
+	color: var(--muted);
+	cursor: default;
+}
+
+/* The code step folded while the buttons are open (`ConnectCodeLine`): the
+   code with "Change" on one line and until when on the next. Each holds
+   together, since the menu is only as wide as it has to be and would
+   otherwise put the label, the code and "Change" on three; an operator's long
+   code is cut short rather than widening it. */
+.connect-code-line {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	margin: 0;
+	padding: 0.4rem 0.6rem;
+	font-size: 0.8rem;
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+.connect-code-line code {
+	display: inline-block;
+	max-width: 10rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	vertical-align: bottom;
+	color: var(--fg);
+}
+
+/* Only a place to find the first button in; the buttons are laid out by the
+   menu or the panel as they are without a gate. */
+.connect-choices {
+	display: contents;
+}
+
+/* The search, at the right-hand end of the bar. It takes the room the tabs
+   leave and keeps to the right of it, so the field lines up with the notes it
+   answers into rather than running on from the last tab. */
+.source-search {
+	display: flex;
+	flex: 1;
+	justify-content: flex-end;
+	align-items: center;
+	min-width: 0;
+	padding-block: 0.3rem;
+	padding-inline-start: 0.5rem;
+}
+
+.source-search .search-box {
+	position: relative;
+	display: flex;
+	width: 100%;
+	max-width: 20rem;
+	min-width: 6rem;
+}

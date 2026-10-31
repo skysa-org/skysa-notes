@@ -1,0 +1,437 @@
+/* ---- Compact window ----------------------------------------------------- */
+
+/*
+ * Too narrow for three panes. The width is decided once, in
+ * `components/ui/layout.ts`, and arrives here as `.compact` on the frame rather
+ * than as a media query of this file's own: it also decides which bar is
+ * rendered, and two answers to "is this compact" could disagree by a pixel.
+ *
+ * The note takes the window. The sidebar and the note list stay in the grid,
+ * mounted, and become dropdowns — a panel under the bar, shown while the
+ * shell's `data-panel` names it. Positioned either way, so neither is ever a
+ * grid item: the note view is the only one, and has the only column.
+ */
+.compact .app-shell {
+	position: relative;
+	grid-template-columns: minmax(0, 1fr);
+}
+
+/* Every panel fills the window under the bar and scrolls inside itself. A
+   panel sized to its content left the note showing beneath it, which on a
+   phone is a strip too short to read and a target for a press that was meant
+   for the panel. `overscroll-behavior` keeps a fling at the end of the list
+   from moving the page behind it. */
+.compact .source-panel,
+.compact .sidebar,
+.compact .note-list,
+.compact .scratchpad {
+	display: none;
+	position: absolute;
+	inset: 0;
+	z-index: 15;
+	border-inline-end: 0;
+	overscroll-behavior: contain;
+	/* The last row clear of a phone's home indicator, which the page runs
+	   under (`viewport-fit=cover`). */
+	padding-block-end: env(safe-area-inset-bottom);
+}
+
+.compact .app-shell[data-panel='notebooks'] > .sidebar {
+	display: flex;
+}
+
+.compact .app-shell[data-panel='sources'] > .source-panel {
+	display: flex;
+}
+
+/* The tabs as a list at the top, and the storage panel at the foot, with the
+   room between them — where a sidebar keeps its storage panel, and for the
+   same reason: it is the part a user looks for rather than reads past. One
+   column, and it scrolls as a whole when an account's storage panel has a lot
+   to say. Only ever drawn in a compact window. */
+.source-panel {
+	flex-direction: column;
+	overflow-y: auto;
+	background: var(--surface);
+}
+
+.source-panel-foot {
+	margin-block-start: auto;
+}
+
+.source-panel ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.compact .app-shell[data-panel='notes'] > .note-list {
+	display: block;
+}
+
+.compact .app-shell[data-panel='notes'] > .scratchpad {
+	display: flex;
+}
+
+/* The one column a compact grid has: placed in the second, as in a wide
+   window, it would be laid out in an empty track past the window's edge. */
+.compact .scratchpad {
+	grid-column: auto;
+}
+
+/* Each panel opens out of its trigger and shuts back into it: from a strip as
+   wide as the trigger, along the top of the panel right under it, out to the
+   whole window — so which of the three was opened is never in doubt. Where the
+   triggers are is measured, not worked out here (`Origins` in
+   `routes/panel.ts`); the bar's share for each of them depends on whether the
+   search field fits beside them. */
+.compact .source-panel {
+	--from-left: var(--sources-left, 0px);
+	--from-right: var(--sources-right, 0px);
+}
+
+.compact .sidebar {
+	--from-left: var(--notebooks-left, 0px);
+	--from-right: var(--notebooks-right, 0px);
+}
+
+.compact .note-list,
+.compact .scratchpad {
+	--from-left: var(--notes-left, 0px);
+	--from-right: var(--notes-right, 0px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	/* Shut, and shutting: drawn back into the trigger, quicker than it came
+	   out. `display` is held until then (`allow-discrete`), or there would be
+	   nothing to see shut; a press meanwhile goes through to what is under it,
+	   since the panel is already on its way out. */
+	.compact .source-panel,
+	.compact .sidebar,
+	.compact .note-list,
+	.compact .scratchpad {
+		clip-path: inset(0 var(--from-right) 100% var(--from-left) round 0.5rem);
+		opacity: 0;
+		pointer-events: none;
+		transition:
+			clip-path var(--duration-m) var(--ease-in),
+			opacity var(--duration-m) var(--ease-in),
+			transform var(--duration-m) var(--ease-in),
+			display var(--duration-m) allow-discrete;
+	}
+
+	/* Open, and opening: above one still shutting when the user goes straight
+	   from one trigger to the next. */
+	.compact .app-shell[data-panel='sources'] > .source-panel,
+	.compact .app-shell[data-panel='notebooks'] > .sidebar,
+	.compact .app-shell[data-panel='notes'] > .note-list,
+	.compact .app-shell[data-panel='notes'] > .scratchpad {
+		z-index: 16;
+		clip-path: inset(0 round 0);
+		opacity: 1;
+		pointer-events: auto;
+		transition:
+			clip-path var(--duration-xl) var(--ease-glide),
+			opacity var(--duration-s) linear,
+			transform var(--duration-xl) var(--ease-glide),
+			display var(--duration-xl) allow-discrete;
+	}
+
+	/* Straight from one panel to the next — a source chosen opens its
+	   notebooks, a notebook its notes, or another trigger is pressed — the
+	   two go along together as their triggers are, in a row: onward, the one
+	   left goes off to the left and the next comes in from the right, and
+	   back, the other way. Neither is drawn into its trigger, since neither
+	   is opening or shutting the dropdown. */
+	.compact .app-shell[data-slide='onward'] {
+		--slide-in: 100%;
+		--slide-out: -100%;
+	}
+
+	.compact .app-shell[data-slide='back'] {
+		--slide-in: -100%;
+		--slide-out: 100%;
+	}
+
+	.compact .app-shell[data-from='sources'] > .source-panel,
+	.compact .app-shell[data-from='notebooks'] > .sidebar,
+	.compact .app-shell[data-from='notes'] > .note-list,
+	.compact .app-shell[data-from='notes'] > .scratchpad {
+		clip-path: inset(0 round 0);
+		opacity: 1;
+		transform: translateX(var(--slide-out));
+		transition:
+			transform var(--duration-xl) var(--ease-glide),
+			display var(--duration-xl) allow-discrete;
+	}
+
+	/* Where opening starts: a panel that was `display: none` has no style of
+	   its own to come from. */
+	@starting-style {
+		.compact .app-shell[data-panel='sources'] > .source-panel,
+		.compact .app-shell[data-panel='notebooks'] > .sidebar,
+		.compact .app-shell[data-panel='notes'] > .note-list,
+		.compact .app-shell[data-panel='notes'] > .scratchpad {
+			clip-path: inset(0 var(--from-right) 100% var(--from-left) round 0.5rem);
+			opacity: 0;
+		}
+
+		.compact .app-shell[data-from][data-panel='sources'] > .source-panel,
+		.compact .app-shell[data-from][data-panel='notebooks'] > .sidebar,
+		.compact .app-shell[data-from][data-panel='notes'] > .note-list,
+		.compact .app-shell[data-from][data-panel='notes'] > .scratchpad {
+			clip-path: inset(0 round 0);
+			opacity: 1;
+			transform: translateX(var(--slide-in));
+		}
+	}
+}
+
+/* A card open in a compact window covers the scratchpad rather than taking
+   its place: the wall is laid out under it, hidden — `visibility`, which
+   keeps it from the focus and a screen reader too — but for while the card
+   grows out of it (`cardMotion.ts`), and is there at once, not opening out of
+   its trigger, for the card to go back into as it closes. */
+.compact .app-shell[data-card] > .scratchpad {
+	display: flex;
+	clip-path: none;
+	opacity: 1;
+	visibility: hidden;
+	transition: none;
+}
+
+/* And with no card open and nothing over it, the scratchpad is what a compact
+   window shows, as it is — in the moment between a card closing and its pane
+   being opened again, which is no time to open it out of its trigger. */
+.compact .app-shell[data-wall] > .scratchpad {
+	display: flex;
+	clip-path: none;
+	opacity: 1;
+	pointer-events: auto;
+	transition: none;
+}
+
+/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
+   push the next answer off. Two lines still carry the match, which is what
+   the excerpt is for. */
+.compact .note-excerpt {
+	-webkit-line-clamp: 2;
+}
+
+.compact-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-xs);
+	/* The first dropdown's words over the note's title, and the search glyph
+	   over the note's last button. */
+	padding: var(--space-xs) calc(var(--gutter) - var(--control-inline));
+	border-block-end: 1px solid var(--border);
+	background: var(--surface);
+}
+
+/* The three dropdowns are as wide as what they say, side by side. Once the
+   bar is full, one that says little keeps all of it, and the ones that say
+   more share what is left equally, each truncating inside its share: a long
+   notebook name must not take the room the note's title needs, and the whole
+   of either is in the tooltip and the panel. A grid rather than a row, since
+   a row would shrink every one of them in proportion to its words, the short
+   ones with the long. `start`, so a share is never wider than its words. */
+.compact-pickers {
+	/* Either side of each chevron, so the three read as a path. */
+	--crumb: var(--space-xs);
+
+	display: grid;
+	flex: 0 1 auto;
+	grid-template-columns: repeat(3, minmax(0, auto));
+	justify-content: start;
+	min-width: 0;
+}
+
+/* Words and a chevron, without a box: the chevron is what says each one opens
+   something, and whether it is open. The room after it is half this one's and
+   half the next one's, so the chevron is as far from the next words as from
+   its own, and a press anywhere between two lands on one or the other. */
+.compact-picker {
+	display: flex;
+	align-items: center;
+	gap: var(--crumb);
+	min-width: 0;
+	padding: 0.35rem calc(var(--crumb) / 2);
+	font: inherit;
+	font-size: 0.85rem;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+/* One after the open one's, while it is open (`afterOpen`): it fades as the
+   panel opens and is back as it shuts, its room kept throughout. Hidden as
+   well as see-through, once it has faded, and `inert` from the start. */
+.compact-picker {
+	transition: opacity var(--duration-m) var(--ease-out);
+}
+
+.compact-picker[inert] {
+	visibility: hidden;
+	opacity: 0;
+	transition:
+		opacity var(--duration-m) var(--ease-in),
+		visibility var(--duration-m);
+}
+
+/* The first one's words over the note's title. */
+.compact-picker:first-child {
+	padding-inline-start: var(--control-inline);
+}
+
+@media (hover: hover) {
+	button.compact-picker:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* A scratch card's name (`CardName`): said where a note's dropdown would be,
+   but nothing to press. */
+.compact-picker-static {
+	cursor: default;
+}
+
+/* The chevron right after the words rather than at the far end of the share,
+   where with no box around them it would read as belonging to the next. */
+.compact-picker-label {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: start;
+}
+
+/* A notebook's path and a note's name, shortened in their middle to fit
+   (`MiddleLabel`): the whole of it sizes the label, unseen, and the shortened
+   one is drawn over it. Until it is measured that is the whole, cut at its
+   end. The label clips rather than ending in an ellipsis of its own: drawn
+   where the unseen whole overflows it, in the label's colour, that one
+   showed. */
+.compact-picker-middle {
+	position: relative;
+	text-overflow: clip;
+}
+
+.compact-picker-whole {
+	visibility: hidden;
+}
+
+.compact-picker-shown {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Lit while its panel is open, in the colour of what is on. The tile is
+   outside the glyph's box by as much as it is pulled back in, so opening a
+   panel moves nothing along the bar; and it is on the glyph's holder rather
+   than the glyph, which turns, so the tile stays square. */
+.compact-picker-chevron {
+	display: grid;
+	flex: none;
+	place-items: center;
+	margin: -0.125rem;
+	padding: 0.125rem;
+	border-radius: 0.25rem;
+}
+
+.compact-picker[aria-expanded='true'] .compact-picker-chevron {
+	background: var(--on-bg);
+}
+
+.compact-picker-chevron {
+	transition: background-color var(--duration-state) var(--ease-out);
+}
+
+/* Pointing along the bar while the panel is shut, and turned down at it while
+   it is open. */
+.compact-picker .toolbar-icon {
+	color: var(--muted);
+	transform: rotate(-90deg);
+}
+
+.compact-picker[aria-expanded='true'] .toolbar-icon {
+	color: var(--on-fg);
+	transform: none;
+}
+
+.compact-picker .toolbar-icon {
+	transition:
+		transform var(--duration-m) var(--ease-out),
+		color var(--duration-state) var(--ease-out);
+}
+
+.compact-icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: calc(1rem + 2 * var(--control-inline));
+	height: 2rem;
+	padding: 0;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.compact-icon:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* The search, glyph or field, at the far end of the bar from the dropdowns,
+   however little they say. */
+.compact-pickers ~ .compact-icon,
+.compact-pickers ~ .compact-search {
+	margin-inline-start: auto;
+}
+
+.compact-search,
+.compact-search .search-box {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+}
+
+/* Beside the dropdowns, on a bar with the room: a field's worth, and the rest
+   is theirs. */
+.compact-search-beside {
+	flex: 0 1 16rem;
+	min-width: 10rem;
+}
+
+/* 16px, because Safari on a phone zooms the page into any field smaller than
+   that the moment it is focused, and does not zoom back out. */
+.compact-search .note-search {
+	font-size: 1rem;
+}
+
+/* The close button beside the field empties it as well as shutting it, so the
+   browser's own clear button would be a second × a thumb's width from the
+   first, doing half as much. */
+.compact-search .note-search::-webkit-search-cancel-button {
+	display: none;
+}
+
+.new-folder {
+	width: calc(100% - 2 * var(--gutter));
+	margin: var(--space-s) var(--gutter);
+	padding: 0.35rem 0.5rem;
+	font: inherit;
+	font-size: 0.85rem;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--bg);
+	color: var(--fg);
+}

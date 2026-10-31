@@ -277,7 +277,7 @@ const CardLine = ({ line }: { line: PreviewLine }) => {
 			{line.marker !== undefined && <Marker marker={line.marker} depth={line.depth} />}
 			<span
 				className="scratch-card-words"
-				// A chip that starts its line has no room before it (`styles.css`).
+				// A chip that starts its line has no room before it (`styles/`).
 				data-embed-first={line.runs[0]?.embed === undefined ? undefined : true}
 			>
 				{line.runs.map((run, at) => (

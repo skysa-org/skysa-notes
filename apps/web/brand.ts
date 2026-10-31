@@ -251,7 +251,7 @@ const stack = (given: BrandFont | undefined, fallback: string): string =>
 	given === undefined ? fallback : `'${given.family}', ${fallback}`;
 
 /**
- * The brand as a stylesheet: the fonts, and the custom properties `styles.css`
+ * The brand as a stylesheet: the fonts, and the custom properties `styles/`
  * reads for them and for the brand colour. A file of its own on this origin,
  * so the Content-Security-Policy needs nothing new.
  */

@@ -1,13 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { COMPACT, useElementWidth, useMediaQuery } from '../src/components/ui/layout.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
+import { allStyles } from './support/styles.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -172,10 +169,7 @@ describe('useElementWidth', () => {
 	});
 });
 
-const styles = readFileSync(
-	join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles.css'),
-	'utf8'
-);
+const styles = allStyles();
 
 /** The `clamp(min, preferred vw, max)` terms of the shell's two side columns. */
 const sideColumns = (): { vw: number; max: number }[] => {

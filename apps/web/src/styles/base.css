@@ -1,0 +1,211 @@
+* {
+	box-sizing: border-box;
+}
+
+/* A compact window is a phone's or a small tablet's: every block tighter. */
+.app-frame.compact {
+	--gutter: var(--space-m);
+	--bar-block: var(--space-s);
+}
+
+/* A note narrower than this beside the columns has the same gutter a phone
+   gives it. The bar's height is left alone: its bottom rule meets the pane
+   headers' beside it. */
+@container note (width < 36rem) {
+	.note-view > * {
+		--gutter: var(--space-m);
+	}
+}
+
+/* One focus ring for every control, shown for the keyboard and not for a tap
+   or a click. Outside the control and in the accent, so a focused toggle
+   still shows plainly whether it is on. */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+/* Inside, for what fills a scrolling list or bar edge to edge: outside, the
+   ring would be cut off by the box that scrolls. */
+button.row:focus-visible,
+.source-tab:focus-visible,
+.toolbar-item:focus-visible {
+	outline-offset: -2px;
+}
+
+/* A tap is answered by the control's own state; the grey flash a phone adds on
+   top of it looked, for a moment, like the toggle staying on. */
+button,
+a {
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* What the pointer lights, and what becomes selected or on, fades rather than
+   blinks. In `:where()`, so a control that moves something else as well says
+   so in a rule of its own without first having to outrank this one. Not the
+   focus ring, which is an outline and comes at once: it is where the keys
+   are, and a ring that arrives late reads as lag. Nor the lists the arrow
+   keys move a highlight through, below. */
+:where(button, a, input, select, textarea, [role='button']) {
+	transition-property: color, background-color, border-color, box-shadow, opacity;
+	transition-duration: var(--duration-state);
+	transition-timing-function: var(--ease-out);
+}
+
+/* A highlight that follows the arrow keys moves at once, as the caret does:
+   one that fades along behind them looks like the list keeping up. The
+   palette's and the search's rows are not buttons, so have no fade to take
+   away; they follow the pointer too (`usePointerMoved`), and move as quickly. */
+.slash-item {
+	transition: none;
+}
+
+/* Everything that opens arrives the same way: from nothing, from a little
+   short of where it rests and a little smaller, towards the edge it opened
+   from. The longhands, `translate` and `scale`, rather than `transform`, so
+   this composes with whatever an element is already transformed by and
+   leaves a measurement of its size (`offsetWidth`) alone. Where it comes
+   from is the element's own to say. */
+@keyframes arrive {
+	from {
+		opacity: 0;
+		translate: 0 var(--arrive-y, 0);
+		scale: var(--arrive-scale, 1);
+	}
+}
+
+/* What appears in a list, among rows that have already moved to make room
+   for it, only fades: sliding in, it would arrive after the rows beside it. */
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
+/* Behind a dialog. The backdrop's colour, not its opacity, which would fade
+   the dialog in a second time on top of its own. */
+@keyframes dim-in {
+	from {
+		background-color: transparent;
+	}
+}
+
+/* A card hung from the control that opened it: under it, or over it when it
+   rises from the foot of a pane or a bar. */
+.toolbar-panel,
+.slash-menu[data-show='true'],
+.inline-toolbar[data-show='true'],
+.source-search .search-results {
+	--arrive-y: -0.25rem;
+	--arrive-scale: 0.98;
+	transform-origin: top;
+	animation: arrive var(--duration-m) var(--ease-out);
+}
+
+/* Over what opened it: the selection's toolbar, above the words; the bar at
+   the foot of a phone's note; the storage gear's menu, at the foot of the
+   sidebar (`FloatingMenu`'s `rises`). */
+.inline-toolbar[data-show='true'],
+.format-toolbar-bottom .toolbar-panel,
+.toolbar-panel.options-menu-rises {
+	--arrive-y: 0.25rem;
+	transform-origin: bottom;
+}
+
+a {
+	color: var(--brand);
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	-webkit-font-smoothing: antialiased;
+}
+
+.shell {
+	max-width: 42rem;
+	margin: 0 auto;
+	padding: 3rem 1.25rem;
+	line-height: 1.6;
+}
+
+.muted {
+	color: var(--muted);
+}
+
+/* A line that names paths: one long unbroken name wraps rather than widening
+   whatever holds it. */
+.wrap-anywhere {
+	overflow-wrap: anywhere;
+}
+
+/* Inline code is a chip, the way Atlassian's editors draw one: a tint, a thin
+   edge and its own ink, so a `--flag` or a `pnpm verify` in the middle of a
+   sentence is visibly not the sentence. Not tokenised — there is no language on
+   an inline span for a highlighter to use, and guessing at one would colour
+   English prose as if it were code. */
+code {
+	font-family: var(--font-mono);
+	background: var(--code-surface);
+	border: 1px solid var(--border);
+	border-radius: 0.25rem;
+	padding: 0.05em 0.3em;
+	font-size: 0.9em;
+	color: var(--code-inline-fg);
+	overflow-wrap: break-word;
+}
+
+/*
+ * The token palette, written once for both editors: ProseMirror gets these as
+ * inline decorations over the real text, CodeMirror gets them through
+ * `syntaxHighlighting`, and neither has a colour of its own to disagree with.
+ */
+.tok-keyword {
+	color: var(--tok-keyword);
+}
+
+.tok-string,
+.tok-regexp {
+	color: var(--tok-string);
+}
+
+.tok-literal {
+	color: var(--tok-literal);
+}
+
+.tok-comment {
+	color: var(--tok-comment);
+	font-style: italic;
+}
+
+.tok-function {
+	color: var(--tok-function);
+}
+
+.tok-type {
+	color: var(--tok-type);
+}
+
+.tok-property {
+	color: var(--tok-property);
+}
+
+.tok-tag {
+	color: var(--tok-tag);
+}
+
+.tok-operator {
+	color: var(--tok-operator);
+}
+
+.tok-meta {
+	color: var(--tok-meta);
+}
+
+.tok-invalid {
+	color: var(--tok-invalid);
+	text-decoration: underline wavy;
+}

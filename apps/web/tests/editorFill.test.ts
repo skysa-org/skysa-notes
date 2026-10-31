@@ -1,8 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { describe, expect, it } from 'vitest';
+
+import { allStyles } from './support/styles.js';
 
 /**
  * The editable surface fills the editor, all the way down the chain.
@@ -19,10 +17,7 @@ import { describe, expect, it } from 'vitest';
  * and the surface is told to grow, including the one the app did not write.
  */
 
-const styles = readFileSync(
-	join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles.css'),
-	'utf8'
-);
+const styles = allStyles();
 
 /** The declarations of every rule whose selector list mentions `selector`. */
 const declarations = (selector: string): string =>

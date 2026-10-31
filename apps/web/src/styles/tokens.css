@@ -1,0 +1,169 @@
+:root {
+	color-scheme: light dark;
+
+	/*
+	 * Spacing, in the few steps everything is built from, and the three that
+	 * say how dense the layout is. The density three are the ones blocks agree
+	 * on, so that words line up down the screen however many blocks they
+	 * cross — the note's title over its first line, a pane's heading over its
+	 * rows, the tab over the heading. A compact window and a narrow note
+	 * tighten them (`.app-frame.compact`, `@container note`), and everything
+	 * built on them tightens together.
+	 */
+	--space-3xs: 0.125rem;
+	--space-2xs: 0.25rem;
+	--space-xs: 0.375rem;
+	--space-s: 0.5rem;
+	--space-m: 0.75rem;
+	--space-l: 1rem;
+	/* How far a block's words sit in from its sides. */
+	--gutter: var(--space-l);
+	/* Above and below the words of a bar: the pane headers and the note's,
+	   whose bottom rules have to meet across the columns. */
+	--bar-block: var(--space-m);
+	/* Above and below a row of a list. */
+	--row-block: var(--space-s);
+	/* The height of a control in a bar, and the inset of the words or the
+	   glyph inside a borderless one. A bar that starts or ends with such a
+	   control pulls its own padding in by the inset, so the words line up
+	   with the gutter rather than the control's invisible edge. */
+	--control: 1.75rem;
+	--control-inline: var(--space-s);
+
+	/*
+	 * Motion, in as few steps as spacing has, so that everything that moves
+	 * moves alike. One curve for what arrives or answers, fast out of the gate
+	 * and settling, and one for what leaves, which goes without lingering.
+	 * `--duration-state` is a colour changing — hover, a press, what is
+	 * selected or on — and is not movement, so it stays when the system asks
+	 * for less motion; every other step goes to nothing then, and what would
+	 * have moved is simply there.
+	 */
+	--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--ease-in: cubic-bezier(0.4, 0, 1, 1);
+	/* A panel the width of the window, which has further to go. */
+	--ease-glide: cubic-bezier(0.3, 0.7, 0.2, 1);
+	--duration-state: 120ms;
+	/* A fade, and a thing the size of a glyph. */
+	--duration-s: 120ms;
+	/* A menu or a popover opening, a chevron turning, a list's new rows. */
+	--duration-m: 180ms;
+	/* A dialog or a notice arriving over the page. */
+	--duration-l: 240ms;
+	/* A panel crossing the window. */
+	--duration-xl: 300ms;
+
+	--bg: #ffffff;
+	--fg: #111827;
+	--muted: #6b7280;
+	--surface: #f3f4f6;
+	--border: #e5e7eb;
+	/* Behind a search match. Dark enough to see against the surface, light
+	   enough to leave the muted text on top of it readable. */
+	--mark: #fde68a;
+	/* Every match in the open note, and the one the cursor is on. The current
+	   one has to be tellable from the rest at a glance while the eye is moving
+	   with Enter, so it is a different hue and not a stronger tint. */
+	--find-match: #fde68a;
+	--find-current: #fdba74;
+	/* What a toast is about. These colour a 4px bar and a 10% wash behind the
+	   card, and never the words themselves — the text stays `--fg` on what is
+	   still very nearly `--surface`, so the contrast of the message does not
+	   depend on the tone it arrives with. */
+	--ok: #16a34a;
+	--warn: #b45309;
+	--bad: #dc2626;
+	/* Code, in both editors and in the app's own prose. `--code-*` is the chip
+	   an inline span is drawn as and the slab a block is; `--tok-*` is the one
+	   palette both editors colour a token with (`editor/features/code/highlight.ts`), which is
+	   why it is here and not in either of them. Eleven colours, because a
+	   palette nobody can hold in their head is a palette that ends up
+	   inconsistent. */
+	--code-surface: #f5f6f8;
+	--code-inline-fg: #be123c;
+	--tok-keyword: #7c3aed;
+	--tok-string: #0f766e;
+	--tok-literal: #b45309;
+	--tok-comment: #4b5563;
+	--tok-function: #2563eb;
+	--tok-type: #0e7490;
+	--tok-property: #9333ea;
+	--tok-tag: #b91c1c;
+	--tok-operator: #6b7280;
+	--tok-meta: #64748b;
+	--tok-invalid: #dc2626;
+	/* Where a dragged notebook or note would land, and the wash behind the line
+	   saying what is being moved. Its own hue rather than one of the three
+	   above: a drop target is not an outcome, and green over the row under the
+	   pointer would read as "done" before anything has been. */
+	--drop: #2563eb;
+	/* What is on: a pressed toggle, the tab in use, a mark already applied.
+	   A colour of its own rather than a darker grey, because a grey that is
+	   darker than hover is only told apart from hover side by side, and a
+	   toggle is pressed with the pointer still over it. */
+	--accent: #2563eb;
+	/* `--brand` and `--on-brand`, the colour behind the app's icon: the
+	   answer a question expects, filled, and every link. Set for each theme by
+	   the brand's stylesheet, with `--font-sans` and `--font-mono` (`brand.ts`,
+	   docs/ARCHITECTURE.md §8). */
+	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+	--on-fg: var(--accent);
+	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
+	/* A row pinned to the top of its list (`store/pins.ts`): a wash of the
+	   "on" colour, lighter than a pressed toggle's, since it is a row that is
+	   kept somewhere rather than a control that is on. */
+	--pinned-bg: color-mix(in srgb, var(--accent) 9%, transparent);
+	/* Keyboard focus: a ring, drawn outside the control, so it never reads
+	   as the control's own state. */
+	--ring: color-mix(in srgb, var(--accent) 70%, transparent);
+	font-family: var(--font-sans);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0b0f19;
+		--fg: #e5e7eb;
+		--muted: #9ca3af;
+		--surface: #161b26;
+		--border: #262c3a;
+		/* The light theme's yellow at full strength glares here, and dark text
+		   on it is what `mark` does by default — unreadable beside `--fg`. */
+		--mark: #4d3f12;
+		--find-match: #4d3f12;
+		--find-current: #7c4a12;
+		/* Lifted off the dark background the way `--mark` is: the light
+		   theme's green and red go muddy against `--surface` here, and the
+		   amber has to stop being brown to read as a warning at all. */
+		--ok: #4ade80;
+		--warn: #fbbf24;
+		--bad: #f87171;
+		--drop: #60a5fa;
+		--accent: #60a5fa;
+		/* The light palette's ink is unreadable on a dark slab: every token
+		   colour is the same hue lifted until it reads against `--surface`,
+		   and the slab itself steps away from the page rather than towards
+		   it, which is the direction that reads as inset here. */
+		--code-surface: #11161f;
+		--code-inline-fg: #fda4af;
+		--tok-keyword: #c4b5fd;
+		--tok-string: #5eead4;
+		--tok-literal: #fcd34d;
+		--tok-comment: #9ca3af;
+		--tok-function: #93c5fd;
+		--tok-type: #67e8f9;
+		--tok-property: #d8b4fe;
+		--tok-tag: #fca5a5;
+		--tok-operator: #9ca3af;
+		--tok-meta: #94a3b8;
+		--tok-invalid: #f87171;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--duration-s: 0ms;
+		--duration-m: 0ms;
+		--duration-l: 0ms;
+		--duration-xl: 0ms;
+	}
+}
