@@ -11,7 +11,6 @@ import {
 	type ReactNode,
 	useCallback,
 	useEffect,
-	useLayoutEffect,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -29,12 +28,11 @@ import {
 	type FormatToolbarProps,
 	type ToolbarPlacement,
 } from './FormatToolbar.js';
-import { useIncomingBody } from './incoming.js';
+import { useEditorBinding } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
 import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
 import type { SecretHost } from './secretHost.js';
-import { keepSecrets } from './secretPanels.js';
 import { SlashMenu } from './SlashMenu.js';
 
 /**
@@ -139,13 +137,19 @@ const EditorBody = ({
 	toolbarEnd,
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
-	const notify = useLatest(onUserEdit);
-
 	const unsupported = useLatest(onUnsupported);
 
-	const replaced = useLatest(onAdopted);
-
-	const incoming = useIncomingBody(noteId, body, origin);
+	// Held from when the editor is made, since by the time it goes this is the
+	// view its secret panels were registered under.
+	const proseView = useRef<EditorView | null>(null);
+	const { edited, adopt } = useEditorBinding({
+		noteId,
+		body,
+		origin,
+		onUserEdit,
+		onAdopted,
+		view: proseView,
+	});
 	const pluginView = usePluginViewFactory();
 
 	// Wrapping and line numbers, as this device last left them. Here rather than
@@ -172,10 +176,7 @@ const EditorBody = ({
 			createRichEditor({
 				root,
 				body: initial.current,
-				onUserEdit: (markdown) => {
-					incoming.emit(markdown);
-					notify.current(markdown, incoming.base());
-				},
+				onUserEdit: edited,
 				onStateChange: (state) => {
 					format.set(readFormat(state));
 				},
@@ -200,26 +201,12 @@ const EditorBody = ({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [loading, noteId, offer]);
 
-	// What is typed in a secret's panel kept before the editor goes: a word an
-	// input method is still composing is not in the note until then. A layout
-	// effect's cleanup, so it runs before any passive one: the note's autosave
-	// flushes in its own as the note is left, and must find the edit there. The
-	// view is held from when the editor is made, since by then it is the one
-	// the panels were registered under.
-	const proseView = useRef<EditorView | null>(null);
 	useEffect(() => {
 		if (loading) return;
 		proseView.current = get()?.action((ctx) => ctx.get(editorViewCtx)) ?? null;
 		// `get` is intentionally absent; see below.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [loading, noteId]);
-	useLayoutEffect(
-		() => () => {
-			if (proseView.current !== null) keepSecrets(proseView.current);
-			proseView.current = null;
-		},
-		[noteId]
-	);
 
 	// Can this note be shown at all? Checked once the editor exists, because only
 	// then do its parser and serializer exist. This runs before the user has any
@@ -249,16 +236,8 @@ const EditorBody = ({
 		if (loading) return;
 		const editor = get();
 		if (editor === undefined) return;
-		if (!incoming.shouldAdopt(body)) return;
 		editor.action((ctx) => {
-			// Only a body the editor now holds moves what its edits are made
-			// against: one it could not take in is asked about again. And only
-			// one that changed the text has replaced it, as in the raw editor:
-			// a body that already says what the document does leaves what the
-			// user typed where it was (#444).
-			const adoption = adoptBody(ctx, body);
-			if (adoption !== 'refused') incoming.adopted();
-			if (adoption === 'replaced') replaced.current?.();
+			if (!adopt(body, () => adoptBody(ctx, body))) return;
 			// The same question the editor was built with, asked again of a body
 			// that arrived from somewhere else. A sync pull can bring in markdown
 			// this editor cannot show, and since the check above runs once, this
@@ -266,7 +245,7 @@ const EditorBody = ({
 			const lost = whatIsLost(ctx, body);
 			if (lost !== undefined) unsupported.current(lost);
 		});
-	}, [body, origin, get, incoming, loading, replaced, unsupported]);
+	}, [body, origin, get, adopt, loading, unsupported]);
 
 	// The editor keeps the selection a toolbar press acts on. A mouse's press
 	// never takes focus away, and the editor is handed it back afterwards, so

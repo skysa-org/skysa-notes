@@ -241,6 +241,25 @@ describe('RawEditor', () => {
 			expect(undoDepth(view.state)).toBeGreaterThan(0);
 		});
 
+		it('takes in a body from outside that says what it shows, and keeps what was typed', () => {
+			const onUserEdit = vi.fn();
+			const onAdopted = vi.fn();
+			const props = { noteId: 'a', onUserEdit, onAdopted };
+			const { container, rerender } = render(
+				<RawEditor {...props} body="Hello" origin="o1" />
+			);
+			const view = editorView(container);
+			view.dispatch({ changes: { from: 5, insert: ' world' } });
+
+			rerender(<RawEditor {...props} body="Hello world" origin="o2" />);
+
+			expect(onAdopted).not.toHaveBeenCalled();
+			expect(undoDepth(view.state)).toBeGreaterThan(0);
+			// Taken in all the same: the next edit is one against o2.
+			view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+			expect(onUserEdit).toHaveBeenLastCalledWith('Hello world!', 'o2');
+		});
+
 		it('is one step to undo, paste and all', () => {
 			const { container } = render(
 				<RawEditor noteId="a" body="Hello" onUserEdit={vi.fn()} />

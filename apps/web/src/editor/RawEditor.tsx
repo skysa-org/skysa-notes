@@ -4,7 +4,7 @@ import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { Autolink } from '@lezer/markdown';
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useLatest } from '../hooks/useLatest.js';
 import { rawCaretAboveKeyboard } from './aboveKeyboard.js';
@@ -13,13 +13,12 @@ import { isUserEdit, programmatic } from './dirty.js';
 import { findExtension, rawFindTarget } from './findRaw.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { CODE_HIGHLIGHTER } from './highlight.js';
-import { useIncomingBody } from './incoming.js';
+import { useEditorBinding } from './incoming.js';
 import { markdownCodeLanguages } from './languages.js';
 import { rawLinks } from './linkRaw.js';
 import { rawWithoutNul } from './noNul.js';
 import { rawAttachments } from './rawAttach.js';
 import { NO_SECRETS, type SecretHost } from './secretHost.js';
-import { keepSecrets } from './secretPanels.js';
 import { rawSecrets } from './secretRaw.js';
 
 /**
@@ -113,11 +112,16 @@ export const RawEditor = ({
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
 	// down and rebuild the editor.
-	const notify = useLatest(onUserEdit);
-	const replaced = useLatest(onAdopted);
 	const files = useLatest(attachments);
 	const sealing = useLatest(secrets);
-	const incoming = useIncomingBody(noteId, body, origin);
+	const { edited, adopt } = useEditorBinding({
+		noteId,
+		body,
+		origin,
+		onUserEdit,
+		onAdopted,
+		view,
+	});
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
 	const offer = useOfferFindTarget();
@@ -157,9 +161,7 @@ export const RawEditor = ({
 					rawCaretAboveKeyboard(),
 					EditorView.updateListener.of((update) => {
 						if (!isUserEdit(update)) return;
-						const edited = update.state.doc.toString();
-						incoming.emit(edited);
-						notify.current(edited, incoming.base());
+						edited(update.state.doc.toString());
 					}),
 				],
 			}),
@@ -177,17 +179,6 @@ export const RawEditor = ({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [noteId]);
 
-	// What is typed in a secret's panel kept before the editor goes: a word an
-	// input method is still composing is not in the note until then. A layout
-	// effect's cleanup, so it runs before any passive one: the note's autosave
-	// flushes in its own as the note is left, and must find the edit there.
-	useLayoutEffect(
-		() => () => {
-			if (view.current !== null) keepSecrets(view.current);
-		},
-		[noteId]
-	);
-
 	// Adopt a body that changed underneath us — a sync pull, or an edit made in
 	// the other mode. Annotated as programmatic so it cannot mark the note dirty.
 	//
@@ -199,20 +190,18 @@ export const RawEditor = ({
 	useEffect(() => {
 		const instance = view.current;
 		if (instance === null) return;
-		if (!incoming.shouldAdopt(body)) return;
-
-		const current = instance.state.doc.toString();
-		if (current !== body) {
+		adopt(body, () => {
+			const current = instance.state.doc.toString();
+			if (current === body) return 'same';
 			instance.dispatch({
 				changes: changeBetween(current, body),
 				effects: undoHistory.reconfigure([]),
 				annotations: [programmatic.annotations, Transaction.addToHistory.of(false)],
 			});
 			instance.dispatch({ effects: undoHistory.reconfigure(history()) });
-		}
-		incoming.adopted();
-		if (current !== body) replaced.current?.();
-	}, [body, origin, incoming, replaced]);
+			return 'replaced';
+		});
+	}, [body, origin, adopt]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;
 };
