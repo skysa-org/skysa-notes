@@ -1,8 +1,9 @@
 /* What more than one component is drawn from. */
 
 /* What floats over the page and goes when it is done with: a menu, a flyout,
-   the command palette. By name, not a class each adds: each is nothing
-   without this, and a second class to remember is one to forget. */
+   the command palette (with a deeper shadow of its own, `palette.css`). By
+   name, not a class each adds: each is nothing without this, and a second class
+   to remember is one to forget. */
 .slash-menu,
 .inline-toolbar,
 .toolbar-panel,
