@@ -27,11 +27,13 @@
 }
 
 /* A button with words on it. Each says its own padding, until those are one
-   step. `.modal button`, `.account button`, `.clipboard button`, `.fill-page
-   button`, `.note-actions button` and `.error-actions button` are the same and
-   are not here on purpose: they hold their place in the cascade over rules of
-   the same weight (`button.danger`, `button.icon`, `button.row`), and would lose
-   to them from here. */
+   step. The buttons of `.modal`, `.account`, `.clipboard`, `.fill-page`,
+   `.note-actions` and `.error-actions` look much the same (`.error-actions`' are
+   on `--surface`) and are not here on purpose: each holds its place in the
+   cascade over rules of the same weight, `.modal button` and `.note-actions
+   button` over `button.danger`, `button.icon` and `button.row`, and the
+   `:not(.icon)` ones over `button.row:hover` and `button.row.pinned`. From here
+   they would lose to those. */
 .update-prompt button,
 .toast button,
 .connect-code-form button,
@@ -42,6 +44,7 @@
 	border-radius: var(--radius-s);
 	background: var(--bg);
 	color: var(--fg);
+	cursor: pointer;
 }
 
 /* A place to type or choose. Each says its own padding, and its size of words. */

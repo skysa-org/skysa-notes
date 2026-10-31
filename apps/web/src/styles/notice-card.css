@@ -40,7 +40,6 @@
 .toast button {
 	flex: none;
 	padding: 0.35rem 0.75rem;
-	cursor: pointer;
 }
 
 .update-prompt button.ghost,

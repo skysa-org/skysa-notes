@@ -203,7 +203,6 @@
 .toolbar-link .dialog-actions button {
 	font-size: 0.85rem;
 	padding: 0.3rem 0.7rem;
-	cursor: pointer;
 }
 
 .toolbar-link .dialog-actions button:disabled {

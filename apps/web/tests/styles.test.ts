@@ -56,6 +56,10 @@ describe('the stylesheet', () => {
 	])('draws %s as a control', (selector) => {
 		const control = primitiveDeclarations(selector);
 
+		if (selector.endsWith('button') || selector.endsWith('-install')) {
+			expect(control).toContain('cursor: pointer');
+		}
+
 		for (const declaration of [
 			'font: inherit',
 			'border: 1px solid var(--border)',
