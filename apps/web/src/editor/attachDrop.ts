@@ -14,12 +14,12 @@ import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/
 
 import { iconElement } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
+import { pickFiles } from '../lib/pickFiles.js';
 import { settleAfter } from '../store/heldEdits.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
 import { LIST_ITEM } from './lists.js';
-import { pickFiles } from './pickFiles.js';
 
 /**
  * Files pasted, dropped or picked into the rich editor (#187): each added beside the

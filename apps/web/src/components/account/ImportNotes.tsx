@@ -1,8 +1,8 @@
 import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { useState } from 'react';
 
-import { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
+import { pickFiles } from '../../lib/pickFiles.js';
 import { useDb } from '../../store/database.js';
 import {
 	bringsAnything,

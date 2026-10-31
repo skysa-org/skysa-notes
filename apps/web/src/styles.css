@@ -2201,7 +2201,7 @@ button.danger {
 }
 
 /* Folded rather than scrolling sideways, for every block at once: the setting
-   is the reader's, not the note's (`editor/codeDisplay.ts`). */
+   is the reader's, not the note's (`store/codeDisplay.ts`). */
 .editor-rich-surface .code-block-wrap pre {
 	overflow-x: visible;
 }

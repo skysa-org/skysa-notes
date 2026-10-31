@@ -1,9 +1,9 @@
 import { contentTypeOf, downloadName, opensInTab, safeOpenType } from '@skysa/core';
 
-import { COARSE_POINTER } from '../components/ui/layout.js';
-import { t } from '../i18n/t.js';
-import { DOWNLOAD_GRACE_MS } from '../store/exportNotes.js';
-import type { AttachmentHost, AttachmentProblem, Fetched } from './attachHost.js';
+import type { AttachmentHost, AttachmentProblem, Fetched } from '../../editor/attachHost.js';
+import { t } from '../../i18n/t.js';
+import { DOWNLOAD_GRACE_MS } from '../../store/exportNotes.js';
+import { COARSE_POINTER } from '../ui/layout.js';
 
 /**
  * Opening and saving a file beside a note, from its chip (#187).

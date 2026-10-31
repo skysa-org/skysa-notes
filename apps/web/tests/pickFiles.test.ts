@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { pickFiles } from '../src/editor/pickFiles.js';
+import { pickFiles } from '../src/lib/pickFiles.js';
 
 /**
  * The browser's own picker, through a file input clicked for the user (#187).

@@ -539,8 +539,6 @@ export default tseslint.config(
 		// and the hooks that read them. The sync layer drives the engine against
 		// that store. Neither may import the UI or anything built on top of
 		// them, so each can be read, tested and changed without the screens.
-		// The store reads the editor's mode and code-display preferences, which
-		// are plain values kept in editor/; nothing else of the editor.
 		files: ['apps/web/src/store/**/*.{ts,tsx}'],
 		rules: {
 			'no-restricted-imports': [
@@ -550,6 +548,7 @@ export default tseslint.config(
 						NOT_ABOVE(
 							[
 								'components',
+								'editor',
 								'routes',
 								'sync',
 								'secrets',
@@ -559,17 +558,8 @@ export default tseslint.config(
 								'pictures',
 								'commands',
 							],
-							'the store is the data layer: it does not import the sync layer or the UI.'
+							'the store is the data layer: it does not import the sync layer, the UI or the editors.'
 						),
-						{
-							group: [
-								'**/editor/*',
-								'!**/editor/mode.js',
-								'!**/editor/codeDisplay.js',
-							],
-							message:
-								'the store reads only the editor preferences (editor/mode, editor/codeDisplay).',
-						},
 					],
 				},
 			],
@@ -601,6 +591,36 @@ export default tseslint.config(
 			],
 		},
 	},
+	{
+		// The bottom layer: plain browser helpers, for anything above to use.
+		files: ['apps/web/src/lib/**/*.{ts,tsx}'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						NOT_ABOVE(
+							[
+								'components',
+								'editor',
+								'store',
+								'routes',
+								'sync',
+								'secrets',
+								'fill',
+								'share',
+								'install',
+								'pictures',
+								'commands',
+							],
+							'lib/ is the bottom layer: it imports nothing of the app.'
+						),
+					],
+				},
+			],
+		},
+	},
+
 	{
 		// The editors are views over a note's markdown (CLAUDE.md): they may use
 		// the store and shared UI pieces, but not the screens that hold them or

@@ -1,9 +1,9 @@
 import { frontmatterIsEditable, headings, type StructuralDifference } from '@skysa/core';
 import { type ReactNode, useMemo } from 'react';
 
-import { type EditorMode, MODE_LABELS } from '../../editor/mode.js';
 import { t } from '../../i18n/t.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
+import { type EditorMode, MODE_LABELS } from '../../store/editorMode.js';
 import { shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
 import { PinButton, ScratchBar } from '../scratchpad/ScratchControls.js';

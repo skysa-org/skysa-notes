@@ -22,14 +22,10 @@ import type {
 	Shown,
 	ShowOptions,
 } from '../../editor/attachHost.js';
-import {
-	createObjectUrlCache,
-	type HeldUrl,
-	type ObjectUrlCache,
-} from '../../editor/objectUrls.js';
 import { createOffers } from '../../editor/offers.js';
-import { pickFiles } from '../../editor/pickFiles.js';
 import { useLatest } from '../../hooks/useLatest.js';
+import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../../lib/objectUrls.js';
+import { pickFiles } from '../../lib/pickFiles.js';
 import { copyTurns, nearestCopy } from '../../pictures/copies.js';
 import { noShrinker, type PictureShrinker, pictureShrinker } from '../../pictures/shrinker.js';
 import { useDb } from '../../store/database.js';
@@ -56,7 +52,7 @@ import type { SyncScheduler } from '../../sync/scheduler.js';
  * A link is resolved from where the note is at the moment it is asked, so a
  * note moved or renamed while open shows its pictures from its new folder. A
  * picture's bytes become a URL once, shared by every view of it and let go of
- * when none shows it (`editor/objectUrls.ts`); an SVG is drawn from a `data:`
+ * when none shows it (`lib/objectUrls.ts`); an SVG is drawn from a `data:`
  * URL instead, never a `blob:` one (`drawsFromData` says why).
  */
 

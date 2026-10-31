@@ -1,8 +1,8 @@
 import type { ScratchColor } from '@skysa/core';
 import type { Ref } from 'react';
 
-import type { EditorMode } from '../../editor/mode.js';
 import type { NoteRecord } from '../../store/db.js';
+import type { EditorMode } from '../../store/editorMode.js';
 import type { ScratchMarks } from '../../store/scratchpad.js';
 
 export interface NoteViewProps {

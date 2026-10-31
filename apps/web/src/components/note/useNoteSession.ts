@@ -1,12 +1,12 @@
 import { useCallback, useEffect } from 'react';
 
 import type { SaveContext } from '../../editor/autosaveQueue.js';
-import { type EditorMode, otherMode } from '../../editor/mode.js';
 import { useAutosave } from '../../editor/useAutosave.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
+import { type EditorMode, otherMode } from '../../store/editorMode.js';
 import { beforeClosing } from '../../store/heldEdits.js';
 import { useDefaultEditorMode } from '../../store/hooks.js';
 import { deleteForUndo, renameNote, saveNoteBody, setNoteEditorMode } from '../../store/notes.js';

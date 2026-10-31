@@ -2,11 +2,11 @@ import type { StructuralDifference } from '@skysa/core';
 import { type ReactNode, useCallback, useRef } from 'react';
 
 import { useCommand } from '../../commands/context.js';
-import type { EditorMode } from '../../editor/mode.js';
 import { RawEditor } from '../../editor/RawEditor.js';
 import { RichEditor, type RichEditorProps } from '../../editor/RichEditor.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
+import type { EditorMode } from '../../store/editorMode.js';
 import { useNoteAttachments } from '../attachments/noteAttachments.js';
 import { useNoteSecrets } from '../secrets/noteSecrets.js';
 import { useNotices } from '../ui/notices.js';

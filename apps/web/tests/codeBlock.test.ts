@@ -3,8 +3,8 @@ import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type CodeDisplayStore, createCodeDisplayStore } from '../src/editor/codeDisplay.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { type CodeDisplayStore, createCodeDisplayStore } from '../src/store/codeDisplay.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
