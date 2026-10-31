@@ -1,6 +1,6 @@
 # skysa-notes — instructions for Claude Code
 
-Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, OneDrive, or Dropbox (WebDAV is deferred indefinitely — `docs/ARCHITECTURE.md` §5.4). Read `docs/ARCHITECTURE.md` before any non-trivial task; it is the source of truth for the architecture and the decisions behind it; open work is in GitHub issues. If a task requires deviating from it, say so and propose the edit to `docs/ARCHITECTURE.md` in the same PR.
+Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, OneDrive, or Dropbox (WebDAV is deferred indefinitely — `docs/ARCHITECTURE.md` §5.4). Read `docs/ARCHITECTURE.md` before any non-trivial task; it is the source of truth for the architecture, and it links the decision behind each feature in `docs/decisions/`; `docs/history.md` is how it was built; open work is in GitHub issues. If a task requires deviating from it, say so and propose the edit to `docs/ARCHITECTURE.md` in the same PR.
 
 ## Stack (do not substitute)
 - pnpm workspace: `apps/web` (Vite + React + TS, TanStack Router, Dexie, vite-plugin-pwa), `apps/api` (Hono on Cloudflare Workers, D1 via Drizzle), `packages/core` (framework-free TS).

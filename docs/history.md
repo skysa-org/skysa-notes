@@ -262,7 +262,7 @@ The traces also carry where a rename or move went, and not only where it started
 
   **Names are short, derived, and the user's to overrule.**
   "Dropbox", and "Dropbox 2" for the next one of the same provider, numbered per provider in `boundAt` order with no 1 on the first; `renameSource` writes a `label` on the `syncState` row and that beats everything.
-  This is a better answer to what the disconnect work left open (`ARCHITECTURE.md` §10) — the source list naming live sources by account id because `displayName` is only written while a source is in front — by not needing the server's name at all: `displayName` is still the server's, still overwritten on every reconcile, and a rename would have been thrown away by the next one.
+  This is a better answer to what the disconnect work left open ([decision 0001](decisions/0001-disconnecting-without-an-invisible-pile.md)) — the source list naming live sources by account id because `displayName` is only written while a source is in front — by not needing the server's name at all: `displayName` is still the server's, still overwritten on every reconcile, and a rename would have been thrown away by the next one.
   Derived rather than written down at connect time so that every source already on a device gets a name with no backfill, and so that letting the first Dropbox go leaves the other called "Dropbox" rather than a "Dropbox 2" with no 1 above it.
   The cost is a name moving under the user when another source goes, and renaming is the answer to it.
   Numbering counts renamed sources too, or typing a name would renumber the rest.

@@ -4,8 +4,8 @@ Thanks for looking. This is an early project and the most useful contributions
 right now are bug reports against real use, and small focused pull requests.
 
 Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first. It is the source of truth for the
-architecture and the decisions behind it, and it explains why a lot of things
-are the shape they are. Open work is in the issue tracker; pick an issue or
+architecture, and with the records in [`docs/decisions/`](docs/decisions/README.md) it explains why
+a lot of things are the shape they are. Open work is in the issue tracker; pick an issue or
 open one before starting anything larger than a fix. If a change needs to deviate from it, say so and
 propose the edit to `docs/ARCHITECTURE.md` in the same pull request.
 
@@ -59,7 +59,7 @@ What is expected of a change:
 
 - **Tests for new behaviour.** Not coverage for its own sake — a test that fails
   if the thing you fixed comes back.
-- **Amend `docs/ARCHITECTURE.md`** if the change alters a decision recorded there.
+- **Amend `docs/ARCHITECTURE.md`**, or the record in `docs/decisions/`, if the change alters a decision recorded there.
 - **A changeset**, if the change touches `apps/` or `packages/`:
   `pnpm run changeset` asks which packages moved, how big the change is and for
   a summary, then writes a small file to commit alongside it. CI fails a pull request that changes a package without one. If
