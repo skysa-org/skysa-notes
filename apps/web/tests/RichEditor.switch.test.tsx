@@ -21,7 +21,7 @@ import { render } from './support/notices.js';
 /**
  * Switching from one note to another, with the real editor.
  *
- * `RichEditor.test.tsx` mocks `rich.js` wholesale, so every claim it makes
+ * `RichEditor.test.tsx` mocks `createRichEditor` and `adopt` wholesale, so every claim it makes
  * about the fidelity check is a claim about the mock — and it never changes
  * `noteId` at all. This one does neither: it renders the actual Milkdown
  * editor and moves from one note to the next, which is the most ordinary thing

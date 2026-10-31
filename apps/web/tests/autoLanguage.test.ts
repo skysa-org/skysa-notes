@@ -4,7 +4,7 @@ import { undo } from '@milkdown/kit/prose/history';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { adoptBody, currentMarkdown } from '../src/editor/rich.js';
+import { adoptBody, currentMarkdown } from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

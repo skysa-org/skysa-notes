@@ -25,7 +25,8 @@ import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
-import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
+import { adoptBody, whatIsLost } from './rich/adopt.js';
+import { createRichEditor } from './rich/createRichEditor.js';
 import type { SecretHost } from './secretHost.js';
 import { SlashMenu } from './SlashMenu.js';
 import { FormatToolbar } from './toolbar/FormatToolbar.js';
@@ -33,7 +34,7 @@ import { BASIC_SLOTS } from './toolbar/slots.js';
 import type { FormatToolbarProps, ToolbarPlacement } from './toolbar/types.js';
 
 /**
- * Rich text mode. The editor lives in `rich.ts`; this is the React side of it —
+ * Rich text mode. The editor lives in `rich/`; this is the React side of it —
  * when to build one, what to feed it, and what to do when it reports back.
  */
 

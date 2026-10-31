@@ -10,7 +10,7 @@ import {
 	currentMarkdown,
 	representsFaithfully,
 	whatIsLost,
-} from '../src/editor/rich.js';
+} from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

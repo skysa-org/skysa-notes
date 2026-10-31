@@ -106,7 +106,8 @@ import { type Editor } from '@milkdown/kit/core';
 import { appendFileSync } from 'node:fs';
 import { afterEach, it } from 'vitest';
 
-import { createRichEditor, currentMarkdown, whatIsLost } from '../src/editor/rich.js';
+import { currentMarkdown, whatIsLost } from '../src/editor/rich/adopt.js';
+import { createRichEditor } from '../src/editor/rich/createRichEditor.js';
 
 const OUT = process.env.PROBE_OUT ?? '/tmp/probe.txt';
 const editors: Editor[] = [];
@@ -170,8 +171,8 @@ suite. It is the CI gate; `pnpm test` alone skips `format:check`.
   start → harmless; the app runs.
 - `sh: pnpm: command not found` from `corepack pnpm dev`/`verify` → the
   PATH shim above.
-- `No "X" export is defined on the "../src/editor/rich.js" mock` →
-  `tests/RichEditor.test.tsx` mocks `rich.js` wholesale; a new function the
+- `No "X" export is defined on the "../src/editor/rich/….js" mock` →
+  `tests/RichEditor.test.tsx` mocks `rich/createRichEditor.js` and `rich/adopt.js` wholesale; a new function the
   component calls must be added to that mock.
 - `is not exported under the conditions` → a `@skysa/core/src/...` import;
   use the package root.

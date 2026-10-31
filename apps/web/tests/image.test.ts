@@ -12,7 +12,8 @@ import {
 	type Shown,
 	type ShowOptions,
 } from '../src/editor/attachHost.js';
-import { createRichEditor, currentMarkdown, whatIsLost } from '../src/editor/rich.js';
+import { currentMarkdown, whatIsLost } from '../src/editor/rich/adopt.js';
+import { createRichEditor } from '../src/editor/rich/createRichEditor.js';
 
 /**
  * A picture in a note, drawn by the rich editor's image view (#187), against a

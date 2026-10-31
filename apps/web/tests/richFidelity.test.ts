@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { sameMarkdownStructure } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { createRichEditor } from '../src/editor/rich/createRichEditor.js';
 
 /**
  * The second fidelity layer from docs/ARCHITECTURE.md §7.

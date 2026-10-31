@@ -7,7 +7,7 @@ import { callCommand } from '@milkdown/kit/utils';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { appChange } from '../src/editor/dirty.js';
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { taskPlugin, toggleTaskCommand } from '../src/editor/tasks.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
@@ -266,7 +266,7 @@ describe('the item after a task', () => {
 	});
 
 	// No box, and so no `<br />`: an empty item that is not a task is its
-	// marker alone (`itemWithoutEmptyLine` in rich.ts).
+	// marker alone (`itemWithoutEmptyLine` in rich/markdown.ts).
 	it('is a plain item after a plain one', async () => {
 		const { withCtx } = await mount('- one\n');
 		withCtx(afterWord('one'));

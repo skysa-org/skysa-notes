@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { readFormat } from '../src/editor/format.js';
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { FormatToolbar } from '../src/editor/toolbar/FormatToolbar.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

@@ -94,7 +94,7 @@ export const richMatches = (doc: ProseNode, query: FindQuery): readonly Match[] 
 			);
 
 /**
- * Draws the matches. Installed by `rich.ts` for every editor, since a plugin
+ * Draws the matches. Installed by `createRichEditor.ts` for every editor, since a plugin
  * cannot be added to a running one and the cost with no query is a string
  * comparison per block.
  */
