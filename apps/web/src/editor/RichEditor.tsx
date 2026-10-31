@@ -19,6 +19,7 @@ import {
 import { useLatest } from '../hooks/useLatest.js';
 import { useCodeDisplay } from '../store/hooks.js';
 import type { AttachmentHost } from './attachHost.js';
+import { useEditorBinding } from './editorBinding.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
@@ -28,7 +29,6 @@ import {
 	type FormatToolbarProps,
 	type ToolbarPlacement,
 } from './FormatToolbar.js';
-import { useEditorBinding } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
 import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
@@ -230,7 +230,7 @@ const EditorBody = ({
 	}, [loading, noteId]);
 
 	// Adopt a body that changed underneath us — a sync pull, or an edit made in
-	// raw mode. `shouldAdopt` is what keeps a stale prop on an unrelated re-render
+	// raw mode. `adopt` is what keeps a stale prop on an unrelated re-render
 	// from wiping out what the user has typed since the last save.
 	useEffect(() => {
 		if (loading) return;
