@@ -11,7 +11,7 @@ import {
 } from '@skysa/core';
 import { useEffect, useMemo, useRef } from 'react';
 
-import { closedProblem } from '../../editor/addFiles.js';
+import { closedProblem } from '../../editor/features/attachments/addFiles.js';
 import type {
 	Added,
 	AttachmentHost,
@@ -21,8 +21,8 @@ import type {
 	PictureSize,
 	Shown,
 	ShowOptions,
-} from '../../editor/attachHost.js';
-import { createOffers } from '../../editor/offers.js';
+} from '../../editor/features/attachments/attachHost.js';
+import { createOffers } from '../../editor/shared/offers.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../../lib/objectUrls.js';
 import { pickFiles } from '../../lib/pickFiles.js';

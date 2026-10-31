@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { onKeyboardRise, revealAbove } from '../src/editor/aboveKeyboard.js';
+import { onKeyboardRise, revealAbove } from '../src/editor/shared/aboveKeyboard.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**

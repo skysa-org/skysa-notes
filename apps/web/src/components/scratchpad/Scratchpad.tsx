@@ -21,7 +21,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { openableLink, openLink } from '../../editor/links.js';
+import { openableLink, openLink } from '../../editor/features/links/links.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';

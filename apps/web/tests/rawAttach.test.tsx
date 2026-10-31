@@ -4,15 +4,15 @@ import { EditorView } from '@codemirror/view';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Carried } from '../src/editor/addFiles.js';
+import type { Carried } from '../src/editor/features/attachments/addFiles.js';
 import {
 	type Added,
 	type AttachmentHost,
 	type AttachmentProblem,
 	type FileReceiver,
 	NO_ATTACHMENTS,
-} from '../src/editor/attachHost.js';
-import { RawEditor } from '../src/editor/RawEditor.js';
+} from '../src/editor/features/attachments/attachHost.js';
+import { RawEditor } from '../src/editor/raw/RawEditor.js';
 import { settleEditors } from '../src/store/heldEdits.js';
 
 /**

@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
 import { FindBar } from '../src/components/note/FindBar.js';
 import { NoteView } from '../src/components/note/NoteView.js';
-import { FindTargetProvider } from '../src/editor/findTarget.js';
-import { RichEditor } from '../src/editor/RichEditor.js';
+import { FindTargetProvider } from '../src/editor/features/find/findTarget.js';
+import { RichEditor } from '../src/editor/rich/RichEditor.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import {

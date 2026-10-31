@@ -1,7 +1,7 @@
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { RichEditor } from '../src/editor/RichEditor.js';
+import { RichEditor } from '../src/editor/rich/RichEditor.js';
 import { fakeHost, fence, openedIn, sealed } from './secretHostFake.js';
 
 /**

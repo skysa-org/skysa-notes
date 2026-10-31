@@ -1,6 +1,6 @@
 import { siteOf } from '@skysa/core';
 
-import { openableLink } from '../../editor/links.js';
+import { openableLink } from '../../editor/features/links/links.js';
 
 /**
  * A password's label, where it is a web address (docs/ARCHITECTURE.md §7,

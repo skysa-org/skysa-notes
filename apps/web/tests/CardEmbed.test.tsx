@@ -8,7 +8,7 @@ import {
 	type PictureSize,
 	type Shown,
 	type ShowOptions,
-} from '../src/editor/attachHost.js';
+} from '../src/editor/features/attachments/attachHost.js';
 
 /**
  * A picture on a scratch card as its host answers for it (docs/ARCHITECTURE.md

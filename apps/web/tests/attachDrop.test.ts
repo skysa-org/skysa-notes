@@ -6,16 +6,16 @@ import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Carried } from '../src/editor/addFiles.js';
+import type { Carried } from '../src/editor/features/attachments/addFiles.js';
 import {
 	type Added,
 	type AttachmentHost,
 	type AttachmentProblem,
 	type FileReceiver,
 	NO_ATTACHMENTS,
-} from '../src/editor/attachHost.js';
-import { INSERT_COMMANDS, SLASH_COMMANDS } from '../src/editor/commands.js';
+} from '../src/editor/features/attachments/attachHost.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { INSERT_COMMANDS, SLASH_COMMANDS } from '../src/editor/rich/commands.js';
 import { settleEditors } from '../src/store/heldEdits.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

@@ -26,36 +26,46 @@ import { toLf } from '@skysa/core';
 
 import { t } from '../../i18n/t.js';
 import { codeDisplay, type CodeDisplayStore } from '../../store/codeDisplay.js';
-import { richCaretAboveKeyboard } from '../aboveKeyboard.js';
-import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from '../attachDrop.js';
-import { attachHostCtx, type AttachmentHost } from '../attachHost.js';
-import { attachmentSchema, attachmentViewPlugin, claimsClick } from '../attachment.js';
-import { autoLanguagePlugin } from '../autoLanguage.js';
-import { codeBlocksKeepAtoms, codeSpansHoldText } from '../codeAtoms.js';
-import { codeBlockViewPlugin } from '../codeBlock.js';
-import { codeActivePlugin, codeNumbersPlugin } from '../codeTools.js';
-import { copiedText } from '../copiedText.js';
-import { deleteSelectedNode } from '../deleteSelected.js';
-import { holdUserEdits, userEditPlugin } from '../dirty.js';
-import { findPlugin } from '../findRich.js';
-import { codeHighlightPlugin } from '../highlight.js';
-import { htmlViewPlugin } from '../htmlView.js';
-import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } from '../image.js';
-import { createLanguageSource } from '../languages.js';
-import { linkChipPlugin, openLinkAtCursor } from '../linkRich.js';
-import { selectedKey } from '../nodeBar.js';
-import { richWithoutNul } from '../noNul.js';
+import {
+	attachOnDrop,
+	attachOnPaste,
+	pendingFiles,
+	receivePicked,
+} from '../features/attachments/attachDrop.js';
+import { attachHostCtx, type AttachmentHost } from '../features/attachments/attachHost.js';
+import {
+	attachmentSchema,
+	attachmentViewPlugin,
+	claimsClick,
+} from '../features/attachments/attachment.js';
+import {
+	imageViewPlugin,
+	imageWithoutStrayTitles,
+	unloadablePicturesInWords,
+} from '../features/attachments/image.js';
+import { autoLanguagePlugin } from '../features/code/autoLanguage.js';
+import { codeBlocksKeepAtoms, codeSpansHoldText } from '../features/code/codeAtoms.js';
+import { codeBlockViewPlugin } from '../features/code/codeBlock.js';
+import { codeActivePlugin, codeNumbersPlugin } from '../features/code/codeTools.js';
+import { codeHighlightPlugin } from '../features/code/highlight.js';
+import { createLanguageSource } from '../features/code/languages.js';
+import { findPlugin } from '../features/find/findRich.js';
+import { linkChipPlugin, openLinkAtCursor } from '../features/links/linkRich.js';
 import {
 	codeBlockWithoutSecrets,
 	secretPanelsCtx,
 	secretPlugin,
 	secretSchema,
 	secretViewPlugin,
-} from '../secretBlock.js';
-import { type SecretHost, secretHostCtx } from '../secretHost.js';
-import { createSecretPanels } from '../secretPanels.js';
-import { tailPlugin } from '../tail.js';
-import { taskPlugin, toggleTaskCommand } from '../tasks.js';
+} from '../features/secrets/secretBlock.js';
+import { type SecretHost, secretHostCtx } from '../features/secrets/secretHost.js';
+import { createSecretPanels } from '../features/secrets/secretPanels.js';
+import { richCaretAboveKeyboard } from '../shared/aboveKeyboard.js';
+import { holdUserEdits, userEditPlugin } from '../shared/dirty.js';
+import { richWithoutNul } from '../shared/noNul.js';
+import { copiedText } from './copiedText.js';
+import { deleteSelectedNode } from './deleteSelected.js';
+import { htmlViewPlugin } from './htmlView.js';
 import {
 	cellWithoutEmptyLine,
 	commonmarkWithoutBreakEater,
@@ -64,6 +74,9 @@ import {
 	itemWithoutEmptyLine,
 	paragraphAsBlankLine,
 } from './markdown.js';
+import { selectedKey } from './nodeBar.js';
+import { tailPlugin } from './tail.js';
+import { taskPlugin, toggleTaskCommand } from './tasks.js';
 
 /**
  * The rich editor itself, with no React in it.

@@ -41,11 +41,11 @@ const RESTRICTED_SYNTAX = [
 	{
 		// The rich editor's marker for a change the app made (#456): set with
 		// `appChange` and asked with `isAppChange`, so that what counts as the
-		// app's is decided in `apps/web/src/editor/dirty.ts` and nowhere else.
+		// app's is decided in `apps/web/src/editor/shared/dirty.ts` and nowhere else.
 		selector:
 			"Literal[value='skysa/programmatic'], TemplateElement[value.cooked='skysa/programmatic']",
 		message:
-			"mark the app's own change with appChange(tr) and ask with isAppChange(tr), from editor/dirty.ts (#456).",
+			"mark the app's own change with appChange(tr) and ask with isAppChange(tr), from editor/shared/dirty.ts (#456).",
 	},
 	{
 		selector: 'AwaitExpression > ImportExpression',
@@ -634,6 +634,28 @@ export default tseslint.config(
 						NOT_ABOVE(
 							['routes', 'sync'],
 							'the editors are views: they do not import routes or the sync layer.'
+						),
+					],
+				},
+			],
+		},
+	},
+	{
+		// What both editors use, and the raw one, know nothing of the rich one.
+		// Replaces the rule above for these files, so it says that again.
+		files: ['apps/web/src/editor/{raw,shared}/**/*.{ts,tsx}'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						NOT_ABOVE(
+							['routes', 'sync'],
+							'the editors are views: they do not import routes or the sync layer.'
+						),
+						NOT_ABOVE(
+							['rich', 'toolbar'],
+							'raw/ and shared/ do not depend on the rich editor (ProseMirror).'
 						),
 					],
 				},

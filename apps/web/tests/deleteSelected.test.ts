@@ -7,7 +7,7 @@ import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * A delete a phone's keyboard asks for with an input event rather than a key,
- * while a picture or a chip is selected whole (`editor/deleteSelected.ts`).
+ * while a picture or a chip is selected whole (`editor/rich/deleteSelected.ts`).
  */
 
 afterEach(async () => {

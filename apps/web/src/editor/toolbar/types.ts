@@ -1,7 +1,7 @@
 import type { Ctx } from '@milkdown/kit/ctx';
 
-import type { FormatState } from '../format.js';
-import type { PressedBy } from '../press.js';
+import type { FormatState } from '../rich/format.js';
+import type { PressedBy } from '../shared/press.js';
 
 export interface FormatToolbarProps {
 	/** What the selection is, as `format.ts` reads it. */

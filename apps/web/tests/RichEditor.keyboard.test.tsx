@@ -2,12 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { RichEditor } from '../src/editor/RichEditor.js';
+import { RichEditor } from '../src/editor/rich/RichEditor.js';
 
 /**
  * The toolbars pressed from the keyboard, against the real editor and the
  * real `run`, which hands focus back to the editor after a mouse's press and
- * leaves it on the control after any other (`editor/press.ts`). A harness
+ * leaves it on the control after any other (`editor/shared/press.ts`). A harness
  * whose `run` never moved focus would pass whatever focus did here.
  */
 

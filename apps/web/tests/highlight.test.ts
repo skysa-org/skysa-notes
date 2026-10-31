@@ -2,7 +2,7 @@ import type { LanguageSupport } from '@codemirror/language';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HIGHLIGHT_LIMIT, tokenize } from '../src/editor/highlight.js';
+import { HIGHLIGHT_LIMIT, tokenize } from '../src/editor/features/code/highlight.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

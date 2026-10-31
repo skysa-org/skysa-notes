@@ -54,7 +54,7 @@ const EDITOR_BREAK = /^\s*<br\s*\/?>\s*$/i;
 
 /**
  * A link the rich editor shows as a file's chip: one run of plain words, to a
- * file beside the note (`apps/web/src/editor/attachment.ts`).
+ * file beside the note (`apps/web/src/editor/features/attachments/attachment.ts`).
  */
 const isChip = (link: Link): boolean => {
 	const [only, ...rest] = link.children;

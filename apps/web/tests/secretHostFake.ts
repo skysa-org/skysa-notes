@@ -1,7 +1,7 @@
 import { secretBlocksIn } from '@skysa/core';
 import { vi } from 'vitest';
 
-import type { SecretHost } from '../src/editor/secretHost.js';
+import type { SecretHost } from '../src/editor/features/secrets/secretHost.js';
 import {
 	generateIdentity,
 	openSecret,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { DETECTABLE, detectLanguage } from '../src/editor/detect.js';
-import { findCodeLanguage } from '../src/editor/languages.js';
+import { DETECTABLE, detectLanguage } from '../src/editor/features/code/detect.js';
+import { findCodeLanguage } from '../src/editor/features/code/languages.js';
 
 /**
  * Guessing a code block's language from the text it is made out of.

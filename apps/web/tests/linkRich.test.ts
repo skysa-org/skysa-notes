@@ -3,7 +3,7 @@ import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { linkAt } from '../src/editor/linkRich.js';
+import { linkAt } from '../src/editor/features/links/linkRich.js';
 import { linksOpened as opened } from './linksOpened.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

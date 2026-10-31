@@ -7,20 +7,20 @@ import type { EditorView as RichView } from '@milkdown/kit/prose/view';
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Carried } from '../src/editor/addFiles.js';
+import type { Carried } from '../src/editor/features/attachments/addFiles.js';
 import {
 	type Added,
 	type AttachmentHost,
 	type AttachmentProblem,
 	NO_ATTACHMENTS,
-} from '../src/editor/attachHost.js';
-import { EMPTY_QUERY, type FindQuery, type FindTarget } from '../src/editor/find.js';
-import { rawFindTarget } from '../src/editor/findRaw.js';
-import { richFindTarget } from '../src/editor/findRich.js';
-import { RawEditor } from '../src/editor/RawEditor.js';
+} from '../src/editor/features/attachments/attachHost.js';
+import { EMPTY_QUERY, type FindQuery, type FindTarget } from '../src/editor/features/find/find.js';
+import { rawFindTarget } from '../src/editor/features/find/findRaw.js';
+import { richFindTarget } from '../src/editor/features/find/findRich.js';
+import type { SecretHost } from '../src/editor/features/secrets/secretHost.js';
+import { RawEditor } from '../src/editor/raw/RawEditor.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
-import { RichEditor } from '../src/editor/RichEditor.js';
-import type { SecretHost } from '../src/editor/secretHost.js';
+import { RichEditor } from '../src/editor/rich/RichEditor.js';
 import { settleEditors } from '../src/store/heldEdits.js';
 import { linksOpened as opened } from './linksOpened.js';
 import { fakeHost, fence, openedIn, sealed } from './secretHostFake.js';

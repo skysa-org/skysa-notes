@@ -9,7 +9,7 @@ import {
 	rearmor,
 	secretsIn,
 	writtenAt,
-} from '../src/editor/secretRaw.js';
+} from '../src/editor/features/secrets/secretRaw.js';
 import { sealed } from './secretHostFake.js';
 
 /**

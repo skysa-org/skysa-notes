@@ -6,7 +6,7 @@ import {
 	LIST_COMMANDS,
 	MORE_INLINE_COMMANDS,
 	PRIMARY_INLINE_COMMANDS,
-} from '../commands.js';
+} from '../rich/commands.js';
 
 /** The groups the bar's controls are drawn in. */
 export type Group = 'textStyle' | 'textFormatting' | 'lists' | 'indentation' | 'insert' | 'link';

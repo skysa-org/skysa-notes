@@ -10,7 +10,7 @@ import { createStore } from './emitter.js';
  * The buttons that change them sit on a block because that is where the reader
  * is when they want them, not because the block owns the answer.
  *
- * A store rather than a value, and the same shape as `editor/format.ts`'s, for
+ * A store rather than a value, and the same shape as `editor/rich/format.ts`'s, for
  * the same reason: the editor is not React, the toolbar is, and both have to
  * hear about a change. The editor plugins subscribe; `useCodeDisplay` loads the
  * stored value into it and writes changes back.

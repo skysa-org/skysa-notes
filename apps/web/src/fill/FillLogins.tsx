@@ -11,7 +11,7 @@ import {
 
 import { copyText } from '../components/clipboard/systemClipboard.js';
 import { UnlockDialog } from '../components/secrets/UnlockDialog.js';
-import { openLink } from '../editor/links.js';
+import { openLink } from '../editor/features/links/links.js';
 import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';

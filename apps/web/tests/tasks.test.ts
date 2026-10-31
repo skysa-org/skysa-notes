@@ -6,9 +6,9 @@ import { EditorState, Plugin, TextSelection, type Transaction } from '@milkdown/
 import { callCommand } from '@milkdown/kit/utils';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { appChange } from '../src/editor/dirty.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
-import { taskPlugin, toggleTaskCommand } from '../src/editor/tasks.js';
+import { taskPlugin, toggleTaskCommand } from '../src/editor/rich/tasks.js';
+import { appChange } from '../src/editor/shared/dirty.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

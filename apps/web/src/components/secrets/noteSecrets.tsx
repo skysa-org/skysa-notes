@@ -1,9 +1,9 @@
 import { AgeError, cell } from '@skysa/core';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AttachmentProblem } from '../../editor/attachHost.js';
-import { createOffers } from '../../editor/offers.js';
-import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
+import type { AttachmentProblem } from '../../editor/features/attachments/attachHost.js';
+import type { Opened, Sealer, SecretHost } from '../../editor/features/secrets/secretHost.js';
+import { createOffers } from '../../editor/shared/offers.js';
 import { t } from '../../i18n/t.js';
 import { type Age, loadAge } from '../../secrets/loadAge.js';
 import type { SecretsLock } from '../../secrets/lock.js';

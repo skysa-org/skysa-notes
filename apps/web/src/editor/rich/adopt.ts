@@ -4,8 +4,8 @@ import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { firstStructuralDifference, type StructuralDifference } from '@skysa/core';
 
-import { appChange, holdUserEdits, userEditKey } from '../dirty.js';
-import type { Adoption } from '../editorBinding.js';
+import { appChange, holdUserEdits, userEditKey } from '../shared/dirty.js';
+import type { Adoption } from '../shared/editorBinding.js';
 
 /**
  * The editor's document as markdown, exactly as Milkdown writes it.

@@ -2,7 +2,7 @@
  * The edits the editors are holding, which the store cannot see.
  *
  * An editor keeps what was typed for a moment before it saves it, and keeps an
- * edit whose save failed until one goes through (`editor/useAutosave.ts`). None
+ * edit whose save failed until one goes through (`editor/shared/useAutosave.ts`). None
  * of that is in a row. So anything about to act on "what this device holds" has
  * to have the editors write first — a tab closing its database for a newer
  * build (`store/staleTab.ts`), and a source being let go, where a count of what

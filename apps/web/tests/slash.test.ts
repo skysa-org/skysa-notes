@@ -3,7 +3,7 @@ import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BLOCK_COMMANDS } from '../src/editor/commands.js';
+import { BLOCK_COMMANDS } from '../src/editor/rich/commands.js';
 import {
 	matchCommands,
 	moveHighlight,
@@ -11,7 +11,7 @@ import {
 	slashKeyAction,
 	slashQuery,
 	textBeforeCursor,
-} from '../src/editor/slash.js';
+} from '../src/editor/rich/slash.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 const labels = (query: string) => matchCommands(query, BLOCK_COMMANDS).map((item) => item.label);

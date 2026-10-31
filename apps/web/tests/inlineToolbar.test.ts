@@ -2,7 +2,7 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { shouldShowInlineToolbar } from '../src/editor/InlineToolbar.js';
+import { shouldShowInlineToolbar } from '../src/editor/toolbar/InlineToolbar.js';
 import { fence, sealed } from './secretHostFake.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';

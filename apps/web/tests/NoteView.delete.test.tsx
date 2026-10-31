@@ -33,7 +33,7 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
  * not what the editor does, it is what deleting does to an edit that has not been
  * saved yet.
  */
-vi.mock('../src/editor/RichEditor.js', () => ({
+vi.mock('../src/editor/rich/RichEditor.js', () => ({
 	RichEditor: ({
 		origin = '',
 		onUserEdit,

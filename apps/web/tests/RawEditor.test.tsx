@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { changeBetween, RawEditor } from '../src/editor/RawEditor.js';
+import { changeBetween, RawEditor } from '../src/editor/raw/RawEditor.js';
 
 /**
  * The editor half of the "dirty only on real edits" rule: loading a note, and

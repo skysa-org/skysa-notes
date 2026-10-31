@@ -11,7 +11,7 @@ import {
 	type PictureSize,
 	type Shown,
 	type ShowOptions,
-} from '../src/editor/attachHost.js';
+} from '../src/editor/features/attachments/attachHost.js';
 import { currentMarkdown, whatIsLost } from '../src/editor/rich/adopt.js';
 import { createRichEditor } from '../src/editor/rich/createRichEditor.js';
 

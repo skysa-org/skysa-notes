@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 
-import type { SaveContext } from '../../editor/autosaveQueue.js';
-import { useAutosave } from '../../editor/useAutosave.js';
+import type { SaveContext } from '../../editor/shared/autosaveQueue.js';
+import { useAutosave } from '../../editor/shared/useAutosave.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';

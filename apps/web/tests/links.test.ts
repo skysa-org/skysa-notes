@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 
-import { linkAddress, linkChip, openableLink, openLink } from '../src/editor/links.js';
+import {
+	linkAddress,
+	linkChip,
+	openableLink,
+	openLink,
+} from '../src/editor/features/links/links.js';
 
 /**
  * A link in a note, opened in the browser (docs/ARCHITECTURE.md §7, "Links

@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { readFormat } from '../src/editor/format.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { readFormat } from '../src/editor/rich/format.js';
 import { FormatToolbar } from '../src/editor/toolbar/FormatToolbar.js';
 import { BASIC_SLOTS } from '../src/editor/toolbar/slots.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
@@ -111,7 +111,7 @@ describe('FormatToolbar', () => {
 
 	/**
 	 * A block made out of text that is already there arrives knowing what it is
-	 * (`editor/detect.ts`) — end to end, because the guess and the block are one
+	 * (`editor/features/code/detect.ts`) — end to end, because the guess and the block are one
 	 * transaction and it is the command that has to put them together.
 	 */
 	it('guesses the language of the text it turns into a code block', async () => {

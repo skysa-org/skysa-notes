@@ -1,6 +1,10 @@
 import { contentTypeOf, downloadName, opensInTab, safeOpenType } from '@skysa/core';
 
-import type { AttachmentHost, AttachmentProblem, Fetched } from '../../editor/attachHost.js';
+import type {
+	AttachmentHost,
+	AttachmentProblem,
+	Fetched,
+} from '../../editor/features/attachments/attachHost.js';
 import { t } from '../../i18n/t.js';
 import { DOWNLOAD_GRACE_MS } from '../../store/exportNotes.js';
 import { COARSE_POINTER } from '../ui/layout.js';

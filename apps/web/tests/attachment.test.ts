@@ -8,10 +8,10 @@ import {
 	type AttachmentProblem,
 	type Fetched,
 	NO_ATTACHMENTS,
-} from '../src/editor/attachHost.js';
-import { ATTACHMENT } from '../src/editor/attachment.js';
-import { selectedKey } from '../src/editor/nodeBar.js';
+} from '../src/editor/features/attachments/attachHost.js';
+import { ATTACHMENT } from '../src/editor/features/attachments/attachment.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { selectedKey } from '../src/editor/rich/nodeBar.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

@@ -3,11 +3,15 @@ import { closeHistory, undo } from '@milkdown/kit/prose/history';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { selectedKey } from '../src/editor/nodeBar.js';
+import { insertSecretCommand } from '../src/editor/features/secrets/secretBlock.js';
+import {
+	NO_SECRETS,
+	type Sealer,
+	type SecretHost,
+} from '../src/editor/features/secrets/secretHost.js';
+import { labelToWrite } from '../src/editor/features/secrets/secretPanels.js';
 import { adoptBody, currentMarkdown } from '../src/editor/rich/adopt.js';
-import { insertSecretCommand } from '../src/editor/secretBlock.js';
-import { NO_SECRETS, type Sealer, type SecretHost } from '../src/editor/secretHost.js';
-import { labelToWrite } from '../src/editor/secretPanels.js';
+import { selectedKey } from '../src/editor/rich/nodeBar.js';
 import { fakeHost, fence, openedIn, sealed, sealedForAnother } from './secretHostFake.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

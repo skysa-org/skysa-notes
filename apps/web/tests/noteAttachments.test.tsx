@@ -9,7 +9,11 @@ import {
 	pictureUrls,
 	useNoteAttachments,
 } from '../src/components/attachments/noteAttachments.js';
-import type { AttachmentProblem, Shown, ShowOptions } from '../src/editor/attachHost.js';
+import type {
+	AttachmentProblem,
+	Shown,
+	ShowOptions,
+} from '../src/editor/features/attachments/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlFactory } from '../src/lib/objectUrls.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import type { FileRecord, NoteRecord } from '../src/store/db.js';

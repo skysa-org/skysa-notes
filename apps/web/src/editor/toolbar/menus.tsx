@@ -12,9 +12,9 @@ import {
 import { Icon } from '../../components/ui/icons.js';
 import { usePressAway } from '../../components/ui/usePressAway.js';
 import { t } from '../../i18n/t.js';
-import { type EditorCommand, MORE_INLINE_COMMANDS, TEXT_STYLES } from '../commands.js';
-import type { FormatState } from '../format.js';
-import { onPress } from '../press.js';
+import { type EditorCommand, MORE_INLINE_COMMANDS, TEXT_STYLES } from '../rich/commands.js';
+import type { FormatState } from '../rich/format.js';
+import { onPress } from '../shared/press.js';
 import type { FormatToolbarProps, ToolbarPlacement } from './types.js';
 import type { Stop } from './useRoving.js';
 

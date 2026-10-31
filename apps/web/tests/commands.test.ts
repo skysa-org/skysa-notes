@@ -3,6 +3,8 @@ import type { Ctx } from '@milkdown/kit/ctx';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { clearLink, setLink } from '../src/editor/rich/actions/link.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import {
 	ALL_COMMANDS,
 	BLOCK_COMMANDS,
@@ -10,9 +12,7 @@ import {
 	INSERT_COMMANDS,
 	SLASH_COMMANDS,
 	TEXT_STYLES,
-} from '../src/editor/commands.js';
-import { clearLink, setLink } from '../src/editor/rich/actions/link.js';
-import { currentMarkdown } from '../src/editor/rich/adopt.js';
+} from '../src/editor/rich/commands.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

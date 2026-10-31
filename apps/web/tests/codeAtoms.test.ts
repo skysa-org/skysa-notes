@@ -4,13 +4,13 @@ import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ALL_COMMANDS } from '../src/editor/commands.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { ALL_COMMANDS } from '../src/editor/rich/commands.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * Code is text (#187): a chip, a picture or a line break is never lost to a
- * code span or a code block (`editor/codeAtoms.ts`).
+ * code span or a code block (`editor/features/code/codeAtoms.ts`).
  */
 
 afterEach(async () => {
