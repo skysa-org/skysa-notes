@@ -57,47 +57,24 @@ export interface EditorCommand {
 type Reflects =
 	Readonly<{ mark: MarkName }> | Readonly<{ list: ListKind }> | Readonly<{ block: 'codeBlock' }>;
 
-const HEADING_1: EditorCommand = {
-	id: 'heading-1',
-	label: t('editor.commands.heading1'),
-	keywords: ['h1', 'title'],
-	apply: run(wrapInHeadingCommand, 1),
-};
+/** A heading of a level, wherever it is offered: its id and what it does follow from the level. */
+const heading = (
+	level: 1 | 2 | 3 | 4 | 5 | 6,
+	label: string,
+	keywords: readonly string[]
+): EditorCommand => ({
+	id: `heading-${level}`,
+	label,
+	keywords,
+	apply: run(wrapInHeadingCommand, level),
+});
 
-const HEADING_2: EditorCommand = {
-	id: 'heading-2',
-	label: t('editor.commands.heading2'),
-	keywords: ['h2', 'section'],
-	apply: run(wrapInHeadingCommand, 2),
-};
-
-const HEADING_3: EditorCommand = {
-	id: 'heading-3',
-	label: t('editor.commands.heading3'),
-	keywords: ['h3'],
-	apply: run(wrapInHeadingCommand, 3),
-};
-
-const HEADING_4: EditorCommand = {
-	id: 'heading-4',
-	label: t('editor.commands.heading4'),
-	keywords: ['h4'],
-	apply: run(wrapInHeadingCommand, 4),
-};
-
-const HEADING_5: EditorCommand = {
-	id: 'heading-5',
-	label: t('editor.commands.heading5'),
-	keywords: ['h5'],
-	apply: run(wrapInHeadingCommand, 5),
-};
-
-const HEADING_6: EditorCommand = {
-	id: 'heading-6',
-	label: t('editor.commands.heading6'),
-	keywords: ['h6'],
-	apply: run(wrapInHeadingCommand, 6),
-};
+const HEADING_1 = heading(1, t('editor.commands.heading1'), ['h1', 'title']);
+const HEADING_2 = heading(2, t('editor.commands.heading2'), ['h2', 'section']);
+const HEADING_3 = heading(3, t('editor.commands.heading3'), ['h3']);
+const HEADING_4 = heading(4, t('editor.commands.heading4'), ['h4']);
+const HEADING_5 = heading(5, t('editor.commands.heading5'), ['h5']);
+const HEADING_6 = heading(6, t('editor.commands.heading6'), ['h6']);
 
 const PLAIN_TEXT: EditorCommand = {
 	id: 'paragraph',

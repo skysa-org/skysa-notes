@@ -9,6 +9,7 @@ import {
 	INLINE_COMMANDS,
 	INSERT_COMMANDS,
 	SLASH_COMMANDS,
+	TEXT_STYLES,
 } from '../src/editor/commands.js';
 import { clearLink, setLink } from '../src/editor/rich/actions/link.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
@@ -333,6 +334,9 @@ describe('the catalogue', () => {
 
 		expect(await produced('heading-1')).toBe('# plain\n');
 		expect(await produced('heading-2')).toBe('## plain\n');
+		expect(await produced('heading-3')).toBe('### plain\n');
+		expect(await produced('heading-4')).toBe('#### plain\n');
+		expect(await produced('heading-5')).toBe('##### plain\n');
 		expect(await produced('heading-6')).toBe('###### plain\n');
 		expect(await produced('bullet-list')).toBe('- plain\n');
 		expect(await produced('ordered-list')).toBe('1. plain\n');
@@ -366,6 +370,14 @@ describe('the catalogue', () => {
 	it('holds everything the menus offer', () => {
 		[...SLASH_COMMANDS, ...INLINE_COMMANDS, ...INSERT_COMMANDS].forEach((command) => {
 			expect(ALL_COMMANDS).toContain(command);
+		});
+	});
+
+	it('names each heading for the level it makes', () => {
+		expect(TEXT_STYLES.map(({ level }) => level)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+		TEXT_STYLES.filter(({ level }) => level > 0).forEach(({ level, command }) => {
+			expect(command.id).toBe(`heading-${level}`);
+			expect(command.label).toBe(`Heading ${level}`);
 		});
 	});
 
