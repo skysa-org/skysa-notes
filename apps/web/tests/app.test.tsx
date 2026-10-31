@@ -248,19 +248,19 @@ describe('the app', () => {
 
 		await open('/?connect=partial', 'Work');
 		const partial = await screen.findByRole('alert');
-		expect(partial.className).toContain('toast-warning');
+		expect(partial.getAttribute('data-toast-tone')).toBe('warning');
 		cleanup();
 
 		await open('/?connect=refused', 'Work');
 		const refused = await screen.findByRole('alert');
-		expect(refused.className).toContain('toast-error');
+		expect(refused.getAttribute('data-toast-tone')).toBe('error');
 		cleanup();
 
 		await open('/?connect=ok', 'Work');
 		// A success waits its turn rather than interrupting: `status`, not
 		// `alert`.
 		const ok = await screen.findByRole('status');
-		expect(ok.className).toContain('toast-success');
+		expect(ok.getAttribute('data-toast-tone')).toBe('success');
 	});
 
 	it('keeps showing the notes when an account is connected, and what was never sent when it is disconnected', async () => {

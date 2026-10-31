@@ -41,6 +41,18 @@ const primitiveDeclarations = (selector: string): string =>
 		.join(' ');
 
 describe('the stylesheet', () => {
+	// The components say which by an attribute, and a browser is as quiet about a
+	// selector nothing matches as about a variable nobody declared.
+	it.each([
+		...['success', 'warning', 'error'].map((tone) => `[data-toast-tone='${tone}']`),
+		...[1, 2, 3, 4, 5, 6].flatMap((level) => [
+			`[data-outline-depth='${String(level)}'] button`,
+			`[data-sample-level='${String(level)}']`,
+		]),
+	])('draws %s', (selector) => {
+		expect(allStyles()).toContain(selector);
+	});
+
 	it.each([
 		'.update-prompt button',
 		'.toast button',

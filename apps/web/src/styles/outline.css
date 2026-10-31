@@ -80,22 +80,22 @@
 }
 
 /* Depth as indentation, which is the whole of the structure a rail can show. */
-.outline-h1 button {
+[data-outline-depth='1'] button {
 	font-weight: 600;
 	color: var(--fg);
 }
-.outline-h2 button {
+[data-outline-depth='2'] button {
 	padding-inline-start: 1rem;
 }
-.outline-h3 button {
+[data-outline-depth='3'] button {
 	padding-inline-start: 1.75rem;
 }
-.outline-h4 button {
+[data-outline-depth='4'] button {
 	padding-inline-start: 2.5rem;
 }
-.outline-h5 button {
+[data-outline-depth='5'] button {
 	padding-inline-start: 3.25rem;
 }
-.outline-h6 button {
+[data-outline-depth='6'] button {
 	padding-inline-start: 4rem;
 }

@@ -336,7 +336,7 @@ export const TextStyleMenu = ({ format, run, open, setOpen, stop }: PanelProps) 
 						setOpen(false);
 					})}
 				>
-					<span className={`toolbar-sample toolbar-sample-${String(style.level)}`}>
+					<span className="toolbar-sample" data-sample-level={style.level}>
 						{style.command.label}
 					</span>
 					{style.level === format.level && <Icon name="check" />}
