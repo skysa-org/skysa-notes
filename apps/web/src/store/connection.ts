@@ -709,13 +709,6 @@ const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
 };
 
 /**
- * Make `connectionId` the app's connection. The device's own notes and
- * notebooks come with it, copied into it, and so do the rows of any detached
- * source that was this same account, resumed. Safe to call again: rows already
- * under it are left as they are, cursor included, and queue nothing. Answers
- * whether it bound.
- */
-/**
  * A live source whose first import is holding the device's pile: copied into
  * it, and kept here as well until the import is done or cancelled.
  */
@@ -760,6 +753,13 @@ const firstBinding = (
 	resuming: readonly string[]
 ): boolean => resuming.length === 0 && !states.some((state) => state.connectionId === connectionId);
 
+/**
+ * Make `connectionId` the app's connection. The device's own notes and
+ * notebooks come with it, copied into it, and so do the rows of any detached
+ * source that was this same account, resumed. Safe to call again: rows already
+ * under it are left as they are, cursor included, and queue nothing. Answers
+ * whether it bound.
+ */
 export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boolean> =>
 	inTransaction(db, async () => {
 		if (!(await unchangedSince(db, input))) return false;

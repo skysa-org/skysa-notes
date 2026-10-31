@@ -837,26 +837,26 @@ export type OpOutcome =
 	/** Nothing to record beyond the op being finished. */
 	| Readonly<{ kind: 'done' }>;
 
+/**
+ * Every read sees a note the user has deleted whose `delete` op is
+ * still queued. The row *is* the tombstone: it is what carries the
+ * `remoteId` the op needs, since the op itself holds only a note id, and it
+ * goes when the op completes as `purged` — not when the user presses delete.
+ *
+ * All of them, not just `noteById`. A store with a `deleted` flag and
+ * filtered indexes is a natural reading of "every live note", passes a
+ * contract suite that only checks `noteById`, and loses a note the first
+ * time one is deleted here and edited on another device: the pull cannot
+ * see the row, mints a second note at that path, and the queued delete then
+ * removes the file that was just imported.
+ *
+ * A note deleted here and changed remotely in the same window resolves in
+ * favour of the delete — the row is written back by the pull and then
+ * purged by the op behind it. That is a decision, not an accident: the
+ * delete is something the user did, and the remote change may be their own
+ * from the other device.
+ */
 export interface SyncStore {
-	/**
-	 * Every read below sees a note the user has deleted whose `delete` op is
-	 * still queued. The row *is* the tombstone: it is what carries the
-	 * `remoteId` the op needs, since the op itself holds only a note id, and it
-	 * goes when the op completes as `purged` — not when the user presses delete.
-	 *
-	 * All of them, not just `noteById`. A store with a `deleted` flag and
-	 * filtered indexes is a natural reading of "every live note", passes a
-	 * contract suite that only checks `noteById`, and loses a note the first
-	 * time one is deleted here and edited on another device: the pull cannot
-	 * see the row, mints a second note at that path, and the queued delete then
-	 * removes the file that was just imported.
-	 *
-	 * A note deleted here and changed remotely in the same window resolves in
-	 * favour of the delete — the row is written back by the pull and then
-	 * purged by the op behind it. That is a decision, not an accident: the
-	 * delete is something the user did, and the remote change may be their own
-	 * from the other device.
-	 */
 	/** Where the last pull got to, or `undefined` for a cold start. */
 	readonly cursor: () => Promise<string | undefined>;
 	/**

@@ -246,11 +246,6 @@ export interface Detached {
 }
 
 /**
- * App-wide settings. A table rather than `localStorage` because the store is
- * already here, it is the same place everything else lives, and it works the
- * same in a test as in the browser.
- */
-/**
  * A credential this device holds, keyed by the connection it reaches — or by
  * `PENDING_CREDENTIAL_ID` while a flow is out and there is no connection yet.
  *
@@ -270,6 +265,11 @@ export interface CredentialRecord {
 /** The one flow that may be out at a time, matching the server's one flow cookie. */
 export const PENDING_CREDENTIAL_ID = 'pending';
 
+/**
+ * App-wide settings. A table rather than `localStorage` because the store is
+ * already here, it is the same place everything else lives, and it works the
+ * same in a test as in the browser.
+ */
 interface PreferenceRecord {
 	key: string;
 	value: string;

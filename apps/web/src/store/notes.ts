@@ -1265,18 +1265,6 @@ export interface NoteFileInput {
 }
 
 /**
- * A clean note record read from a file, with nothing remote on it yet.
- *
- * Synchronous, with the hash passed in, so a caller applying many files in one
- * transaction can digest them all before opening it: `crypto.subtle.digest` is
- * a promise Dexie did not make, and awaiting one inside a transaction commits
- * it early.
- *
- * What a note keeps from the row it replaces is what the file does not say:
- * when it was first seen here, which editor it was last open in, and whether
- * the user has deleted it — a delete here outranks a change there (§7).
- */
-/**
  * Whether a file brings the body a row already holds.
  *
  * Asked of the row's file as well as its body, because the two can differ with
@@ -1318,6 +1306,18 @@ const editedAt = (
 	return existing.contentHash === input.hash ? existing.updatedAt : input.now;
 };
 
+/**
+ * A clean note record read from a file, with nothing remote on it yet.
+ *
+ * Synchronous, with the hash passed in, so a caller applying many files in one
+ * transaction can digest them all before opening it: `crypto.subtle.digest` is
+ * a promise Dexie did not make, and awaiting one inside a transaction commits
+ * it early.
+ *
+ * What a note keeps from the row it replaces is what the file does not say:
+ * when it was first seen here, which editor it was last open in, and whether
+ * the user has deleted it — a delete here outranks a change there (§7).
+ */
 export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 	const parsed = input.parsed ?? parseNoteFile(input.source, { filename: basename(input.path) });
 	const { existing } = input;

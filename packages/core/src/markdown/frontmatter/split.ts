@@ -12,11 +12,6 @@ import { readTime } from '../time.js';
 export const FENCE = '---';
 
 /**
- * The opening fence must be the very first line, and a closing fence must exist.
- * Without a closing fence a leading `---` is an ordinary thematic break.
- */
-const EOL = String.raw`(?:\r\n|\n|\r)`;
-/**
  * All three spellings, not two. A file ending its lines with a bare `\r` is
  * rare — pre-OS X Mac, and a few export tools — but `parse` reads one as a
  * document like any other, so a splitter that does not recognise its fences
@@ -24,6 +19,7 @@ const EOL = String.raw`(?:\r\n|\n|\r)`;
  * the note's `id` is lost, its title comes out as the YAML, and the next write
  * puts a second frontmatter block above the first.
  */
+const EOL = String.raw`(?:\r\n|\n|\r)`;
 /**
  * YAML's document-end marker. On a line of its own it closes a block as `---`
  * does — pandoc writes its blocks that way — and a reader that waits for `---`
@@ -33,6 +29,9 @@ const EOL = String.raw`(?:\r\n|\n|\r)`;
 export const DOCUMENT_END = '...';
 
 /**
+ * The opening fence must be the very first line, and a closing fence must exist.
+ * Without a closing fence a leading `---` is an ordinary thematic break.
+ *
  * Line anchors are spelled out from `EOL` rather than left to the `m` flag,
  * whose `^` and `$` also match at U+2028 and U+2029. Neither ends a line in
  * markdown or in YAML, and both are legal inside a quoted scalar: with `m`, a
@@ -297,24 +296,6 @@ const endedReading = (source: string): Reading | undefined => {
 	};
 };
 
-/**
- * Frontmatter is optional on read: a `.md` file written by any other tool is a
- * valid note.
- *
- * A block closed by `---` is the answer unless a `...` line closed one first
- * and something other than blank lines stands between the two. YAML ends its
- * document at `...`, so what follows is not metadata under any reading: it is
- * a pandoc block and the top of the note, run together as far as the note's
- * first thematic break — `# Slide 1` above a slide rule, which the parser takes
- * for a comment and raises no error over, or a paragraph above a setext
- * underline. Nothing but blank lines between them is YAML that closed itself
- * with `...` and then the fence, which is legal, and stays the `---` block.
- *
- * The rule looks only at the text and never at how well it parsed beyond what
- * each reading already demands, so it answers the same before and after the
- * app's own write — which tidies blank lines and would otherwise tip a rule
- * that counted them.
- */
 /** Did `...` close a block above the `---`, with more than blank lines between? */
 const closedEarlier = (source: string, ended: Reading, fenced: Reading): boolean =>
 	source.slice(ended.length, fenced.length).replace(CLOSING_FENCE, '').trim() !== '';
@@ -441,6 +422,24 @@ const flattenedReading = (source: string): SplitDocument | undefined => {
 	return { frontmatter: pairs.join(match[1] ?? '\n'), body: source.slice(match[0].length) };
 };
 
+/**
+ * Frontmatter is optional on read: a `.md` file written by any other tool is a
+ * valid note.
+ *
+ * A block closed by `---` is the answer unless a `...` line closed one first
+ * and something other than blank lines stands between the two. YAML ends its
+ * document at `...`, so what follows is not metadata under any reading: it is
+ * a pandoc block and the top of the note, run together as far as the note's
+ * first thematic break — `# Slide 1` above a slide rule, which the parser takes
+ * for a comment and raises no error over, or a paragraph above a setext
+ * underline. Nothing but blank lines between them is YAML that closed itself
+ * with `...` and then the fence, which is legal, and stays the `---` block.
+ *
+ * The rule looks only at the text and never at how well it parsed beyond what
+ * each reading already demands, so it answers the same before and after the
+ * app's own write — which tidies blank lines and would otherwise tip a rule
+ * that counted them.
+ */
 export const splitFrontmatter = (source: string): SplitDocument => {
 	if (!source.startsWith(FENCE)) return NO_FRONTMATTER(source);
 
