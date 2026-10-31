@@ -1,5 +1,31 @@
 /* What more than one component is drawn from. */
 
+/* What floats over the page and goes when it is done with: a menu, a flyout,
+   the command palette (with a deeper shadow of its own, `palette.css`). By
+   name, not a class each adds: each is nothing without this, and a second class
+   to remember is one to forget. */
+.slash-menu,
+.inline-toolbar,
+.toolbar-panel,
+.outline.outline-flyout,
+.palette {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-m);
+	background: var(--bg);
+	box-shadow: var(--shadow-l);
+}
+
+/* What the page stops to say: a dialog, a toast, an offer to update. On the
+   raised colour, so that it reads as apart from what is behind it. */
+.modal,
+.update-prompt,
+.toast {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-m);
+	background: var(--surface);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
 /* The bar of small icon buttons that hangs off a block in the editor: a code
    block's, a file chip's, a picture's, a secret's (which sits in its block's
    line instead, `.secret-actions`). The block's text is selectable; the

@@ -27,7 +27,40 @@ const SET_ELSEWHERE: ReadonlySet<string> = new Set([
 	'--viewport-top',
 ]);
 
+/** What `primitives.css` itself gives exactly this selector, not a rule that only starts like it. */
+const primitiveDeclarations = (selector: string): string =>
+	withoutComments(readFileSync(join(STYLES_FOLDER, 'primitives.css'), 'utf8'))
+		.split('}')
+		.filter((block) =>
+			(block.split('{')[0] ?? '')
+				.split(',')
+				.map((listed) => listed.trim())
+				.includes(selector)
+		)
+		.map((block) => block.split('{')[1] ?? '')
+		.join(' ');
+
 describe('the stylesheet', () => {
+	// Each of these is nothing without its surface: see-through, over whatever is
+	// behind it.
+	it.each([
+		['.slash-menu', 'var(--bg)'],
+		['.inline-toolbar', 'var(--bg)'],
+		['.toolbar-panel', 'var(--bg)'],
+		['.outline.outline-flyout', 'var(--bg)'],
+		['.palette', 'var(--bg)'],
+		['.modal', 'var(--surface)'],
+		['.update-prompt', 'var(--surface)'],
+		['.toast', 'var(--surface)'],
+	])('draws %s on %s, with a border, a corner and a shadow', (selector, background) => {
+		const surface = primitiveDeclarations(selector);
+
+		expect(surface).toContain('border: 1px solid var(--border)');
+		expect(surface).toContain('border-radius: var(--radius-m)');
+		expect(surface).toContain(`background: ${background}`);
+		expect(surface).toContain('box-shadow: ');
+	});
+
 	// A file left out draws nothing, and the tests that read the sheet would not
 	// see its rules either.
 	it('imports every file in its folder, once', () => {

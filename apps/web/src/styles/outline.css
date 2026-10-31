@@ -71,10 +71,6 @@
 	width: min(18rem, 100% - 2rem);
 	max-height: calc(100% - 1rem);
 	padding: 0.35rem;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-m);
-	background: var(--bg);
-	box-shadow: var(--shadow-l);
 }
 
 /* Room for a finger, where the rail's rows are sized for a pointer. */
