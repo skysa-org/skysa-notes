@@ -101,10 +101,8 @@ export interface LinkChip {
 export const linkChip = (): LinkChip => {
 	const held = cell<URL | undefined>(undefined);
 
-	const address = document.createElement('span');
-	address.setAttribute('class', 'link-chip-address');
-	const hint = document.createElement('span');
-	hint.setAttribute('class', 'link-chip-hint');
+	const address = el('span', { class: 'link-chip-address' });
+	const hint = el('span', { class: 'link-chip-hint' });
 	// Said by the button's name, and a screen reader's user is not clicking.
 	hint.setAttribute('aria-hidden', 'true');
 	hint.append(t('editor.link.clickHint', { key: modKeyLabel() }));

@@ -148,22 +148,16 @@ const attachmentView =
 	(initial: ProseNode): NodeView => {
 		const held = cell(initial);
 
-		const icon = document.createElement('span');
-		icon.setAttribute('class', 'attachment-icon');
-		const name = document.createElement('span');
-		name.setAttribute('class', 'attachment-name');
-		const chip = document.createElement('span');
-		chip.setAttribute('class', 'attachment-chip');
-		chip.setAttribute('role', 'link');
-		chip.append(icon, name);
+		const icon = el('span', { class: 'attachment-icon' });
+		const name = el('span', { class: 'attachment-name' });
+		const chip = el('span', { class: 'attachment-chip', role: 'link' }, icon, name);
 
 		const opener = barButton('open', t('editor.attachment.open'));
 		const saver = barButton('download', t('editor.attachment.download'));
 		const remover = barButton('trash', t('editor.attachment.remove'));
 		const bar = nodeBar(view, [opener, saver, remover]);
 
-		const dom = el('span', { class: 'attachment' });
-		dom.append(chip, bar.dom);
+		const dom = el('span', { class: 'attachment' }, chip, bar.dom);
 
 		const describe = () => {
 			const node = held.current;

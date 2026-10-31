@@ -174,8 +174,7 @@ const imageView =
 		const remover = barButton('trash', t('editor.attachment.remove'));
 		const bar = nodeBar(view, [opener, saver, remover], 'note-image-actions');
 
-		const dom = el('span', { class: 'note-image' });
-		dom.append(img, reason, action, bar.dom);
+		const dom = el('span', { class: 'note-image' }, img, reason, action, bar.dom);
 
 		const reasonFor = (next: State, alt: string): string | undefined => {
 			const mb = megabytes(size.current);

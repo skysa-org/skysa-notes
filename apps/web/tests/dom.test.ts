@@ -23,7 +23,8 @@ describe('buttonEl', () => {
 	it('is of type button, so it cannot submit a form it is put in', () => {
 		expect(buttonEl().getAttribute('type')).toBe('button');
 		expect(buttonEl({ class: 'a' }, 'Go').outerHTML).toBe(
-			'<button type="button" class="a">Go</button>'
+			'<button class="a" type="button">Go</button>'
 		);
+		expect(buttonEl({ type: 'submit' }).getAttribute('type')).toBe('button');
 	});
 });

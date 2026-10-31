@@ -129,10 +129,7 @@ export const createSecretPanel = ({
 
 	const caption = el('label', { class: 'secret-label-row' }, t('editor.secret.labelField'), name);
 
-	const hint = document.createElement('p');
-	hint.setAttribute('class', 'secret-label-hint');
-	hint.setAttribute('id', hintId);
-	hint.append(t('editor.secret.labelHint'));
+	const hint = el('p', { class: 'secret-label-hint', id: hintId }, t('editor.secret.labelHint'));
 
 	const field = el(
 		'textarea',
@@ -159,9 +156,7 @@ export const createSecretPanel = ({
 		event.preventDefault();
 	});
 
-	const said = document.createElement('p');
-	said.setAttribute('class', 'secret-said');
-	said.setAttribute('role', 'status');
+	const said = el('p', { class: 'secret-said', role: 'status' });
 
 	const say = (message: string | undefined) => {
 		said.replaceChildren(message ?? '');
@@ -178,9 +173,7 @@ export const createSecretPanel = ({
 	const answer = el('span', { class: 'dialog-primary', 'data-dialog-primary': '' }, done);
 
 	// The row every dialog has (`DialogActions`), built as it builds it.
-	const actions = document.createElement('div');
-	actions.setAttribute('class', 'dialog-actions');
-	actions.append(cancel, copy, answer);
+	const actions = el('div', { class: 'dialog-actions' }, cancel, copy, answer);
 
 	const dom = el(
 		'div',

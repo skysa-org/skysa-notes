@@ -68,16 +68,15 @@ export const lineStarts = (text: string): readonly number[] =>
  */
 export const NUMBERED_LINE_LIMIT = 2000;
 
-const numberElement = (line: number) => (): HTMLElement => {
-	const element = el('span', { class: 'code-line-number' });
-	// Out of the flow, so a wrapped line's second row still starts under the
-	// first row's text rather than under the number, and so the numbers cannot
-	// be selected or copied along with the code.
-	element.setAttribute('contenteditable', 'false');
-	element.setAttribute('aria-hidden', 'true');
-	element.append(String(line));
-	return element;
-};
+// Out of the flow, so a wrapped line's second row still starts under the first
+// row's text rather than under the number, and so the numbers cannot be selected
+// or copied along with the code.
+const numberElement = (line: number) => (): HTMLElement =>
+	el(
+		'span',
+		{ class: 'code-line-number', contenteditable: 'false', 'aria-hidden': 'true' },
+		String(line)
+	);
 
 const numbersFor = (doc: ProseNode): readonly Decoration[] => {
 	const found = cell<Decoration[]>([]);

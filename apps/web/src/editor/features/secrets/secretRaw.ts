@@ -535,10 +535,7 @@ const panelWidgets = new WeakMap<SecretPanel, WidgetType>();
 const panelWidget = (panel: SecretPanel): WidgetType => {
 	const kept = panelWidgets.get(panel);
 	if (kept !== undefined) return kept;
-	const widget = widgetOf(() => {
-		const holder = el('div', { class: 'secret-raw-panel' }, panel.dom);
-		return holder;
-	});
+	const widget = widgetOf(() => el('div', { class: 'secret-raw-panel' }, panel.dom));
 	panelWidgets.set(panel, widget);
 	return widget;
 };
@@ -574,8 +571,7 @@ const revealWidget = (
 	host: SecretHost
 ): WidgetType =>
 	widgetOf(() => {
-		const bar = document.createElement('span');
-		bar.setAttribute('class', 'secret-raw-bar');
+		const bar = el('span', { class: 'secret-raw-bar' });
 		const { button } = revealControl({
 			into: bar,
 			host,

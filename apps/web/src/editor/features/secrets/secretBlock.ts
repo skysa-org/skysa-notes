@@ -309,10 +309,7 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 					// may be in its block's view by then.
 					Decoration.widget(
 						place.from,
-						() => {
-							const holder = el('div', { class: 'secret-draft' }, open.panel.dom);
-							return holder;
-						},
+						() => el('div', { class: 'secret-draft' }, open.panel.dom),
 						{
 							key: 'secret-draft',
 							side: -1,
@@ -350,11 +347,8 @@ const secretView = (ctx: Ctx) => {
 		const gone = cell(false);
 
 		// What it is called: its label, or the app's word for a secret.
-		const name = document.createElement('span');
-		name.setAttribute('class', 'secret-name');
-		const label = document.createElement('span');
-		label.setAttribute('class', 'secret-label');
-		label.append(iconElement('lock'), name);
+		const name = el('span', { class: 'secret-name' });
+		const label = el('span', { class: 'secret-label' }, iconElement('lock'), name);
 		const named = () => {
 			const called = secretLabel(labelOf(held.current));
 			name.replaceChildren(called ?? t('editor.secret.label'));
@@ -365,9 +359,7 @@ const secretView = (ctx: Ctx) => {
 		const remover = barButton('trash', t('editor.secret.remove'));
 		const bar = nodeBar(view, [remover], 'secret-actions');
 
-		const line = document.createElement('div');
-		line.setAttribute('class', 'secret-line');
-		line.append(label);
+		const line = el('div', { class: 'secret-line' }, label);
 		const { button: reveal, press } = revealControl({
 			into: line,
 			host,
@@ -378,8 +370,7 @@ const secretView = (ctx: Ctx) => {
 
 		const row = el('div', { class: 'secret-bar' }, line, bar.dom);
 
-		const slot = document.createElement('div');
-		slot.setAttribute('class', 'secret-slot');
+		const slot = el('div', { class: 'secret-slot' });
 
 		const dom = el('div', { class: 'secret-block' }, row, slot);
 

@@ -178,15 +178,15 @@ const codeBlockView =
 			{ pressed: display.get().lineNumbers }
 		);
 
+		// Nothing in the bar is part of the note, so it is not part of the
+		// editable surface either: a cursor must not be able to land in it, and
+		// its own DOM changes are not document changes.
 		const bar = el('div', {
 			class: 'code-block-tools',
 			role: 'group',
 			'aria-label': t('editor.codeBlock.label'),
+			contenteditable: 'false',
 		});
-		// Nothing in the bar is part of the note, so it is not part of the
-		// editable surface either: a cursor must not be able to land in it, and
-		// its own DOM changes are not document changes.
-		bar.setAttribute('contenteditable', 'false');
 		bar.append(picker, wrap, numbers, copy, remove);
 
 		// The block's own rendering, rather than `codeBlockAttr`'s: that ctx exists

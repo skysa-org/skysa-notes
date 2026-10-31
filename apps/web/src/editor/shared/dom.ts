@@ -20,4 +20,4 @@ export const el = <K extends keyof HTMLElementTagNameMap>(
 export const buttonEl = (
 	attributes: Readonly<Record<string, string>> = {},
 	...children: readonly (Node | string)[]
-): HTMLButtonElement => el('button', { type: 'button', ...attributes }, ...children);
+): HTMLButtonElement => el('button', { ...attributes, type: 'button' }, ...children);
