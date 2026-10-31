@@ -1,6 +1,6 @@
 # 0003. Change relay
 
-*optional, 2026-10-05. Cited in the code as §6, "Change relay". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
+*2026-10-05. Optional, and off by default. Cited in the code as §6, "Change relay". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 A device finds another device's edits on its next poll — within 60 seconds while it is visible, sooner on focus (§7).
 Where the operator turns the relay on, it finds them within a second or two, or a few on Google Drive, whose change feed trails a write (§5.1): a device that has pushed tells the API, and the API tells the connection's other devices, which pull.

@@ -45,7 +45,7 @@ The owner asked for it on 2026-10-15, and chose the answers below.
   Cancel, or Done with nothing in it, deletes it quietly.
   Where the device cannot store it, what was typed is in the form and nowhere else, so the form says so and stays open, through Done and the lock alike, until Done stores it; a failed store is asked again, not answered with the first refusal (`useDrafts`).
 - **Delete** is a note's: taken away at once, with Undo for ten seconds.
-- **Copy** puts a field on the system clipboard and nowhere else, and does not clear it later: the owner's choice for secrets (above), carried over.
+- **Copy** puts a field on the system clipboard and nowhere else, and does not clear it later: the owner's choice for secrets (§7, "Secrets in a note"), carried over.
 - **The fields keep the browser out**: spell check, autocomplete, autocorrect, autocapitalize and writing suggestions off, and the marks the common password managers read, as a secret's panel has them.
   The password is a text field drawn as dots (`-webkit-text-security`, in Chrome, Safari and Firefox from 114), not a password field: a browser offers to save what is typed into one of those when it goes, and `autocomplete="off"` does not stop it.
   The cost is that a screen reader reads it out as it reads any text field, as it does the password shown.
@@ -68,8 +68,8 @@ A device that updates after items were made would have passed over them with the
 
 **Not built, and why:**
 - *Filling in a site's form* by an extension or the browser's autofill: the app is a page, and a page cannot reach another's form.
-  A bookmarklet runs in the site's page and can, so that is how it is done (2026-10-16, "Filling in on a site", below).
-- *Clearing the clipboard*: the owner's choice, above.
+  A bookmarklet runs in the site's page and can, so that is how it is done (2026-10-16, §7, "Filling in on a site").
+- *Clearing the clipboard*: the owner's choice for secrets (§7, "Secrets in a note").
 - *One-time codes, more than one address, files on an item*: the object keeps what a later version adds, so there is room for them.
 - *Passwords in the device's own notes*: there is no folder to keep the key's public half in, as for secrets.
 - *A number in a later version's fields* (§3): the object is read and written as `JSON` reads it.

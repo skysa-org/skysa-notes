@@ -5,7 +5,7 @@ WebDAV was planned too and is deferred indefinitely (§5.4).
 Notes are plain `.md` files in a normal directory tree, so the user can open, edit, and back them up with any other tool.
 
 This repo is the complete, self-hostable product: one Cloudflare Worker serving the SPA and a small API, plus the operator's own provider app registrations.
-This document is the design record: the source of truth for the architecture and for every decision behind it.
+This document is the source of truth for the architecture, and with the records in [`decisions/`](decisions/README.md), for every decision behind it.
 Update it when a decision changes.
 It is not a to-do list: open work lives in GitHub issues.
 The record of how the product was built is [`history.md`](history.md).
@@ -1636,7 +1636,7 @@ The decision record is [`decisions/0009-a-notebook-lists-what-is-inside-it.md`](
 ### Where the user is, in the URL (2026-10-06)
 
 The hash names the place the user is, a slug for each name, so the title says where they are and Back and Forward work.
-The decision record is [`decisions/0007-where-the-user-is-in-the-url.md`](decisions/0007-where-the-user-is-in-the-url.md).
+The decision record is [`decisions/0007-where-the-user-is-in-the-url.md`](decisions/0007-where-the-user-is-in-the-url.md), and "A dropdown is a step on a phone" is in it.
 
 ### Conflict rule (concrete)
 Remote wins the original path.
@@ -2360,7 +2360,7 @@ The decision record is [`decisions/0002-getting-a-library-out.md`](decisions/000
 ### Getting a library in (2026-10-05)
 
 "Import notes" brings notes in from the user's disk, from the storage panel of the source showing (its gear, or the source's `⋯`).
-The decision record is [`decisions/0006-getting-a-library-in.md`](decisions/0006-getting-a-library-in.md).
+The decision record is [`decisions/0006-getting-a-library-in.md`](decisions/0006-getting-a-library-in.md), and "Into the scratchpad" is in it.
 
 ### The clipboard (2026-10-06)
 
@@ -2380,7 +2380,7 @@ The decision record is [`decisions/0014-the-vault.md`](decisions/0014-the-vault.
 ### Secrets in a note (2026-10-14)
 
 Words the folder holds only encrypted.
-The decision record is [`decisions/0013-secrets-in-a-note.md`](decisions/0013-secrets-in-a-note.md).
+The decision record is [`decisions/0013-secrets-in-a-note.md`](decisions/0013-secrets-in-a-note.md), and "Replacing the key", "The device's own lock, where there is one" and "Notes from another source" are in it.
 
 ### Passwords in the vault (2026-10-15)
 

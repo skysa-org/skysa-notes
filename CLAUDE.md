@@ -1,6 +1,6 @@
 # skysa-notes — instructions for Claude Code
 
-Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, OneDrive, or Dropbox (WebDAV is deferred indefinitely — `docs/ARCHITECTURE.md` §5.4). Read `docs/ARCHITECTURE.md` before any non-trivial task; it is the source of truth for the architecture, and it links the decision behind each feature in `docs/decisions/`; `docs/history.md` is how it was built; open work is in GitHub issues. If a task requires deviating from it, say so and propose the edit to `docs/ARCHITECTURE.md` in the same PR.
+Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, OneDrive, or Dropbox (WebDAV is deferred indefinitely — `docs/ARCHITECTURE.md` §5.4). Read `docs/ARCHITECTURE.md` before any non-trivial task; it is the source of truth for the architecture, and it links the decision behind each feature in `docs/decisions/`; `docs/history.md` is how it was built; open work is in GitHub issues. If a task requires deviating from it, say so and propose the edit to it, or to the decision record, in the same PR.
 
 ## Stack (do not substitute)
 - pnpm workspace: `apps/web` (Vite + React + TS, TanStack Router, Dexie, vite-plugin-pwa), `apps/api` (Hono on Cloudflare Workers, D1 via Drizzle), `packages/core` (framework-free TS).
@@ -25,7 +25,7 @@ Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, O
 
 ## Working style
 - Work one issue at a time, and check the change against `docs/ARCHITECTURE.md` before starting. Start in plan mode for anything touching more than one package.
-- Prefer small PRs against `main`. Each PR: tests for new behavior, an amendment to `docs/ARCHITECTURE.md` if a recorded decision changes, and — if it changes anything under `apps/` or `packages/` — a changeset (`pnpm run changeset`, or `--empty` when nothing observable moved). CI fails a PR that changes a package without one. The three workspace packages share one version and one `vX.Y.Z` tag; `.changeset/README.md` says why and how a release is cut.
+- Prefer small PRs against `main`. Each PR: tests for new behavior, an amendment to `docs/ARCHITECTURE.md` or the record in `docs/decisions/` if a recorded decision changes, and — if it changes anything under `apps/` or `packages/` — a changeset (`pnpm run changeset`, or `--empty` when nothing observable moved). CI fails a PR that changes a package without one. The three workspace packages share one version and one `vX.Y.Z` tag; `.changeset/README.md` says why and how a release is cut.
 - Commands: `pnpm dev` (web + wrangler dev), `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm db:migrate`, `pnpm build`.
 - When unsure about a provider API detail (scopes, endpoints, conflict semantics), check the current vendor docs rather than assuming; note the URL in a code comment.
 - Words the user reads come from the catalog, `t('…')` from `apps/web/src/i18n/t.ts` (`docs/ARCHITECTURE.md` §7, "The app's words"): whole sentences with `{placeholders}`, and `{ one, other }` for a count — never fragments joined in code, never English grammar (`count === 1 ? 'it' : 'them'`) in a component.

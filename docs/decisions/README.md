@@ -10,7 +10,7 @@ A new decision gets the next number and a line below, and is written one sentenc
 |---|---|---|
 | [0001](0001-disconnecting-without-an-invisible-pile.md) | Disconnecting without an invisible pile | 2026-09-19 |
 | [0002](0002-getting-a-library-out.md) | Getting a library out | 2026-09-24 |
-| [0003](0003-change-relay.md) | Change relay | optional, 2026-10-05 |
+| [0003](0003-change-relay.md) | Change relay | 2026-10-05 |
 | [0004](0004-the-sidebar-opens-as-far-as-it-is-asked.md) | The sidebar opens as far as it is asked | 2026-10-05 |
 | [0005](0005-pinned-to-the-top.md) | Pinned to the top | 2026-10-05 |
 | [0006](0006-getting-a-library-in.md) | Getting a library in | 2026-10-05 |
@@ -19,7 +19,7 @@ A new decision gets the next number and a line below, and is written one sentenc
 | [0009](0009-a-notebook-lists-what-is-inside-it.md) | A notebook lists what is inside it | 2026-10-07 |
 | [0010](0010-the-scratchpad.md) | The scratchpad | 2026-10-07 |
 | [0011](0011-the-apps-words.md) | The app's words | 2026-10-07 |
-| [0012](0012-large-libraries.md) | Large libraries | 2026-10-08, #275 |
+| [0012](0012-large-libraries.md) | Large libraries | 2026-10-08 |
 | [0013](0013-secrets-in-a-note.md) | Secrets in a note | 2026-10-14 |
 | [0014](0014-the-vault.md) | The vault | 2026-10-15 |
 | [0015](0015-passwords-in-the-vault.md) | Passwords in the vault | 2026-10-15 |

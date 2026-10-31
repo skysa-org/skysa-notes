@@ -8,7 +8,7 @@ Its row sits above the notebooks' heading, as tall as the headings at the top of
 The scratchpad has no heading of its own; the row, lit, says where the user is — in a wide window, as the bar does in a compact one.
 A phone slides to it as it does to a notebook's notes, and the bar says "Scratchpad" with no note dropdown after it.
 There, the scratchpad is all there is under the bar while no card is open, so shutting the notebooks or the sources over it — by their trigger, Escape or a press outside — goes back to it, as does choosing its row again (`usePanel`'s resting pane), rather than to an empty window.
-The owner asked for it on 2026-10-07 and chose the answers below; it is on a branch for them to try before it is merged.
+The owner asked for it on 2026-10-07 and chose the answers below.
 
 - **Ordinary notes in a folder of their own** (§3).
   The sync engine, conflict copies, the unsent count, export, attachments beside a note and the move of the device's own notes into a first source all work on them unchanged, which is the reason for this over a table of their own.
@@ -24,7 +24,7 @@ The owner asked for it on 2026-10-07 and chose the answers below; it is on a bra
 - **A card** shows the note's name if it has one, and its first 60 or so words (`cardLines`), in no more than 12 lines, lines kept as lines and "…" where it was cut.
   They are set as the note sets them (`previewBlocks`, §7, "An empty line is a blank line"): bold, italic, struck, code and a link's words as they are in the text — a link that goes to the web, an e-mail address or a phone number opens in the browser when its words are pressed (2026-10-12, §7, "Links open in the browser"); a heading heavier; a quote ruled off; an item's bullet, number or box before its words, a task done struck through — the marks drawn by the card and kept out of its name, not printed as the characters that wrote them.
   A picture is drawn where it is, whole, no taller than six of the card's lines and counted as six of its twelve, and a file as the editor's chip (`CardEmbed`, the owner's ask): got as the editor gets a picture (`useNoteAttachments`, one host to a card with a picture in it), once it is on screen and never a large one, and said in its words until it is.
-  It is drawn from the thumb, a copy no larger than a card ever draws it ("Drawn from a copy" below; 2026-10-08, #276).
+  It is drawn from the thumb, a copy no larger than a card ever draws it (§7, "Drawn from a copy"; 2026-10-08, #276).
   Its room is held from the card's first drawing, with its words in it meanwhile, so a card is placed at the height it will have and the wall does not place it again when a picture arrives (`Room` in `CardEmbed.tsx`).
   Where this device has read the picture's size before (`AttachmentHost.size`, asked as soon as the card is drawn, seen or not; remembered for the session, so a card drawn again has it from its first frame), the room is the size it is drawn at.
   Otherwise it is the tallest a card draws a picture, 8rem, with the picture drawn inside it, at its own size or smaller, for as long as the card is drawn.

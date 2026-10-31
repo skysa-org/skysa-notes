@@ -3,7 +3,7 @@
 *2026-10-16. Cited in the code as §7, "Filling in on a site". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 **A bookmarklet fills a site's login from the passwords, and remembers one typed there.**
-The owner asked for it on 2026-10-16, and chose the answers below; it is built in steps, and this section grows with them.
+The owner asked for it on 2026-10-16, and chose the answers below.
 
 **Which logins a site is offered** (`vault/sites.ts` in core; the owner's choice): only the page's own site.
 A login fills the site its Site names and the sites under it: one saved for `example.com` fills `login.example.com`, never the other way about.

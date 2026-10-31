@@ -3,7 +3,7 @@
 *2026-10-14. Cited in the code as §7, "Secrets in a note". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 **Words the folder holds only encrypted.**
-A source can be set up for secrets, by setting up its vault (above).
+A source can be set up for secrets, by setting up its vault (§7, "The vault").
 A secret is a block in a note whose words are encrypted on the device before they are written anywhere, so the store, the provider and anyone who can read the folder hold only ciphertext, and showing them takes the device unlocked.
 The owner asked for it, and chose the answers below on 2026-10-14.
 It is built in six steps: the format in `core` (#378), setting up a source (#379), unlocking and locking a device (#380), secret blocks in the editors (#381), the device's own lock (#382), and other keys and replacing the key (#383).
@@ -208,7 +208,7 @@ The lock on the toolbar came after 1.4.0 (2026-10-15, the owner's ask).
 The slash menu and the palette are found only by someone who already knows what to type, so nothing on the screen said a note could hold a secret.
 On a narrow bar the lock goes into More tools before the link does.
 
-**Copy** puts a revealed secret's words on the system clipboard (`navigator.clipboard.writeText`) and nowhere else, never on the source's shared clipboard ("The clipboard", above).
+**Copy** puts a revealed secret's words on the system clipboard (`navigator.clipboard.writeText`) and nowhere else, never on the source's shared clipboard (§7, "The clipboard").
 What happens to them there is the user's business (the owner's choice): the app does not clear them later, and does not refuse them if they are pasted into the shared clipboard.
 
 **Locking** (the owner's choice) happens when the page is hidden, and after 30 s with no key, pointer, touch or scroll in it.
