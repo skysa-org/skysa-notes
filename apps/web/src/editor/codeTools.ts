@@ -4,8 +4,8 @@ import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { cell } from '@skysa/core';
 
 import type { CodeDisplayStore } from './codeDisplay.js';
-import { CODE_BLOCK_NODE } from './commands.js';
 import { ancestor } from './lists.js';
+import { CODE_BLOCK_NODE } from './rich/schema.js';
 
 /**
  * What the editor draws around a code block that the node view cannot draw for

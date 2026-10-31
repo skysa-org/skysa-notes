@@ -1,7 +1,5 @@
-import { type CmdKey, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import {
-	createCodeBlockCommand,
 	insertHrCommand,
 	liftListItemCommand,
 	sinkListItemCommand,
@@ -13,19 +11,15 @@ import {
 	wrapInHeadingCommand,
 } from '@milkdown/kit/preset/commonmark';
 import { insertTableCommand, toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
-import type { MarkType } from '@milkdown/kit/prose/model';
-import type { EditorState } from '@milkdown/kit/prose/state';
-import { callCommand } from '@milkdown/kit/utils';
-import { cell } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { attachPicked } from './attachDrop.js';
-import { ATTACHMENT } from './attachment.js';
-import { detectLanguage } from './detect.js';
 import type { MarkName } from './format.js';
 import type { IconName } from './icons.js';
 import { applyList, type ListKind } from './lists.js';
-import { markRunIn } from './markRun.js';
+import { clearFormatting } from './rich/actions/clearFormatting.js';
+import { toggleCodeBlock } from './rich/actions/codeBlock.js';
+import { run } from './rich/actions/run.js';
 import { insertSecretCommand } from './secretBlock.js';
 
 /**
@@ -62,135 +56,6 @@ export interface EditorCommand {
 /** What a toolbar button reports on, as `FormatState` says it. */
 type Reflects =
 	Readonly<{ mark: MarkName }> | Readonly<{ list: ListKind }> | Readonly<{ block: 'codeBlock' }>;
-
-/**
- * Milkdown assigns a command's key when the editor builds the plugin, not when
- * the module is loaded — so the key has to be read at the moment the command is
- * used. Reading it here, while building the catalogue, captures `undefined` and
- * throws the first time anyone picks something out of the menu.
- */
-const run =
-	<T>(command: { key: CmdKey<T> }, payload?: T) =>
-	(ctx: Ctx): void => {
-		callCommand(command.key, payload)(ctx);
-	};
-
-/** The mark a link is, as the commonmark preset names it in the schema. */
-export const LINK_MARK = 'link';
-
-/**
- * Take the formatting off the selection: every mark it carries, and the block
- * style with them.
- *
- * Both halves, because that is what the button says. Atlassian's editor puts
- * "Clear formatting" in the same menu and takes the heading off too, and a
- * user who has asked for their text back plain means the whole of it.
- *
- * There is no command for this in the preset — `removeMark` over the selection
- * for every mark in the schema is the whole of it, which also means a mark
- * added to the schema later is cleared without this having to be remembered.
- * The stored marks go as well, so that typing on from a collapsed cursor does
- * not put back what was just taken off.
- */
-const clearFormatting = (ctx: Ctx): void => {
-	const view = ctx.get(editorViewCtx);
-	const { state } = view;
-	const { from, to } = state.selection;
-
-	view.dispatch(
-		Object.values(state.schema.marks).reduce(
-			(tr, type) => tr.removeMark(from, to, type),
-			state.tr.setStoredMarks([])
-		)
-	);
-	run(turnIntoTextCommand)(ctx);
-};
-
-/**
- * The whole of the link the selection is in, when it is in one.
- *
- * Found by the mark rather than by the selection, because a link is a mark over
- * a run of text and not a node: the user's cursor is somewhere in the middle of
- * it and the edit has to reach both ends, across any formatting inside it. The
- * same link the toolbar's form shows (`markRunIn`).
- */
-const linkAround = (state: EditorState, type: MarkType): { from: number; to: number } | null => {
-	const { from, to } = state.selection;
-	return markRunIn(state.doc, from, to, type) ?? null;
-};
-
-/** Whether everything inline in `from`–`to` is a file's chip. */
-const onlyChips = (state: EditorState, from: number, to: number): boolean => {
-	const other = cell(false);
-	state.doc.nodesBetween(from, to, (node) => {
-		if (node.isInline && node.type.name !== ATTACHMENT) other.current = true;
-	});
-	return !other.current;
-};
-
-/**
- * Make the selection a link to `href`, or point the link it is already in
- * somewhere else.
- *
- * Not `toggleLinkCommand`, which is `toggleMark` and so acts on the selection
- * exactly: with a cursor inside a link — which is where a user editing one has
- * it — that changes nothing and sets a stored mark instead. `addMark` drops any
- * link already in the range, so retyping a URL replaces it rather than nesting.
- *
- * With nothing selected and no link to edit, the URL becomes the text, because
- * a link with no words in it cannot be seen or clicked.
- *
- * A file's chip is never put in a link (#187): it is a link already, and in
- * markdown one inside another is two broken ones. A selection of nothing but
- * chips — one selected whole, or one Shift+Arrow has gone over — is left as it
- * is: not linked and unlinked again, which would be an edit of nothing, and a
- * note dirty for it. A chip inside a selection is left out of the link.
- */
-export const setLink =
-	(href: string) =>
-	(ctx: Ctx): void => {
-		const view = ctx.get(editorViewCtx);
-		const { state } = view;
-		const type = state.schema.marks[LINK_MARK];
-		if (type === undefined) return;
-		const mark = type.create({ href });
-		const around = linkAround(state, type);
-		const { from, to, empty } = state.selection;
-		if (!empty && onlyChips(state, from, to)) return;
-
-		const tr = () => {
-			if (around !== null) return state.tr.addMark(around.from, around.to, mark);
-			if (empty)
-				return state.tr.insertText(href, from, to).addMark(from, from + href.length, mark);
-			return state.tr.addMark(from, to, mark);
-		};
-
-		// Only a selection can hold a chip: a link the cursor is in is one run
-		// of text, and a URL written in as its own words is another.
-		const linked = tr();
-		const chips = new Set<number>();
-		linked.doc.nodesBetween(from, to, (node, pos) => {
-			if (node.type.name === ATTACHMENT) chips.add(pos);
-		});
-		view.dispatch(
-			[...chips].reduce((step, pos) => step.removeMark(pos, pos + 1, type), linked)
-		);
-		view.focus();
-	};
-
-/** Leave the words and take the link off them. */
-export const clearLink = (ctx: Ctx): void => {
-	const view = ctx.get(editorViewCtx);
-	const { state } = view;
-	const type = state.schema.marks[LINK_MARK];
-	if (type === undefined) return;
-
-	const around = linkAround(state, type);
-	if (around === null) return;
-
-	view.dispatch(state.tr.removeMark(around.from, around.to, type).setStoredMarks([]));
-	view.focus();
-};
 
 const HEADING_1: EditorCommand = {
 	id: 'heading-1',
@@ -273,45 +138,6 @@ const QUOTE: EditorCommand = {
 	label: t('editor.commands.quote'),
 	keywords: ['blockquote', 'citation'],
 	apply: run(wrapInBlockquoteCommand),
-};
-
-/** The node a code block is, as the commonmark preset names it in the schema. */
-export const CODE_BLOCK_NODE = 'code_block';
-
-/**
- * The text a code block would be made out of.
- *
- * With nothing selected that is the whole paragraph the cursor is in, because
- * that is what `setBlockType` is about to turn into a block — not the empty
- * selection. With something selected it is the selection, across blocks if it
- * spans them.
- */
-const textToBecomeCode = (state: EditorState): string => {
-	const { from, to, empty, $from } = state.selection;
-	return empty ? $from.parent.textContent : state.doc.textBetween(from, to, '\n');
-};
-
-/**
- * Into a code block, or back out of it.
- *
- * A toggle because the toolbar button is a toggle: it lights up inside a code
- * block, and a lit button that only ever does the thing it says is already done
- * is a button with no way back. `turnIntoTextCommand` is the way back — the
- * same one "Plain text" uses — so the two agree about what leaving a block
- * means.
- *
- * A block made out of text that is already there arrives with a guess at what
- * language that text is in (`editor/detect.ts`), in the same transaction, so
- * one undo takes back the block and the guess together. An empty block — `/code`
- * on a blank line — has nothing to guess from and gets no language.
- */
-const toggleCodeBlock = (ctx: Ctx): void => {
-	const { state } = ctx.get(editorViewCtx);
-	if (state.selection.$from.parent.type.name === CODE_BLOCK_NODE) {
-		run(turnIntoTextCommand)(ctx);
-		return;
-	}
-	run(createCodeBlockCommand, detectLanguage(textToBecomeCode(state)) ?? '')(ctx);
 };
 
 const CODE_BLOCK: EditorCommand = {
