@@ -41,6 +41,19 @@ const primitiveDeclarations = (selector: string): string =>
 		.join(' ');
 
 describe('the stylesheet', () => {
+	// Unlayered, ProseMirror's sheets win every tie with the app's: they arrive
+	// with the editor's chunk, after it.
+	it("keeps the editor's vendored sheets under the app's, in a layer", () => {
+		const vendor = withoutComments(
+			readFileSync(join(STYLES_FOLDER, '..', 'editor', 'rich', 'vendor.css'), 'utf8')
+		);
+		const imports = vendor.split('\n').filter((line) => line.startsWith('@import'));
+
+		expect(imports.length).toBeGreaterThan(0);
+		expect(imports.filter((line) => !line.includes('layer(vendor)'))).toEqual([]);
+		expect(withoutComments(allStyles())).not.toContain('@layer');
+	});
+
 	// The components say which by an attribute, and a browser is as quiet about a
 	// selector nothing matches as about a variable nobody declared.
 	it.each([

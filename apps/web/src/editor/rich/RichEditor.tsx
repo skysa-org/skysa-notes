@@ -1,5 +1,4 @@
-import '@milkdown/kit/prose/view/style/prosemirror.css';
-import '@milkdown/kit/prose/tables/style/tables.css';
+import './vendor.css';
 
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';

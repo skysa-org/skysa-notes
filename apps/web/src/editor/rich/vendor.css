@@ -1,0 +1,7 @@
+/*
+ * ProseMirror's own stylesheets, as Milkdown ships them. They arrive with the
+ * editor's chunk, after the app's sheet, so unlayered they would win every tie
+ * with it; in a layer the app's rules beat them whatever their weight.
+ */
+@import '@milkdown/kit/prose/view/style/prosemirror.css' layer(vendor);
+@import '@milkdown/kit/prose/tables/style/tables.css' layer(vendor);
