@@ -21,9 +21,6 @@
 	width: min(32rem, 100%);
 	max-height: min(24rem, calc(100dvh - 6rem));
 	overflow: hidden;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-m);
-	background: var(--bg);
 	box-shadow: var(--shadow-xl);
 }
 

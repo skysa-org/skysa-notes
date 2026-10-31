@@ -110,7 +110,12 @@ export const SlashMenu = () => {
 	});
 
 	return (
-		<div className="slash-menu" ref={host} role="listbox" aria-label={t('editor.slashMenu')}>
+		<div
+			className="surface-popover slash-menu"
+			ref={host}
+			role="listbox"
+			aria-label={t('editor.slashMenu')}
+		>
 			{items.map((item, position) => (
 				<button
 					type="button"

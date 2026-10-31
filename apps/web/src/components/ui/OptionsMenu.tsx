@@ -182,8 +182,8 @@ const MenuCard = ({
 		ref={cardRef}
 		className={
 			rises
-				? 'toolbar-panel options-menu-items options-menu-rises'
-				: 'toolbar-panel options-menu-items'
+				? 'surface-popover toolbar-panel options-menu-items options-menu-rises'
+				: 'surface-popover toolbar-panel options-menu-items'
 		}
 		role="group"
 		aria-label={label}

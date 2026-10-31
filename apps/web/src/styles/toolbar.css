@@ -104,10 +104,6 @@
 	flex-direction: column;
 	min-width: 11rem;
 	padding: 0.25rem;
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-m);
-	box-shadow: var(--shadow-l);
 }
 
 /* In the top layer (`usePanelPlacement`), which places it and caps its height

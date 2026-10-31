@@ -45,7 +45,7 @@ export const StaleTabGate = ({
 				{children}
 			</div>
 			{state === 'stale' && copying && (
-				<div className="update-prompt tab-stale-bar" role="alert">
+				<div className="surface-card update-prompt tab-stale-bar" role="alert">
 					<span>{t('shell.staleTab.cannotSave')}</span>
 					<button type="button" onClick={reload}>
 						{t('common.reload')}
@@ -77,7 +77,7 @@ export const StaleTabGate = ({
 				</Dialog>
 			)}
 			{state === 'waiting' && (
-				<div className="update-prompt" role="status">
+				<div className="surface-card update-prompt" role="status">
 					<span>{t('shell.staleTab.waiting')}</span>
 				</div>
 			)}

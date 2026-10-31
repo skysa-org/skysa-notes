@@ -10,10 +10,6 @@
 .inline-toolbar {
 	position: absolute;
 	z-index: var(--z-popover);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-m);
-	background: var(--bg);
-	box-shadow: var(--shadow-l);
 }
 
 .slash-menu:not([data-show='true']),

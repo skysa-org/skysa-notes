@@ -176,7 +176,7 @@ export const Outline = ({ body, editor, onClose, focusEditor = true }: OutlinePr
 	return (
 		<nav
 			ref={nav}
-			className={onClose === undefined ? 'outline' : 'outline outline-flyout'}
+			className={onClose === undefined ? 'outline' : 'surface-popover outline outline-flyout'}
 			aria-label={t('shell.outline.label')}
 		>
 			<ol>
