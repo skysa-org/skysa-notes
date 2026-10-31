@@ -69,11 +69,12 @@ import {
  * The rich editor itself, with no React in it.
  *
  * Milkdown is ProseMirror over a remark AST, and the markdown string stays the
- * only source of truth: this module is handed a body, hands back a body, and is
- * configured with the same `remark-stringify` options as `core` so the markdown
- * it writes is the markdown the fidelity suites test. Keeping it separate from
- * the component is what lets those suites drive a real editor without a DOM
- * that can pretend to be typed into. See docs/ARCHITECTURE.md §7.
+ * only source of truth: this folder is handed a body (later ones by `adopt.ts`),
+ * hands back a body, and is configured with the same `remark-stringify` options
+ * as `core` (`markdown.ts`) so the markdown it writes is the markdown the
+ * fidelity suites test. Keeping it separate from the component is what lets
+ * those suites drive a real editor without a DOM that can pretend to be typed
+ * into. See docs/ARCHITECTURE.md §7.
  */
 
 /**

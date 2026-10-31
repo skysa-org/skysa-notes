@@ -172,7 +172,7 @@ suite. It is the CI gate; `pnpm test` alone skips `format:check`.
 - `sh: pnpm: command not found` from `corepack pnpm dev`/`verify` → the
   PATH shim above.
 - `No "X" export is defined on the "../src/editor/rich/….js" mock` →
-  `tests/RichEditor.test.tsx` mocks `rich/` wholesale; a new function the
+  `tests/RichEditor.test.tsx` mocks `rich/createRichEditor.js` and `rich/adopt.js` wholesale; a new function the
   component calls must be added to that mock.
 - `is not exported under the conditions` → a `@skysa/core/src/...` import;
   use the package root.

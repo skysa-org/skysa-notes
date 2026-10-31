@@ -7,7 +7,6 @@ import { firstStructuralDifference, type StructuralDifference } from '@skysa/cor
 import { appChange, holdUserEdits, userEditKey } from '../dirty.js';
 import type { Adoption } from '../editorBinding.js';
 
-/** What the editor's document says, as markdown. */
 /**
  * The editor's document as markdown, exactly as Milkdown writes it.
  *
