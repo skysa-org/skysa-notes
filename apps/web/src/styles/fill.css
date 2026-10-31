@@ -27,14 +27,14 @@
 
 .fill-header h1 {
 	margin: 0;
-	font-size: 1.25rem;
+	font-size: var(--text-xl);
 	overflow-wrap: anywhere;
 }
 
 /* Beside the heading, for a page over http:. */
 .fill-insecure {
 	color: var(--bad);
-	font-size: 0.8125rem;
+	font-size: var(--text-s);
 	font-weight: 600;
 }
 
@@ -130,6 +130,6 @@
 	font-weight: 600;
 	text-decoration: none;
 	border: 1px dashed var(--brand);
-	border-radius: 999px;
+	border-radius: var(--radius-pill);
 	cursor: grab;
 }

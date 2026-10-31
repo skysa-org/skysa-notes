@@ -1,3 +1,10 @@
+/* What the brand's stylesheet sets, for a page without one. `:where` weighs
+   nothing, so `brand.ts`'s `:root` wins whichever of the two loads first. */
+:where(:root) {
+	--brand: var(--accent);
+	--on-brand: #ffffff;
+}
+
 :root {
 	color-scheme: light dark;
 
@@ -29,6 +36,45 @@
 	   with the gutter rather than the control's invisible edge. */
 	--control: 1.75rem;
 	--control-inline: var(--space-s);
+
+	/* Corners, in the steps controls and cards are drawn with. `50%` is a circle,
+	   `inherit` is its parent's, and neither is a step. */
+	--radius-xs: 0.25rem;
+	--radius-s: 0.375rem;
+	--radius-m: 0.5rem;
+	--radius-l: 0.75rem;
+	--radius-pill: 999px;
+
+	/* How far something is lifted off the page: a card at rest, a card under the
+	   pointer, whatever floats over the page (a menu, a toast, a dialog), and the
+	   command palette over all of it. */
+	--shadow-s: 0 1px 3px rgb(0 0 0 / 0.08);
+	--shadow-m: 0 2px 8px rgb(0 0 0 / 0.12);
+	--shadow-l: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
+	--shadow-xl: 0 1rem 2.5rem rgb(0 0 0 / 25%);
+
+	/* Words, by size. A size in `em` follows the words around it, and is not
+	   one of these. */
+	--text-xs: 0.75rem;
+	--text-s: 0.8125rem;
+	--text-m: 0.875rem;
+	--text-body: 1rem;
+	--text-xl: 1.25rem;
+
+	/* What is over what, across the whole page. `1` and `2` inside a component
+	   are its own, and not these. `--z-sheet` is a compact window's panel, and
+	   `--z-sheet-over` the one opening over another still shutting. `--z-menu` is
+	   the options menu, and the bar saying another tab took over. A menu opened
+	   from inside a dialog goes over the dialog that opened it
+	   (`--z-dialog-menu`). */
+	--z-sheet: 15;
+	--z-sheet-over: 16;
+	--z-popover: 20;
+	--z-float: 30;
+	--z-menu: 40;
+	--z-drop: 90;
+	--z-dialog: 100;
+	--z-dialog-menu: 110;
 
 	/*
 	 * Motion, in as few steps as spacing has, so that everything that moves

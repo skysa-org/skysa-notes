@@ -1,7 +1,7 @@
 /* Above the other corner notices: it is the one that says nothing here saves. */
 .tab-stale-bar {
 	inset-block-end: 9rem;
-	z-index: 40;
+	z-index: var(--z-menu);
 }
 
 /* ---- Notices floated over the shell ------------------------------------- */
@@ -16,7 +16,7 @@
 	position: fixed;
 	inset-block-end: 5rem;
 	inset-inline: 1rem;
-	z-index: 30;
+	z-index: var(--z-float);
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;

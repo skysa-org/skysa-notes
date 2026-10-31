@@ -40,13 +40,13 @@
 .attached-file-size {
 	grid-area: size;
 	justify-self: end;
-	font-size: 0.8125rem;
+	font-size: var(--text-s);
 	white-space: nowrap;
 }
 
 .attached-file-notes {
 	grid-area: notes;
-	font-size: 0.8125rem;
+	font-size: var(--text-s);
 	overflow-wrap: anywhere;
 }
 

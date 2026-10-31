@@ -39,7 +39,7 @@
 	font: inherit;
 	font-size: 0.85rem;
 	color: var(--muted);
-	border-radius: 0.25rem;
+	border-radius: var(--radius-xs);
 	cursor: pointer;
 	/* One line each: a rail of wrapped headings stops being scannable, which is
 	 * the only thing it is for. */
@@ -67,14 +67,14 @@
 	position: absolute;
 	inset-block-start: 0.5rem;
 	inset-inline-end: 0.5rem;
-	z-index: 20;
+	z-index: var(--z-popover);
 	width: min(18rem, 100% - 2rem);
 	max-height: calc(100% - 1rem);
 	padding: 0.35rem;
 	border: 1px solid var(--border);
-	border-radius: 0.5rem;
+	border-radius: var(--radius-m);
 	background: var(--bg);
-	box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
+	box-shadow: var(--shadow-l);
 }
 
 /* Room for a finger, where the rail's rows are sized for a pointer. */
