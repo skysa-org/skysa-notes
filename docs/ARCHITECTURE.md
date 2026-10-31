@@ -692,7 +692,8 @@ What follows is the design as planned, kept so it need not be worked out again i
 - Transport: **all WebDAV traffic goes through `/api/webdav/*`** because most servers don't emit CORS headers.
   The proxy forwards method/headers/body verbatim, injects Basic auth, restricts to the configured base URL, and streams bodies.
   Supported methods: `PROPFIND`, `GET`, `PUT`, `MKCOL`, `MOVE`, `DELETE`, `REPORT`.
-- Root: the user supplies a base URL that *is* the app folder (e.g. `https://cloud.example.com/remote.php/dav/files/david/Notes/`). ensureRoot does `PROPFIND depth 0`, `MKCOL` if 404, then writes `.notesapp.json`.
+- Root: the user supplies a base URL that *is* the app folder (e.g. `https://cloud.example.com/remote.php/dav/files/david/Notes/`).
+  ensureRoot does `PROPFIND depth 0`, `MKCOL` if 404, then writes `.notesapp.json`.
 - Files: `PUT` with `If-Match: <etag>` for updates, `If-None-Match: *` for creates.
   Version = `ETag` (strip weak prefix `W/` and normalize quotes).
 - Changes: no universal delta.
@@ -847,7 +848,8 @@ Keep it boring.
   Identity and data are coupled: a connection is reached by the credential the device that made it holds, and nothing anywhere aggregates connections under a subject.
   A person with Dropbox and Google Drive connected has two silos, and the server cannot tell they are one person — which is the property, not a limitation to be fixed later.
 
-  What this closes, so it is not re-opened by accident: no `identities` table, no `IdentityProvider` adapters, no Google/Microsoft sign-in, no merge-by-verified-email, no account linking, no magic link, and no `arctic` dependency — whose deprecation (July 2026) had been an open question since 2026-09-14 and is now moot rather than decided. §14 keeps the reasoning and what it would have cost.
+  What this closes, so it is not re-opened by accident: no `identities` table, no `IdentityProvider` adapters, no Google/Microsoft sign-in, no merge-by-verified-email, no account linking, no magic link, and no `arctic` dependency — whose deprecation (July 2026) had been an open question since 2026-09-14 and is now moot rather than decided.
+  §14 keeps the reasoning and what it would have cost.
 
   The gain is that a whole class of question stops needing an answer here: which of two identities a grant belongs to, what a verified email is worth, what happens when a linked provider is unlinked, and who may see a connection someone else made.
   A shared instance is still possible — that is what the entitlement seam is for — it just gates on the storage account rather than on a user the server invented.
@@ -869,7 +871,8 @@ Dropbox is the first storage flow and the shape the others follow.
 - **Hand-rolled.**
   The storage flows are Authorization Code + PKCE and about forty lines each, so they install no OAuth dependency at all.
   (`arctic` was once planned for sign-in, was deprecated by its author in July 2026, and is moot now that there is no sign-in — see "No sign-in separate from storage".)
-- **The PKCE verifier and `state` ride in a short-lived signed cookie** (`skysa_flow`, 10 minutes, `httpOnly`, `sameSite=lax`), not a table. §9 wants `state` bound to the browser that started the flow, which is what a cookie *is*; a table would need a sweep job and a KV binding neither of which exists.
+- **The PKCE verifier and `state` ride in a short-lived signed cookie** (`skysa_flow`, 10 minutes, `httpOnly`, `sameSite=lax`), not a table.
+  §9 wants `state` bound to the browser that started the flow, which is what a cookie *is*; a table would need a sweep job and a KV binding neither of which exists.
   The payload is signed because an attacker who could rewrite it could otherwise substitute their own `state` and complete a flow the user never began.
 - **A callback asked for again is answered the same way (2026-09-30, issue #149).**
   The callback can be answered only once: reading it clears the flow cookie, and the provider's authorization code is spent.
@@ -4017,7 +4020,8 @@ A test checks the answer against a parse of the whole body over four thousand bo
   - **The page always asks** (`share/TakeShare.tsx`), and then takes `share` out of the URL: "Add to the clipboard?", naming what came, for the source showing.
     Where that source's clipboard is hidden, the answer is "Show clipboard and add".
     The device's own notes and a disconnected source have no clipboard, and the user is told so.
-    Whatever the answer, the kept share is deleted. §9 says why it asks even with the clipboard shown.
+    Whatever the answer, the kept share is deleted.
+    §9 says why it asks even with the clipboard shown.
   - **With no worker, it reaches nothing.**
     The share sheet offers only an installed app, whose worker answers.
     If the worker were somehow missing, the POST would go to Cloudflare.
@@ -4427,7 +4431,8 @@ The traces also carry where a rename or move went, and not only where it started
   One registry behind both (§7, "Commands are declared, not collected"): `Mod+K` opens the palette, a bare `n` makes a note, `Mod+Shift+F` puts the cursor in the search field, and `Mod+E` — which `NoteView` used to listen for itself — is now a registration like any other, so it appears in the palette with its chord printed from the same value the listener matches.
 - Several connected sources on one device, each its own silo.
   Not the relaxation this line used to describe ("multiple connections per user"): there is no user to hold them.
-  The device generates a credential per connection, keeps it, and sends the server only its hash; `storage_connections` is keyed on `(provider, account_id)` and `grants` on that hash; `sessions`, `holdsAnotherProvider`, `session_mismatch` and the `conflict`/`signin`/`occupied` outcomes are gone. §6, "Per-connection credentials", records what was decided and what was deliberately not done — including the XSS trade that `script-src 'self'` now has to carry.
+  The device generates a credential per connection, keeps it, and sends the server only its hash; `storage_connections` is keyed on `(provider, account_id)` and `grants` on that hash; `sessions`, `holdsAnotherProvider`, `session_mismatch` and the `conflict`/`signin`/`occupied` outcomes are gone.
+  §6, "Per-connection credentials", records what was decided and what was deliberately not done — including the XSS trade that `script-src 'self'` now has to carry.
 - **The sources are tabs across the top, named for what they are (2026-09-21).**
   A device can hold several accounts at once and the only way between them was a list at the foot of the storage panel, which answered "switch me" but never "which of these am I looking at" — and the panes below mean something different for each, since every source is its own notes, notebooks, queue and cursor (§6).
   `SourceTabs` sits in the frame above `app-shell`, for the reason the grid's three children give, and carries everything `connectedSources` knows: the live sources, the detached ones — which hold work their remote was never sent and are editable, so a bar without them would be a bar that hides notes — and the device's own pile when it holds anything.
@@ -4474,7 +4479,8 @@ The traces also carry where a rename or move went, and not only where it started
   And a tab's accessible name was left to be assembled from its two spans, which the name-from-contents rules do not join the way `textContent` does: the name is said outright with `aria-label`, in exactly the visible words.
 
 - **Notebooks and notes are re-arranged by dragging them (2026-09-21).**
-  A notebook can be dragged into another or out to the top level, and a note can be dragged from the list into any notebook — the first UI for `moveFolder` and `moveNote`, which have been in the store, tested, and uncalled since the folder work. §7, "Re-arranging is moving", records what dragging was taken to mean and why hand ordering within a level is not it: there is no stored order anywhere and nowhere on a provider to put one, so a drag re-parents rather than re-sorts.
+  A notebook can be dragged into another or out to the top level, and a note can be dragged from the list into any notebook — the first UI for `moveFolder` and `moveNote`, which have been in the store, tested, and uncalled since the folder work.
+  §7, "Re-arranging is moving", records what dragging was taken to mean and why hand ordering within a level is not it: there is no stored order anywhere and nowhere on a provider to put one, so a drag re-parents rather than re-sorts.
   The rules are a module with no DOM in it (`store/rearrange.ts`) because every refusal in them is a drop the pointer can really make.
   Picking up is also a command, so the whole thing works from the keyboard and from a single pointer that never drags (WCAG 2.2 SC 2.5.7) with one implementation rather than two, and the destinations say in words where the thing would land.
   **Left (issue #125):** a notebook row's accessible name is its label and its note count run together ("Work1"), which is the same name-from-contents trap the tabs hit and is pre-existing — during a move the row says its name outright, so it shows only when nothing is being moved.
@@ -4499,7 +4505,8 @@ The traces also carry where a rename or move went, and not only where it started
 
 - **A re-parented notebook no longer leaves a copy of itself behind (2026-09-22).**
   Reported against Dropbox and not Dropbox's: the same duplicate appeared over the fake, the OneDrive stub and Drive.
-  Moving or deleting a notebook queued one `rmdir`, for the outermost directory, and every directory below it was left with nothing naming it — so the pull that runs before the next push adopted them as notebooks, and the `rmdir` was then refused because the device held a row under the path again. §7, "Folder renames/moves", records the rule and why the op is about the pull as much as the removal.
+  Moving or deleting a notebook queued one `rmdir`, for the outermost directory, and every directory below it was left with nothing naming it — so the pull that runs before the next push adopted them as notebooks, and the `rmdir` was then refused because the device held a row under the path again.
+  §7, "Folder renames/moves", records the rule and why the op is about the pull as much as the removal.
   The soak now runs over **Dropbox** as well, which it never did — the provider this was reported on was the one provider the whole-app suite did not cover.
 
 - **The editor fills its pane, with a formatting toolbar across the top (2026-09-22).**
@@ -4668,7 +4675,8 @@ The traces also carry where a rename or move went, and not only where it started
 
 - **A first import says how it is going, holds the app, and can be cancelled (2026-09-23).**
   Connecting on a device with many notes, or to an account with many, showed "Syncing…" for minutes and nothing else, and nothing could stop it.
-  The import now counts what it finds, downloads and uploads — over the app for the first source, which is held until it is through, and in the storage panel for a later one — and Cancel puts the device back as it was. §6, "A source's first import"; §7, the sync loop.
+  The import now counts what it finds, downloads and uploads — over the app for the first source, which is held until it is through, and in the storage panel for a later one — and Cancel puts the device back as it was.
+  §6, "A source's first import"; §7, the sync loop.
 - **Where the user was, where a note starts, and what a row says (2026-10-01).**
   Five refinements to the note list and the note beside it, one commit each:
   - *The list is ordered by when each note was made*, newest first, so editing a note no longer moves its row to the top under the pointer (§7, "Re-arranging is moving").
