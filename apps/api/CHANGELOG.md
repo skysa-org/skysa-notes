@@ -1,5 +1,31 @@
 # @skysa/api
 
+## 2.0.0
+
+### Patch Changes
+
+- 537b4d8: The three storage OAuth flows share their token request, ID-token reading, revoking and default token lifetime (`oauth/common.ts`), and the Dropbox module is only its adapter, as the other two are.
+- c1221d7: JSON the API reads from outside its own code is checked against a schema rather than cast: provider token responses (a field of the wrong kind is dropped, a lifetime sent as digits is read as a number, and an access token that is not a string fails the exchange), ID-token claims, the signed flow cookies, the stored OAuth secret, and the relay's frames and tickets.
+- 51eb6f1: Signing out the last device of an account now removes the account's stored access in the same step. A sign-out cut off part way, by a tab closed at the wrong moment, could before leave that access stored on the server with no device able to use or remove it.
+- c9d52c6: Each API route that acts on a connection now checks the device's credential itself, and the routes get the app's configuration and keys from `createApp` rather than from the request. A request under `/api/connection` for a path or method that is not a route now answers 404 `not_found` rather than 401. Nothing to do for an instance run from `src/worker.ts`; a second Worker entry with middleware of its own that read the app's configuration, seams or keys from the request (`c.get('config')` and the like) reads them from what it passed to `createApp`.
+- 0b336f2: `GET /api/relay` checks the request's origin first: a cross-origin request is refused 403 whether or not the relay is on, rather than learning from a 404 that it is off.
+- cbc1140: `/api/config` no longer offers `webdav`, whose connect answers 404, though `ENABLED_PROVIDERS=webdav` still boots. The Worker logs a warning at boot for `webdav` in `ENABLED_PROVIDERS` and for `WEBDAV_ALLOW_PRIVATE`, which is deprecated and does nothing; both are removed with the breaking change #118 tracks.
+- c43ddef: The OAuth callback sends the browser back to the app, as a failed connect, where it used to answer in raw JSON: a provider the deployment does not offer or has turned off, a callback with neither a code nor an error, and a throttled callback.
+- Updated dependencies [0f7b070]
+- Updated dependencies [c1b5d11]
+- Updated dependencies [99f3910]
+- Updated dependencies [c85cf4e]
+- Updated dependencies [0c7023f]
+- Updated dependencies [f65a764]
+- Updated dependencies [29842a6]
+- Updated dependencies [56907dc]
+- Updated dependencies [feab61a]
+- Updated dependencies [9ee74b4]
+- Updated dependencies [59c4ee6]
+- Updated dependencies [0eae082]
+- Updated dependencies [08ed8c8]
+  - @skysa/core@2.0.0
+
 ## 1.11.2
 
 ### Patch Changes
