@@ -55,21 +55,12 @@ import { getPasswordsShown, isVaultNote, listVaultNotes } from './vault.js';
  * (`DatabaseProvider`).
  */
 
-/**
- * The source the app is showing, as the device knows it, or `null` for the
- * device's own pile. For saying what kind of source the notes on screen belong
- * to — a detached one, above all, which looks like any other from its notes.
- */
 /** Every source on this device, in the order they were connected. */
 export const useSources = (): ConnectedSource[] | undefined => {
 	const db = useDb();
 	return useLiveQuery(() => connectedSources(db), [db]);
 };
 
-/**
- * The source whose first import is under way, or `null` for none. One at a
- * time: a bind while one is running copies nothing (`bindConnection`).
- */
 /**
  * Whether a credential brought back from a provider's consent page is still
  * waiting to be taken up (`claimConnection`), and so whether the connection it
@@ -93,6 +84,11 @@ export const useHeldImport = (): SyncStateRecord | undefined => {
 	return useLiveQuery(async () => (await db.syncState.toArray()).find(holdsPile), [db]);
 };
 
+/**
+ * The source the app is showing, as the device knows it, or `null` for the
+ * device's own pile. For saying what kind of source the notes on screen belong
+ * to — a detached one, above all, which looks like any other from its notes.
+ */
 export const useActiveSource = (): SyncStateRecord | null | undefined => {
 	const db = useDb();
 	return useLiveQuery(

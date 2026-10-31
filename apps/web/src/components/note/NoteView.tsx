@@ -23,8 +23,6 @@ import type {
 import { useNoteLayout } from './useNoteLayout.js';
 import { useNoteSession } from './useNoteSession.js';
 
-/** The open note: its title, its body, and the actions that act on it. */
-
 /** `Cmd+E` on a Mac, `Ctrl+E` elsewhere — see `commands/chord.ts`. */
 const MODE_TOGGLE = parseChord('Mod+E');
 
@@ -141,6 +139,7 @@ const useScratchMarking = (note: NoteRecord | undefined, draft: NoteDraft | unde
 	);
 };
 
+/** The open note: its title, its body, and the actions that act on it. */
 export const NoteView = ({
 	note,
 	onDeleted,
