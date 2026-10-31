@@ -45,7 +45,7 @@ import { t } from '../i18n/t.js';
 import { richCaretAboveKeyboard } from './aboveKeyboard.js';
 import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from './attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
-import { attachmentSchema, attachmentViewPlugin, claimsClick, selectedKey } from './attachment.js';
+import { attachmentSchema, attachmentViewPlugin, claimsClick } from './attachment.js';
 import { autoLanguagePlugin } from './autoLanguage.js';
 import { codeBlocksKeepAtoms, codeSpansHoldText } from './codeAtoms.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
@@ -60,6 +60,7 @@ import { htmlViewPlugin } from './htmlView.js';
 import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } from './image.js';
 import { createLanguageSource } from './languages.js';
 import { linkChipPlugin, openLinkAtCursor } from './linkRich.js';
+import { selectedKey } from './nodeBar.js';
 import { richWithoutNul } from './noNul.js';
 import {
 	codeBlockWithoutSecrets,

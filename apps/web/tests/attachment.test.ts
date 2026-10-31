@@ -9,7 +9,8 @@ import {
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
-import { ATTACHMENT, selectedKey } from '../src/editor/attachment.js';
+import { ATTACHMENT } from '../src/editor/attachment.js';
+import { selectedKey } from '../src/editor/nodeBar.js';
 import { currentMarkdown } from '../src/editor/rich.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

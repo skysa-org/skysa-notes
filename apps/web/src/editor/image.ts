@@ -15,8 +15,9 @@ import {
 	type Shown,
 	type ShowOptions,
 } from './attachHost.js';
-import { barButton, nameIn, nodeBar, removeNode, selectedKeys } from './attachment.js';
+import { nameIn } from './attachment.js';
 import { openFile, saveFile } from './fileActions.js';
+import { barButton, nodeBar, removeNode, selectedKeys } from './nodeBar.js';
 
 /**
  * A picture in a note (#187), shown where the markdown says it is.

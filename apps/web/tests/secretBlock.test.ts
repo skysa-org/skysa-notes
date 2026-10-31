@@ -3,7 +3,7 @@ import { closeHistory, undo } from '@milkdown/kit/prose/history';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { selectedKey } from '../src/editor/attachment.js';
+import { selectedKey } from '../src/editor/nodeBar.js';
 import { adoptBody, currentMarkdown } from '../src/editor/rich.js';
 import { insertSecretCommand } from '../src/editor/secretBlock.js';
 import { NO_SECRETS, type Sealer, type SecretHost } from '../src/editor/secretHost.js';
