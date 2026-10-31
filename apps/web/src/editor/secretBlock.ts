@@ -13,8 +13,8 @@ import type { MarkdownNode, NodeSchema } from '@milkdown/kit/transformer';
 import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
 import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 
+import { iconElement } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
-import { iconElement } from './icons.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from './nodeBar.js';
 import { secretHostCtx } from './secretHost.js';
 import {

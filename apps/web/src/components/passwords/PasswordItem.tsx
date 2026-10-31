@@ -14,7 +14,6 @@ import {
 } from '@skysa/core';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
-import { Icon } from '../../editor/icons.js';
 import { linkAddress, openLink } from '../../editor/links.js';
 import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
 import { t } from '../../i18n/t.js';
@@ -34,6 +33,7 @@ import { titleShown } from '../../store/titles.js';
 import type { NoteDraft } from '../note/types.js';
 import { useNoteSecrets } from '../secrets/noteSecrets.js';
 import { editedAt } from '../ui/editedAt.js';
+import { Icon } from '../ui/icons.js';
 import { useNotices } from '../ui/notices.js';
 import { useFlash } from '../ui/useFlash.js';
 import { KEEP_OUT } from './keepOut.js';

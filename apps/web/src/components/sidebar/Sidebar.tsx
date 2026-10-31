@@ -1,7 +1,6 @@
 import { ancestorPaths, basename, isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
-import { Icon, type IconName } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
 import type { Moving } from '../../store/rearrange.js';
@@ -9,6 +8,7 @@ import { SCRATCHPAD_LABEL } from '../../store/scratchpad.js';
 import { type FolderNode, notesUnder } from '../../store/tree.js';
 import { PASSWORDS_LABEL } from '../../store/vault.js';
 import { AttachedFiles } from '../attachments/AttachedFiles.js';
+import { Icon, type IconName } from '../ui/icons.js';
 import { FloatingMenu } from '../ui/OptionsMenu.js';
 import { TreeBody } from './FolderTree.js';
 import { DeleteConfirm, MoveHint, NewFolderField } from './NotebookFields.js';

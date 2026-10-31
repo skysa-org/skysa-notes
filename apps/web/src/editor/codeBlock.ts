@@ -4,9 +4,9 @@ import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $view } from '@milkdown/kit/utils';
 import { cell } from '@skysa/core';
 
+import { iconElement, type IconName } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
 import type { CodeDisplayStore } from './codeDisplay.js';
-import { iconElement, type IconName } from './icons.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
 import { removeNode } from './nodeBar.js';
 

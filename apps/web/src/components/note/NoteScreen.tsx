@@ -1,7 +1,6 @@
 import { frontmatterIsEditable, headings, type StructuralDifference } from '@skysa/core';
 import { type ReactNode, useMemo } from 'react';
 
-import { Icon, type IconName } from '../../editor/icons.js';
 import { type EditorMode, MODE_LABELS } from '../../editor/mode.js';
 import { t } from '../../i18n/t.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
@@ -9,6 +8,7 @@ import { shownFolder, useRenaming } from '../../store/renaming.js';
 import { titleShown } from '../../store/titles.js';
 import { PinButton, ScratchBar } from '../scratchpad/ScratchControls.js';
 import { useRenamings } from '../shell/context.js';
+import { Icon, type IconName } from '../ui/icons.js';
 import { FindBar } from './FindBar.js';
 import { NoteBody } from './NoteBody.js';
 import { TitleField } from './TitleField.js';

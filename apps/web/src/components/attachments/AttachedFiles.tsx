@@ -2,7 +2,6 @@ import { fileKind } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 
-import { FILE_ICONS, Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
 import { activeConnectionId } from '../../store/db.js';
@@ -14,6 +13,7 @@ import {
 } from '../../store/fileLinks.js';
 import { titleShown } from '../../store/titles.js';
 import { Dialog, DialogActions, InlineDialog } from '../ui/Dialog.js';
+import { FILE_ICONS, Icon } from '../ui/icons.js';
 
 /**
  * The files in a notebook, each with the notes that link it under its name,

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { DialogActions } from '../../components/ui/Dialog.js';
+import { Icon } from '../../components/ui/icons.js';
 import { t } from '../../i18n/t.js';
-import { Icon } from '../icons.js';
 import { clearLink, setLink } from '../rich/actions/link.js';
 import { type PanelProps, ToolbarPopover } from './menus.js';
 import type { FormatToolbarProps } from './types.js';

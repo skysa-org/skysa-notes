@@ -9,7 +9,6 @@ import {
 	useState,
 } from 'react';
 
-import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import type { Origins, Pane } from '../../routes/panel.js';
 import { KEEPS_PANEL, PANES } from '../../routes/panel.js';
@@ -20,6 +19,7 @@ import { nameless, shownName } from '../../store/titles.js';
 import { folderLabel } from '../../store/tree.js';
 import { ProviderIcon } from '../sources/ProviderIcon.js';
 import { useShowingSource } from '../sources/useShowingSource.js';
+import { Icon } from '../ui/icons.js';
 import { rems, useElementWidth, useFontsStatus } from '../ui/layout.js';
 import { useLiveEdits, useRenamings } from './context.js';
 import { middleEllipsis } from './middleEllipsis.js';

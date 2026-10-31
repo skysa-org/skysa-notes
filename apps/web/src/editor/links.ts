@@ -1,8 +1,8 @@
 import { cell } from '@skysa/core';
 
 import { modKeyLabel } from '../commands/chord.js';
+import { iconElement } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
-import { iconElement } from './icons.js';
 
 /**
  * A link in a note, opened in the browser (docs/ARCHITECTURE.md §7, "Links

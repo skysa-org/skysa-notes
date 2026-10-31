@@ -9,12 +9,12 @@ import {
 	useRef,
 } from 'react';
 
-import { Icon } from '../../editor/icons.js';
 import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
 import type { NotebookPin } from '../../store/pins.js';
 import { canDrop, type Moving } from '../../store/rearrange.js';
 import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../../store/tree.js';
+import { Icon } from '../ui/icons.js';
 import type { MenuPoint, OptionsMenuItem } from '../ui/OptionsMenu.js';
 import { pickUpProps } from '../ui/pickUpProps.js';
 import { RowOptions } from '../ui/RowOptions.js';

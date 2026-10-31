@@ -12,10 +12,10 @@ import {
 } from '@milkdown/kit/preset/commonmark';
 import { insertTableCommand, toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 
+import type { IconName } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
 import { attachPicked } from './attachDrop.js';
 import type { MarkName } from './format.js';
-import type { IconName } from './icons.js';
 import { applyList, type ListKind } from './lists.js';
 import { clearFormatting } from './rich/actions/clearFormatting.js';
 import { toggleCodeBlock } from './rich/actions/codeBlock.js';

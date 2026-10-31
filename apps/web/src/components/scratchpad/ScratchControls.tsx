@@ -1,7 +1,7 @@
 import type { ScratchColor } from '@skysa/core';
 
-import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
+import { Icon } from '../ui/icons.js';
 import { OptionsMenu } from '../ui/OptionsMenu.js';
 import { cardMenuItems, colorItems } from './scratchMenus.js';
 

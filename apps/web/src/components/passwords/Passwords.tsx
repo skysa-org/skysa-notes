@@ -1,10 +1,10 @@
 import { useId, useMemo, useState } from 'react';
 
-import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import { titleShown } from '../../store/titles.js';
 import { filterByLabel, PASSWORDS_LABEL } from '../../store/vault.js';
+import { Icon } from '../ui/icons.js';
 import { FillSetupDialog } from './FillSetupDialog.js';
 
 /**
