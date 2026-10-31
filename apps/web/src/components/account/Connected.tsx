@@ -3,8 +3,8 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
 
 import type { Grant, InstanceConfig } from '../../api/client.js';
 import { answer, type Asked } from '../../api/instanceConfig.js';
-import type { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
+import type { pickFiles } from '../../lib/pickFiles.js';
 import { tabLock } from '../../secrets/tabLock.js';
 import { setClipboardShown, showsClipboard } from '../../store/clipboard.js';
 import { connectedSources } from '../../store/connection.js';

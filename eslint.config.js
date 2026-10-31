@@ -539,8 +539,6 @@ export default tseslint.config(
 		// and the hooks that read them. The sync layer drives the engine against
 		// that store. Neither may import the UI or anything built on top of
 		// them, so each can be read, tested and changed without the screens.
-		// The store reads the editor's mode and code-display preferences, which
-		// are plain values kept in editor/; nothing else of the editor.
 		files: ['apps/web/src/store/**/*.{ts,tsx}'],
 		rules: {
 			'no-restricted-imports': [
@@ -550,6 +548,7 @@ export default tseslint.config(
 						NOT_ABOVE(
 							[
 								'components',
+								'editor',
 								'routes',
 								'sync',
 								'secrets',
@@ -561,15 +560,6 @@ export default tseslint.config(
 							],
 							'the store is the data layer: it does not import the sync layer or the UI.'
 						),
-						{
-							group: [
-								'**/editor/*',
-								'!**/editor/mode.js',
-								'!**/editor/codeDisplay.js',
-							],
-							message:
-								'the store reads only the editor preferences (editor/mode, editor/codeDisplay).',
-						},
 					],
 				},
 			],

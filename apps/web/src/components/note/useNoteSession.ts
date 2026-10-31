@@ -1,10 +1,10 @@
 import { useCallback, useEffect } from 'react';
 
 import type { SaveContext } from '../../editor/autosaveQueue.js';
-import { type EditorMode, otherMode } from '../../editor/mode.js';
 import { useAutosave } from '../../editor/useAutosave.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
+import { type EditorMode, otherMode } from '../../lib/editorMode.js';
 import { useDb } from '../../store/database.js';
 import { type NoteRecord, noteRef } from '../../store/db.js';
 import { beforeClosing } from '../../store/heldEdits.js';

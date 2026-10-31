@@ -1,7 +1,7 @@
 import type { FileKind } from '@skysa/core';
 
 /**
- * The toolbar's icons, drawn here rather than installed.
+ * The app's icons, drawn here rather than installed.
  *
  * An icon package would be a dependency for twenty shapes, and the shapes are
  * the conventional ones — a bold "B", a chain link, three dots — so there is

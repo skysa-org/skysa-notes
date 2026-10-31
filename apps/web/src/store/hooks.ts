@@ -2,8 +2,8 @@ import { isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { startTransition, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
-import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
-import type { EditorMode } from '../editor/mode.js';
+import { codeDisplay, type CodeDisplayStore } from '../lib/codeDisplay.js';
+import type { EditorMode } from '../lib/editorMode.js';
 import { type ConnectedSource, connectedSources, holdsPile } from './connection.js';
 import { useDb } from './database.js';
 import {

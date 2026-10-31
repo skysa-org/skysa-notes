@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createObjectUrlCache, type ObjectUrlFactory } from '../src/editor/objectUrls.js';
+import { createObjectUrlCache, type ObjectUrlFactory } from '../src/lib/objectUrls.js';
 
 const GRACE = 1000;
 

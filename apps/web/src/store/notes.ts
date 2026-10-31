@@ -25,7 +25,7 @@ import {
 } from '@skysa/core';
 import Dexie from 'dexie';
 
-import type { EditorMode } from '../editor/mode.js';
+import type { EditorMode } from '../lib/editorMode.js';
 import {
 	activeConnectionId,
 	type ConnectionScope,

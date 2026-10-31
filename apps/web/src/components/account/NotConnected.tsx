@@ -2,8 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useSyncExternalStore } from 'react';
 
 import { answer } from '../../api/instanceConfig.js';
-import type { pickFiles } from '../../editor/pickFiles.js';
 import { t } from '../../i18n/t.js';
+import type { pickFiles } from '../../lib/pickFiles.js';
 import { useDb } from '../../store/database.js';
 import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { holdsAnything, type Library } from '../../store/exportNotes.js';

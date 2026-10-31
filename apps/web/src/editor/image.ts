@@ -8,6 +8,7 @@ import { $prose, $view } from '@milkdown/kit/utils';
 import { cell, classifyHref } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
+import { openFile, saveFile } from '../lib/fileActions.js';
 import {
 	attachHostCtx,
 	type AttachmentHost,
@@ -16,7 +17,6 @@ import {
 	type ShowOptions,
 } from './attachHost.js';
 import { nameIn } from './attachment.js';
-import { openFile, saveFile } from './fileActions.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from './nodeBar.js';
 
 /**

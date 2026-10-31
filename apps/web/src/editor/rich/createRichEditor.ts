@@ -25,6 +25,7 @@ import { $prose } from '@milkdown/kit/utils';
 import { toLf } from '@skysa/core';
 
 import { t } from '../../i18n/t.js';
+import { codeDisplay, type CodeDisplayStore } from '../../lib/codeDisplay.js';
 import { richCaretAboveKeyboard } from '../aboveKeyboard.js';
 import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from '../attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from '../attachHost.js';
@@ -32,7 +33,6 @@ import { attachmentSchema, attachmentViewPlugin, claimsClick } from '../attachme
 import { autoLanguagePlugin } from '../autoLanguage.js';
 import { codeBlocksKeepAtoms, codeSpansHoldText } from '../codeAtoms.js';
 import { codeBlockViewPlugin } from '../codeBlock.js';
-import { codeDisplay, type CodeDisplayStore } from '../codeDisplay.js';
 import { codeActivePlugin, codeNumbersPlugin } from '../codeTools.js';
 import { copiedText } from '../copiedText.js';
 import { deleteSelectedNode } from '../deleteSelected.js';

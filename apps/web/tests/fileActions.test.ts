@@ -6,7 +6,7 @@ import {
 	type Fetched,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
-import { type FileBrowser, openFile, saveFile } from '../src/editor/fileActions.js';
+import { type FileBrowser, openFile, saveFile } from '../src/lib/fileActions.js';
 
 /**
  * Opening and saving a file beside a note (#187), against a browser that

@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 
-import { type CodeDisplay, DEFAULT_CODE_DISPLAY } from '../editor/codeDisplay.js';
-import { DEFAULT_EDITOR_MODE, type EditorMode, isEditorMode } from '../editor/mode.js';
+import { type CodeDisplay, DEFAULT_CODE_DISPLAY } from '../lib/codeDisplay.js';
+import { DEFAULT_EDITOR_MODE, type EditorMode, isEditorMode } from '../lib/editorMode.js';
 import type { NotesDatabase } from './db.js';
 
 /**

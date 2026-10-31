@@ -16,8 +16,8 @@ import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/clipboard/Clipbo
 import type { SystemClipboard, SystemRead } from '../src/components/clipboard/systemClipboard.js';
 import { useFileDropGuard } from '../src/components/clipboard/useFileDropGuard.js';
 import { FLASH_MS } from '../src/components/ui/useFlash.js';
-import type { FileBrowser } from '../src/editor/fileActions.js';
-import type { ObjectUrlCache } from '../src/editor/objectUrls.js';
+import type { FileBrowser } from '../src/lib/fileActions.js';
+import type { ObjectUrlCache } from '../src/lib/objectUrls.js';
 import type { PictureShrinker } from '../src/pictures/shrinker.js';
 import { addClips, type ClipInput } from '../src/store/clipboard.js';
 import type { NotesDatabase } from '../src/store/db.js';

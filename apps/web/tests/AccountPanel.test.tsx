@@ -16,8 +16,8 @@ import { SourcePanel } from '../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../src/components/sources/SourceTabs.js';
 import { NoticesProvider, useShownNotices } from '../src/components/ui/notices.js';
 import { Toast } from '../src/components/ui/Toast.js';
-import type { pickFiles } from '../src/editor/pickFiles.js';
 import { t } from '../src/i18n/t.js';
+import type { pickFiles } from '../src/lib/pickFiles.js';
 import {
 	bindConnection,
 	detachConnection,

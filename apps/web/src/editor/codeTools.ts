@@ -3,7 +3,7 @@ import { type EditorState, Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { cell } from '@skysa/core';
 
-import type { CodeDisplayStore } from './codeDisplay.js';
+import type { CodeDisplayStore } from '../lib/codeDisplay.js';
 import { ancestor } from './lists.js';
 import { CODE_BLOCK_NODE } from './rich/schema.js';
 

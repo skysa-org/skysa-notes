@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { api } from '../../api/client.js';
 import { answer, type Asked, useInstanceConfig } from '../../api/instanceConfig.js';
-import type { pickFiles } from '../../editor/pickFiles.js';
+import type { pickFiles } from '../../lib/pickFiles.js';
 import { useDb } from '../../store/database.js';
 import { activeConnectionId } from '../../store/db.js';
 import { downloadLibrary, downloadUnsent, type Library } from '../../store/exportNotes.js';

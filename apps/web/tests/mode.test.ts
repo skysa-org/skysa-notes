@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_EDITOR_MODE, isEditorMode, otherMode } from '../src/editor/mode.js';
+import { DEFAULT_EDITOR_MODE, isEditorMode, otherMode } from '../src/lib/editorMode.js';
 
 describe('editor mode', () => {
 	it('opens in rich text unless told otherwise', () => {
