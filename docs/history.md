@@ -66,9 +66,10 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
   Transient failures retry after 5 s, doubling to 5 min — and while a retry waits on its timer, edits, focus and visibility leave it to that timer (only "Sync now" and `online` go first), because every failed push is an attempt against its op and a keystroke's debounce would otherwise spend them all in seconds — reset by a sync with nothing left failing that time can fix (`ok` or `blocked`); a failure that finds the browser offline reads as `offline`.
   Conflict copies accumulate in the status for the session, whichever sync made them.
   `blocked` is `attention`, but pulls go on every minute, and it is not for ever: the engine counts every failure an op has, an outage's included, so an op gets eight (about ten minutes of the backoff), and a blocked op gets its attempts back when the user presses "Sync now", on `online`, and on its own fifteen minutes after it first blocked.
-  *How connecting works, as of this phase.*
-  Phase 7 replaced the list-and-session design this passage describes, and §6, "Per-connection credentials", is how it works now.
-  A credential reaches exactly one connection, so nothing "binds to the first one"; there are no sessions, and the device lets go only on `credential_revoked` or `not_found`; the connect button is a POST that answers a URL; and Phase 9's sign-in was dropped on 2026-09-18.
+  *How connecting works.*
+  This passage was edited as later phases landed, so it mixes this phase's list-and-session design with what replaced it: for how connecting works now, read §6, "Per-connection credentials".
+  Phase 7 is what took away "the first one this build can sync" (a credential reached exactly one connection from then on) and sessions (the device let go only on `credential_revoked` or `not_found`), and made the connect button a POST that answers a URL.
+  The sign-in of Phase 9 was dropped on 2026-09-18.
   The server is the authority on whether an account is connected, and the device follows.
   On open the panel asks `/api/connection` with the credential this device holds, which reaches exactly one connection: a credential a flow has just consented for claims that connection (`claimConnection`), and otherwise the binding the device already has is confirmed, and let go of only on `credential_revoked` or `not_found`.
   A signed-in empty list unbinds (it was disconnected from another device), but no session changes nothing: an expired session is not a disconnect, and the panel offers "Connect again", which keeps the connection's id for the same account.
@@ -221,7 +222,7 @@ And it asked for a notebook it had just checked was free while the scheduler pul
 The fourth was recorded here as **seeds 318 and 578 failing every time, and 253, 302, 461 and 597 sometimes**, all differing in a conflict copy's `updated:` line alone.
 That understated it, and a review on 2026-09-18 found what it was.
 Seed 578 left one browser clean and holding a note's body *without* an edit the remote and the other browser had; seed 461, intermittently and only over the OneDrive and Drive stubs, **lost edits outright** — four tokens in no file anywhere.
-Both were one fault: a move's returned version adopted over bytes nobody had read (above, "The version a move hands back").
+Both were one fault: a move's returned version adopted over bytes nobody had read (§7, "The version a move hands back").
 With that fixed, all six seeds pass, over the fake and both stubs.
 They turned on timing — 578 passed over the fake on CI while failing on a laptop — which is why they are held by the scripted tests in `packages/core/tests/sync/overProviders.test.ts` rather than by pinning a seed: a pinned seed that fails only sometimes is a suite that goes red by itself.
 
@@ -261,7 +262,7 @@ The traces also carry where a rename or move went, and not only where it started
 
   **Names are short, derived, and the user's to overrule.**
   "Dropbox", and "Dropbox 2" for the next one of the same provider, numbered per provider in `boundAt` order with no 1 on the first; `renameSource` writes a `label` on the `syncState` row and that beats everything.
-  This is a better answer to what the disconnect work left open below — the source list naming live sources by account id because `displayName` is only written while a source is in front — by not needing the server's name at all: `displayName` is still the server's, still overwritten on every reconcile, and a rename would have been thrown away by the next one.
+  This is a better answer to what the disconnect work left open (`ARCHITECTURE.md` §10) — the source list naming live sources by account id because `displayName` is only written while a source is in front — by not needing the server's name at all: `displayName` is still the server's, still overwritten on every reconcile, and a rename would have been thrown away by the next one.
   Derived rather than written down at connect time so that every source already on a device gets a name with no backfill, and so that letting the first Dropbox go leaves the other called "Dropbox" rather than a "Dropbox 2" with no 1 above it.
   The cost is a name moving under the user when another source goes, and renaming is the answer to it.
   Numbering counts renamed sources too, or typing a name would renumber the rest.
@@ -311,7 +312,7 @@ The traces also carry where a rename or move went, and not only where it started
   It is now unconditionally the top level, which is what a `+` in a pane header called "Notebooks" means; inside is the rarer thing and has two ways of its own to be asked for (the menu, and dragging it there afterwards).
   Beside it, `NotebookMenu` holds what can be done to the **open** notebook: a notebook inside it, Rename, Move, Delete.
   In the header and not on every row, because the rows are drag sources and a button inside a button is not a thing HTML has — each row would become a wrapper holding two controls, for chrome on every line to serve an action taken rarely.
-  That held until 2026-10-01, when each row got a `⋯` of its own beside its button (§8, "Inside the window"): a menu in the header did not say which notebook it was about until it was opened.
+  That held until 2026-10-01, when each row got a `⋯` of its own beside its button (§7, "Inside the window"): a menu in the header did not say which notebook it was about until it was opened.
   `renameFolder` and `deleteFolder` were in the same state `moveFolder` was: written, tested, and with no caller, so the only way to change a notebook was to edit the folder on the provider.
   `renameFolder` now hands back the path it moved to, because the caller cannot work it out — the name is sanitised on the way in — and the open notebook is named by path in the URL, which both it and a delete have just changed.
 
@@ -379,7 +380,7 @@ The traces also carry where a rename or move went, and not only where it started
 
   **The menus opened where nobody could see them.**
   A toolbar that scrolls sideways is a scroll box, and a scroll box in one axis is a scroll box in both — `overflow-x: auto` makes the used value of `overflow-y` `auto` as well — so every panel hanging from a button belonged to the bar's own scrollable overflow instead of hovering over the note.
-  The bar wrapped instead, at first — two rows on a narrow screen being a smaller price than a menu that does not appear — and now keeps to one line by moving what does not fit into a `More tools` menu at its end (§ "Inside the window", above), which is a menu hanging from the bar like the others and so opens over the note.
+  The bar wrapped instead, at first — two rows on a narrow screen being a smaller price than a menu that does not appear — and now keeps to one line by moving what does not fit into a `More tools` menu at its end (§7, "Inside the window"), which is a menu hanging from the bar like the others and so opens over the note.
   The stylesheet assertion that pins the editor's height chain still holds the bar to no scroll box.
 
   **Changing a list's kind is changing the node, not wrapping it** (`editor/rich/lists.ts`).

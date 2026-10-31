@@ -1137,7 +1137,7 @@ A revocation list is the one of the three that could still be built on what exis
 
 ### Data model (Drizzle, D1)
 ```
-users               id, email, email_verified, created_at              (no caller; to be dropped — §10)
+users               id, email, email_verified, created_at              (no caller; to be dropped — #118)
 identities          id, user_id, provider ('google'|'microsoft'), subject, email, created_at   (no caller; to be dropped)
 storage_connections id, provider, account_id, display_name, root_id,
                     secret_ciphertext, secret_iv, secret_key_id, created_at, last_used_at
@@ -4190,7 +4190,8 @@ A test checks the answer against a parse of the whole body over four thousand bo
 ## 10. Build record
 
 The record of how the product was built, phase by phase, is now [`history.md`](history.md).
-A citation of "Phase N" means the heading of that name there.
+A citation of "Phase N" means the heading of that name there, or "§10 Phase N" the same.
+Phase 9, the sign-in layer, was never built: "Cleaning up after account-first" there says what became of it.
 A citation of §10 about disconnecting means the section below.
 
 ### Disconnecting without an invisible pile (2026-09-19)
@@ -4241,7 +4242,7 @@ There is **no migration** for a pile an earlier disconnect left: nothing has bee
   The deletion planned for this change — `MIXED_ACCOUNTS`, `NOTES_ACCOUNT_KEY`, `other-account` and the rest — landed with the detach change above, which is what made them dead, and a sweep for whatever the three changes left after them (a prefs key still read but no longer written, CSS for a panel that no longer exists, an export with no caller, a type with no user, a test helper nothing calls) found none of theirs.
   That is the tooling working rather than luck: `noUnusedLocals` and `noUnusedParameters` fail the build on a declaration the moment its last use goes, so the only dead code a change like this can leave behind is an *export*, and the exports that have none — `heldCredentials`, `useDirtyCount`, and the Phase 1 store functions the tests are the only callers of — all predate this work and are not its to delete.
   (`heldCredentials` and `useDirtyCount` were deleted on 2026-10-26, when knip's report was cleared for #461.)
-  What was left was the prose, and §6, §7 and Phase 2 above now describe the world these four changes built rather than the one they replaced: in particular `LOCAL_CONNECTION_ID` is described again as what it has always been and nothing more — never connected, or nothing connected — since `bindConnection` copying its rows into the first source bound is the only thing that fills or empties it
+  What was left was the prose, and §6 and §7 now describe the world these four changes built rather than the one they replaced: in particular `LOCAL_CONNECTION_ID` is described again as what it has always been and nothing more — never connected, or nothing connected — since `bindConnection` copying its rows into the first source bound is the only thing that fills or empties it
 
 **What the four together guarantee, so it need not be assembled from four entries.**
 The remote is the source of truth, so letting a source go takes off the device exactly what the remote has and nothing else; connecting the account again brings it back.
