@@ -5,6 +5,12 @@
 	--on-brand: #ffffff;
 }
 
+@media (prefers-color-scheme: dark) {
+	:where(:root) {
+		--on-brand: #111827;
+	}
+}
+
 :root {
 	color-scheme: light dark;
 
@@ -46,8 +52,7 @@
 	--radius-pill: 999px;
 
 	/* How far something is lifted off the page: a card at rest, a card under the
-	   pointer, whatever floats over the page (a menu, a toast, a dialog), and the
-	   command palette over all of it. */
+	   pointer, a menu or flyout over the page, and the command palette. */
 	--shadow-s: 0 1px 3px rgb(0 0 0 / 0.08);
 	--shadow-m: 0 2px 8px rgb(0 0 0 / 0.12);
 	--shadow-l: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
@@ -66,7 +71,8 @@
 	   `--z-sheet-over` the one opening over another still shutting. `--z-menu` is
 	   the options menu, and the bar saying another tab took over. A menu opened
 	   from inside a dialog goes over the dialog that opened it
-	   (`--z-dialog-menu`). */
+	   (`--z-dialog-menu`). `cardMotion.ts` writes a card in flight directly, as
+	   numbers, against these: `OVER_PANELS` and `OVER_ALL`. */
 	--z-sheet: 15;
 	--z-sheet-over: 16;
 	--z-popover: 20;

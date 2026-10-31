@@ -49,7 +49,7 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
 	background: var(--surface);
-	box-shadow: var(--shadow-l);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 	font-size: 0.9rem;
 	line-height: 1.6;
 }

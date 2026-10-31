@@ -1,4 +1,5 @@
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -16,13 +17,20 @@ describe('the stylesheet', () => {
 	// A name nobody declares is no error to a browser: the rule just goes away,
 	// and the corner goes square without a word.
 	it('uses only the steps tokens.css declares', () => {
-		const css = allStyles();
+		const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
+		const step = String.raw`--(?:radius|shadow|text|z)-[\w-]+|--brand|--on-brand`;
 		const declared = new Set(
-			[...css.matchAll(/(--(?:radius|shadow|text|z)-[\w-]+):/g)].map((match) => match[1])
+			[
+				...withoutComments(
+					readFileSync(join(STYLES_FOLDER, 'tokens.css'), 'utf8')
+				).matchAll(new RegExp(`(${step})\\s*:`, 'g')),
+			].map((match) => match[1])
 		);
-		const used = [...css.matchAll(/var\((--(?:radius|shadow|text|z)-[\w-]+)\)/g)].map(
-			(match) => match[1]
-		);
+		const used = [
+			...withoutComments(allStyles()).matchAll(
+				new RegExp(`var\\(\\s*(${step})\\s*[,)]`, 'g')
+			),
+		].map((match) => match[1]);
 
 		expect(used.length).toBeGreaterThan(0);
 		expect(used.filter((name) => !declared.has(name))).toEqual([]);
