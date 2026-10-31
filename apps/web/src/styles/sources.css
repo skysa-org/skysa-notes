@@ -53,7 +53,7 @@
 	min-width: 0;
 	padding: var(--space-s) var(--tab-inline);
 	font: inherit;
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	line-height: var(--tab-line);
 	white-space: nowrap;
 	color: var(--muted);
@@ -218,7 +218,7 @@
 /* Its words, while nothing is connected: sized as a tab's name is, beside
    the `+` that keeps the size it has everywhere else. */
 .source-add-label {
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	white-space: nowrap;
 }
 
@@ -256,7 +256,7 @@
 	margin: 0;
 	padding: 0.4rem 0.6rem;
 	max-width: 18rem;
-	font-size: 0.8rem;
+	font-size: var(--text-s);
 }
 
 .connect-gate {
@@ -306,7 +306,7 @@
 .connect-code-form input {
 	flex: 1;
 	min-width: 0;
-	font-size: 0.9rem;
+	font-size: var(--text-m);
 	padding: 0.35rem 0.5rem;
 }
 
@@ -348,7 +348,7 @@
 	gap: 0.15rem;
 	margin: 0;
 	padding: 0.4rem 0.6rem;
-	font-size: 0.8rem;
+	font-size: var(--text-s);
 	color: var(--muted);
 	white-space: nowrap;
 }

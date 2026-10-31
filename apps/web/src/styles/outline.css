@@ -37,7 +37,7 @@
 	padding: 0.2rem 0.35rem;
 	text-align: left;
 	font: inherit;
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	color: var(--muted);
 	border-radius: var(--radius-xs);
 	cursor: pointer;
@@ -76,7 +76,7 @@
 /* Room for a finger, where the rail's rows are sized for a pointer. */
 .outline-flyout button {
 	padding-block: 0.45rem;
-	font-size: 0.95rem;
+	font-size: var(--text-body);
 }
 
 /* Depth as indentation, which is the whole of the structure a rail can show. */

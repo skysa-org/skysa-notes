@@ -70,7 +70,7 @@
 .search-heading {
 	margin: 0;
 	padding: var(--space-s) var(--gutter) var(--space-2xs);
-	font-size: 0.7rem;
+	font-size: var(--text-xs);
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;

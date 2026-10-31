@@ -28,7 +28,7 @@
 
 .slash-item {
 	font: inherit;
-	font-size: 0.9rem;
+	font-size: var(--text-m);
 	text-align: start;
 	padding: 0.4rem 0.6rem;
 	border: 0;
@@ -50,7 +50,7 @@
 
 .toolbar-button {
 	font: inherit;
-	font-size: 0.8rem;
+	font-size: var(--text-s);
 	padding: 0.3rem var(--control-inline);
 	border: 0;
 	border-radius: var(--radius-s);

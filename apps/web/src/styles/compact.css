@@ -258,7 +258,7 @@
 	min-width: 0;
 	padding: 0.35rem calc(var(--crumb) / 2);
 	font: inherit;
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	color: var(--fg);
 	background: none;
 	border: 0;
@@ -414,7 +414,7 @@
 /* 16px, because Safari on a phone zooms the page into any field smaller than
    that the moment it is focused, and does not zoom back out. */
 .compact-search .note-search {
-	font-size: 1rem;
+	font-size: var(--text-field-floor);
 }
 
 /* The close button beside the field empties it as well as shutting it, so the
@@ -429,7 +429,7 @@
 	margin: var(--space-s) var(--gutter);
 	padding: 0.35rem 0.5rem;
 	font: inherit;
-	font-size: 0.85rem;
+	font-size: var(--text-m);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--bg);

@@ -159,7 +159,7 @@
 	.find-input,
 	.toolbar-link input,
 	.connect-code-form input {
-		font-size: 1rem;
+		font-size: var(--text-field-floor);
 	}
 
 	/* A task's box at the 24px WCAG's own minimum asks, not `--tap`: the
