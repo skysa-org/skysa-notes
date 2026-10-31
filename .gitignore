@@ -155,8 +155,6 @@ vite.config.ts.timestamp-*
 # vite-plugin-pwa dev service worker output
 dev-dist/
 
-# Local WebDAV test target (docker/nextcloud-compose.yml) volumes
-docker/data/
 
 # Editors
 .vscode/*

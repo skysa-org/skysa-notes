@@ -707,6 +707,7 @@ What follows is the design as planned, kept so it need not be worked out again i
   Accept that renames done outside the app look like delete+create in the worst case.
 
 ---
+- The adapter takes a `fetch`-like function, so it can point at the proxy in the browser and at the server directly in tests; a Nextcloud container was the planned test target.
 
 ## 6. Backend
 
@@ -3123,13 +3124,18 @@ The decision record is [`decisions/0001-disconnecting-without-an-invisible-pile.
 
 ```
 pnpm-workspace.yaml
-package.json                  # root scripts: dev, build, test, lint, db:migrate
+package.json                  # root scripts: dev, build, test, lint, verify (the gate before a push), db:migrate
+docs/                         # this file; decisions/ (a record per decision); history.md (the build record)
+.changeset/                   # a changeset per PR; README.md says how a release is cut
+scripts/setup.sh              # first-run setup
 apps/
   web/                        # Vite + React SPA
     vite.config.ts            # vite-plugin-pwa, the brand, /api proxy
     brand.ts                  # NOTES_BRAND: load and check a brand, write it into the build (§8)
     brand/                    # the default brand: brand.json, its schema, the six icons, recolour.mjs
     pwa.ts                    # manifest (from the brand) and Workbox options
+    public/_headers           # the CSP: nothing may be added to script-src (§9)
+    scripts/                  # bundleBudget.mjs: the size budget CI holds the build to
     fill.html                 # the fill window's page, which the bookmarklet opens (§7, §8)
     src/
       main.tsx jitless.ts routes/
@@ -3147,7 +3153,7 @@ apps/
       errors/                 # reached.ts: how far a failure got, for the messages that have to say
       install/                # installing from the browser (§8, "Installing from the browser")
       share/                  # what the system's share sheet hands the app (§8, "Shared to the app")
-      pictures/               # smaller copies of pictures, made in a worker (§7, "Large libraries")
+      pictures/               # smaller copies of pictures, made in a worker (§7, "Pictures, as this device has read them")
       secrets/                # the unlock, the key and the device's lock, over core's secrets/ and age/ (§7, "Secrets in a note")
       styles/                 # index.css imports the rest: tokens.css, base.css, primitives.css, then one per area (§7)
       assets/                 # what the build bundles: the providers' marks
@@ -3157,6 +3163,7 @@ apps/
       i18n/                   # the app's words: t(), rich(), and the English catalog in en/ (§7)
   api/                        # Hono on Cloudflare Workers
     wrangler.toml             # D1 binding, [assets] → ../web/dist
+    migrations/               # D1's, numbered
     src/
       app.ts                  # createApp(options) — library export, no env access
       worker.ts               # default Worker entry: createApp with self-host defaults from env
@@ -3167,7 +3174,7 @@ apps/
         token.ts              # /token
         relay.ts              # /connection/relay/ticket, /relay (the change relay)
       relay/                  # the relay's hub seam, Durable Object, rooms and tickets
-      db/                     # drizzle schema, client, migrations; connections.ts: the race-sensitive writes (commitConnection, revokeGrant, recordRefresh)
+      db/                     # drizzle schema, client; connections.ts: the race-sensitive writes (commitConnection, revokeGrant, recordRefresh)
       context.ts              # AppEnv (a request's bindings and db), AuthedEnv (+ bearer), RouteDeps (what createApp hands every router)
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
       flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
@@ -3185,9 +3192,9 @@ packages/
       config.ts               # APP_FOLDER_NAME, MARKER_FILE
       cell.ts                 # cell(): the one way to hold a value that changes, where `let` is not allowed (#457)
       marker.ts paths.ts      # the marker file; paths as POSIX, relative to the app's root
-      hash.ts json.ts         # content hashes; JSON from outside, checked
+      hash.ts json.ts         # content hashes; JSON from outside, parsed without throwing (no schema)
       api.ts relay.ts         # the shapes the app and the Worker both speak: refusals, the relay's frames
-      entitlements.ts         # the seam an operator restricts minting through (§6, "Entitlement seam")
+      entitlements.ts         # the seam an operator restricts connecting and minting through (§6, "Entitlement seam")
       scratchpad.ts           # the colours a scratch note can have
       appFolder.ts            # the app folder's places that are not notebooks: isScratchPath isVaultPath isClipPath isEncryptionFile
       files/                  # files that are not notes: mediaTypes.ts (one table of types) attachments.ts (how one is shown or opened)
