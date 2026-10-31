@@ -11,6 +11,7 @@ import { openFile, saveFile } from '../../../components/attachments/fileActions.
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
 import { stringAttr } from '../../rich/schema.js';
+import { buttonEl, el } from '../../shared/dom.js';
 import {
 	attachHostCtx,
 	type AttachmentHost,
@@ -164,23 +165,16 @@ const imageView =
 		// again — Try again, a notice — until the link names another picture.
 		const wanted = cell(false);
 
-		const img = document.createElement('img');
-		img.setAttribute('referrerpolicy', 'no-referrer');
-		img.setAttribute('decoding', 'async');
-		const reason = document.createElement('span');
-		reason.setAttribute('class', 'note-image-status');
-		const action = document.createElement('button');
-		action.setAttribute('type', 'button');
-		action.setAttribute('class', 'note-image-action');
-		action.setAttribute('hidden', '');
+		const img = el('img', { referrerpolicy: 'no-referrer', decoding: 'async' });
+		const reason = el('span', { class: 'note-image-status' });
+		const action = buttonEl({ class: 'note-image-action', hidden: '' });
 
 		const opener = barButton('open', t('editor.image.openFull'));
 		const saver = barButton('download', t('editor.attachment.download'));
 		const remover = barButton('trash', t('editor.attachment.remove'));
 		const bar = nodeBar(view, [opener, saver, remover], 'note-image-actions');
 
-		const dom = document.createElement('span');
-		dom.setAttribute('class', 'note-image');
+		const dom = el('span', { class: 'note-image' });
 		dom.append(img, reason, action, bar.dom);
 
 		const reasonFor = (next: State, alt: string): string | undefined => {

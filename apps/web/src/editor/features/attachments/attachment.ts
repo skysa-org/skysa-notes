@@ -14,6 +14,7 @@ import { FILE_ICONS, iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
 import { stringAttr } from '../../rich/schema.js';
+import { el } from '../../shared/dom.js';
 import { opensOnClick } from '../links/links.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 
@@ -161,8 +162,7 @@ const attachmentView =
 		const remover = barButton('trash', t('editor.attachment.remove'));
 		const bar = nodeBar(view, [opener, saver, remover]);
 
-		const dom = document.createElement('span');
-		dom.setAttribute('class', 'attachment');
+		const dom = el('span', { class: 'attachment' });
 		dom.append(chip, bar.dom);
 
 		const describe = () => {

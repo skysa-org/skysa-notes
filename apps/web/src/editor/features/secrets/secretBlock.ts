@@ -17,6 +17,7 @@ import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
 import { PARAGRAPH_NODE, stringAttr } from '../../rich/schema.js';
+import { el } from '../../shared/dom.js';
 import { secretHostCtx } from './secretHost.js';
 import {
 	createSecretPanels,
@@ -309,9 +310,7 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 					Decoration.widget(
 						place.from,
 						() => {
-							const holder = document.createElement('div');
-							holder.setAttribute('class', 'secret-draft');
-							holder.append(open.panel.dom);
+							const holder = el('div', { class: 'secret-draft' }, open.panel.dom);
 							return holder;
 						},
 						{
@@ -377,16 +376,12 @@ const secretView = (ctx: Ctx) => {
 			gone: () => gone.current,
 		});
 
-		const row = document.createElement('div');
-		row.setAttribute('class', 'secret-bar');
-		row.append(line, bar.dom);
+		const row = el('div', { class: 'secret-bar' }, line, bar.dom);
 
 		const slot = document.createElement('div');
 		slot.setAttribute('class', 'secret-slot');
 
-		const dom = document.createElement('div');
-		dom.setAttribute('class', 'secret-block');
-		dom.append(row, slot);
+		const dom = el('div', { class: 'secret-block' }, row, slot);
 
 		/**
 		 * The panel its block has, if it is the first block with that armor:

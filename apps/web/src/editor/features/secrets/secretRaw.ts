@@ -18,6 +18,7 @@ import {
 } from '@codemirror/view';
 import { armor as armorOf, type Cell, cell, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
 
+import { el } from '../../shared/dom.js';
 import type { SecretHost } from './secretHost.js';
 import type { SecretPanel } from './secretPanel.js';
 import {
@@ -535,9 +536,7 @@ const panelWidget = (panel: SecretPanel): WidgetType => {
 	const kept = panelWidgets.get(panel);
 	if (kept !== undefined) return kept;
 	const widget = widgetOf(() => {
-		const holder = document.createElement('div');
-		holder.setAttribute('class', 'secret-raw-panel');
-		holder.append(panel.dom);
+		const holder = el('div', { class: 'secret-raw-panel' }, panel.dom);
 		return holder;
 	});
 	panelWidgets.set(panel, widget);
