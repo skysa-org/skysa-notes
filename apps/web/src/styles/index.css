@@ -5,6 +5,7 @@
  */
 @import './tokens.css';
 @import './base.css';
+@import './primitives.css';
 @import './notice-card.css';
 @import './sources.css';
 @import './search.css';

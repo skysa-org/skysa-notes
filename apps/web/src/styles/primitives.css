@@ -1,0 +1,39 @@
+/* What more than one component is drawn from. Each comes before every
+   component, so a component's own rule of the same weight says where it differs. */
+
+/* The bar of small icon buttons that hangs off a block in the editor: a code
+   block's, a file chip's, a picture's. The block's text is selectable; the
+   chrome around it is not, or dragging from the last line downwards would
+   select a control instead of code. Each says where it hangs and whether it
+   shows. */
+.toolstrip {
+	position: absolute;
+	z-index: 2;
+	align-items: center;
+	gap: 0.125rem;
+	margin-block-start: 0.25rem;
+	padding: 0.2rem 0.25rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-s);
+	background: var(--surface);
+	box-shadow: var(--shadow-l);
+	user-select: none;
+}
+
+.toolstrip-button {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.25rem;
+	border: 0;
+	border-radius: var(--radius-xs);
+	background: none;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.toolstrip-button:hover {
+		background: var(--hover-bg);
+		color: var(--fg);
+	}
+}

@@ -90,7 +90,11 @@ const toolButton = (
 	press: () => void,
 	options: Readonly<{ pressed?: boolean }> = {}
 ): HTMLButtonElement => {
-	const button = buttonEl({ class: 'code-tool', title: label, 'aria-label': label });
+	const button = buttonEl({
+		class: 'toolstrip-button code-tool',
+		title: label,
+		'aria-label': label,
+	});
 	if (options.pressed !== undefined) button.setAttribute('aria-pressed', String(options.pressed));
 	button.append(iconElement(icon));
 
@@ -182,7 +186,7 @@ const codeBlockView =
 		// editable surface either: a cursor must not be able to land in it, and
 		// its own DOM changes are not document changes.
 		const bar = el('div', {
-			class: 'code-block-tools',
+			class: 'toolstrip code-block-tools',
 			role: 'group',
 			'aria-label': t('editor.codeBlock.label'),
 			contenteditable: 'false',
