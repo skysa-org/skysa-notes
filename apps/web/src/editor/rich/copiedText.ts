@@ -2,6 +2,8 @@ import { schemaCtx, serializerCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { Fragment, type Node as ProseNode, type Slice } from '@milkdown/kit/prose/model';
 
+import { HARD_BREAK_NODE } from './schema.js';
+
 /**
  * What a copy out of the rich editor puts on the clipboard as text: the
  * selection as markdown, as the clipboard plugin writes it, but for the
@@ -24,7 +26,7 @@ import { Fragment, type Node as ProseNode, type Slice } from '@milkdown/kit/pros
 const LEADING = /^[ \t]+/u;
 const TRAILING = /[ \t]+$/u;
 
-const isBreak = (node: ProseNode): boolean => node.type.name === 'hardbreak';
+const isBreak = (node: ProseNode): boolean => node.type.name === HARD_BREAK_NODE;
 
 /** Text whose spaces are not to be touched: a code span's. */
 const isCode = (node: ProseNode): boolean => node.marks.some((mark) => mark.type.spec.code);

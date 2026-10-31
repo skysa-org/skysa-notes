@@ -4,6 +4,8 @@ import type { NodeView } from '@milkdown/kit/prose/view';
 import { $view } from '@milkdown/kit/utils';
 import { decodeCharacterReferences } from '@skysa/core';
 
+import { stringAttr } from './schema.js';
+
 /**
  * Html as the rich editor draws it: the atom Milkdown makes of it, shown as the
  * text it is written in, as before, but with its character references read
@@ -16,7 +18,7 @@ import { decodeCharacterReferences } from '@skysa/core';
  * atom is read back from (`parseDOM` in Milkdown's `htmlSchema`).
  */
 const htmlView = (node: ProseNode): NodeView => {
-	const value = typeof node.attrs.value === 'string' ? node.attrs.value : '';
+	const value = stringAttr(node, 'value');
 	const dom = document.createElement('span');
 	dom.setAttribute('data-type', 'html');
 	dom.setAttribute('data-value', value);

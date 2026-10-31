@@ -4,6 +4,8 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { Plugin, type Transaction } from '@milkdown/kit/prose/state';
 import { AddMarkStep, ReplaceStep, Transform } from '@milkdown/kit/prose/transform';
 
+import { PARAGRAPH_NODE } from '../../rich/schema.js';
+
 /**
  * What code does with a chip or a picture (#187).
  *
@@ -96,7 +98,7 @@ const droppedAtoms = (transactions: readonly Transaction[]): Dropped[] =>
 /** One atom as the markdown it is, on its own and with no marks. */
 const markdownOf = (ctx: Ctx, node: ProseNode): string => {
 	const { schema } = node.type;
-	const paragraph = schema.nodes.paragraph;
+	const paragraph = schema.nodes[PARAGRAPH_NODE];
 	if (paragraph === undefined) return '';
 	const doc = schema.topNodeType.create(null, paragraph.create(null, node.mark([])));
 	return ctx.get(serializerCtx)(doc).replace(/\n+$/, '');

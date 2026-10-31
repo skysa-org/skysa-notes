@@ -13,6 +13,7 @@ import {
 import { FILE_ICONS, iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
+import { stringAttr } from '../../rich/schema.js';
 import { opensOnClick } from '../links/links.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 
@@ -35,11 +36,6 @@ import { attachHostCtx, type AttachmentHost } from './attachHost.js';
  */
 
 export const ATTACHMENT = 'attachment';
-
-const attributeOf = (node: ProseNode, name: 'href' | 'label'): string => {
-	const value: unknown = node.attrs[name];
-	return typeof value === 'string' ? value : '';
-};
 
 const titleOf = (node: ProseNode): string | null => {
 	const value: unknown = node.attrs.title;
@@ -95,10 +91,10 @@ export const attachmentSchema = $nodeSchema(ATTACHMENT, () => ({
 	toDOM: (node) => [
 		'a',
 		{
-			'data-attachment': attributeOf(node, 'href'),
+			'data-attachment': stringAttr(node, 'href'),
 			...(titleOf(node) === null ? {} : { title: titleOf(node) }),
 		},
-		attributeOf(node, 'label'),
+		stringAttr(node, 'label'),
 	],
 	parseMarkdown: {
 		match: isChipLink,
@@ -114,10 +110,10 @@ export const attachmentSchema = $nodeSchema(ATTACHMENT, () => ({
 		match: (node) => node.type.name === ATTACHMENT,
 		runner: (state, node) => {
 			state.openNode('link', undefined, {
-				url: attributeOf(node, 'href'),
+				url: stringAttr(node, 'href'),
 				title: titleOf(node),
 			});
-			state.addNode('text', undefined, attributeOf(node, 'label'));
+			state.addNode('text', undefined, stringAttr(node, 'label'));
 			state.closeNode();
 		},
 	},
@@ -135,13 +131,11 @@ export const nameIn = (href: string): string => {
 
 /** What a chip shows: its words, or the file's name where it has none. */
 const shownName = (node: ProseNode): string =>
-	attributeOf(node, 'label') === ''
-		? nameIn(attributeOf(node, 'href'))
-		: attributeOf(node, 'label');
+	stringAttr(node, 'label') === '' ? nameIn(stringAttr(node, 'href')) : stringAttr(node, 'label');
 
 /** Open the file a chip names. */
 const open = (host: AttachmentHost, node: ProseNode, browser?: FileBrowser): Promise<void> =>
-	openFile({ host, href: attributeOf(node, 'href'), label: shownName(node), browser });
+	openFile({ host, href: stringAttr(node, 'href'), label: shownName(node), browser });
 
 const attachmentView =
 	(
@@ -174,7 +168,7 @@ const attachmentView =
 		const describe = () => {
 			const node = held.current;
 			const shown = shownName(node);
-			const kind = fileKind(nameIn(attributeOf(node, 'href')));
+			const kind = fileKind(nameIn(stringAttr(node, 'href')));
 			name.replaceChildren(shown);
 			icon.replaceChildren(iconElement(FILE_ICONS[kind]));
 			// Keyed by the file's kind, which the catalog has a message for each of.
@@ -199,7 +193,7 @@ const attachmentView =
 			busy(() =>
 				saveFile({
 					host,
-					href: attributeOf(held.current, 'href'),
+					href: stringAttr(held.current, 'href'),
 					label: shownName(held.current),
 					browser,
 				})

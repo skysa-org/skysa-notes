@@ -8,6 +8,7 @@ import { iconElement, type IconName } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import type { CodeDisplayStore } from '../../../store/codeDisplay.js';
 import { removeNode } from '../../rich/nodeBar.js';
+import { stringAttr } from '../../rich/schema.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
 
 /**
@@ -29,6 +30,9 @@ import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
  * (`editor/features/code/highlight.ts`).
  */
 
+/** How long a code block's copy button says it has copied. */
+const COPIED_SHOWN_MS = 1500;
+
 /**
  * What the picker says about a block that names no language — and what it
  * promises, since `editor/features/code/autoLanguage.ts` is watching such a block and will
@@ -37,10 +41,7 @@ import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
 const DETECT = t('editor.codeBlock.detect');
 
 /** The word in the file, which may be an alias or something never heard of. */
-const languageOf = (node: ProseNode): string => {
-	const language: unknown = node.attrs.language;
-	return typeof language === 'string' ? language : '';
-};
+const languageOf = (node: ProseNode): string => stringAttr(node, 'language');
 
 /**
  * The option that word picks out. A fence saying `js` is JavaScript and the
@@ -151,7 +152,7 @@ const codeBlockView =
 					copy.setAttribute('data-copied', 'true');
 					setTimeout(() => {
 						copy.removeAttribute('data-copied');
-					}, 1500);
+					}, COPIED_SHOWN_MS);
 				})
 				.catch(() => undefined);
 		});

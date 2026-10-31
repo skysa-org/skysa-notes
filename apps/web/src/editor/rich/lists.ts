@@ -7,6 +7,8 @@ import type { EditorState, Transaction } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { callCommand } from '@milkdown/kit/utils';
 
+import { LIST_ITEM_NODE } from './schema.js';
+
 /**
  * What a list is, and how to turn one into another.
  *
@@ -21,7 +23,6 @@ import { callCommand } from '@milkdown/kit/utils';
  * list from one kind to another is changing the node, not wrapping it.
  */
 
-export const LIST_ITEM = 'list_item';
 const BULLET = 'bullet_list';
 const ORDERED = 'ordered_list';
 const LISTS = [BULLET, ORDERED];
@@ -64,7 +65,7 @@ export const ancestor = ($from: ResolvedPos, names: readonly string[]): Ancestor
 	ancestors($from, names)[0] ?? null;
 
 /** The list item the selection is in, if it is in one. */
-const itemAround = (state: EditorState) => ancestor(state.selection.$from, [LIST_ITEM]);
+const itemAround = (state: EditorState) => ancestor(state.selection.$from, [LIST_ITEM_NODE]);
 
 /**
  * The innermost list around the selection, and which kind it is.
@@ -109,7 +110,7 @@ const retype = (tr: Transaction, list: Ancestor, kind: ListKind): void => {
 	if (list.node.type !== target) tr.setNodeMarkup(list.pos, target, attrs);
 
 	list.node.forEach((item, offset) => {
-		if (item.type.name !== LIST_ITEM) return;
+		if (item.type.name !== LIST_ITEM_NODE) return;
 		tr.setNodeMarkup(list.pos + 1 + offset, undefined, itemAttrs(kind, item.attrs));
 	});
 };

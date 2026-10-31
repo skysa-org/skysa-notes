@@ -10,6 +10,7 @@ import { cell, classifyHref } from '@skysa/core';
 import { openFile, saveFile } from '../../../components/attachments/fileActions.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
+import { stringAttr } from '../../rich/schema.js';
 import {
 	attachHostCtx,
 	type AttachmentHost,
@@ -87,11 +88,6 @@ const OFFERS: Readonly<Partial<Record<State, string>>> = {
 
 /** A size in megabytes, to a tenth of one. */
 const megabytes = (size: number): number => Math.round((size / (1024 * 1024)) * 10) / 10;
-
-const attributeOf = (node: ProseNode, name: 'src' | 'alt' | 'title'): string => {
-	const value: unknown = node.attrs[name];
-	return typeof value === 'string' ? value : '';
-};
 
 /**
  * The nearest of `element` and its ancestors that scrolls, or none where the
@@ -209,7 +205,7 @@ const imageView =
 			dom.setAttribute('data-state', next);
 			if (next === 'loading') dom.setAttribute('aria-busy', 'true');
 			else dom.removeAttribute('aria-busy');
-			reason.replaceChildren(reasonFor(next, attributeOf(held.current, 'alt')) ?? '');
+			reason.replaceChildren(reasonFor(next, stringAttr(held.current, 'alt')) ?? '');
 			const offer = OFFERS[next];
 			action.toggleAttribute('hidden', offer === undefined);
 			action.replaceChildren(offer ?? '');
@@ -325,11 +321,11 @@ const imageView =
 		 * chip's file does. One on the web, or in the link, does neither: it is
 		 * not the note's to hand over.
 		 */
-		const own = () => classifyHref(attributeOf(held.current, 'src')) === 'relative';
+		const own = () => classifyHref(stringAttr(held.current, 'src')) === 'relative';
 
 		const describe = () => {
-			const alt = attributeOf(held.current, 'alt');
-			const title = attributeOf(held.current, 'title');
+			const alt = stringAttr(held.current, 'alt');
+			const title = stringAttr(held.current, 'title');
 			img.setAttribute('alt', alt);
 			if (title === '') img.removeAttribute('title');
 			else img.setAttribute('title', title);
@@ -339,11 +335,11 @@ const imageView =
 
 		/** The file, as a chip asks for one: by the name the user knows it by. */
 		const request = () => {
-			const src = attributeOf(held.current, 'src');
+			const src = stringAttr(held.current, 'src');
 			return {
 				host,
 				href: src,
-				label: savedAs(attributeOf(held.current, 'alt'), nameIn(src)),
+				label: savedAs(stringAttr(held.current, 'alt'), nameIn(src)),
 			};
 		};
 
@@ -400,7 +396,7 @@ const imageView =
 		});
 
 		describe();
-		show(attributeOf(initial, 'src'));
+		show(stringAttr(initial, 'src'));
 
 		return {
 			dom,
@@ -408,12 +404,12 @@ const imageView =
 			// Only ever handed an image: ProseMirror offers a view a node of
 			// another type only when its spec says `multiType`.
 			update: (node) => {
-				const before = attributeOf(held.current, 'src');
+				const before = stringAttr(held.current, 'src');
 				held.current = node;
 				describe();
-				if (attributeOf(node, 'src') !== before) {
+				if (stringAttr(node, 'src') !== before) {
 					wanted.current = false;
-					show(attributeOf(node, 'src'));
+					show(stringAttr(node, 'src'));
 					return true;
 				}
 				// The alt text may have changed, and with it what is said.
@@ -456,7 +452,7 @@ export const imageViewPlugin = $view(
 const UNLOADABLE = /^\s*(?:blob|webkit-fake-url|file):/i;
 
 const unloadable = (node: ProseNode): boolean =>
-	node.type.name === 'image' && UNLOADABLE.test(attributeOf(node, 'src'));
+	node.type.name === 'image' && UNLOADABLE.test(stringAttr(node, 'src'));
 
 /** `fragment` with each picture no page can load as its alt text, or nothing. */
 const inWords = (fragment: Fragment, schema: Schema): Fragment =>
@@ -464,7 +460,7 @@ const inWords = (fragment: Fragment, schema: Schema): Fragment =>
 		fragment.content.flatMap((node): ProseNode[] => {
 			if (!unloadable(node))
 				return [node.isLeaf ? node : node.copy(inWords(node.content, schema))];
-			const alt = attributeOf(node, 'alt');
+			const alt = stringAttr(node, 'alt');
 			return alt === '' ? [] : [schema.text(alt, node.marks)];
 		})
 	);
@@ -553,16 +549,16 @@ export const imageWithoutStrayTitles =
 				},
 			],
 			toDOM: (node) => {
-				const src = attributeOf(node, 'src');
+				const src = stringAttr(node, 'src');
 				const own = classifyHref(src) === 'relative';
 				return [
 					'img',
 					{
 						...(own ? { 'data-src': src } : { src, referrerpolicy: 'no-referrer' }),
-						alt: attributeOf(node, 'alt'),
-						...(attributeOf(node, 'title') === ''
+						alt: stringAttr(node, 'alt'),
+						...(stringAttr(node, 'title') === ''
 							? {}
-							: { title: attributeOf(node, 'title') }),
+							: { title: stringAttr(node, 'title') }),
 					},
 				];
 			},

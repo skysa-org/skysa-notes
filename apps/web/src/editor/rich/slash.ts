@@ -2,6 +2,7 @@ import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
 import type { EditorCommand } from './commands.js';
+import { PARAGRAPH_NODE } from './schema.js';
 
 /**
  * The slash menu's rules, with no editor and no React in them.
@@ -10,8 +11,6 @@ import type { EditorCommand } from './commands.js';
  * means are the parts that are easy to get subtly wrong and impossible to test
  * through a contenteditable surface in jsdom, so they live here.
  */
-
-const PARAGRAPH = 'paragraph';
 
 /** How far back to look. A slash query is a few characters; a paragraph can be a page. */
 const LOOK_BACK = 200;
@@ -31,7 +30,7 @@ export const textBeforeCursor = (view: EditorView): string | undefined => {
 	if (!view.hasFocus()) return undefined;
 
 	const { $from } = selection;
-	if ($from.parent.type.name !== PARAGRAPH) return undefined;
+	if ($from.parent.type.name !== PARAGRAPH_NODE) return undefined;
 
 	return $from.parent.textBetween(
 		Math.max(0, $from.parentOffset - LOOK_BACK),

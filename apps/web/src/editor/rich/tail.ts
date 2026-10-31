@@ -4,6 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/
 
 import { t } from '../../i18n/t.js';
 import { appChange } from '../shared/dirty.js';
+import { PARAGRAPH_NODE } from './schema.js';
 
 /**
  * A way out of a block that ends the note.
@@ -25,8 +26,6 @@ import { appChange } from '../shared/dirty.js';
  * it is asked for, and goes away again if the user thinks better of it.
  */
 
-const PARAGRAPH = 'paragraph';
-
 /** True while the paragraph at the end is one this plugin offered, not one that was typed. */
 const tailKey = new PluginKey<boolean>('skysa-editor-tail');
 
@@ -36,7 +35,7 @@ const OFFERED = 'offered';
 /** Whether the note ends in something a cursor cannot be put after. */
 const needsTail = (doc: ProseNode): boolean => {
 	const last = doc.lastChild;
-	return last !== null && last.type.name !== PARAGRAPH;
+	return last !== null && last.type.name !== PARAGRAPH_NODE;
 };
 
 /**
@@ -49,7 +48,7 @@ const needsTail = (doc: ProseNode): boolean => {
  * keystroke is their edit and the paragraph is saved with its words in it.
  */
 const offerTail = (view: EditorView): void => {
-	const type = view.state.schema.nodes[PARAGRAPH];
+	const type = view.state.schema.nodes[PARAGRAPH_NODE];
 	if (type === undefined) return;
 
 	const end = view.state.doc.content.size;
@@ -116,7 +115,8 @@ export const tailPlugin = new Plugin<boolean>({
 		if (tailKey.getState(state) !== true) return null;
 
 		const last = state.doc.lastChild;
-		if (last === null || last.type.name !== PARAGRAPH || last.content.size > 0) return null;
+		if (last === null || last.type.name !== PARAGRAPH_NODE || last.content.size > 0)
+			return null;
 
 		const start = state.doc.content.size - last.nodeSize;
 		if (state.selection.from >= start) return null;

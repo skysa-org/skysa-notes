@@ -5,6 +5,8 @@ import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $remark } from '@milkdown/kit/utils';
 import { STRINGIFY_OPTIONS } from '@skysa/core';
 
+import { PARAGRAPH_NODE } from './schema.js';
+
 /**
  * Blank lines between blocks, kept as blank lines (2026-10-04).
  *
@@ -275,7 +277,7 @@ export const itemWithoutEmptyLine =
 				...spec.toMarkdown,
 				runner: (state, node) => {
 					const first = node.firstChild;
-					if (first?.type.name !== 'paragraph' || first.content.size > 0) {
+					if (first?.type.name !== PARAGRAPH_NODE || first.content.size > 0) {
 						write(state, node);
 						return;
 					}

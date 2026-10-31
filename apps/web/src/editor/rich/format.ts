@@ -4,7 +4,7 @@ import type { EditorState } from '@milkdown/kit/prose/state';
 import { createStore } from '../../store/emitter.js';
 import { listAround, type ListKind } from './lists.js';
 import { markRunIn } from './markRun.js';
-import { CODE_BLOCK_NODE, LINK_MARK } from './schema.js';
+import { CODE_BLOCK_NODE, LINK_MARK, LIST_ITEM_NODE } from './schema.js';
 
 /**
  * What the editor's selection is, in the terms the toolbar draws itself in.
@@ -46,7 +46,6 @@ export const NO_FORMAT: FormatState = {
 };
 
 const HEADING = 'heading';
-const LIST_ITEM = 'list_item';
 
 /** Every mark the toolbar has a button for. */
 const MARKS = ['strong', 'emphasis', 'strike_through', 'inlineCode', LINK_MARK] as const;
@@ -103,7 +102,7 @@ const linkHref = (state: EditorState): string | null => {
  * Called without a dispatch, so it only answers.
  */
 const indentable = (state: EditorState): { canIndent: boolean; canOutdent: boolean } => {
-	const item = state.schema.nodes[LIST_ITEM];
+	const item = state.schema.nodes[LIST_ITEM_NODE];
 	if (item === undefined) return { canIndent: false, canOutdent: false };
 	return { canIndent: sinkListItem(item)(state), canOutdent: liftListItem(item)(state) };
 };
