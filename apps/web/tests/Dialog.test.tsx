@@ -304,7 +304,6 @@ describe('the middle, as the window gets shorter', () => {
 		render(<Form />);
 		const { body } = parts();
 		const dialog = document.querySelector('.modal');
-		expect(dialog?.classList.contains('surface-card')).toBe(true);
 		Object.defineProperty(body, 'clientHeight', { configurable: true, value: 200 });
 		Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 500 });
 

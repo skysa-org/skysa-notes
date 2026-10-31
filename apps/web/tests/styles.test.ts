@@ -1,17 +1,9 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { allStyles, importedStyles, STYLES_FOLDER } from './support/styles.js';
-
-/** Every source file the app's markup can be in. */
-const sources = (folder: string): readonly string[] =>
-	readdirSync(folder).flatMap((name) => {
-		const path = join(folder, name);
-		if (statSync(path).isDirectory()) return sources(path);
-		return /\.tsx?$/.test(name) ? [path] : [];
-	});
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -36,24 +28,6 @@ const SET_ELSEWHERE: ReadonlySet<string> = new Set([
 ]);
 
 describe('the stylesheet', () => {
-	// `.surface-*` draws these, so each class list has to name it: without it the
-	// menu has no border, background or shadow, and nothing else says so.
-	it.each([
-		['toolbar-panel', 'surface-popover'],
-		['slash-menu', 'surface-popover'],
-		['inline-toolbar', 'surface-popover'],
-		['outline-flyout', 'surface-popover'],
-		['update-prompt', 'surface-card'],
-	])('draws every %s from %s', (name, surface) => {
-		const lists = sources(resolve(STYLES_FOLDER, '..'))
-			.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(/['"`]([^'"`\n]*)['"`]/g)])
-			.map((match) => (match[1] ?? '').split(/\s+/))
-			.filter((tokens) => tokens.includes(name));
-
-		expect(lists.length).toBeGreaterThan(0);
-		expect(lists.filter((tokens) => !tokens.includes(surface))).toEqual([]);
-	});
-
 	// A file left out draws nothing, and the tests that read the sheet would not
 	// see its rules either.
 	it('imports every file in its folder, once', () => {

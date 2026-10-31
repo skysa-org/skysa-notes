@@ -323,6 +323,24 @@ describe('the spacing', () => {
 	});
 });
 
+describe('surfaces', () => {
+	// Each of these is nothing without it: see-through, over whatever is behind.
+	it.each([
+		'.slash-menu',
+		'.inline-toolbar',
+		'.toolbar-panel',
+		'.outline.outline-flyout',
+		'.palette',
+		'.modal',
+		'.update-prompt',
+		'.toast',
+	])('draw %s with a border, a corner, a background and a shadow', (selector) => {
+		for (const property of ['border', 'border-radius', 'background', 'box-shadow']) {
+			expect(declarations(selector)).toMatch(new RegExp(`(^|[\\s;{])${property}: `));
+		}
+	});
+});
+
 describe('toggles', () => {
 	it('show that they are on in the accent, not a darker grey than hover', () => {
 		for (const selector of [

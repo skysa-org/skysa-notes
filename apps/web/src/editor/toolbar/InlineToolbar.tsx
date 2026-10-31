@@ -107,7 +107,7 @@ export const InlineToolbar = () => {
 
 	return (
 		<div
-			className="surface-popover inline-toolbar"
+			className="inline-toolbar"
 			ref={host}
 			role="toolbar"
 			aria-label={t('editor.selectionToolbar')}

@@ -415,8 +415,7 @@ export const Dialog = ({
 
 	const shell = {
 		ref: setDialog,
-		className:
-			className === undefined ? 'surface-card modal' : `surface-card modal ${className}`,
+		className: className === undefined ? 'modal' : `modal ${className}`,
 		'data-dialog': '',
 		role,
 		'aria-modal': true,

@@ -45,11 +45,7 @@ export const Menu = ({
 	);
 
 	return (
-		<div
-			className={`surface-popover toolbar-panel ${className}`}
-			role="group"
-			aria-label={label}
-		>
+		<div className={`toolbar-panel ${className}`} role="group" aria-label={label}>
 			{children}
 		</div>
 	);

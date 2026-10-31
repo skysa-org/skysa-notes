@@ -1,8 +1,8 @@
 /* The card every notice floating over the page is made of. The new-version
    prompt was the first and gave it its name; the undo notice, the stale-tab
-   bar and the toasts are the same shape. The look lives here and the placing
-   lives with each of them, so a notice that joins a stack is not also told
-   where on the viewport to be. */
+   bar and the toasts are the same shape. The surface is `primitives.css`'s, the
+   shape lives here and the placing lives with each of them, so a notice that
+   joins a stack is not also told where on the viewport to be. */
 .update-prompt,
 .toast {
 	display: flex;

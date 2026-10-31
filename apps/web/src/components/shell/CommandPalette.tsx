@@ -131,7 +131,7 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 			}}
 		>
 			<div
-				className="surface-popover palette"
+				className="palette"
 				role="dialog"
 				aria-modal="true"
 				aria-label={t('shell.palette.list')}

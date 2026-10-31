@@ -1,8 +1,13 @@
 /* What more than one component is drawn from. */
 
 /* What floats over the page and goes when it is done with: a menu, a flyout,
-   the command palette. */
-.surface-popover {
+   the command palette. By name, not a class each adds: each is nothing
+   without this, and a second class to remember is one to forget. */
+.slash-menu,
+.inline-toolbar,
+.toolbar-panel,
+.outline.outline-flyout,
+.palette {
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
 	background: var(--bg);
@@ -11,7 +16,9 @@
 
 /* What the page stops to say: a dialog, a toast, an offer to update. On the
    raised colour, so that it reads as apart from what is behind it. */
-.surface-card {
+.modal,
+.update-prompt,
+.toast {
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
 	background: var(--surface);

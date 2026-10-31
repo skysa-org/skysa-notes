@@ -586,9 +586,6 @@ describe('the palette as a dialog', () => {
 		const user = userEvent.setup();
 		const { onClose } = openOver(focused());
 		const backdrop = document.querySelector<HTMLElement>('.palette-backdrop');
-		expect(document.querySelector('.palette')?.classList.contains('surface-popover')).toBe(
-			true
-		);
 		if (backdrop === null) throw new Error('no backdrop');
 
 		// Begun there and let go on the palette: not a press outside, and the

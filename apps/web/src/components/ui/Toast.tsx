@@ -96,7 +96,7 @@ export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 	);
 
 	return (
-		<div ref={card} className={`surface-card toast toast-${tone}`} role={ROLE[tone]}>
+		<div ref={card} className={`toast toast-${tone}`} role={ROLE[tone]}>
 			<span>{message}</span>
 			{action !== undefined && 'url' in action && (
 				// In this window, as connecting storage is: a new one, in an app

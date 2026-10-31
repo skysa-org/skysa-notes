@@ -45,7 +45,7 @@ export const UpdatePrompt = ({
 
 	if (updating !== 'no') {
 		return (
-			<div className="surface-card update-prompt" role="status">
+			<div className="update-prompt" role="status">
 				<span>
 					{updating === 'slow' ? t('shell.update.slow') : t('shell.update.updating')}
 				</span>
@@ -54,7 +54,7 @@ export const UpdatePrompt = ({
 	}
 
 	return (
-		<div className="surface-card update-prompt" role="status">
+		<div className="update-prompt" role="status">
 			<span>{t('shell.update.available')}</span>
 			<button
 				type="button"

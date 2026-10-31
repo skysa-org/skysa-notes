@@ -297,7 +297,7 @@ export const ToolbarPopover = ({
 			</button>
 			{open && (
 				<div
-					className="surface-popover toolbar-panel"
+					className="toolbar-panel"
 					ref={panel}
 					id={`${id}-panel`}
 					role="group"
