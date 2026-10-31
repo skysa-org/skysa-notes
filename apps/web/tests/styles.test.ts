@@ -40,7 +40,45 @@ const primitiveDeclarations = (selector: string): string =>
 		.map((block) => block.split('{')[1] ?? '')
 		.join(' ');
 
+/** Every source file under a folder. */
+const sources = (folder: string): readonly string[] =>
+	readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
+		const path = join(folder, entry.name);
+		if (entry.isDirectory()) return sources(path);
+		return /\.tsx?$/.test(entry.name) ? [path] : [];
+	});
+
 describe('the stylesheet', () => {
+	// Unlayered, ProseMirror's sheets win every tie with the app's: they arrive
+	// with the editor's chunk, after it.
+	it("keeps the editor's vendored sheets under the app's, in a layer", () => {
+		const vendor = withoutComments(
+			readFileSync(join(STYLES_FOLDER, '..', 'editor', 'rich', 'vendor.css'), 'utf8')
+		);
+		const imports = vendor.split('\n').filter((line) => line.startsWith('@import'));
+
+		expect(imports.length).toBeGreaterThan(0);
+		expect(imports.filter((line) => !line.includes('layer(vendor)'))).toEqual([]);
+	});
+
+	// `styles/` relies on weight across files (a focus ring in `base.css`), and
+	// across layers weight stops counting.
+	it("leaves the app's own rules out of every layer", () => {
+		expect(withoutComments(allStyles())).not.toContain('@layer');
+		expect(readFileSync(join(STYLES_FOLDER, 'index.css'), 'utf8')).not.toContain('layer(');
+	});
+
+	it("imports the vendored sheets from one place, and that place from the editor's", () => {
+		const importers = sources(join(STYLES_FOLDER, '..')).filter((file) =>
+			/@milkdown\/[^'"]*\.css/.test(readFileSync(file, 'utf8'))
+		);
+
+		expect(importers).toEqual([]);
+		expect(
+			readFileSync(join(STYLES_FOLDER, '..', 'editor', 'rich', 'RichEditor.tsx'), 'utf8')
+		).toContain("import './vendor.css';");
+	});
+
 	// The components say which by an attribute, and a browser is as quiet about a
 	// selector nothing matches as about a variable nobody declared.
 	it.each([
