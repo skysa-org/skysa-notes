@@ -2,7 +2,7 @@
 .find-bar {
 	display: flex;
 	flex-direction: column;
-	gap: 0.35rem;
+	gap: var(--space-xs);
 	padding: var(--space-s) var(--gutter);
 	border-block-end: 1px solid var(--border);
 	background: var(--surface);
@@ -13,7 +13,7 @@
 .find-row {
 	display: flex;
 	align-items: center;
-	gap: 0.35rem;
+	gap: var(--space-xs);
 	/* Narrow enough and the controls wrap onto another line rather than
 	   pushing the note off the side. */
 	flex-wrap: wrap;

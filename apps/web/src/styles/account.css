@@ -41,7 +41,7 @@
 .account button:not(.icon),
 .clipboard button:not(.icon) {
 	font: inherit;
-	padding: 0.35rem var(--space-m);
+	padding: var(--space-xs) var(--space-m);
 	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--bg);
@@ -131,8 +131,8 @@
    and its number, which is the whole of what it is there to say. */
 button.icon.account-devices-count {
 	width: auto;
-	gap: 0.2rem;
-	padding-inline: 0.35rem;
+	gap: var(--space-2xs);
+	padding-inline: var(--space-xs);
 	font-size: var(--text-s);
 }
 
@@ -165,7 +165,7 @@ button.icon.account-devices-count {
 .account-devices {
 	display: flex;
 	flex-direction: column;
-	gap: 0.35rem;
+	gap: var(--space-xs);
 }
 
 .account-devices ul {
@@ -174,7 +174,7 @@ button.icon.account-devices-count {
 	list-style: none;
 	display: flex;
 	flex-direction: column;
-	gap: 0.35rem;
+	gap: var(--space-xs);
 }
 
 .account-devices li {

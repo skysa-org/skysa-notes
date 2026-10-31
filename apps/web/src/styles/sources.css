@@ -197,7 +197,7 @@
 /* No radius: the bar is the top of the window, and a rounded corner up against
    the window's edge reads as a mistake in the rendering. */
 .source-add-button {
-	padding: var(--space-s) 0.6rem;
+	padding: var(--space-s) var(--space-s);
 	font: inherit;
 	font-size: var(--text-body);
 	line-height: var(--tab-line);
@@ -233,13 +233,13 @@
 .source-add-heading,
 .source-add-menu .muted {
 	margin: 0;
-	padding: 0.4rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	font-size: var(--text-xs);
 	color: var(--muted);
 }
 
 .source-add-heading {
-	padding-block-end: 0.2rem;
+	padding-block-end: var(--space-2xs);
 	/* The panel is as wide as its widest row, and this is meant to be it. */
 	white-space: nowrap;
 	font-weight: 600;
@@ -254,7 +254,7 @@
 .connect-gate,
 .connect-gate-note {
 	margin: 0;
-	padding: 0.4rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	max-width: 18rem;
 	font-size: var(--text-s);
 }
@@ -263,7 +263,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
-	gap: 0.4rem;
+	gap: var(--space-xs);
 }
 
 .connect-gate p {
@@ -300,18 +300,18 @@
 
 .connect-code-row {
 	display: flex;
-	gap: 0.4rem;
+	gap: var(--space-xs);
 }
 
 .connect-code-form input {
 	flex: 1;
 	min-width: 0;
 	font-size: var(--text-m);
-	padding: 0.35rem var(--space-s);
+	padding: var(--space-xs) var(--space-s);
 }
 
 .connect-code-form button {
-	padding: 0.35rem 0.7rem;
+	padding: var(--space-xs) var(--space-m);
 }
 
 /* Its two words in one cell, the one not said hidden, so it is as wide as the
@@ -345,9 +345,9 @@
 .connect-code-line {
 	display: flex;
 	flex-direction: column;
-	gap: 0.15rem;
+	gap: var(--space-3xs);
 	margin: 0;
-	padding: 0.4rem 0.6rem;
+	padding: var(--space-xs) var(--space-s);
 	font-size: var(--text-s);
 	color: var(--muted);
 	white-space: nowrap;
@@ -377,7 +377,7 @@
 	justify-content: flex-end;
 	align-items: center;
 	min-width: 0;
-	padding-block: 0.3rem;
+	padding-block: var(--space-2xs);
 	padding-inline-start: var(--space-s);
 }
 

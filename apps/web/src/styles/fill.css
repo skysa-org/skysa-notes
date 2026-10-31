@@ -125,7 +125,7 @@
 
 .fill-bookmarklet {
 	display: inline-block;
-	padding: 0.4rem 0.9rem;
+	padding: var(--space-xs) var(--space-l);
 	color: var(--brand);
 	font-weight: 600;
 	text-decoration: none;

@@ -167,7 +167,7 @@ button.row,
 .row-editing {
 	display: flex;
 	flex-direction: column;
-	gap: 0.15rem;
+	gap: var(--space-3xs);
 	width: 100%;
 	padding: var(--row-block) var(--gutter);
 	font: inherit;
@@ -487,7 +487,7 @@ button.danger {
 .note-title {
 	display: flex;
 	align-items: center;
-	gap: 0.4rem;
+	gap: var(--space-xs);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -519,7 +519,7 @@ button.danger {
 .note-search {
 	flex: 1;
 	min-width: 0;
-	padding: 0.35rem var(--space-s);
+	padding: var(--space-xs) var(--space-s);
 	font: inherit;
 	font-size: var(--text-m);
 	border: 1px solid var(--border);
@@ -646,7 +646,7 @@ button.danger {
 	flex: none;
 	font: inherit;
 	font-size: var(--text-m);
-	padding: 0.3rem 0.7rem;
+	padding: var(--space-2xs) var(--space-m);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--bg);
