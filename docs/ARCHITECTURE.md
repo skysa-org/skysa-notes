@@ -1658,7 +1658,12 @@ apps/
       main.tsx routes/
       components/             # by feature: account/, sources/, sidebar/, list/, note/, secrets/, passwords/, scratchpad/, clipboard/, attachments/, shell/; ui/ for the building blocks they share
       fill/                   # the fill window: its entry, the protocol, the bookmarklet (§7, "Filling in on a site")
-      editor/                 # RichEditor (Milkdown), RawEditor (CodeMirror), ModeToggle, shared autosave hook
+      editor/                 # the two editors, over one markdown string (§7)
+        shared/               # what both use: dirty, editorBinding, useAutosave. Imports neither rich/ nor raw/
+        rich/                 # RichEditor (Milkdown): commands, format, markRun, markdown, actions/
+        raw/                  # RawEditor (CodeMirror)
+        toolbar/              # FormatToolbar, InlineToolbar
+        features/             # find/, links/, secrets/, attachments/, code/: each feature's rich and raw halves side by side
       store/                  # Dexie db, notes.ts, folders.ts
       sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps core engine
       api/                    # typed client for apps/api

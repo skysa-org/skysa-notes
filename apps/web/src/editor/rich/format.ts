@@ -2,8 +2,8 @@ import { liftListItem, sinkListItem } from '@milkdown/kit/prose/schema-list';
 import type { EditorState } from '@milkdown/kit/prose/state';
 
 import { createStore } from '../../store/emitter.js';
-import { markRunIn } from '../features/links/markRun.js';
 import { listAround, type ListKind } from './lists.js';
+import { markRunIn } from './markRun.js';
 import { CODE_BLOCK_NODE, LINK_MARK } from './schema.js';
 
 /**

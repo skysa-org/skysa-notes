@@ -2,9 +2,9 @@ import type { Mark } from '@milkdown/kit/prose/model';
 import { type Command, type EditorState, Plugin } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
+import { markRunIn } from '../../rich/markRun.js';
 import { LINK_MARK } from '../../rich/schema.js';
 import { linkChip, openableLink, openLink, opensOnClick } from './links.js';
-import { markRunIn } from './markRun.js';
 
 /**
  * A link in rich text, opened in the browser (`links.ts`; docs/ARCHITECTURE.md

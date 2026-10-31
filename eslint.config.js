@@ -640,6 +640,28 @@ export default tseslint.config(
 			],
 		},
 	},
+	{
+		// What both editors use, and the raw one, know nothing of the rich one.
+		// Replaces the rule above for these files, so it says that again.
+		files: ['apps/web/src/editor/{raw,shared}/**/*.{ts,tsx}'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						NOT_ABOVE(
+							['routes', 'sync'],
+							'the editors are views: they do not import routes or the sync layer.'
+						),
+						NOT_ABOVE(
+							['rich', 'toolbar'],
+							'raw/ and shared/ do not depend on the rich editor (ProseMirror).'
+						),
+					],
+				},
+			],
+		},
+	},
 
 	// ---- File size ----------------------------------------------------------
 

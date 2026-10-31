@@ -96,7 +96,7 @@ const DECLINED: readonly (readonly [string, string])[] = [
 	['a word', 'total\n'],
 	['a list of names', 'alpha\nbeta\ngamma\n'],
 	['prose with a colon in it', 'Note: this is the part that matters.\n'],
-	['a path', 'apps/web/src/editor/features/code/detect.ts\n'],
+	['a path', 'apps/web/src/editor/detect.ts\n'],
 	['a number', '42\n'],
 	['pseudocode', 'take each note\n  if it changed, upload it\n  otherwise leave it\n'],
 ];

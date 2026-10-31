@@ -76,7 +76,7 @@ const markIn = (
  * (`markIn`), run out to both ends with `markRunAt`.
  *
  * The one answer to "which link" in the rich editor: the toolbar's form shows
- * it (`format.ts`), Link and Remove act on it (`actions/link.ts`), and the chip is
+ * it (`format.ts`), Link and Remove act on it (`rich/actions/link.ts`), and the chip is
  * drawn under it (`linkRich.ts`). Asked three ways, the form showed a link that
  * Link then wrote a new one beside, and named none over a selection whose link
  * Link would point elsewhere.
