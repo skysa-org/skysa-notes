@@ -5,6 +5,7 @@ import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { cell } from '@skysa/core';
 
+import { CODE_BLOCK_NODE } from '../../rich/schema.js';
 import type { LanguageSource } from './languages.js';
 
 /**
@@ -101,8 +102,6 @@ export const tokenize = (code: string, language: LanguageSupport): readonly Toke
 	return found.current;
 };
 
-const CODE_BLOCK = 'code_block';
-
 /**
  * Tokens are cached against the node itself.
  *
@@ -126,7 +125,7 @@ const decorate = (doc: ProseNode, languages: LanguageSource): DecorationSet => {
 	const found = cell<Decoration[]>([]);
 
 	doc.descendants((node, pos) => {
-		if (node.type.name !== CODE_BLOCK) return true;
+		if (node.type.name !== CODE_BLOCK_NODE) return true;
 
 		const language = languages.get(node.attrs.language as string | undefined);
 		// Not loaded yet, or not a language we know: plain text, and the view
@@ -153,7 +152,7 @@ const decorate = (doc: ProseNode, languages: LanguageSource): DecorationSet => {
 const languagesIn = (doc: ProseNode): readonly string[] => {
 	const found = new Set<string>();
 	doc.descendants((node) => {
-		if (node.type.name !== CODE_BLOCK) return true;
+		if (node.type.name !== CODE_BLOCK_NODE) return true;
 		const language = node.attrs.language as string | undefined;
 		if (language !== undefined && language !== '') found.add(language);
 		return false;

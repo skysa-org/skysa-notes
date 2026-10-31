@@ -16,7 +16,7 @@ import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { pickFiles } from '../../../lib/pickFiles.js';
 import { settleAfter } from '../../../store/heldEdits.js';
-import { LIST_ITEM } from '../../rich/lists.js';
+import { HARD_BREAK_NODE, LIST_ITEM_NODE } from '../../rich/schema.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
@@ -123,7 +123,7 @@ const placeNear = (doc: ProseNode, at: number): number => {
  * a line break as the break it is, anything else — a picture, a chip — as a
  * thing that is not a space.
  */
-const asLine = (leaf: ProseNode): string => (leaf.type.name === 'hardbreak' ? '\n' : '\ufffc');
+const asLine = (leaf: ProseNode): string => (leaf.type.name === HARD_BREAK_NODE ? '\n' : '\ufffc');
 
 /**
  * Put `node` in at `at`. A picture is a thing of its own, never on a line with
@@ -164,7 +164,7 @@ const putIn = (tr: Transaction, at: number, node: ProseNode): Transaction => {
 	const from = at - (before.length - before.trimEnd().length);
 	const to = at + (after.length - after.trimStart().length);
 	const $from = tr.delete(from, to).doc.resolve(from);
-	const opensItem = $from.index(-1) === 0 && $from.node(-1).type.name === LIST_ITEM;
+	const opensItem = $from.index(-1) === 0 && $from.node(-1).type.name === LIST_ITEM_NODE;
 	if ($from.parent.content.size === 0 || ($from.parentOffset === 0 && opensItem)) {
 		return tr.insert(from, node);
 	}

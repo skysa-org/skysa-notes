@@ -290,6 +290,9 @@ const blockAround = (node: SyntaxNode | null): SyntaxNode | null => {
 const outermost = (node: SyntaxNode): SyntaxNode =>
 	node.parent === null || node.parent.parent === null ? node : outermost(node.parent);
 
+/** How long the parser is given to reach a place before the answer goes on without it. */
+const PARSE_BUDGET_MS = 200;
+
 /**
  * Where a new secret could go for the cursor at `at`, best first: after the
  * block the cursor is in, as rich mode puts one, inside the list or quote
@@ -300,7 +303,7 @@ const outermost = (node: SyntaxNode): SyntaxNode =>
 const placesFor = (state: EditorState, at: number): Place[] => {
 	const { doc } = state;
 	const line = doc.lineAt(Math.min(at, doc.length));
-	const tree = ensureSyntaxTree(state, line.to, 200) ?? syntaxTree(state);
+	const tree = ensureSyntaxTree(state, line.to, PARSE_BUDGET_MS) ?? syntaxTree(state);
 	const block = blockAround(tree.resolveInner(line.to, -1));
 	const end = doc.line(doc.lines);
 	const atEnd = end.text.trim() === '' ? onBlank(doc, end.number) : after(doc, end.number, '');
@@ -341,7 +344,7 @@ const holds = (state: EditorState, place: Place): boolean | undefined => {
 	const doc = state.doc.replace(place.from, place.to, Text.of(insert.split('\n')));
 	// A state of its own: the editor's would draw this note's panels for it.
 	const tried = EditorState.create({ doc, extensions: parsing.extension });
-	const tree = ensureSyntaxTree(tried, doc.length, 200);
+	const tree = ensureSyntaxTree(tried, doc.length, PARSE_BUDGET_MS);
 	if (tree === null) return undefined;
 	return secretsIn(tried, place.from, place.from + insert.length, TRIED, tree).length > 0;
 };

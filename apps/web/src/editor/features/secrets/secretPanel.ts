@@ -89,9 +89,12 @@ export const LABEL_MAX = 80;
 /** Ids for each panel's label and what is said of it, apart from every other panel's. */
 const panelIds = cell(0);
 
-/** Lines enough for the words, and one to type on: from 2 to 12. */
+const MIN_ROWS = 2;
+const MAX_ROWS = 12;
+
+/** Lines enough for the words, and one to type on. */
 const rowsFor = (words: string): string =>
-	String(Math.min(12, Math.max(2, words.split('\n').length + 1)));
+	String(Math.min(MAX_ROWS, Math.max(MIN_ROWS, words.split('\n').length + 1)));
 
 export const createSecretPanel = ({
 	words,

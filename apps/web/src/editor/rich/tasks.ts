@@ -11,7 +11,8 @@ import { cell } from '@skysa/core';
 
 import { t } from '../../i18n/t.js';
 import { isAppChange } from '../shared/dirty.js';
-import { type Ancestor, ancestor, ancestors, isTask, LIST_ITEM } from './lists.js';
+import { type Ancestor, ancestor, ancestors, isTask } from './lists.js';
+import { LIST_ITEM_NODE } from './schema.js';
 
 /**
  * Task list items: a checkbox that can be pressed, and a new item that stays a
@@ -55,7 +56,7 @@ const TASK_TOGGLE = 'skysa/taskToggle';
  */
 const toggleAt = (state: EditorState, inside: number): Transaction | null => {
 	const $pos = state.doc.resolve(inside);
-	const found = ancestor($pos, [LIST_ITEM]);
+	const found = ancestor($pos, [LIST_ITEM_NODE]);
 	if (found === null || !isTask(found.node)) return null;
 
 	const checked = found.node.attrs.checked !== true;
@@ -66,7 +67,7 @@ const toggleAt = (state: EditorState, inside: number): Transaction | null => {
 	// nothing's size.
 	if (checked) {
 		found.node.descendants((node, offset) => {
-			if (node.type.name !== LIST_ITEM) return true;
+			if (node.type.name !== LIST_ITEM_NODE) return true;
 			if (isTask(node))
 				tr.setNodeMarkup(found.pos + 1 + offset, undefined, { ...node.attrs, checked });
 			return true;
@@ -74,7 +75,7 @@ const toggleAt = (state: EditorState, inside: number): Transaction | null => {
 	}
 
 	if (!checked) {
-		ancestors($pos, [LIST_ITEM])
+		ancestors($pos, [LIST_ITEM_NODE])
 			.filter((above) => above.depth < found.depth && above.node.attrs.checked === true)
 			.forEach((above) => {
 				tr.setNodeMarkup(above.pos, undefined, { ...above.node.attrs, checked: false });
@@ -136,7 +137,7 @@ const checkboxes = (doc: ProseNode): DecorationSet => {
 	const found = cell<Decoration[]>([]);
 
 	doc.descendants((node, pos) => {
-		if (node.type.name !== LIST_ITEM || !isTask(node)) return true;
+		if (node.type.name !== LIST_ITEM_NODE || !isTask(node)) return true;
 		if (node.firstChild?.isTextblock !== true) return false;
 		const checked = node.attrs.checked === true;
 		found.current = [
@@ -176,7 +177,8 @@ const stoodOverUnfinished = (node: ProseNode): boolean => {
 	const found = cell(false);
 	node.descendants((child) => {
 		if (found.current) return false;
-		if (child.type.name === LIST_ITEM && child.attrs.checked === false) found.current = true;
+		if (child.type.name === LIST_ITEM_NODE && child.attrs.checked === false)
+			found.current = true;
 		return !found.current;
 	});
 	return found.current;
@@ -241,7 +243,7 @@ const overtaken = (
 	after: EditorState,
 	depth: number
 ): readonly Ancestor[] =>
-	ancestors(after.selection.$from, [LIST_ITEM])
+	ancestors(after.selection.$from, [LIST_ITEM_NODE])
 		.filter((above) => above.depth < depth && above.node.attrs.checked === true)
 		.filter((above) => {
 			const was = before.doc.nodeAt(mapBack(trs, above.pos));
@@ -265,7 +267,7 @@ const continuity = (
 	if (trs.some((tr) => tr.getMeta(TASK_TOGGLE) === true)) return null;
 	if (trs.some(isAppChange)) return null;
 
-	const item = ancestor(after.selection.$from, [LIST_ITEM]);
+	const item = ancestor(after.selection.$from, [LIST_ITEM_NODE]);
 	if (item === null) return null;
 
 	const fresh = arrived(trs, before, after, item);

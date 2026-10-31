@@ -16,6 +16,7 @@ import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
+import { PARAGRAPH_NODE } from '../../rich/schema.js';
 import { secretHostCtx } from './secretHost.js';
 import {
 	createSecretPanels,
@@ -162,7 +163,7 @@ const draftKey = new PluginKey<number | null>('skysa-secret-draft');
 const placeFor = (doc: ProseNode, at: number, type: NodeType): { from: number; to: number } => {
 	const $at = doc.resolve(Math.min(at, doc.content.size));
 	const { parent } = $at;
-	if ($at.depth > 0 && parent.type.name === 'paragraph' && parent.content.size === 0) {
+	if ($at.depth > 0 && parent.type.name === PARAGRAPH_NODE && parent.content.size === 0) {
 		const before = $at.before();
 		const $before = doc.resolve(before);
 		if ($before.parent.canReplaceWith($before.index(), $before.index() + 1, type)) {

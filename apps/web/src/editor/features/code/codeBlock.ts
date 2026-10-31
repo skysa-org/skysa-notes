@@ -29,6 +29,9 @@ import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
  * (`editor/features/code/highlight.ts`).
  */
 
+/** How long a code block's copy button says it has copied. */
+const COPIED_SHOWN_MS = 1500;
+
 /**
  * What the picker says about a block that names no language — and what it
  * promises, since `editor/features/code/autoLanguage.ts` is watching such a block and will
@@ -151,7 +154,7 @@ const codeBlockView =
 					copy.setAttribute('data-copied', 'true');
 					setTimeout(() => {
 						copy.removeAttribute('data-copied');
-					}, 1500);
+					}, COPIED_SHOWN_MS);
 				})
 				.catch(() => undefined);
 		});

@@ -23,6 +23,11 @@ import { onPress } from '../shared/press.js';
  * reached.
  */
 
+/** How long a selection has to settle before the bubble moves to it. */
+const TOOLTIP_DEBOUNCE_MS = 20;
+/** Between the bubble and the selection. */
+const TOOLTIP_GAP_PX = 8;
+
 /**
  * When the toolbar is worth showing.
  *
@@ -83,8 +88,8 @@ export const InlineToolbar = () => {
 
 		const instance = new TooltipProvider({
 			content,
-			debounce: 20,
-			offset: 8,
+			debounce: TOOLTIP_DEBOUNCE_MS,
+			offset: TOOLTIP_GAP_PX,
 			shouldShow: shouldShowInlineToolbar(content),
 		});
 		provider.current = instance;
