@@ -35,6 +35,18 @@ describe('the editor open now', () => {
 		expect(offers.current()).toBe('raw');
 	});
 
+	it('takes one item offered twice away once for each offer', () => {
+		const offers = createOffers<string>();
+		const first = offers.offer('rich');
+		offers.offer('raw');
+		offers.offer('rich');
+		expect(offers.current()).toBe('rich');
+
+		first();
+
+		expect(offers.current()).toBe('rich');
+	});
+
 	it('tells its listeners of each change, and not of a second withdrawal', () => {
 		const offers = createOffers<string>();
 		const listener = vi.fn();

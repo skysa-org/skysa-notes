@@ -13,8 +13,8 @@ import { createOffers, type Offers } from './offers.js';
  * from the element it rendered into. So the editor that has one offers it here,
  * and takes it away when it goes.
  *
- * A store rather than React state, built the same way `commands/registry.ts` is
- * and for the same reason: an editor offers itself from the effect that builds
+ * A store rather than React state (`offers.ts`), for the same reason
+ * `commands/registry.ts` is one: an editor offers itself from the effect that builds
  * it, and setting React state from there is a cascading render — where telling
  * an external system is exactly what an effect is for.
  *

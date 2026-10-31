@@ -355,6 +355,18 @@ describe('what the editor is told', () => {
 		expect(insert).toHaveBeenCalledTimes(1);
 	});
 
+	it('puts "Insert secret" in the live editor after one let go of offers itself late and goes', async () => {
+		const h = await setup();
+		const live = vi.fn();
+		h.secrets().host.receive(live);
+
+		const late = h.secrets().host.receive(vi.fn());
+		late();
+		h.secrets().insert();
+
+		expect(live).toHaveBeenCalledTimes(1);
+	});
+
 	it('copies words to the clipboard, answering whether they went', async () => {
 		const h = await setup();
 		expect(await h.secrets().host.copy('the door code')).toBe(true);

@@ -7,10 +7,9 @@ import { createEmitter } from '../store/emitter.js';
  * Every editor that has offered itself and not gone, in the order they offered;
  * the last is the one open now. More than one only while one editor is giving
  * way to another, and that can go either way round: the new one can be built
- * before the old one has gone, as under React's strict-mode double mount, and a
- * rich editor still being built when it is let go of is built — and offers
- * itself — before it goes. So taking one away never takes the others with it,
- * and leaves the one that offered last before it.
+ * before the old one has gone, and a rich editor still being built when it is
+ * let go of is built — and offers itself — before it goes. So taking one away
+ * never takes the others with it, and leaves the one that offered last before it.
  */
 export interface Offers<T> {
 	/** Offer this editor's; the returned function takes it away again. */
@@ -21,17 +20,20 @@ export interface Offers<T> {
 }
 
 export const createOffers = <T>(): Offers<T> => {
-	const offered = new Set<T>();
+	// Each offer an entry of its own, so that one item offered twice is taken
+	// away once for each.
+	const offered = new Set<Readonly<{ item: T }>>();
 	const changes = createEmitter();
 	return {
 		offer: (item) => {
-			offered.add(item);
+			const entry = { item };
+			offered.add(entry);
 			changes.emit();
 			return () => {
-				if (offered.delete(item)) changes.emit();
+				if (offered.delete(entry)) changes.emit();
 			};
 		},
-		current: () => [...offered].at(-1),
+		current: () => [...offered].at(-1)?.item,
 		subscribe: changes.subscribe,
 	};
 };
