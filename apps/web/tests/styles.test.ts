@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -41,6 +41,32 @@ const primitiveDeclarations = (selector: string): string =>
 		.join(' ');
 
 describe('the stylesheet', () => {
+	describe("the fill window's", () => {
+		const fill = resolve(STYLES_FOLDER, '..', 'fill', 'index.css');
+		const files = [
+			...readFileSync(fill, 'utf8').matchAll(/@import\s+['"]\.\.\/styles\/([^'"]+)['"]/g),
+		].map((match) => match[1] ?? '');
+
+		// A later rule of equal specificity wins, so a different order could draw
+		// the window differently from the app.
+		it("keeps the app's order", () => {
+			expect(files.length).toBeGreaterThan(0);
+			expect(files).toEqual(importedStyles().filter((file) => files.includes(file)));
+		});
+
+		it('declares every variable it uses', () => {
+			const css = withoutComments(
+				files.map((file) => readFileSync(join(STYLES_FOLDER, file), 'utf8')).join('\n')
+			);
+			const declared = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((match) => match[1]));
+			const used = [...css.matchAll(/var\(\s*(--[\w-]+)/g)].map((match) => match[1] ?? '');
+
+			expect(used.filter((name) => !declared.has(name) && !SET_ELSEWHERE.has(name))).toEqual(
+				[]
+			);
+		});
+	});
+
 	// The components say which by an attribute, and a browser is as quiet about a
 	// selector nothing matches as about a variable nobody declared.
 	it.each([

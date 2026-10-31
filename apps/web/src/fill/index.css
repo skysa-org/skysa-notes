@@ -1,0 +1,17 @@
+/*
+ * What the fill window is drawn from: the app's stylesheet (`styles/index.css`)
+ * without what is only ever on the app's own pages, in the same order, since a
+ * later rule of equal specificity wins. It opens over a site's sign-in page.
+ */
+@import '../styles/tokens.css';
+@import '../styles/base.css';
+@import '../styles/primitives.css';
+@import '../styles/notice-card.css';
+@import '../styles/shell.css';
+@import '../styles/rich.css';
+@import '../styles/toolbar.css';
+@import '../styles/passwords.css';
+@import '../styles/dialogs.css';
+@import '../styles/notices.css';
+@import '../styles/touch.css';
+@import '../styles/fill.css';
