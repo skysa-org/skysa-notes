@@ -75,7 +75,7 @@
 	--bad: #dc2626;
 	/* Code, in both editors and in the app's own prose. `--code-*` is the chip
 	   an inline span is drawn as and the slab a block is; `--tok-*` is the one
-	   palette both editors colour a token with (`editor/highlight.ts`), which is
+	   palette both editors colour a token with (`editor/features/code/highlight.ts`), which is
 	   why it is here and not in either of them. Eleven colours, because a
 	   palette nobody can hold in their head is a palette that ends up
 	   inconsistent. */
@@ -1851,7 +1851,7 @@ button.danger {
 }
 
 /* A real checkbox, put at the head of the item's first line by the editor
-   (`editor/tasks.ts`), because the character that used to be drawn here was a
+   (`editor/rich/tasks.ts`), because the character that used to be drawn here was a
    pseudo-element and nothing can press one of those. It is pulled into the
    margin so the words of a task line up with the words of a plain one. */
 .editor-rich-surface .task-checkbox {
@@ -1919,7 +1919,7 @@ button.danger {
 }
 
 /*
- * A secret (`editor/secretBlock.ts`): closed, a slab like a code block's with
+ * A secret (`editor/features/secrets/secretBlock.ts`): closed, a slab like a code block's with
  * one line on it — what it is, and Reveal — and nothing of its armor. Revealed,
  * its words are in a panel under that line, which is the view's own and not
  * the note's text, so it can be typed in and selected as a form is.
@@ -2080,7 +2080,7 @@ button.danger {
 }
 
 /*
- * A secret in raw mode (`editor/secretRaw.ts`): Reveal after the fence's
+ * A secret in raw mode (`editor/features/secrets/secretRaw.ts`): Reveal after the fence's
  * opening, in the app's type rather than the note's, and the panel under the
  * closing fence, in a slab as a new secret's is in rich mode.
  */
@@ -2112,7 +2112,7 @@ button.danger {
 }
 
 /*
- * The tools, under the block being edited (`editor/codeTools.ts` says which
+ * The tools, under the block being edited (`editor/features/code/codeTools.ts` says which
  * one that is). Absolute, so the note's text does not move when they appear
  * and settle back when they go; over whatever follows, because a bar that
  * pushed the next paragraph down would make every click near a code block a
@@ -2235,7 +2235,7 @@ button.danger {
 
 /*
  * The way out of a note that ends in a block a cursor cannot be put after
- * (`editor/tail.ts`). A button, so the keyboard can reach it; the size of a
+ * (`editor/rich/tail.ts`). A button, so the keyboard can reach it; the size of a
  * line and the width of the note, so the mouse does not have to aim. Quiet
  * until it is pointed at, because it is scenery the rest of the time.
  */
@@ -2293,7 +2293,7 @@ button.danger {
 }
 
 /*
- * A picture in a note (`editor/image.ts`). The `<img>` is there in every
+ * A picture in a note (`editor/features/attachments/image.ts`). The `<img>` is there in every
  * state and empty until it has a URL; a picture not shown is a line saying
  * why, in a box where the picture would be, with a button where there is
  * something to do about it.
@@ -2324,7 +2324,7 @@ button.danger {
 
 /*
  * The room it will take, where this device has read its size before
- * (`editor/image.ts`, #276): as wide as the picture, or the line, and as tall
+ * (`editor/features/attachments/image.ts`, #276): as wide as the picture, or the line, and as tall
  * as that makes it — however small, since the least room above is for a
  * picture whose size is not known.
  */
@@ -2374,7 +2374,7 @@ button.danger {
 }
 
 /*
- * A file beside a note that is not a picture (`editor/attachment.ts`): a chip
+ * A file beside a note that is not a picture (`editor/features/attachments/attachment.ts`): a chip
  * with the file's kind and its name, in the line like a word, and under it,
  * while it is selected, what can be done with it — the code block's bar.
  */
@@ -2532,7 +2532,7 @@ button.danger {
 
 /*
  * The link the cursor is in, and what opens it in the browser
- * (`editor/links.ts`): a chip under the link, outside the text, as a file
+ * (`editor/features/links/links.ts`): a chip under the link, outside the text, as a file
  * chip's bar is under the chip. The rich editor places it in Milkdown's
  * container, which scrolls with the words; the raw editor's is a CodeMirror
  * tooltip, whose own frame is taken off so the chip is all that shows.
@@ -2616,7 +2616,7 @@ button.danger {
 }
 
 /*
- * A file on its way into the note (`editor/attachDrop.ts`): where it is going,
+ * A file on its way into the note (`editor/features/attachments/attachDrop.ts`): where it is going,
  * until it is there. A decoration, not the note's text.
  */
 .attachment-pending {

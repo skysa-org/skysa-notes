@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FindBar } from '../src/components/note/FindBar.js';
-import { FindTargetProvider } from '../src/editor/findTarget.js';
-import { RawEditor } from '../src/editor/RawEditor.js';
+import { FindTargetProvider } from '../src/editor/features/find/findTarget.js';
+import { RawEditor } from '../src/editor/raw/RawEditor.js';
 
 /**
  * The bar, over a real CodeMirror document.

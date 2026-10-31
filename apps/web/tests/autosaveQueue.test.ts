@@ -5,7 +5,7 @@ import {
 	AUTOSAVE_RETRY_MS,
 	createHeld,
 	type Save,
-} from '../src/editor/autosaveQueue.js';
+} from '../src/editor/shared/autosaveQueue.js';
 
 /**
  * The queue on its own, with no hook around it: what is kept, what is tried

@@ -4,8 +4,8 @@ import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { cell } from '@skysa/core';
 
-import { ATTACHMENT } from '../../attachment.js';
-import { markRunIn } from '../../markRun.js';
+import { ATTACHMENT } from '../../features/attachments/attachment.js';
+import { markRunIn } from '../../features/links/markRun.js';
 import { LINK_MARK } from '../schema.js';
 
 /**

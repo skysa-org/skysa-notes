@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { DETECTABLE, detectLanguage } from '../src/editor/detect.js';
-import { findCodeLanguage } from '../src/editor/languages.js';
+import { DETECTABLE, detectLanguage } from '../src/editor/features/code/detect.js';
+import { findCodeLanguage } from '../src/editor/features/code/languages.js';
 
 /**
  * Guessing a code block's language from the text it is made out of.
@@ -96,7 +96,7 @@ const DECLINED: readonly (readonly [string, string])[] = [
 	['a word', 'total\n'],
 	['a list of names', 'alpha\nbeta\ngamma\n'],
 	['prose with a colon in it', 'Note: this is the part that matters.\n'],
-	['a path', 'apps/web/src/editor/detect.ts\n'],
+	['a path', 'apps/web/src/editor/features/code/detect.ts\n'],
 	['a number', '42\n'],
 	['pseudocode', 'take each note\n  if it changed, upload it\n  otherwise leave it\n'],
 ];

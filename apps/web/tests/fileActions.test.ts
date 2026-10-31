@@ -6,7 +6,7 @@ import {
 	type AttachmentProblem,
 	type Fetched,
 	NO_ATTACHMENTS,
-} from '../src/editor/attachHost.js';
+} from '../src/editor/features/attachments/attachHost.js';
 
 /**
  * Opening and saving a file beside a note (#187), against a browser that

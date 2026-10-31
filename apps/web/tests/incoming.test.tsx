@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { useIncomingBody } from '../src/editor/incoming.js';
+import { useIncomingBody } from '../src/editor/shared/incoming.js';
 
 /**
  * Two ways an editor loses work by taking a body it should have ignored: its own

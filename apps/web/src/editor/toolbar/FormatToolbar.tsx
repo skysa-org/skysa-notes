@@ -2,8 +2,8 @@ import { type ReactNode, useMemo, useRef, useState } from 'react';
 
 import { Icon } from '../../components/ui/icons.js';
 import { t } from '../../i18n/t.js';
-import type { EditorCommand } from '../commands.js';
-import { onPress } from '../press.js';
+import type { EditorCommand } from '../rich/commands.js';
+import { onPress } from '../shared/press.js';
 import { LinkForm, LinkPanel } from './LinkForm.js';
 import {
 	MenuCommand,

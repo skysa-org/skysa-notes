@@ -4,9 +4,13 @@ import { EditorView } from '@codemirror/view';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RawEditor } from '../src/editor/RawEditor.js';
-import { NO_SECRETS, type Opened, type SecretHost } from '../src/editor/secretHost.js';
-import { allSecrets } from '../src/editor/secretRaw.js';
+import {
+	NO_SECRETS,
+	type Opened,
+	type SecretHost,
+} from '../src/editor/features/secrets/secretHost.js';
+import { allSecrets } from '../src/editor/features/secrets/secretRaw.js';
+import { RawEditor } from '../src/editor/raw/RawEditor.js';
 import { fakeHost, fence, openedIn, sealed, sealedForAnother } from './secretHostFake.js';
 
 /**

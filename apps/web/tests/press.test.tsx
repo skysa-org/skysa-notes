@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { onPress, type PressedBy } from '../src/editor/press.js';
+import { onPress, type PressedBy } from '../src/editor/shared/press.js';
 
 /**
  * A toolbar control pressed by a mouse, a key or a screen reader: acted on

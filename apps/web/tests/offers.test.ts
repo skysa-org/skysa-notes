@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createOffers } from '../src/editor/offers.js';
+import { createOffers } from '../src/editor/shared/offers.js';
 
 describe('the editor open now', () => {
 	it('is none until one offers itself, and none again once it has gone', () => {

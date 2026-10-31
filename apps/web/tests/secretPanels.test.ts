@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { NO_SECRETS } from '../src/editor/secretHost.js';
-import { createSecretPanel } from '../src/editor/secretPanel.js';
+import { NO_SECRETS } from '../src/editor/features/secrets/secretHost.js';
+import { createSecretPanel } from '../src/editor/features/secrets/secretPanel.js';
 import {
 	createSecretPanels,
 	type NotRevealed,
 	revealControl,
 	type SecretDocument,
 	secretSession,
-} from '../src/editor/secretPanels.js';
+} from '../src/editor/features/secrets/secretPanels.js';
 import { t } from '../src/i18n/t.js';
 
 /**

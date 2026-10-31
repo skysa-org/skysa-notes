@@ -50,7 +50,7 @@ import { usePressAway } from '../ui/usePressAway.js';
  *
  * Neither jump can dirty a note. The raw one dispatches a selection and a scroll
  * effect and no `changes`; the rich one moves the browser's own selection. Both
- * rules in `editor/dirty.ts` begin at `docChanged`.
+ * rules in `editor/shared/dirty.ts` begin at `docChanged`.
  */
 
 export interface OutlineProps {
@@ -103,7 +103,7 @@ const jumpRich = (editor: Element, heading: Heading, focus: boolean): void => {
 	// scrolling the rail. ProseMirror reads its selection back from the DOM, so
 	// this is the whole of it — and a selection is not a document change, which
 	// is what makes it safe to do to a note that is not being edited: both rules
-	// in `editor/dirty.ts` begin at `docChanged`.
+	// in `editor/shared/dirty.ts` begin at `docChanged`.
 	//
 	// Focus first, and the order is load-bearing. ProseMirror ignores a
 	// selection that changes while its view is unfocused, but its DOM observer

@@ -14,8 +14,8 @@ import {
 } from '@skysa/core';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
-import { linkAddress, openLink } from '../../editor/links.js';
-import type { Opened, Sealer, SecretHost } from '../../editor/secretHost.js';
+import { linkAddress, openLink } from '../../editor/features/links/links.js';
+import type { Opened, Sealer, SecretHost } from '../../editor/features/secrets/secretHost.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
 import type { NoteRecord } from '../../store/db.js';

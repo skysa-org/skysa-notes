@@ -4,13 +4,13 @@ import { redo, undo, undoDepth } from '@milkdown/kit/prose/history';
 import { Selection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { appChange } from '../src/editor/dirty.js';
 import {
 	adoptBody,
 	currentMarkdown,
 	representsFaithfully,
 	whatIsLost,
 } from '../src/editor/rich/adopt.js';
+import { appChange } from '../src/editor/shared/dirty.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

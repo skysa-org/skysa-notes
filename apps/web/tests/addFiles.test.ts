@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { addProblem, type Carried, closedProblem, filesToAttach } from '../src/editor/addFiles.js';
+import {
+	addProblem,
+	type Carried,
+	closedProblem,
+	filesToAttach,
+} from '../src/editor/features/attachments/addFiles.js';
 
 /**
  * Which of what a paste or a drop carries are files to add (#187), and what to

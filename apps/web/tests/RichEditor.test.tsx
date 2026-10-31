@@ -1,10 +1,10 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Adoption } from '../src/editor/editorBinding.js';
 import { adoptBody, whatIsLost } from '../src/editor/rich/adopt.js';
 import type { RichEditorSetup } from '../src/editor/rich/createRichEditor.js';
-import { RichEditor } from '../src/editor/RichEditor.js';
+import { RichEditor } from '../src/editor/rich/RichEditor.js';
+import type { Adoption } from '../src/editor/shared/editorBinding.js';
 
 /**
  * The React side of rich mode: when a body is loaded into the editor and when it

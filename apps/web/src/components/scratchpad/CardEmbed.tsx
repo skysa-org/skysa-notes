@@ -14,7 +14,7 @@ import {
 	NO_ATTACHMENTS,
 	type PictureSize,
 	type Shown,
-} from '../../editor/attachHost.js';
+} from '../../editor/features/attachments/attachHost.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import { useNoteAttachments } from '../attachments/noteAttachments.js';

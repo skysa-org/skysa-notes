@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type NoteSecrets, useNoteSecrets } from '../src/components/secrets/noteSecrets.js';
-import type { AttachmentProblem } from '../src/editor/attachHost.js';
+import type { AttachmentProblem } from '../src/editor/features/attachments/attachHost.js';
 import {
 	generateIdentity,
 	openSecret,

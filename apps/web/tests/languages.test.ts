@@ -7,7 +7,7 @@ import {
 	createLanguageSource,
 	findCodeLanguage,
 	markdownCodeLanguages,
-} from '../src/editor/languages.js';
+} from '../src/editor/features/code/languages.js';
 
 /**
  * The list of languages a code block can be written in.

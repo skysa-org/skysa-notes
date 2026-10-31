@@ -16,7 +16,7 @@ import type { NoteDraft } from '../src/components/note/types.js';
 import { PasswordItem } from '../src/components/passwords/PasswordItem.js';
 import { editedAt } from '../src/components/ui/editedAt.js';
 import { FLASH_MS } from '../src/components/ui/useFlash.js';
-import type { SecretHost } from '../src/editor/secretHost.js';
+import type { SecretHost } from '../src/editor/features/secrets/secretHost.js';
 import { openSecret } from '../src/secrets/age.js';
 import { db, LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';

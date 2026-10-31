@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import { parseChord } from '../../commands/chord.js';
 import { useCommand } from '../../commands/context.js';
-import { FindTargetProvider } from '../../editor/findTarget.js';
+import { FindTargetProvider } from '../../editor/features/find/findTarget.js';
 import { rich } from '../../i18n/rich.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';

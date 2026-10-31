@@ -2,8 +2,8 @@ import type { StructuralDifference } from '@skysa/core';
 import { type ReactNode, useCallback, useRef } from 'react';
 
 import { useCommand } from '../../commands/context.js';
-import { RawEditor } from '../../editor/RawEditor.js';
-import { RichEditor, type RichEditorProps } from '../../editor/RichEditor.js';
+import { RawEditor } from '../../editor/raw/RawEditor.js';
+import { RichEditor, type RichEditorProps } from '../../editor/rich/RichEditor.js';
 import { t } from '../../i18n/t.js';
 import type { NoteRecord } from '../../store/db.js';
 import type { EditorMode } from '../../store/editorMode.js';

@@ -26,7 +26,7 @@ import { render } from './support/notices.js';
  */
 const mounted = vi.hoisted(() => ({ bodies: [] as string[] }));
 
-vi.mock('../src/editor/RichEditor.js', () => ({
+vi.mock('../src/editor/rich/RichEditor.js', () => ({
 	RichEditor: ({
 		body,
 		onUnsupported,

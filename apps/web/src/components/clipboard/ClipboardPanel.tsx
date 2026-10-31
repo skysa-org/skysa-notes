@@ -19,7 +19,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { chordLabel, parseChord } from '../../commands/chord.js';
-import { filesToAttach } from '../../editor/addFiles.js';
+import { filesToAttach } from '../../editor/features/attachments/addFiles.js';
 import { t } from '../../i18n/t.js';
 import { createObjectUrlCache, type ObjectUrlCache } from '../../lib/objectUrls.js';
 import { pickFiles } from '../../lib/pickFiles.js';

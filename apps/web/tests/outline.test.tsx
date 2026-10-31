@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Outline } from '../src/components/note/Outline.js';
-import { RawEditor } from '../src/editor/RawEditor.js';
+import { RawEditor } from '../src/editor/raw/RawEditor.js';
 
 /**
  * The rail, and where a click lands.
@@ -83,7 +83,7 @@ describe('the outline', () => {
 		});
 
 		/**
-		 * The hard rule (`editor/dirty.ts`, docs/ARCHITECTURE.md §7): a note becomes dirty
+		 * The hard rule (`editor/shared/dirty.ts`, docs/ARCHITECTURE.md §7): a note becomes dirty
 		 * only on a user editing transaction. An outline reads a note; adding a
 		 * `changes` to that dispatch would rewrite files the user only looked at.
 		 */

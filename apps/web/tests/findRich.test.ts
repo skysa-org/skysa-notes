@@ -2,8 +2,8 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { EMPTY_QUERY, type FindQuery } from '../src/editor/find.js';
-import { richFindTarget, richMatches } from '../src/editor/findRich.js';
+import { EMPTY_QUERY, type FindQuery } from '../src/editor/features/find/find.js';
+import { richFindTarget, richMatches } from '../src/editor/features/find/findRich.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

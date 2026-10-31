@@ -4,8 +4,8 @@ import { undo as undoCommand } from '@milkdown/kit/prose/history';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { applyList, listAround } from '../src/editor/lists.js';
 import { currentMarkdown } from '../src/editor/rich/adopt.js';
+import { applyList, listAround } from '../src/editor/rich/lists.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

@@ -8,7 +8,7 @@ import {
 	type FormatState,
 	NO_FORMAT,
 	readFormat,
-} from '../src/editor/format.js';
+} from '../src/editor/rich/format.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { EMPTY_QUERY, type FindQuery, type FindTarget, type Located } from '../../editor/find.js';
-import { useFindTarget } from '../../editor/findTarget.js';
+import {
+	EMPTY_QUERY,
+	type FindQuery,
+	type FindTarget,
+	type Located,
+} from '../../editor/features/find/find.js';
+import { useFindTarget } from '../../editor/features/find/findTarget.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
 

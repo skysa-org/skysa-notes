@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 
 import { useCommand } from '../../commands/context.js';
-import type { RichEditorProps } from '../../editor/RichEditor.js';
+import type { RichEditorProps } from '../../editor/rich/RichEditor.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
 import { useFormatToolbarShown } from '../../store/hooks.js';

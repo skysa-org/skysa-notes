@@ -7,7 +7,7 @@ import {
 	locate,
 	type Match,
 	matchesIn,
-} from '../src/editor/find.js';
+} from '../src/editor/features/find/find.js';
 
 /**
  * The engine both editors share. What is worth pinning is the behaviour the two

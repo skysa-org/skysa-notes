@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RawEditor } from '../src/editor/RawEditor.js';
+import { RawEditor } from '../src/editor/raw/RawEditor.js';
 import { linksOpened as opened } from './linksOpened.js';
 
 /**

@@ -3,7 +3,7 @@ import type { Ctx } from '@milkdown/kit/ctx';
 import { createCodeBlockCommand, turnIntoTextCommand } from '@milkdown/kit/preset/commonmark';
 import type { EditorState } from '@milkdown/kit/prose/state';
 
-import { detectLanguage } from '../../detect.js';
+import { detectLanguage } from '../../features/code/detect.js';
 import { CODE_BLOCK_NODE } from '../schema.js';
 import { run } from './run.js';
 
@@ -30,7 +30,7 @@ const textToBecomeCode = (state: EditorState): string => {
  * means.
  *
  * A block made out of text that is already there arrives with a guess at what
- * language that text is in (`editor/detect.ts`), in the same transaction, so
+ * language that text is in (`editor/features/code/detect.ts`), in the same transaction, so
  * one undo takes back the block and the guess together. An empty block — `/code`
  * on a blank line — has nothing to guess from and gets no language.
  */

@@ -13,7 +13,7 @@ import {
 	ProgrammaticChange,
 	userEditKey,
 	userEditPlugin,
-} from '../src/editor/dirty.js';
+} from '../src/editor/shared/dirty.js';
 
 /**
  * The rule these tests defend: opening a note, switching modes, or taking a
