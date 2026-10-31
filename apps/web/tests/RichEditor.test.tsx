@@ -1,7 +1,8 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { adoptBody, type Adoption, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
+import type { Adoption } from '../src/editor/editorBinding.js';
+import { adoptBody, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
 import { RichEditor } from '../src/editor/RichEditor.js';
 
 /**

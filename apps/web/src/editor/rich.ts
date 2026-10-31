@@ -54,6 +54,7 @@ import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
 import { copiedText } from './copiedText.js';
 import { deleteSelectedNode } from './deleteSelected.js';
 import { appChange, holdUserEdits, userEditKey, userEditPlugin } from './dirty.js';
+import type { Adoption } from './editorBinding.js';
 import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
 import { htmlViewPlugin } from './htmlView.js';
@@ -629,12 +630,6 @@ const forgetHistory = (view: EditorView): void => {
 		appChange(view.state.tr.setMeta(plugin, { historyState: init({}, view.state) as unknown }))
 	);
 };
-
-/**
- * What became of a body handed to `adoptBody`: already what the document says,
- * put in its place, or not taken in at all.
- */
-export type Adoption = 'same' | 'replaced' | 'refused';
 
 /**
  * Put a body into the editor without it counting as an edit — a sync pull, or a
