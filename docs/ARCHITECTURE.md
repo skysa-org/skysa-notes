@@ -707,6 +707,7 @@ What follows is the design as planned, kept so it need not be worked out again i
   Accept that renames done outside the app look like delete+create in the worst case.
 
 ---
+- The adapter takes a `fetch`-like function, so it can point at the proxy in the browser and at the server directly in tests; a Nextcloud container was the planned test target.
 
 ## 6. Backend
 
@@ -3123,16 +3124,21 @@ The decision record is [`decisions/0001-disconnecting-without-an-invisible-pile.
 
 ```
 pnpm-workspace.yaml
-package.json                  # root scripts: dev, build, test, lint, db:migrate
+package.json                  # root scripts: dev, build, test, lint, verify (the gate before a push), db:migrate
+docs/                         # this file; decisions/ (a record per decision); history.md (the build record)
+.changeset/                   # a changeset per PR; README.md says how a release is cut
+scripts/setup.sh              # first-run setup
 apps/
   web/                        # Vite + React SPA
     vite.config.ts            # vite-plugin-pwa, the brand, /api proxy
     brand.ts                  # NOTES_BRAND: load and check a brand, write it into the build (§8)
     brand/                    # the default brand: brand.json, its schema, the six icons, recolour.mjs
     pwa.ts                    # manifest (from the brand) and Workbox options
+    public/_headers           # the CSP: nothing may be added to script-src (§9)
+    scripts/                  # bundleBudget.mjs: the size budget CI holds the build to
     fill.html                 # the fill window's page, which the bookmarklet opens (§7, §8)
     src/
-      main.tsx routes/
+      main.tsx jitless.ts routes/
       components/             # by feature: account/, sources/, sidebar/, list/, note/, secrets/, passwords/, scratchpad/, clipboard/, attachments/, shell/; ui/ for the building blocks they share
       fill/                   # the fill window: its entry, the protocol, the bookmarklet (§7, "Filling in on a site")
       editor/                 # the two editors, over one markdown string (§7)
@@ -3141,12 +3147,23 @@ apps/
         raw/                  # RawEditor (CodeMirror)
         toolbar/              # FormatToolbar, InlineToolbar
         features/             # find/, links/, secrets/, attachments/, code/: each feature's rich and raw halves side by side
-      store/                  # Dexie db, notes.ts, folders.ts
+      commands/               # the palette's and the chords' registry: registry.ts, chord.ts, context.tsx
+      lib/                    # the bottom layer: plain browser helpers that import nothing else here
+      hooks/                  # useLatest
+      errors/                 # reached.ts: how far a failure got, for the messages that have to say
+      install/                # installing from the browser (§8, "Installing from the browser")
+      share/                  # what the system's share sheet hands the app (§8, "Shared to the app")
+      pictures/               # smaller copies of pictures, made in a worker (§7, "Pictures, as this device has read them")
+      secrets/                # the unlock, the key and the device's lock, over core's secrets/ and age/ (§7, "Secrets in a note")
+      styles/                 # index.css imports the rest: tokens.css, base.css, primitives.css, then one per area (§7)
+      assets/                 # what the build bundles: the providers' marks
+      store/                  # Dexie db, notes.ts, folders.ts, and a module per thing the device holds: vault, clipboard, scratchpad, pins, pictures
       sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps core engine
       api/                    # typed client for apps/api
       i18n/                   # the app's words: t(), rich(), and the English catalog in en/ (§7)
   api/                        # Hono on Cloudflare Workers
     wrangler.toml             # D1 binding, [assets] → ../web/dist
+    migrations/               # D1's, numbered
     src/
       app.ts                  # createApp(options) — library export, no env access
       worker.ts               # default Worker entry: createApp with self-host defaults from env
@@ -3157,7 +3174,7 @@ apps/
         token.ts              # /token
         relay.ts              # /connection/relay/ticket, /relay (the change relay)
       relay/                  # the relay's hub seam, Durable Object, rooms and tickets
-      db/                     # drizzle schema, client, migrations; connections.ts: the race-sensitive writes (commitConnection, revokeGrant, recordRefresh)
+      db/                     # drizzle schema, client; connections.ts: the race-sensitive writes (commitConnection, revokeGrant, recordRefresh)
       context.ts              # AppEnv (a request's bindings and db), AuthedEnv (+ bearer), RouteDeps (what createApp hands every router)
       credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
       flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
@@ -3174,13 +3191,19 @@ packages/
       index.ts                # what the apps may use, by name; tests/exports.test.ts lists the values (#449)
       config.ts               # APP_FOLDER_NAME, MARKER_FILE
       cell.ts                 # cell(): the one way to hold a value that changes, where `let` is not allowed (#457)
+      marker.ts paths.ts      # the marker file; paths as POSIX, relative to the app's root
+      hash.ts json.ts         # content hashes; JSON from outside, parsed without throwing (no schema)
+      api.ts relay.ts         # the shapes the app and the Worker both speak: refusals, the relay's frames
+      entitlements.ts         # the seam an operator restricts connecting and minting through (§6, "Entitlement seam")
+      scratchpad.ts           # the colours a scratch note can have
       appFolder.ts            # the app folder's places that are not notebooks: isScratchPath isVaultPath isClipPath isEncryptionFile
       files/                  # files that are not notes: mediaTypes.ts (one table of types) attachments.ts (how one is shown or opened)
                               #   pictures.ts (a picture's header, and the copies made of it) clipboard.ts (the clipboard's items)
       vault/                  # vault.ts (a password item's JSON and body) password.ts (the generator) sites.ts (which logins a page is offered)
       providers/
         types.ts              # StorageProvider interface, errors
-        onedrive.ts dropbox.ts webdav.ts fake.ts
+        onedrive.ts dropbox.ts fake.ts
+        text.ts               # a file's bytes as a note's text, or UnreadableError
         gdrive/               # Google Drive, by part: wire.ts (endpoints, answers, the client) root.ts (the app folder)
                               #   upload.ts cursor.ts (changes) duplicates.ts (two items at one path) index.ts
         idTree.ts             # the id → parent tree an id-based change feed is read against (OneDrive, Drive)
@@ -3221,6 +3244,7 @@ packages/
         lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
         preview.ts            # a body as the lines a list can show; the one rule the note preview and the search excerpt share
         secretBlocks.ts       # a secret's `age` fence: found, labelled, kept out of the search index, rewritten; no curve
+      age/                    # the age format: header, stream, armor, keys, over @noble's primitives (§7, "Secrets in a note")
       secrets/                # recoveryKey.ts (the printed key, typed back) encryptionFile.ts (.encryption.json; its path is appFolder.ts's)
                               #   sealing.ts (sealing and opening a secret: the one module here with the curve in it)
     tests/
@@ -3228,12 +3252,10 @@ packages/
       providers/contract.test.ts
       markdown/roundtrip.test.ts
       sync/*.test.ts
-docker/nextcloud-compose.yml  # WebDAV test target (WebDAV deferred, §5.4)
 ```
 
 Dependency rule: `core` imports nothing from `apps/*`.
 `web` and `api` may import `core`, by its main entry, `@skysa/core`, which names what it offers rather than re-exporting whole modules (#449); their tests may also import `@skysa/core/testing`, and their source may not, nor any path into a `tests` folder (ESLint).
-The WebDAV adapter in `core` takes a `fetch`-like function so it can point at the proxy in the browser and at the server directly in tests.
 
 Inside `apps/web/src` the layers point one way too (2026-10-22, ESLint's `no-restricted-imports`): `lib/` is the bottom, plain browser helpers that import nothing of the app; `store/` is the data layer and imports neither the sync layer, the UI nor the editors; `sync/` imports the store, `api/`, `errors/` and `i18n/`, and no UI; `editor/` does not import `routes/` or `sync/`.
 Inside `core`, nothing under `providers/` imports `sync/` (#449): what both need, a conflict copy's name say, sits below them in `names/`, which imports neither of them nor `markdown/`.
