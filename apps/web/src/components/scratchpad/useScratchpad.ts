@@ -317,7 +317,7 @@ export const useScratchpad = ({
 		moveOpen: active ? promote : undefined,
 		/**
 		 * What the shell says of the scratchpad in a compact window, under
-		 * `panel` (styles.css): a card open over it, which it stays drawn under
+		 * `panel` (`styles/compact.css`): a card open over it, which it stays drawn under
 		 * to grow out of and go back into; or it with nothing over it, which is
 		 * what shows.
 		 */

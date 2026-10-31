@@ -162,7 +162,7 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('a chip', () => {
 	it('can be told apart where it starts its line, which the stylesheet gives no room before', async () => {
-		// `styles.css` keys on what ProseMirror draws: an empty image before an
+		// `styles/rich.css` keys on what ProseMirror draws: an empty image before an
 		// inline atom first in its paragraph or after another, and none after
 		// words. Should that change, a chip after words would lose its room.
 		const { root } = await mount(

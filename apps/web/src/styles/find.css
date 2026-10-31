@@ -1,0 +1,55 @@
+/* Find and replace, over whichever editor is open. */
+.find-bar {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	padding: var(--space-s) var(--gutter);
+	border-block-end: 1px solid var(--border);
+	background: var(--surface);
+	/* In the column, so the note has already moved down to make room for it. */
+	animation: fade-in var(--duration-m) var(--ease-out);
+}
+
+.find-row {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	/* Narrow enough and the controls wrap onto another line rather than
+	   pushing the note off the side. */
+	flex-wrap: wrap;
+}
+
+.find-input {
+	flex: 1 1 8rem;
+	min-width: 0;
+	padding: 0.25rem 0.5rem;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.find-count {
+	color: var(--muted);
+	font-size: 0.85em;
+	/* Held wide enough for "No results" so the buttons beside it do not shuffle
+	   sideways on every keystroke. */
+	min-width: 5.5rem;
+	text-align: end;
+}
+
+.find-row button[aria-pressed='true'] {
+	background: var(--find-current);
+	color: #111827;
+}
+
+/* The rich editor's matches. The raw editor's are the same two colours, applied
+   by `findRaw.ts` through a CodeMirror theme. */
+.find-match {
+	background: var(--find-match);
+	border-radius: 2px;
+}
+
+.find-current {
+	background: var(--find-current);
+}

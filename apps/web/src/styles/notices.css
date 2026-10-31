@@ -1,0 +1,68 @@
+/* Above the other corner notices: it is the one that says nothing here saves. */
+.tab-stale-bar {
+	inset-block-end: 9rem;
+	z-index: 40;
+}
+
+/* ---- Notices floated over the shell ------------------------------------- */
+
+/* Everything this screen floats over the page goes in one stack, so two at
+   once sit above one another rather than on one another. The undo notice used
+   to arrange that by hand with an `inset-block-end` of its own, which worked
+   while it was the only other card there was and does not extend to a third.
+   The bottom 1rem is still left free: the new-version prompt belongs to the
+   root route, outside this tree, and cannot join the stack. */
+.toast-stack {
+	position: fixed;
+	inset-block-end: 5rem;
+	inset-inline: 1rem;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	align-items: center;
+	/* The stack is as wide as the page and usually empty. Without this it takes
+	   the clicks meant for the note underneath it; each card takes its own back
+	   below. */
+	pointer-events: none;
+}
+
+.toast-stack > * {
+	pointer-events: auto;
+	width: 100%;
+	max-width: 28rem;
+}
+
+/* The tone, as a bar down the leading edge and a wash behind the card. Only
+   the toasts take one: the undo notice reports no outcome, and wears the plain
+   card.
+
+   The wash is mixed into `--surface` rather than laid over it, so what the
+   words sit on stays within a few percent of the colour they were designed
+   against — a tinted card and not a coloured one. */
+.toast-success,
+.toast-warning,
+.toast-error {
+	border-inline-start: 4px solid var(--toast-accent);
+	background: color-mix(in srgb, var(--toast-accent) 10%, var(--surface));
+}
+
+.toast-success {
+	--toast-accent: var(--ok);
+}
+
+.toast-warning {
+	--toast-accent: var(--warn);
+}
+
+.toast-error {
+	--toast-accent: var(--bad);
+}
+
+/* Words are at stake, so neither is allowed to read as a footnote — the same
+   reason `.banner-alert` (`install.css`) exists. The colour is not carrying this on its own:
+   it is the one thing a reader may not be able to see. */
+.toast-warning span,
+.toast-error span {
+	font-weight: 600;
+}

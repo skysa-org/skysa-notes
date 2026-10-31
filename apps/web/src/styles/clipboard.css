@@ -1,0 +1,301 @@
+/* A source's clipboard (`ClipboardPanel.tsx`), a section of its own just
+   before the storage panel, whose top border rules the two apart the width of
+   the sidebar. Its title and what puts things in, then the items, newest
+   first. Ten is more than the foot of a sidebar has room for, so the list
+   scrolls inside itself past a few. Spaced by margins rather than a gap, so
+   that the live region, empty but there to be announced into, takes no room.
+
+   The width of the sidebar, square, and a step lighter than it. Holding
+   anything, it is featured: a gradient tinted with the brand's colour, an edge
+   in it and a glow outside it. Files dragged over the window thicken the edge
+   and widen the glow, to say where they can go, and most with them over it.
+   Every edge is a hard shadow drawn inside it, so a thicker one never moves
+   what is in it; the glow shows above and below, as the sidebar cuts off its
+   sides. */
+.clipboard {
+	--clipboard-bg: var(--bg);
+	--clipboard-featured-bg: linear-gradient(
+		160deg,
+		var(--bg) 0%,
+		color-mix(in srgb, var(--brand, var(--accent)) 9%, var(--bg)) 100%
+	);
+	--clipboard-glow: 22%;
+	--clipboard-glow-more: 30%;
+	position: relative;
+	flex: none;
+	padding: var(--space-m) var(--gutter);
+	font-size: 0.85rem;
+	background: var(--clipboard-bg);
+	box-shadow: inset 0 1px 0 var(--border);
+}
+
+/* Lifted rather than sunk: the dark page is darker than the sidebar, so the
+   region is a step lighter than the sidebar, and its tint is at the top. */
+@media (prefers-color-scheme: dark) {
+	.clipboard {
+		--clipboard-bg: color-mix(in srgb, var(--fg) 4%, var(--surface));
+		--clipboard-featured-bg: linear-gradient(
+			160deg,
+			color-mix(in srgb, var(--brand, var(--accent)) 22%, var(--surface)) 0%,
+			var(--surface) 78%
+		);
+		--clipboard-glow: 28%;
+		--clipboard-glow-more: 32%;
+	}
+}
+
+.clipboard > :not(:first-child) {
+	margin-block-start: 0.35rem;
+}
+
+.clipboard > .clipboard-said:empty {
+	margin: 0;
+}
+
+/* Focused by a press anywhere in it, so a keyboard paste lands here. Not a
+   control, and not reached by Tab, so it draws no ring of its own. */
+.clipboard:focus {
+	outline: none;
+}
+
+.clipboard-filled,
+.clipboard-drop-ready {
+	background: var(--clipboard-featured-bg);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 42%, transparent),
+		0 0 12px color-mix(in srgb, var(--brand, var(--accent)) var(--clipboard-glow), transparent);
+}
+
+.clipboard-drop-ready {
+	box-shadow:
+		inset 0 0 0 2px color-mix(in srgb, var(--brand, var(--accent)) 65%, transparent),
+		0 0 20px
+			color-mix(in srgb, var(--brand, var(--accent)) var(--clipboard-glow-more), transparent);
+}
+
+.clipboard-drop-over {
+	box-shadow:
+		inset 0 0 0 3px var(--brand, var(--accent)),
+		0 0 24px color-mix(in srgb, var(--brand, var(--accent)) 60%, transparent);
+}
+
+/* Its edge and glow, which are a state's colour, as a control's are. */
+.clipboard {
+	transition: box-shadow var(--duration-state) var(--ease-out);
+}
+
+/* The window as the clipboard's drop target, while files are dragged over it
+   anywhere but a note's text (`useWindowDrop`): an edge around the whole of
+   it, the brand's, and what a drop does, at its foot. Over everything but a
+   dialog, which a drop is not taken behind, and pressing on nothing: a drag's
+   events go to what is under it. */
+.clipboard-window-drop {
+	position: fixed;
+	inset: 0;
+	z-index: 90;
+	display: flex;
+	align-items: flex-end;
+	justify-content: center;
+	padding: var(--space-l) var(--gutter) calc(var(--space-l) + env(safe-area-inset-bottom));
+	box-shadow: inset 0 0 0 3px var(--brand, var(--accent));
+	pointer-events: none;
+	animation: fade-in var(--duration-s) var(--ease-out);
+}
+
+.clipboard-window-drop > .clipboard-drop-hint {
+	margin: 0;
+	padding: var(--space-s) var(--space-l);
+	border-radius: 999px;
+	text-align: center;
+	font-weight: 600;
+	/* The brand's colour, a third of the way to the text's: readable on the
+	   page's own colour whatever colour a brand gives itself. */
+	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
+	background: var(--bg);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 42%, transparent),
+		0 0 20px color-mix(in srgb, var(--brand, var(--accent)) 30%, transparent);
+}
+
+/* Said to a screen reader, and shown over the item it is about instead. */
+.clipboard > .clipboard-said-quiet {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.clipboard-head {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.clipboard-title {
+	flex: 1;
+	font-weight: 600;
+}
+
+/* What it is for, in a dotted box where the items will be. */
+.clipboard-empty {
+	padding: 0.75rem;
+	border: 2px dotted color-mix(in srgb, var(--muted) 55%, transparent);
+	border-radius: 0.5rem;
+	text-align: center;
+}
+
+.clipboard-items {
+	max-height: 16rem;
+	margin-block-end: 0;
+	padding: 0;
+	overflow-y: auto;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+
+.clipboard-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.25rem;
+	/* A new one at the top, the rest already moved down for it; one from
+	   another device as well, which is how it is noticed coming in. */
+	animation: fade-in var(--duration-m) var(--ease-out);
+}
+
+/* The item and what is drawn over it: a spinner while it goes up, and a
+   "Copied" or a "Saved" once it has been used. */
+.clipboard-cell {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	display: flex;
+}
+
+/* An item is its preview, laid out as one, and not a button in a row of them:
+   after `.clipboard button:not(.icon)`, which is as specific, and would centre
+   its words. */
+.clipboard button.clipboard-choose {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.125rem 0.5rem;
+	padding: 0.375rem 0.5rem;
+	text-align: start;
+	background: var(--surface);
+}
+
+@media (hover: hover) {
+	.clipboard button.clipboard-choose:hover {
+		border-color: color-mix(in srgb, var(--brand, var(--accent)) 55%, var(--border));
+		background: color-mix(in srgb, var(--brand, var(--accent)) 7%, var(--surface));
+	}
+}
+
+/* Not on the other devices yet: greyed out, with a spinner over it, until it
+   is up. */
+.clipboard-pending .clipboard-choose {
+	opacity: 0.45;
+	filter: grayscale(1);
+}
+
+/* And comes into its colour once it is up, rather than snapping to it. */
+.clipboard button.clipboard-choose {
+	transition-property: color, background-color, border-color, box-shadow, opacity, filter;
+	transition-duration:
+		var(--duration-state), var(--duration-state), var(--duration-state), var(--duration-state),
+		var(--duration-m), var(--duration-m);
+	transition-timing-function: var(--ease-out);
+}
+
+.clipboard-progress {
+	position: absolute;
+	inset-block-start: 50%;
+	inset-inline-start: 50%;
+	width: 1.25rem;
+	height: 1.25rem;
+	margin: -0.625rem 0 0 -0.625rem;
+	border: 2px solid color-mix(in srgb, var(--brand, var(--accent)) 25%, transparent);
+	border-block-start-color: var(--brand, var(--accent));
+	border-radius: 50%;
+	pointer-events: none;
+}
+
+.clipboard-done {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.25rem;
+	border-radius: 0.375rem;
+	font-weight: 600;
+	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
+	background: color-mix(in srgb, var(--surface) 88%, transparent);
+	pointer-events: none;
+}
+
+.clipboard-done {
+	animation: fade-in var(--duration-s) var(--ease-out);
+}
+
+/* A turn a lap, for as long as the item is on its way: a loop, not a step of
+   motion, so it is stopped outright rather than shortened when the system
+   asks for less of it. */
+@media (prefers-reduced-motion: no-preference) {
+	.clipboard-progress {
+		animation: clipboard-spin 0.8s linear infinite;
+	}
+
+	@keyframes clipboard-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+}
+
+/* Three lines of it, its own line breaks kept: enough to tell one paste from
+   the next, which is all the list is for. */
+.clipboard-text {
+	flex-basis: 100%;
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.clipboard-thumb {
+	display: block;
+	max-width: 100%;
+	max-height: 6rem;
+	border-radius: 0.25rem;
+	object-fit: contain;
+}
+
+.clipboard-icon {
+	display: flex;
+	color: var(--muted);
+}
+
+.clipboard-name {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.clipboard-size {
+	font-size: 0.8125rem;
+	white-space: nowrap;
+}
+
+.clipboard-remove {
+	flex: none;
+}

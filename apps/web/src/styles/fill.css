@@ -1,0 +1,135 @@
+/* The fill window (src/fill/): a narrow page of its own, opened over a site's
+   sign-in page by the bookmarklet (docs/ARCHITECTURE.md §7, "Filling in on a
+   site"). */
+.fill-page {
+	display: grid;
+	gap: var(--space-m);
+	max-width: 30rem;
+	margin: 0 auto;
+	padding: var(--space-l);
+	line-height: 1.5;
+}
+
+.fill-page p {
+	margin: 0;
+}
+
+.fill-page > button {
+	justify-self: start;
+}
+
+.fill-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-xs) var(--space-s);
+}
+
+.fill-header h1 {
+	margin: 0;
+	font-size: 1.25rem;
+	overflow-wrap: anywhere;
+}
+
+/* Beside the heading, for a page over http:. */
+.fill-insecure {
+	color: var(--bad);
+	font-size: 0.8125rem;
+	font-weight: 600;
+}
+
+/* The fill window's logins: a row each, its label and username, and Fill in
+   or Copy beside them, under them where the window is too narrow. */
+.fill-logins {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--border);
+}
+
+.fill-login {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-xs) var(--space-s);
+	padding: var(--space-s) 0;
+	border-bottom: 1px solid var(--border);
+}
+
+.fill-login-text {
+	display: grid;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.fill-login-label {
+	font-weight: 600;
+}
+
+.fill-login-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-xs);
+}
+
+.fill-said:empty {
+	display: none;
+}
+
+.fill-page button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* What is offered for a password typed on the page, under the logins. */
+.fill-remember {
+	display: grid;
+	gap: var(--space-s);
+	justify-items: start;
+}
+
+.fill-remember .fill-save {
+	justify-self: stretch;
+}
+
+/* Fill on sites (FillSetupDialog): the bookmarklet's link, drawn as a thing
+   to pick up and drag, and what the dialog says of it. */
+.fill-setup-dialog h3 {
+	margin: 1rem 0 0.25rem;
+	font-size: 0.9375rem;
+}
+
+.fill-setup-dialog p {
+	margin: 0.5rem 0;
+}
+
+.fill-setup-dialog ul {
+	margin: 0.25rem 0;
+	padding-inline-start: 1.25rem;
+}
+
+.fill-setup-dialog li + li {
+	margin-top: 0.25rem;
+}
+
+.fill-bookmarklet-holder {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-s) var(--space-m);
+	margin: 0.75rem 0;
+}
+
+.fill-bookmarklet {
+	display: inline-block;
+	padding: 0.4rem 0.9rem;
+	color: var(--brand);
+	font-weight: 600;
+	text-decoration: none;
+	border: 1px dashed var(--brand);
+	border-radius: 999px;
+	cursor: grab;
+}

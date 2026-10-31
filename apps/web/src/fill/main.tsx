@@ -1,6 +1,6 @@
 // First: before any module that builds a zod schema (see the module).
 import '../jitless.js';
-import '../styles.css';
+import '../styles/index.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
