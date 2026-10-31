@@ -8,6 +8,7 @@
 .inline-toolbar,
 .toolbar-panel,
 .outline.outline-flyout,
+.source-search .search-results,
 .palette {
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);

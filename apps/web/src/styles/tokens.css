@@ -52,7 +52,8 @@
 	--radius-pill: 999px;
 
 	/* How far something is lifted off the page: a card at rest, a card under the
-	   pointer, a menu or flyout over the page, and the command palette. */
+	   pointer, whatever floats over the page (a menu, a dialog, a toast), and the
+	   command palette. */
 	--shadow-s: 0 1px 3px rgb(0 0 0 / 0.08);
 	--shadow-m: 0 2px 8px rgb(0 0 0 / 0.12);
 	--shadow-l: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
