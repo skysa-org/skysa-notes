@@ -369,4 +369,27 @@ describe('the catalogue', () => {
 			expect(ALL_COMMANDS).toContain(command);
 		});
 	});
+
+	// Which picture is which is nothing a test of behavior can see.
+	it('says which icon each command is drawn with', () => {
+		const drawn = ALL_COMMANDS.flatMap(({ id, icon }) =>
+			icon === undefined ? [] : [[id, icon]]
+		);
+
+		expect(Object.fromEntries(drawn)).toEqual({
+			'bullet-list': 'bullets',
+			'ordered-list': 'numbers',
+			'task-list': 'tasks',
+			'code-block': 'code-block',
+			strong: 'bold',
+			emphasis: 'italic',
+			strike: 'strike',
+			code: 'code',
+			'clear-formatting': 'clear',
+			outdent: 'outdent',
+			indent: 'indent',
+			attach: 'paperclip',
+			'insert-secret': 'lock',
+		});
+	});
 });

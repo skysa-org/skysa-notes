@@ -22,7 +22,9 @@ import { t } from '../i18n/t.js';
 import { attachPicked } from './attachDrop.js';
 import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
-import { applyList } from './lists.js';
+import type { MarkName } from './format.js';
+import type { IconName } from './icons.js';
+import { applyList, type ListKind } from './lists.js';
 import { markRunIn } from './markRun.js';
 import { insertSecretCommand } from './secretBlock.js';
 
@@ -45,7 +47,21 @@ export interface EditorCommand {
 	 */
 	keywords: readonly string[];
 	apply: (ctx: Ctx) => void;
+	/** Its icon on the toolbar; its name where it has none. */
+	icon?: IconName;
+	/**
+	 * What it is on or off about, where it is one that is: a mark, a list, a
+	 * block. One that only does something — indents, clears, attaches — is not
+	 * pressed or unpressed, and a screen reader is not told it is.
+	 */
+	reflects?: Reflects;
+	/** What of the selection it can do nothing without (`FormatState`). */
+	needs?: 'canIndent' | 'canOutdent';
 }
+
+/** What a toolbar button reports on, as `FormatState` says it. */
+type Reflects =
+	Readonly<{ mark: MarkName }> | Readonly<{ list: ListKind }> | Readonly<{ block: 'codeBlock' }>;
 
 /**
  * Milkdown assigns a command's key when the editor builds the plugin, not when
@@ -227,6 +243,8 @@ const PLAIN_TEXT: EditorCommand = {
 
 const BULLET_LIST: EditorCommand = {
 	id: 'bullet-list',
+	icon: 'bullets',
+	reflects: { list: 'bullet' },
 	label: t('editor.commands.bulletList'),
 	keywords: ['ul', 'unordered', 'bullets'],
 	apply: applyList('bullet'),
@@ -234,6 +252,8 @@ const BULLET_LIST: EditorCommand = {
 
 const ORDERED_LIST: EditorCommand = {
 	id: 'ordered-list',
+	icon: 'numbers',
+	reflects: { list: 'ordered' },
 	label: t('editor.commands.orderedList'),
 	keywords: ['ol', 'ordered', 'numbers'],
 	apply: applyList('ordered'),
@@ -241,6 +261,8 @@ const ORDERED_LIST: EditorCommand = {
 
 const TASK_LIST: EditorCommand = {
 	id: 'task-list',
+	icon: 'tasks',
+	reflects: { list: 'task' },
 	label: t('editor.commands.taskList'),
 	keywords: ['todo', 'checkbox', 'checklist'],
 	apply: applyList('task'),
@@ -294,6 +316,8 @@ const toggleCodeBlock = (ctx: Ctx): void => {
 
 const CODE_BLOCK: EditorCommand = {
 	id: 'code-block',
+	icon: 'code-block',
+	reflects: { block: 'codeBlock' },
 	label: t('editor.commands.codeBlock'),
 	keywords: ['pre', 'fence', 'snippet'],
 	apply: toggleCodeBlock,
@@ -315,6 +339,8 @@ const DIVIDER: EditorCommand = {
 
 const BOLD: EditorCommand = {
 	id: 'strong',
+	icon: 'bold',
+	reflects: { mark: 'strong' },
 	label: t('editor.commands.bold'),
 	keywords: ['strong'],
 	apply: run(toggleStrongCommand),
@@ -322,6 +348,8 @@ const BOLD: EditorCommand = {
 
 const ITALIC: EditorCommand = {
 	id: 'emphasis',
+	icon: 'italic',
+	reflects: { mark: 'emphasis' },
 	label: t('editor.commands.italic'),
 	keywords: ['emphasis'],
 	apply: run(toggleEmphasisCommand),
@@ -329,6 +357,8 @@ const ITALIC: EditorCommand = {
 
 const STRIKETHROUGH: EditorCommand = {
 	id: 'strike',
+	icon: 'strike',
+	reflects: { mark: 'strike_through' },
 	label: t('editor.commands.strikethrough'),
 	keywords: ['strike'],
 	apply: run(toggleStrikethroughCommand),
@@ -336,6 +366,8 @@ const STRIKETHROUGH: EditorCommand = {
 
 const INLINE_CODE: EditorCommand = {
 	id: 'code',
+	icon: 'code',
+	reflects: { mark: 'inlineCode' },
 	label: t('editor.commands.code'),
 	keywords: ['inline code', 'monospace'],
 	apply: run(toggleInlineCodeCommand),
@@ -343,6 +375,7 @@ const INLINE_CODE: EditorCommand = {
 
 const CLEAR_FORMATTING: EditorCommand = {
 	id: 'clear-formatting',
+	icon: 'clear',
 	label: t('editor.commands.clearFormatting'),
 	keywords: ['plain', 'remove', 'reset'],
 	apply: clearFormatting,
@@ -350,6 +383,8 @@ const CLEAR_FORMATTING: EditorCommand = {
 
 const OUTDENT: EditorCommand = {
 	id: 'outdent',
+	icon: 'outdent',
+	needs: 'canOutdent',
 	label: t('editor.commands.outdent'),
 	keywords: ['lift', 'unindent', 'outdent'],
 	apply: run(liftListItemCommand),
@@ -357,6 +392,8 @@ const OUTDENT: EditorCommand = {
 
 const INDENT: EditorCommand = {
 	id: 'indent',
+	icon: 'indent',
+	needs: 'canIndent',
 	label: t('editor.commands.indent'),
 	keywords: ['sink', 'nest', 'indent'],
 	apply: run(sinkListItemCommand),
@@ -396,6 +433,7 @@ const SECRET: EditorCommand = {
 /** The toolbar's paperclip: any file, a picture among them. */
 const ATTACH: EditorCommand = {
 	id: 'attach',
+	icon: 'paperclip',
 	label: t('editor.commands.attach'),
 	keywords: ['attachment', 'upload', 'image', 'picture', 'photo', 'file'],
 	apply: attachPicked(),
@@ -426,6 +464,7 @@ export const SLASH_COMMANDS: readonly EditorCommand[] = [...BLOCK_COMMANDS, IMAG
  */
 const INSERT_SECRET: EditorCommand = {
 	id: 'insert-secret',
+	icon: 'lock',
 	label: t('editor.commands.insertSecret'),
 	keywords: ['encrypt', 'password', 'private', 'hidden', 'age'],
 	apply: insertSecretCommand,
