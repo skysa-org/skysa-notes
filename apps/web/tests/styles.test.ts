@@ -128,6 +128,7 @@ describe('the stylesheet', () => {
 		['.inline-toolbar', 'var(--bg)'],
 		['.toolbar-panel', 'var(--bg)'],
 		['.outline.outline-flyout', 'var(--bg)'],
+		['.source-search .search-results', 'var(--bg)'],
 		['.palette', 'var(--bg)'],
 		['.modal', 'var(--surface)'],
 		['.update-prompt', 'var(--surface)'],
@@ -138,7 +139,7 @@ describe('the stylesheet', () => {
 		expect(surface).toContain('border: 1px solid var(--border)');
 		expect(surface).toContain('border-radius: var(--radius-m)');
 		expect(surface).toContain(`background: ${background}`);
-		expect(surface).toContain('box-shadow: ');
+		expect(surface).toContain('box-shadow: var(--shadow-l)');
 	});
 
 	// A file left out draws nothing, and the tests that read the sheet would not

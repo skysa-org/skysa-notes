@@ -8,6 +8,7 @@
 .inline-toolbar,
 .toolbar-panel,
 .outline.outline-flyout,
+.source-search .search-results,
 .palette {
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
@@ -23,7 +24,7 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
 	background: var(--surface);
-	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+	box-shadow: var(--shadow-l);
 }
 
 /* A button with words on it. Each says its own padding, until those are one
