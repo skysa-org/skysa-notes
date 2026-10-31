@@ -80,6 +80,34 @@ describe('revealControl', () => {
 		await answer(undefined);
 	});
 
+	it('asks for the key of the secret that was pressed, if a pull has changed it since', async () => {
+		const addKeyFor = vi.fn(() => Promise.resolve(false));
+		const answers: ((why: NotRevealed | undefined) => void)[] = [];
+		const armor = { current: 'pressed' };
+		const into = document.createElement('div');
+		const { press } = revealControl({
+			into,
+			host: { ...NO_SECRETS, addKey: addKeyFor },
+			armor: () => armor.current,
+			press: () =>
+				new Promise((resolve) => {
+					answers.push(resolve);
+				}),
+		});
+		press();
+		armor.current = 'pulled';
+
+		answers.shift()?.('other');
+		const button = await vi.waitFor(() => {
+			const found = addKey(into);
+			if (!(found instanceof HTMLElement)) throw new Error('no Add its key yet');
+			return found;
+		});
+		button.click();
+
+		expect(addKeyFor).toHaveBeenCalledWith('pressed');
+	});
+
 	it('offers no key once its block has gone', async () => {
 		const { into, press, answer } = control(() => true);
 		press();

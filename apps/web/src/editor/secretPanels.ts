@@ -363,25 +363,30 @@ export const revealControl = ({
 	into.append(button, said);
 
 	const adding = cell<HTMLButtonElement | undefined>(undefined);
-	const say = (why: NotRevealed | undefined) => {
+	// An answer is about the armor that was pressed, whatever a pull has made of
+	// the block since.
+	const say = (why: NotRevealed | undefined, asked: string) => {
 		said.replaceChildren(why === undefined ? '' : NOT_REVEALED[why]());
 		adding.current?.remove();
 		adding.current = undefined;
 		if (why !== 'other' || gone?.() === true) return;
-		adding.current = addKeyButton(host, armor(), pressed);
+		adding.current = addKeyButton(host, asked, pressed);
 		into.append(adding.current);
 	};
 	const pressed = () => {
-		say(undefined);
+		const asked = armor();
+		say(undefined, asked);
 		button.setAttribute('disabled', '');
-		void press(armor())
+		void press(asked)
 			.finally(() => {
 				button.removeAttribute('disabled');
 			})
-			.then(say);
+			.then((why) => {
+				say(why, asked);
+			});
 	};
 	button.addEventListener('click', pressed);
-	say(problem);
+	say(problem, armor());
 	return { button, press: pressed };
 };
 
