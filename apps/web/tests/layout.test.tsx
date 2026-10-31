@@ -334,6 +334,11 @@ describe('toggles', () => {
 		}
 	});
 
+	it('are big enough for a finger, whichever bar they are on', () => {
+		expect(declarations('.toolstrip-button')).toContain('min-width: var(--tap)');
+		expect(declarations('.toolstrip-button')).toContain('min-height: var(--tap)');
+	});
+
 	it('light on hover only where the pointer can hover', () => {
 		// On a touch screen `:hover` sticks to the last thing tapped, and a
 		// toggle just turned off would stay lit.

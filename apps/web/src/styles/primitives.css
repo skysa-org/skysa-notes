@@ -1,0 +1,46 @@
+/* What more than one component is drawn from. */
+
+/* The bar of small icon buttons that hangs off a block in the editor: a code
+   block's, a file chip's, a picture's, a secret's (which sits in its block's
+   line instead, `.secret-actions`). The block's text is selectable; the
+   chrome around it is not, or dragging from the last line downwards would
+   select a control instead of code. Each says where it hangs and whether it
+   shows. */
+.toolstrip {
+	position: absolute;
+	z-index: 2;
+	align-items: center;
+	gap: 0.125rem;
+	margin-block-start: 0.25rem;
+	padding: 0.2rem 0.25rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-s);
+	background: var(--surface);
+	box-shadow: var(--shadow-l);
+	user-select: none;
+}
+
+.toolstrip-button {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.25rem;
+	border: 0;
+	border-radius: var(--radius-xs);
+	background: none;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+/* A picture on the web or in the link has no file to open or save: only
+   Remove from note is on its bar. `display` above would otherwise show it
+   whatever `hidden` says. */
+.toolstrip-button[hidden] {
+	display: none;
+}
+
+@media (hover: hover) {
+	.toolstrip-button:hover {
+		background: var(--hover-bg);
+		color: var(--fg);
+	}
+}

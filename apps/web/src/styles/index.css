@@ -1,10 +1,12 @@
 /*
- * The app's stylesheet, in the order it cascades. The order is the original
- * file's and it matters: a later rule of equal specificity wins, so moving a
- * line here can change what is drawn.
+ * The app's stylesheet, in the order it cascades. The order matters: a later
+ * rule of equal specificity wins, so moving a line here can change what is
+ * drawn. Primitives come before every component, so that a component's own rule
+ * of the same weight says where it differs.
  */
 @import './tokens.css';
 @import './base.css';
+@import './primitives.css';
 @import './notice-card.css';
 @import './sources.css';
 @import './search.css';

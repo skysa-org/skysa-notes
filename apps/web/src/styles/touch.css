@@ -70,15 +70,9 @@
 		min-height: var(--tap);
 	}
 
-	/* A file's chip, big enough to land on, and its bar's buttons. */
+	/* A file's chip, big enough to land on. */
 	.attachment-chip {
 		min-height: 1.5rem;
-	}
-
-	.attachment-action {
-		justify-content: center;
-		width: var(--tap);
-		height: var(--tap);
 	}
 
 	/* Rows: the notebooks, the notes, the sources, the answers to a search. */
@@ -153,7 +147,7 @@
 		margin-block-start: -0.5rem;
 	}
 
-	.code-tool {
+	.toolstrip-button {
 		justify-content: center;
 		min-width: var(--tap);
 		min-height: var(--tap);

@@ -7,7 +7,10 @@ import { buttonEl } from '../shared/dom.js';
 
 /** A button in the bar under a chip — or over a picture (`image.ts`) — selected whole. */
 export const barButton = (icon: IconName, label: string): HTMLButtonElement =>
-	buttonEl({ class: 'attachment-action', 'aria-label': label, title: label }, iconElement(icon));
+	buttonEl(
+		{ class: 'toolstrip-button attachment-action', 'aria-label': label, title: label },
+		iconElement(icon)
+	);
 
 /**
  * The bar of buttons a node selected whole shows — under a chip, over a
@@ -35,7 +38,9 @@ export const nodeBar = (
 	const dom = document.createElement('span');
 	dom.setAttribute(
 		'class',
-		className === undefined ? 'attachment-actions' : `attachment-actions ${className}`
+		className === undefined
+			? 'toolstrip attachment-actions'
+			: `toolstrip attachment-actions ${className}`
 	);
 	dom.setAttribute('hidden', '');
 	dom.append(...buttons);
