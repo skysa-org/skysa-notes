@@ -192,13 +192,8 @@
 }
 
 .toolbar-link input {
-	font: inherit;
 	font-size: 0.9rem;
 	padding: 0.35rem 0.5rem;
-	color: var(--fg);
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-s);
 }
 
 .toolbar-link .dialog-actions {
@@ -206,13 +201,8 @@
 }
 
 .toolbar-link .dialog-actions button {
-	font: inherit;
 	font-size: 0.85rem;
 	padding: 0.3rem 0.7rem;
-	color: var(--fg);
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-s);
 	cursor: pointer;
 }
 

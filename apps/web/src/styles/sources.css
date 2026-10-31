@@ -306,22 +306,12 @@
 .connect-code-form input {
 	flex: 1;
 	min-width: 0;
-	font: inherit;
 	font-size: 0.9rem;
 	padding: 0.35rem 0.5rem;
-	color: var(--fg);
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-s);
 }
 
 .connect-code-form button {
-	font: inherit;
 	padding: 0.35rem 0.7rem;
-	color: var(--fg);
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-s);
 	cursor: pointer;
 }
 
