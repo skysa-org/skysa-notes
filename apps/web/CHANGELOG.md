@@ -1,5 +1,50 @@
 # @skysa/web
 
+## 2.0.0
+
+### Minor Changes
+
+- 02fa913: A source that needs connecting again says so in red: the storage panel's sentence is in the colour of an error, and a red dot sits on the corner of the source's mark, on its tab in a wide window and on the source dropdown in a narrow one.
+
+### Patch Changes
+
+- 873648e: The storage panel shares one request for the server's settings with the source bar, instead of asking for them a second time each time the app opens.
+- 88b73f1: A checklist item another part of the editor adds in answer to a note's text arriving from sync is left as it came, rather than tidied as if it had been typed; only what the user types is tidied.
+- e328218: In a narrow window, Escape in a menu or a dialog opened over a dropdown shuts the menu or the dialog and leaves the dropdown open, and Escape while typing with an input method's candidates up leaves the dropdown alone.
+- a1fdb5e: A Copy button in a browser with no clipboard to write to (a page not served over HTTPS) now says it could not copy, instead of doing nothing. A "Copied" in the clipboard panel stays for three seconds, as a password's does.
+- a58dae2: A message in the corner no longer goes when something is pressed in a dialog over the page, such as the command palette: it stays until it is dismissed or something outside the dialog is pressed, as the notice after a delete already did.
+- a744baf: The command palette closes on a press begun and let go on the page around it, as a dialog does, instead of as soon as the press begins. Neither a dialog nor the palette closes any more on a press begun around it and let go on it.
+- 400c088: The rich editor no longer treats a body that already says what it shows as replacing the text, as the markdown editor already didn't, so the autosave sitting it is in carries on.
+- af94cc3: Something chosen from another source's `⋯` that was still waiting to be done (a disconnect still out, say) is let go if you show a different source, instead of happening the next time that one is shown.
+- 940f83e: A disconnected source's tab no longer shows a red dot or a "needs to be connected again" tooltip left over from before it was disconnected.
+- 08ed8c8: A queued change this version cannot read, such as one written by a newer version, is now kept and reported as stuck instead of being sent as a note's edit.
+- 7f566a3: A sync's or an import's bar with nothing to count draws as not knowing, as a re-scan's of nothing already did, rather than as an empty bar.
+- d194172: Only the app's own database watches the tab (for a newer build, for being frozen, and for being held up by another tab). A database made beside it no longer leaves a `freeze` listener on the page behind it.
+- d140ec8: The toolbar's link form shows the link that Link and Remove change. With the cursor just after a link, Link now points that link somewhere else and Remove takes it off, as the form already showed, instead of adding a new link beside it. A selection over a link now shows that link in the form.
+- 8d854f7: Taking a source's spelling of a notebook path, listing what a folder holds, and a path's depth are each written once in `store/naming.ts` (`respell`, `namesIn`, `pathDepth`).
+- 6981d97: Prefs kept as JSON are read through one `readJson`, and per-source pref keys are made by one `sourceKey`; the keys are the ones rows were already stored under.
+- 2d9b6c6: Whether a note is live or a tombstone, and whether a source syncs or is detached, is asked through `isLive`, `isTombstone` and `isLiveSource` (`store/rowStates.ts`) in place of the flags compared by hand.
+- aa9bab8: A source's rows are read through one `rowsOf(table, connectionId)` (`store/rows.ts`), in place of ninety `.where('connectionId').equals(…)`; the queries are the same.
+- 48c2373: The store's three identical scope types are one `ConnectionScope`; composite keys are named (`FileKey`, `FolderKey`, `ClipKey`); and the sync's store asks the queue's own `opsFor`/`opsForFile` for a note's or file's ops.
+- c014f9b: The transactions that open many tables share their table lists from `store/scopes.ts` (`writerTables`, `libraryTables`, `sourceTables`), at the widths they had; a test holds every table kept by source in `sourceTables`.
+- 80ff120: Pins now survive disconnecting and connecting again. When a source's notes leave the device, this device keeps what it remembered about that account: pinned notes and notebooks, which notebooks were open, the note open last in each, and whether the scratchpad and passwords were shown. All of it comes back when the account is connected again. It also goes with the device's own notes when they go into the first source you connect.
+- b48483c: The app's in-memory stores (tab state, renames, install prompt, secrets lock, code display, formatting, and the rest) share one `createEmitter` and `createStore` in place of a listener set written out in each.
+- 8200ead: The editors and components that keep the latest callback or value in a ref get it from one `useLatest` hook, in place of twenty-one copies of the same ref-and-effect pair.
+- Updated dependencies [0f7b070]
+- Updated dependencies [c1b5d11]
+- Updated dependencies [99f3910]
+- Updated dependencies [c85cf4e]
+- Updated dependencies [0c7023f]
+- Updated dependencies [f65a764]
+- Updated dependencies [29842a6]
+- Updated dependencies [56907dc]
+- Updated dependencies [feab61a]
+- Updated dependencies [9ee74b4]
+- Updated dependencies [59c4ee6]
+- Updated dependencies [0eae082]
+- Updated dependencies [08ed8c8]
+  - @skysa/core@2.0.0
+
 ## 1.11.2
 
 ### Patch Changes

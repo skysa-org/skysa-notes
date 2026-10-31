@@ -1,5 +1,28 @@
 # @skysa/core
 
+## 2.0.0
+
+### Major Changes
+
+- 59c4ee6: `@skysa/core` now names what it offers instead of re-exporting whole modules, and its test doubles (the in-memory provider, the provider stubs, the store contract) moved to `@skysa/core/testing`. Nothing the app does changes, and an instance deployed with the routine steps needs nothing more.
+  
+  **What to do if your own code imports `@skysa/core`** (a deployment's `EntitlementProvider` or `RateLimiter`, say): every name the apps use is still offered, and so are the types those two seams are written against (`EntitlementContext`, `EntitlementDecision`, `EntitlementSubject`, `RateLimitDecision`). Import `createFakeProvider` and its types from `@skysa/core/testing` instead, and only from tests. 53 values and 34 types nothing in the repository used are no longer offered; if your code imported one of them, it fails to typecheck on update, and the fix is to name it in `packages/core/src/index.ts` (and in `tests/exports.test.ts`, which lists what the entry offers) or to stop depending on it.
+
+### Patch Changes
+
+- 0f7b070: `@skysa/core` offers `cell()`, the one way to hold a value that changes where the lint rules forbid `let`; core holds its own that way.
+- c1b5d11: A note that has to step aside to a conflict name, and finds all of its hundred tries taken, now fails its op so it is retried, as a folder already did. Before, it took the next name without checking it, which could put it on another note's path.
+- 99f3910: Previews and search ask one `hidesAsSecret` whether a fence is kept out of a note's words, and a preview no longer decodes a secret's armor to decide.
+- c85cf4e: `isNoteName` answers whether a name is a note's, folded as `foldName` folds, in place of six copies of the same check in the engine, the Drive adapter, conflict naming and titles.
+- 0c7023f: What the app knows of each file extension (its kind, its media type, whether it is drawn inline, told to a provider, or given to a nameless file) is one table, `files/mediaTypes.ts`, in place of six hand-kept ones. What opens in a tab is still named extension by extension.
+- f65a764: Reading a note file parses its frontmatter once, not twice (`readNoteMetadata`).
+- 29842a6: Core reads JSON from outside through one `parseJson` and `isJsonObject`/`asObject` (`src/json.ts`), in place of nine hand-rolled try/catch parses.
+- 56907dc: An answer a provider should not have given — an item with no id, a file with no version, a page with neither link — is now a `ProviderResponseError`, still without a code, so a log can tell it from an outage. The three adapters' rate-limit errors read alike: `<provider> rate limit (<status>)`, the provider's reason where it gave one, and the wait it asked for.
+- feab61a: No adapter deletes, leaves or moves the app's own folder, whether it is named by its path or by its id: asked to, each refuses with a `NotFoundError`, as it already refused a file written at the root. Google Drive would otherwise have trashed the folder and everything in it, or moved it. A provider's success answer that is not a JSON object is now a `ProviderResponseError` naming the provider, not a `SyntaxError` or a `TypeError`, and Dropbox's rate-limit error says what Dropbox called it, as the other two do.
+- 9ee74b4: A pull whose token expires during the scan that replaces a dead cursor now refreshes the token and goes back to that scan, keeping what the provider said about sending missing notes back up. A pull whose cursor turns out dead on the retry after a refresh now scans. Before, either one ended the run as a retry, and the pull had to wait for the next one.
+- 0eae082: The Dropbox adapter refuses the root as the other adapters do: a note or file written at `''`, or a move onto it, is a `NotFoundError` rather than Dropbox's own 400, and `createFolder('')` answers the app folder instead of failing.
+- 08ed8c8: A queued change this version cannot read, such as one written by a newer version, is now kept and reported as stuck instead of being sent as a note's edit.
+
 ## 1.11.2
 
 No changes in this release.
