@@ -1,8 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSyncExternalStore } from 'react';
 
+import { Icon } from '../components/ui/icons.js';
 import { useMediaQuery } from '../components/ui/layout.js';
-import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { useDb } from '../store/database.js';
 import { dismissInstall, getInstallDismissed } from '../store/prefs.js';

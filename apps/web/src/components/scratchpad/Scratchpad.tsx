@@ -21,7 +21,6 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Icon } from '../../editor/icons.js';
 import { openableLink, openLink } from '../../editor/links.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { t } from '../../i18n/t.js';
@@ -40,6 +39,7 @@ import { titleShown } from '../../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../../store/visibleText.js';
 import { useOpeningNotice } from '../note/opening.js';
 import { useLiveEdits } from '../shell/context.js';
+import { Icon } from '../ui/icons.js';
 import { useElementWidth } from '../ui/layout.js';
 import { usePressAway } from '../ui/usePressAway.js';
 import {

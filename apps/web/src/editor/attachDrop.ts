@@ -12,12 +12,12 @@ import {
 import { dropPoint } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
+import { iconElement } from '../components/ui/icons.js';
 import { t } from '../i18n/t.js';
 import { settleAfter } from '../store/heldEdits.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
-import { iconElement } from './icons.js';
 import { LIST_ITEM } from './lists.js';
 import { pickFiles } from './pickFiles.js';
 

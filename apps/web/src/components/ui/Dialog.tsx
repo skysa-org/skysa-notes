@@ -13,8 +13,8 @@ import {
 import { createPortal } from 'react-dom';
 
 import { useSuspendShortcuts } from '../../commands/context.js';
-import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
+import { Icon } from './icons.js';
 import { rems } from './layout.js';
 import { useFocusBack } from './useFocusBack.js';
 import { usePressOutside } from './usePressOutside.js';

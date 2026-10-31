@@ -2,7 +2,7 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { NodeSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
-import { iconElement, type IconName } from './icons.js';
+import { iconElement, type IconName } from '../components/ui/icons.js';
 
 /** A button in the bar under a chip — or over a picture (`image.ts`) — selected whole. */
 export const barButton = (icon: IconName, label: string): HTMLButtonElement => {

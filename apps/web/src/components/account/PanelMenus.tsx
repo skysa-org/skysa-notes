@@ -1,9 +1,9 @@
 import { type RefObject, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Icon } from '../../editor/icons.js';
 import { t } from '../../i18n/t.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
+import { Icon } from '../ui/icons.js';
 import { OptionsMenu, type OptionsMenuItem } from '../ui/OptionsMenu.js';
 
 /**
