@@ -374,6 +374,7 @@ describe('the catalogue', () => {
 	});
 
 	it('names each heading for the level it makes', () => {
+		expect(TEXT_STYLES.map(({ level }) => level)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 		TEXT_STYLES.filter(({ level }) => level > 0).forEach(({ level, command }) => {
 			expect(command.id).toBe(`heading-${level}`);
 			expect(command.label).toBe(`Heading ${level}`);

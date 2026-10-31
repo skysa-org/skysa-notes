@@ -58,7 +58,11 @@ type Reflects =
 	Readonly<{ mark: MarkName }> | Readonly<{ list: ListKind }> | Readonly<{ block: 'codeBlock' }>;
 
 /** A heading of a level, wherever it is offered: its id and what it does follow from the level. */
-const heading = (level: number, label: string, keywords: readonly string[]): EditorCommand => ({
+const heading = (
+	level: 1 | 2 | 3 | 4 | 5 | 6,
+	label: string,
+	keywords: readonly string[]
+): EditorCommand => ({
 	id: `heading-${level}`,
 	label,
 	keywords,
