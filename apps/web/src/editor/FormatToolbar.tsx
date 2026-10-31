@@ -89,33 +89,13 @@ const isOff = ({ needs, reflects }: EditorCommand, format: FormatState): boolean
 /** The groups the bar's controls are drawn in. */
 type Group = 'textStyle' | 'textFormatting' | 'lists' | 'indentation' | 'insert' | 'link';
 
-/** Every slot the bar has, by id. */
-type SlotId =
-	| 'text-style'
-	| 'strong'
-	| 'emphasis'
-	| 'more-formatting'
-	| 'bullet-list'
-	| 'ordered-list'
-	| 'task-list'
-	| 'indentation'
-	| 'code-block'
-	| 'attach'
-	| 'insert-secret'
-	| 'link';
-
 /**
  * The bar's slots, in the order they are drawn, and the group each is drawn
  * in. A slot is what goes into the overflow menu as one: a button, a menu, or
  * — for indentation — the pair, since either without the other is half a
  * control.
  */
-interface Slot {
-	id: SlotId;
-	group: Group;
-}
-
-const SLOTS: readonly Slot[] = [
+const SLOTS = [
 	{ id: 'text-style', group: 'textStyle' },
 	{ id: 'strong', group: 'textFormatting' },
 	{ id: 'emphasis', group: 'textFormatting' },
@@ -128,7 +108,15 @@ const SLOTS: readonly Slot[] = [
 	{ id: 'attach', group: 'insert' },
 	{ id: 'insert-secret', group: 'insert' },
 	{ id: 'link', group: 'link' },
-];
+] as const satisfies readonly Readonly<{ id: string; group: Group }>[];
+
+/** Every slot the bar has, by id. */
+type SlotId = (typeof SLOTS)[number]['id'];
+
+interface Slot {
+	id: SlotId;
+	group: Group;
+}
 
 /** What each group is called, as a screen reader hears it. */
 const GROUP_LABELS: Readonly<Record<Group, string>> = {

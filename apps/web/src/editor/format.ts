@@ -49,7 +49,10 @@ const HEADING = 'heading';
 const LIST_ITEM = 'list_item';
 
 /** Every mark the toolbar has a button for. */
-const MARKS = ['strong', 'emphasis', 'strike_through', 'inlineCode', LINK_MARK];
+const MARKS = ['strong', 'emphasis', 'strike_through', 'inlineCode', LINK_MARK] as const;
+
+/** A mark the toolbar can report on. */
+export type MarkName = (typeof MARKS)[number];
 
 /**
  * A mark is active where the selection carries it anywhere — which is exactly

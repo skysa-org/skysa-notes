@@ -22,6 +22,7 @@ import { t } from '../i18n/t.js';
 import { attachPicked } from './attachDrop.js';
 import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
+import type { MarkName } from './format.js';
 import type { IconName } from './icons.js';
 import { applyList, type ListKind } from './lists.js';
 import { markRunIn } from './markRun.js';
@@ -60,7 +61,7 @@ export interface EditorCommand {
 
 /** What a toolbar button reports on, as `FormatState` says it. */
 type Reflects =
-	Readonly<{ mark: string }> | Readonly<{ list: ListKind }> | Readonly<{ block: 'codeBlock' }>;
+	Readonly<{ mark: MarkName }> | Readonly<{ list: ListKind }> | Readonly<{ block: 'codeBlock' }>;
 
 /**
  * Milkdown assigns a command's key when the editor builds the plugin, not when
