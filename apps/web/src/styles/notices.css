@@ -1,3 +1,9 @@
+/* Above the other corner notices: it is the one that says nothing here saves. */
+.tab-stale-bar {
+	inset-block-end: 9rem;
+	z-index: 40;
+}
+
 /* ---- Notices floated over the shell ------------------------------------- */
 
 /* Everything this screen floats over the page goes in one stack, so two at
@@ -54,7 +60,7 @@
 }
 
 /* Words are at stake, so neither is allowed to read as a footnote — the same
-   reason `.banner-alert` exists. The colour is not carrying this on its own:
+   reason `.banner-alert` (`install.css`) exists. The colour is not carrying this on its own:
    it is the one thing a reader may not be able to see. */
 .toast-warning span,
 .toast-error span {

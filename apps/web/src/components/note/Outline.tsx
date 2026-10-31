@@ -9,7 +9,7 @@ import { usePressAway } from '../ui/usePressAway.js';
  * The note's headings, down the side, as somewhere to jump to.
  *
  * Inside `.note-view` rather than beside it. `.app-shell` is a three-column
- * grid with exactly one child per column (`styles/`, `routes/index.tsx`), so
+ * grid with exactly one child per column (`styles/shell.css`, `routes/index.tsx`), so
  * a fourth child there takes the sidebar's column and pushes the note view into
  * an implicit second row. `.note-view` is a flex column and a rail costs it
  * nothing.

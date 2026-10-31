@@ -1,3 +1,19 @@
+.scratchpad {
+	grid-column: 2 / -1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	overflow-y: auto;
+	background: var(--bg);
+}
+
+.scratchpad-scroll {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-l);
+	padding: var(--space-l) var(--gutter) 4rem;
+}
+
 /* One line, as wide as a reader's line and no wider, until it is pressed. */
 .take-note {
 	position: relative;

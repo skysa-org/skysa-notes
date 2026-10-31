@@ -1,6 +1,6 @@
-/* ---- A tab a newer build has superseded --------------------------------- */
+/* ---- Dialogs, and the steps asked in them ------------------------------- */
 
-/* A wrapper only so there is something to make inert; it must not become a
+/* A tab a newer build has superseded. A wrapper only so there is something to make inert; it must not become a
    box, or the shell inside loses the height it takes from the page. */
 .tab-gate {
 	display: contents;

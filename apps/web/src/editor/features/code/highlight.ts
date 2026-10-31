@@ -13,7 +13,7 @@ import type { LanguageSource } from './languages.js';
  *
  * One highlighter and one set of class names serve rich mode and raw mode:
  * ProseMirror gets the classes as inline decorations, CodeMirror gets the same
- * object through `syntaxHighlighting`, and `styles/` has one palette to
+ * object through `syntaxHighlighting`, and `styles/base.css` has one palette to
  * paint. Two lists of token colours that could disagree about what a keyword
  * looks like would be a bug nobody would ever see in a test.
  *

@@ -1,7 +1,7 @@
 /* ---- Touch ---------------------------------------------------------------- */
 
 /*
- * A finger is not a pointer. Every control above is sized for a mouse, from
+ * A finger is not a pointer. Every control in the files before this one is sized for a mouse, from
  * the 1.5rem editor tabs to the 30px rows of a menu, and on a touch screen
  * that is a row of targets a thumb covers two of. Here, and only where the
  * primary pointer is coarse, each one is at least `--tap` both ways: 2.75rem,

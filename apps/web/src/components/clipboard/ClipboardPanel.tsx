@@ -50,7 +50,7 @@ import { inEditor } from './useFileDropGuard.js';
  * window's source dropdown. Shown where the user has asked for it on this
  * device, from the storage menu. Holding anything, it is featured, edged and
  * glowing in the brand's colour; the edge thickens inward while files are
- * dragged over the window, most of all over itself (`styles/`).
+ * dragged over the window, most of all over itself (`styles/clipboard.css`).
  *
  * Things come in by Paste, which reads the browser's clipboard (text or a
  * picture); by a keyboard paste, a drop anywhere in the window but on a

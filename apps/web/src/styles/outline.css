@@ -2,7 +2,7 @@
 
 /*
  * A row inside the note view, not a fourth column of `.app-shell` — see the
- * comment on `.app-frame`. The editor keeps the space it had; the rail takes
+ * comment on `.app-frame` (`shell.css`). The editor keeps the space it had; the rail takes
  * its own, and disappears with the note that has no headings in it.
  */
 .note-body {
