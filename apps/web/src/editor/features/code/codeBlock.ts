@@ -8,6 +8,7 @@ import { iconElement, type IconName } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import type { CodeDisplayStore } from '../../../store/codeDisplay.js';
 import { removeNode } from '../../rich/nodeBar.js';
+import { stringAttr } from '../../rich/schema.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
 
 /**
@@ -40,10 +41,7 @@ const COPIED_SHOWN_MS = 1500;
 const DETECT = t('editor.codeBlock.detect');
 
 /** The word in the file, which may be an alias or something never heard of. */
-const languageOf = (node: ProseNode): string => {
-	const language: unknown = node.attrs.language;
-	return typeof language === 'string' ? language : '';
-};
+const languageOf = (node: ProseNode): string => stringAttr(node, 'language');
 
 /**
  * The option that word picks out. A fence saying `js` is JavaScript and the

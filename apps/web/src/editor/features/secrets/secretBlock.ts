@@ -16,7 +16,7 @@ import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
-import { PARAGRAPH_NODE } from '../../rich/schema.js';
+import { PARAGRAPH_NODE, stringAttr } from '../../rich/schema.js';
 import { secretHostCtx } from './secretHost.js';
 import {
 	createSecretPanels,
@@ -56,16 +56,10 @@ import {
 
 const SECRET = 'secret';
 
-const valueOf = (node: ProseNode): string => {
-	const value: unknown = node.attrs.value;
-	return typeof value === 'string' ? value : '';
-};
+const valueOf = (node: ProseNode): string => stringAttr(node, 'value');
 
 /** What its fence says after `age`, exactly as it says it: its label, or nothing. */
-const labelOf = (node: ProseNode): string => {
-	const label: unknown = node.attrs.label;
-	return typeof label === 'string' ? label : '';
-};
+const labelOf = (node: ProseNode): string => stringAttr(node, 'label');
 
 /** A fenced block that is a secret: `age`, and armor that reads (`isSecretBlock`). */
 const isSecretCode = (node: MarkdownNode): boolean =>
