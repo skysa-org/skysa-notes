@@ -10,8 +10,12 @@ Update it when a decision changes.
 It is not a to-do list: open work lives in GitHub issues.
 The record of how the product was built is [`history.md`](history.md).
 
+Every heading has an anchor that does not change with its number or its wording, such as `ARCHITECTURE.md#sync-loop-per-connection`, and a numbered one has its number as well (`#s7`, `#s5-1`).
+Cite by anchor from now on; a citation such as `§7, "The scratchpad"` still works, and a test checks that each one leads somewhere.
+
 ---
 
+<a id="core-decisions-settled"></a><a id="s1"></a>
 ## 1. Core decisions (settled)
 
 | Decision | Choice | Why |
@@ -42,6 +46,7 @@ Non-goals for v1: real-time collaboration, sharing, full-drive access, mobile-na
 
 ---
 
+<a id="architecture-overview"></a><a id="s2"></a>
 ## 2. Architecture overview
 
 ```
@@ -69,6 +74,7 @@ If the backend is down, the app still works offline and can sync to OAuth provid
 
 ---
 
+<a id="note-format-and-directory-layout"></a><a id="s3"></a>
 ## 3. Note format and directory layout
 
 Remote root folder (app-owned), `skysa-notes/` (`APP_FOLDER_NAME`):
@@ -294,6 +300,7 @@ Rules:
   A cursor read while the folder was hidden has passed over every item made since, so schema version 12 drops every source's cursor once, as version 10 did for the scratchpad.
 
 ---
+<a id="provider-adapter-interface"></a><a id="s4"></a>
 ## 4. Provider adapter interface
 
 Every provider implements this.
@@ -379,7 +386,7 @@ Semantics the signatures do not carry:
   Every other capability question is answered by behaviour rather than a flag; this one cannot be, because the wrong answer is silent and costs a file.
 - `write` is create-or-update, never a blind overwrite.
   No `expectedVersion` means "I expect nothing here" — literally WebDAV's `If-None-Match: *` — so a file already at that path is a `ConflictError`.
-  That is what makes §7's "remote deleted, local dirty → re-create on push" safe: if the file came back in the meantime the write conflicts instead of clobbering it.
+  That is what makes §7's rule of re-creating on push a dirty note deleted remotely safe: if the file came back in the meantime the write conflicts instead of clobbering it.
   An `expectedVersion` for a path with no file is a `NotFoundError`.
 - `createFolder` and `delete` are idempotent, so a queued op is always safe to replay.
 - `move` may or may not change `version` — Dropbox's `rev` survives it, OneDrive's `eTag` does not — so the caller stores the returned entry rather than assuming either way.
@@ -448,8 +455,10 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
 
 ---
 
+<a id="provider-specifics"></a><a id="s5"></a>
 ## 5. Provider specifics
 
+<a id="google-drive"></a><a id="s5-1"></a>
 ### 5.1 Google Drive
 - Scope: `https://www.googleapis.com/auth/drive.file` plus `openid email` for identity.
   Non-restricted; standard OAuth verification only.
@@ -570,6 +579,7 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
 - Tokens: backend exchanges the auth code with `access_type=offline&prompt=consent` to get a refresh token.
   Access tokens last 1h; client requests a new one from `/api/token` on `AuthError` or proactively at 55m.
 
+<a id="onedrive-microsoft-graph"></a><a id="s5-2"></a>
 ### 5.2 OneDrive (Microsoft Graph)
 - Scopes: `Files.ReadWrite.AppFolder offline_access openid email`.
   User consent only.
@@ -636,6 +646,7 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
 - Tokens: refresh tokens issued to the backend and **rotated on every refresh** — `/api/token` stores the new one; access tokens ~1h.
   Microsoft has no per-app revoke, so disconnecting deletes the row and answers `revoked: false` (§9).
 
+<a id="dropbox"></a><a id="s5-3"></a>
 ### 5.3 Dropbox
 - App type: **App folder** access.
   Scopes: `files.metadata.read files.metadata.write files.content.read files.content.write account_info.read`.
@@ -683,6 +694,7 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
   Access tokens ~4h.
 - Note: production apps need Dropbox "production" approval once past the dev user cap; App-folder apps have a light review.
 
+<a id="webdav"></a><a id="s5-4"></a>
 ### 5.4 WebDAV
 *Deferred indefinitely (2026-09-17).*
 WebDAV is not being built.
@@ -709,6 +721,7 @@ What follows is the design as planned, kept so it need not be worked out again i
 ---
 - The adapter takes a `fetch`-like function, so it can point at the proxy in the browser and at the server directly in tests; a Nextcloud container was the planned test target.
 
+<a id="backend"></a><a id="s6"></a>
 ## 6. Backend
 
 Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`.
@@ -866,6 +879,7 @@ Keep it boring.
   One consequence of Google's model is worth keeping written down even now that only one flow exists: Google revokes every grant to a project at once, so disconnecting storage revokes the whole project's access for that user — there is simply nothing else left for it to take down.
 - WebDAV proxy: stream request/response bodies straight through (`c.req.raw.body` → upstream `fetch` → return `Response`); enforce a 30 s upstream timeout with `AbortSignal.timeout` and a 20 MB cap regardless of Cloudflare plan limits.
 
+<a id="storage-oauth-as-built"></a>
 ### Storage OAuth, as built (Phase 2)
 
 Dropbox is the first storage flow and the shape the others follow.
@@ -953,6 +967,7 @@ Swap it for the pool once that supports Vitest 5.
 Binding the connection id as AAD would stop a ciphertext copied between rows from decrypting, but an attacker who can write to `connections` has already lost the user the game.
 Recorded here rather than done, because the seal/open signature is cheaper to change now than after WebDAV credentials use it too.
 
+<a id="per-connection-credentials"></a>
 ### Per-connection credentials (Phase 7)
 
 Until Phase 7 a user held **at most one connection**, because in `storage-first` any connected account signed you in as that user: two connections under one user would cross-authorise, and whoever held the OneDrive account would get tokens for the Dropbox one.
@@ -1076,7 +1091,7 @@ The store layer was already keyed by connection; what was singular was everythin
   *Revised 2026-10-02:* the devices are now the *other* devices — this one cannot be removed from itself, and "this device" told the user nothing they did not know — and their rows fold behind a line that says how many there are ("2 other devices signed in on this account"), which is still asked for on open and still said without opening anything.
   The count is what the control was for: a theft shows as one more device than the user has.
   Open, each row names its device by its browser at sign-in (`grants.device`, below).
-  *Revised 2026-10-05:* in a wide window's sidebar, where the panel is now one line and a gear (§8, "The storage panel gave connection management up entirely"), the count is a device icon and a number in that line, beside the gear, and the rows open over everything from it.
+  *Revised 2026-10-05:* in a wide window's sidebar, where the panel is now one line and a gear (`history.md`, "The storage panel gave connection management up entirely"), the count is a device icon and a number in that line, beside the gear, and the rows open over everything from it.
   It is not in the gear's menu with the rest: there it would be said only to a user who went looking, and being said unasked is the property this control is for.
   *Revised 2026-10-06:* a compact window's source dropdown ends in the same line (§8), so the count is there too, at the line's end, and opens the same rows over everything; the fold-out list it had there is gone.
 - **A disconnect names the source it is for.**
@@ -1136,6 +1151,7 @@ A grant from before `0006`, or from a browser the label does not know, has none 
 The device list plus `DELETE` is enough to act on a theft the user knows about; anything more would need something that can say *who* is asking, and after 2026-09-18 there is deliberately no such thing: the credential names a connection, not a person.
 A revocation list is the one of the three that could still be built on what exists.
 
+<a id="data-model-drizzle-d1"></a>
 ### Data model (Drizzle, D1)
 ```
 users               id, email, email_verified, created_at              (no caller; to be dropped — #118)
@@ -1152,6 +1168,7 @@ Never log secrets.
 Never return them to the client.
 The credential behind `secret_hash` is never stored at all.
 
+<a id="endpoints"></a>
 ### Endpoints
 | Route | Purpose |
 |---|---|
@@ -1174,6 +1191,7 @@ Two refusals, and the difference is actionable: `credential_required` (401) mean
 There are no sign-in routes, here or anywhere: identity is the storage connection (§6).
 `AUTH_MODE=account-first` refuses to boot, which is now a refusal to honour a setting that describes something this project has decided not to build rather than something it has not built yet — the env var itself goes with the tables (issue #118).
 
+<a id="change-relay"></a>
 ### Change relay (optional, 2026-10-05)
 
 Where the operator turns it on, a device that has pushed tells the API and the API tells the connection's other devices, which then pull; it carries that something changed, and nothing else.
@@ -1181,8 +1199,10 @@ The decision record is [`decisions/0003-change-relay.md`](decisions/0003-change-
 
 ---
 
+<a id="local-store-and-sync-engine-client"></a><a id="s7"></a>
 ## 7. Local store and sync engine (client)
 
+<a id="indexeddb-schema-dexie"></a>
 ### IndexedDB schema (Dexie)
 ```
 notes        [connectionId + id (uuid)], path, title, body, frontmatter,
@@ -1482,6 +1502,7 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
   A pending file that can go is something to move on its own (`movable`), and the button counts it: "Move 1 note and 1 file to …"; a copy alone is nothing to move, and a Move is never a discard of one.
 - **A detached source never downloads**, so nothing but its own rows can bring its bytes back: the cache's eviction has to spare them.
 
+<a id="sync-loop-per-connection"></a>
 ### Sync loop (per connection)
 1. **Pull**: `changes(cursor)` → for each remote entry:
    - new/updated remote, local clean → fetch content, upsert local, update `remoteVersion`.
@@ -1580,6 +1601,7 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
 3. Triggers: app open, tab regains focus, `online` event, 60s interval while visible, Background Sync API when available (best effort), immediately after a local edit (debounced 2s), and — where the deployment runs the change relay (§6) — a notice that another device of the connection has pushed, and 3 and 10 s after the last such notice.
    The relay is one more trigger, never a replacement for the others: it hears nothing of edits made in the folder by other tools.
 
+<a id="folder-renames-moves"></a>
 ### Folder renames/moves
 A remote folder rename or move is applied locally unconditionally, including when notes inside it are dirty: the move is metadata-only and does not conflict with content edits.
 Dirty notes keep their pending content ops and simply get their `path` rewritten; queued ops that reference old paths are rewritten before push.
@@ -1596,6 +1618,7 @@ So the whole subtree came back — the notebook at its old path, ancestors conju
 The duplicate was permanent and on the remote as well as in the sidebar.
 Found by re-parenting a notebook that had been dragged into place a round earlier (2026-09-22): a directory this device made in the round before is exactly what its own next pull reports, which is why it needed a drag, a sync, and another drag to show up at all.
 
+<a id="re-arranging-is-moving"></a>
 ### Re-arranging is moving
 
 The sidebar's tree is the user's actual directory structure, and the note list is sorted by when each note was made, newest first — not by when it was last edited, which it was until 2026-10-01: an edit moved the row being typed into to the top under the user.
@@ -1619,26 +1642,31 @@ The URL names the open notebook by path, and a move changes that path — for th
 So a notebook move rebases the open folder, or moving the notebook you are in throws you out of it and into the first one in the tree.
 A note move follows the note only when it is the one open in the editor: a note dragged out of a list the user is reading has left, which is all they asked for, but the note they are *writing in* would otherwise sit beside a sidebar lighting up the notebook it has just left — the same disagreement opening a search result has to avoid.
 
+<a id="the-sidebar-opens-as-far-as-it-is-asked"></a>
 ### The sidebar opens as far as it is asked (2026-10-05)
 
 A notebook with notebooks inside it lists them only while it is open, and a notebook starts shut: a library brought in from elsewhere can be hundreds of notebooks nested three deep, and listed whole the sidebar was a column to scroll to find anything in.
 The decision record is [`decisions/0004-the-sidebar-opens-as-far-as-it-is-asked.md`](decisions/0004-the-sidebar-opens-as-far-as-it-is-asked.md).
 
+<a id="pinned-to-the-top"></a>
 ### Pinned to the top (2026-10-05)
 
 A notebook or a note can be pinned, from its `⋯` or a right-click on its row: "Pin to top", first in the menu, and "Unpin" once it is.
 The decision record is [`decisions/0005-pinned-to-the-top.md`](decisions/0005-pinned-to-the-top.md).
 
+<a id="a-notebook-lists-what-is-inside-it"></a>
 ### A notebook lists what is inside it (2026-10-07)
 
 A notebook's list shows its own notes, then the notes of every notebook inside it, at any depth.
 The decision record is [`decisions/0009-a-notebook-lists-what-is-inside-it.md`](decisions/0009-a-notebook-lists-what-is-inside-it.md).
 
+<a id="where-the-user-is-in-the-url"></a>
 ### Where the user is, in the URL (2026-10-06)
 
 The hash names the place the user is, a slug for each name, so the title says where they are and Back and Forward work.
 The decision record is [`decisions/0007-where-the-user-is-in-the-url.md`](decisions/0007-where-the-user-is-in-the-url.md), and "A dropdown is a step on a phone" is in it.
 
+<a id="conflict-rule-concrete"></a>
 ### Conflict rule (concrete)
 Remote wins the original path.
 Local content is saved as a new note at `<path minus .md> (conflict <YYYY-MM-DDTHH-mm>).md` with the same frontmatter except a fresh `id`.
@@ -1651,6 +1679,7 @@ The name is deliberately **not** slugified: the copy has to be recognisable as t
 
 The names are `packages/core/src/names/conflicts.ts`; the copy's contents, with its own `id`, are `packages/core/src/sync/conflicts.ts`.
 
+<a id="edits-the-editor-has-not-saved-yet"></a>
 ### Edits the editor has not saved yet
 "Local dirty" is the `dirty` flag, and an edit reaches it only when autosave runs, up to 2 s after the keystroke.
 Until then the row is clean, and a pull may replace its body or delete it.
@@ -1738,6 +1767,7 @@ The store cannot see the edit, so the save decides instead (`saveNoteBody`, `app
   That errs toward keeping the words.
 - Two tabs typing into the same note is not covered: edits never change the origin.
 
+<a id="what-the-loop-above-left-open-and-how-the-engine-answers-it"></a>
 ### What the loop above left open, and how the engine answers it
 
 The branch table is the specification; these are the cases it does not mention, each decided in the direction that cannot lose an edit.
@@ -2353,61 +2383,73 @@ Unless a command moved it deliberately — `app.search` exists to put the cursor
 Only the *label* cares which keyboard it is, and it is allowed to be wrong: a wrong label is a smaller failure than a dead key.
 Chords without a modifier are ignored while the user is in a text box, or every one of them would be unreachable from the one place people spend their time.
 
+<a id="getting-a-library-out"></a>
 ### Getting a library out (2026-09-24)
 
 "Download all notes" writes the source showing as one zip of markdown, from the palette (`app.download`) or the storage panel.
 The decision record is [`decisions/0002-getting-a-library-out.md`](decisions/0002-getting-a-library-out.md).
 
+<a id="getting-a-library-in"></a>
 ### Getting a library in (2026-10-05)
 
 "Import notes" brings notes in from the user's disk, from the storage panel of the source showing (its gear, or the source's `⋯`).
 The decision record is [`decisions/0006-getting-a-library-in.md`](decisions/0006-getting-a-library-in.md), and "Into the scratchpad" is in it.
 
+<a id="the-clipboard"></a>
 ### The clipboard (2026-10-06)
 
 A clipboard a source's devices share.
 The decision record is [`decisions/0008-the-clipboard.md`](decisions/0008-the-clipboard.md).
 
+<a id="the-scratchpad"></a>
 ### The scratchpad (2026-10-07)
 
 Quick notes on a wall of cards.
 The decision record is [`decisions/0010-the-scratchpad.md`](decisions/0010-the-scratchpad.md).
 
+<a id="the-vault"></a>
 ### The vault (2026-10-15)
 
 What the app calls the place a source keeps what only its devices can read.
 The decision record is [`decisions/0014-the-vault.md`](decisions/0014-the-vault.md).
 
+<a id="secrets-in-a-note"></a>
 ### Secrets in a note (2026-10-14)
 
 Words the folder holds only encrypted.
 The decision record is [`decisions/0013-secrets-in-a-note.md`](decisions/0013-secrets-in-a-note.md), and "Replacing the key", "The device's own lock, where there is one" and "Notes from another source" are in it.
 
+<a id="passwords-in-the-vault"></a>
 ### Passwords in the vault (2026-10-15)
 
 A password manager, kept where the secrets are.
 The decision record is [`decisions/0015-passwords-in-the-vault.md`](decisions/0015-passwords-in-the-vault.md).
 
+<a id="filling-in-on-a-site"></a>
 ### Filling in on a site (2026-10-16)
 
 A bookmarklet fills a site's login from the passwords, and remembers one typed there.
 The decision record is [`decisions/0017-filling-in-on-a-site.md`](decisions/0017-filling-in-on-a-site.md).
 
+<a id="large-libraries"></a>
 ### Large libraries (2026-10-08, #275)
 
 A long list draws only what is near the screen, so a phone can hold a notebook of a thousand notes.
 The decision record is [`decisions/0012-large-libraries.md`](decisions/0012-large-libraries.md).
 
+<a id="the-apps-words"></a>
 ### The app's words (2026-10-07)
 
 Every word the app shows or reads out comes from one catalog, `apps/web/src/i18n/`, rather than being written where it is said, so that a translation is a second catalog and not a change to every component.
 The decision record is [`decisions/0011-the-apps-words.md`](decisions/0011-the-apps-words.md).
 
+<a id="dialogs"></a>
 ### Dialogs (2026-10-15)
 
 Every dialog is built one way (`components/ui/Dialog.tsx`).
 The decision record is [`decisions/0016-dialogs.md`](decisions/0016-dialogs.md).
 
+<a id="editor"></a>
 ### Editor
 
 Two modes over one markdown string.
@@ -2860,6 +2902,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
 
 ---
 
+<a id="pwa-specifics"></a><a id="s8"></a>
 ## 8. PWA specifics
 - `vite-plugin-pwa` in `generateSW` mode to start (switch to `injectManifest` only if a custom worker becomes necessary): precache app shell (the answer to a navigation to the app's own route, and no other; below), `NetworkOnly` for `/api/*` (never a cached answer: binding follows what `/api/connection` says, see Phase 2), `NetworkOnly` for provider API origins, `registerType: 'prompt'` with an in-app "update available" toast.
 - Manifest generated by the plugin: standalone display, icons, and a `share_target` that feeds the clipboard (below, "Shared to the app").
@@ -3015,6 +3058,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
 
 ---
 
+<a id="security-checklist"></a><a id="s9"></a>
 ## 9. Security checklist
 - PKCE + `state` on every OAuth flow; `state` bound to the browser that started it by the signed `__Host-skysa_flow` cookie, which also carries the device's credential hash (§6, "Per-connection credentials").
   `/start` is a same-origin POST, so neither the hash nor `state` can be planted by a link.
@@ -3107,12 +3151,14 @@ A test checks the answer against a parse of the whole body over four thousand bo
 
 ---
 
+<a id="build-record"></a><a id="s10"></a>
 ## 10. Build record
 
 The record of how the product was built, phase by phase, is now [`history.md`](history.md).
 A citation of "Phase N" means the heading of that name there, or "§10 Phase N" the same.
 Phase 9, the sign-in layer, was never built: "Cleaning up after account-first" there says what became of it.
 
+<a id="disconnecting-without-an-invisible-pile"></a>
 ### Disconnecting without an invisible pile (2026-09-19)
 
 A source that is let go must not leave notes where nobody can see them, and must not take unsent work with it unasked.
@@ -3120,6 +3166,7 @@ The decision record is [`decisions/0001-disconnecting-without-an-invisible-pile.
 
 ---
 
+<a id="repo-layout"></a><a id="s11"></a>
 ## 11. Repo layout
 
 ```
@@ -3277,6 +3324,7 @@ Git is asked only to *narrow* the walk, and only when its answer names that same
 
 ---
 
+<a id="resolved-decisions-formerly-open-questions"></a><a id="s12"></a>
 ## 12. Resolved decisions (formerly open questions)
 
 1. **App folder name:** `skysa-notes`, exported as `APP_FOLDER_NAME` from `packages/core/src/config.ts`.
@@ -3311,14 +3359,17 @@ Git is asked only to *narrow* the walk, and only when its answer names that same
      Neither `undefined` may be read as "there are none", or the app opens one folder and jumps to another a frame later — with no notebooks at all it would briefly tell a user whose whole library is loose notes that they have nothing.
      `selectedFolderPath` takes the count, not a boolean, for exactly this reason.
 
+<a id="distribution-and-licensing"></a><a id="s13"></a>
 ## 13. Distribution and licensing
 
+<a id="repo"></a>
 ### Repo
 One public repo, `skysa-notes`, containing everything in §11.
 It is self-hostable and complete: placeholders only in `wrangler.toml`, `.dev.vars.example` listing every key, no operator credentials or deployment-specific configuration in the tree.
 Defaults are `AlwaysAllowedEntitlementProvider`, `AUTH_MODE=storage-first`, and `ENABLED_PROVIDERS` defaulting to what an operator can run without registering several apps (`dropbox`).
 Anyone who needs different behavior composes it through `createApp` (§6) rather than forking.
 
+<a id="license-agpl-3-0-cla-decided-confirm-final-cla-text-with-a-lawyer"></a>
 ### License: AGPL-3.0 + CLA (decided; confirm final CLA text with a lawyer)
 - **AGPL-3.0** for all code — version 3 **only** (SPDX `AGPL-3.0-only`).
   `NOTICE` carries the grant and says version 3, the four `package.json` files say `AGPL-3.0-only`, and both CLAs promise version 3; they said "or later" until 2026-09-18, which this document never did, and a licence field that disagrees with the notice is two answers to one question.
@@ -3346,6 +3397,7 @@ Also:
     Each is used unmodified as a tool, which is what those licenses are written for.
     Re-run this scan before publishing rather than trusting the list — it is a snapshot, not a rule.
 
+<a id="self-hosting-model"></a>
 ### Self-hosting model
 A self-hoster needs: a Cloudflare account (Workers Free is sufficient indefinitely for personal use; the daily limits are unreachable by one person), their own Google/Entra/Dropbox app registrations (named `skysa-notes` so folder names match), and ~15 minutes with `docs/self-hosting.md`.
 Their Google app is in "Testing" (at most 100 test users, refresh tokens expiring after 7 days) until they publish it.
@@ -3360,6 +3412,7 @@ Operators running an instance for many users should know two things, both to be 
 - Back up D1 with `wrangler d1 export` on a cron trigger.
   The database holds encrypted refresh tokens and connection metadata, never note content.
 
+<a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>
 ## 14. Not planned (possible future add-ons)
 
 None of these are in any phase.
@@ -3385,6 +3438,7 @@ Listed so the reasoning isn't lost if they come up.
   What it would have taken, kept so the cost is not re-discovered: an `identities` table and `IdentityProvider` adapters for Google and Microsoft; merge-by-verified-email, whose hard part is that the *existing* user's email must be verified too, since a storage-first user is created with whatever the storage provider called the account and a Microsoft `email` claim is set by a tenant's admin — matching on the incoming provider alone lets a crafted tenant sign in as someone else; explicit in-session linking (`?link=1`) for Hide-My-Email relays and differing addresses; a second Google Cloud project, because Google revokes every grant to a project at once and disconnecting storage would otherwise sign the user out of their sign-in; and a reconciliation between two authorization paths, since a user would own connections that already have credentials of their own.
   The three add-ons that hung off it went with it: **Apple sign-in** (a `.p8` JWT client secret rotated every six months, `form_post` callback, name delivered only on first authorization, relay addresses), **Facebook sign-in** (email not guaranteed, so an email-confirmation step, plus Meta App Review and possible Business Verification), and **magic link** (an `email` identity type, transactional email with SPF/DKIM/DMARC, and a one-time-code fallback for the PWA's link-opens-in-another-browser problem).
 
+<a id="github-setup"></a><a id="s15"></a>
 ## 15. GitHub setup
 
 Organization **`skysa-org`** — `skysa` was taken.

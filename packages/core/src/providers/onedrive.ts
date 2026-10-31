@@ -55,8 +55,8 @@ import {
  * Graph is id-based and this interface is path-based, and the two meet badly in
  * one place: the delta feed carries no paths at all. See `changes` below.
  *
- * Not in the Graph reference pages, and so still to be confirmed against a live
- * account (docs/ARCHITECTURE.md, Phase 3): that an upload by path answers
+ * Not in the Graph reference pages, and so checked against a live account, with
+ * the answers in docs/ARCHITECTURE.md §5.2: that an upload by path answers
  * `@microsoft.graph.conflictBehavior=fail` with `409 nameAlreadyExists`, that an
  * upload by id answers a stale `If-Match` with `412`, that a move honours the
  * same `conflictBehavior` (the move page documents only `if-match`), and that

@@ -82,7 +82,7 @@ describe('push', () => {
 	});
 
 	it('re-creates a note whose remote copy was deleted', async () => {
-		// §7's "remote deleted, local dirty" arriving the other way round: the
+		// §7's rule for a remote delete of a dirty note, arriving the other way round: the
 		// push finds nothing there. The retry is a create, not an overwrite.
 		const entry = await remoteFile('a.md', 'one\n');
 		world.store.put({

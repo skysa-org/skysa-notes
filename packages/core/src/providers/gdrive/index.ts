@@ -74,8 +74,8 @@ import {
  *   the tree in `idTree.ts`, and a folder that arrives from elsewhere is listed
  *   here, since the feed will not say what is inside it.
  *
- * Not in the reference pages, and so still to be confirmed against a live
- * account (docs/ARCHITECTURE.md, Phase 4): what an unusable page token answers; whether
+ * Not in the reference pages, and so checked against a live account, with the
+ * answers in docs/ARCHITECTURE.md §5.1: what an unusable page token answers; whether
  * trashing or renaming a folder lists its descendants; that files this app made
  * on one device are visible from another under `drive.file`; that a name search
  * finds a file created a moment before (verify-after-create and every path walk

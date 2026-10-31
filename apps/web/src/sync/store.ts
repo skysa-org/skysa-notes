@@ -116,7 +116,7 @@ type Scope = Pick<
  * tombstone meeting a remote change is a conflict, and the conflict's copy is a
  * brand-new live note holding the text the user deleted: the note comes back in
  * the sidebar and on the remote. Reported clean, the pull writes the row back
- * and the delete behind it purges it — §7's "the delete wins".
+ * and the delete behind it purges it — §7: the delete wins.
  */
 const isDirty = (note: NoteRecord): boolean => note.dirty === 1 && isLive(note);
 

@@ -71,6 +71,12 @@ What is expected of a change:
   the licence. Anything that reaches the shipped bundle must be MIT, Apache-2.0
   or ISC. Build- and test-time tools are held to a looser line — `docs/ARCHITECTURE.md`
   §13 records what is already in the tree and why — but say which it is.
+- **A doc comment says what the code promises, in one to five lines.** It sits on
+  the declaration it describes. History and reasoning go in `docs/ARCHITECTURE.md`,
+  a record in `docs/decisions/` or the pull request, and the comment links them by
+  anchor (`docs/ARCHITECTURE.md#the-scratchpad`). Older comments run longer; shorten
+  one when you are changing what it describes.
+- **Docs are one sentence per line**, so a diff shows the sentence that changed.
 - **No `let`, no loops, no mutation** outside tests; the lint rules say so. The
   few loops kept (a byte scan where recursion would go too deep) sit behind a
   disable comment that says why. Each workaround has one helper: a value that
