@@ -1,3 +1,5 @@
+import { cell } from '@skysa/core';
+
 import { t } from '../i18n/t.js';
 import { createEmitter } from '../store/emitter.js';
 import type { Sealer, SecretHost } from './secretHost.js';
@@ -296,7 +298,7 @@ export const reveal = async (
 export type NotRevealed = 'other' | 'unreadable';
 
 /** Why a secret could not be revealed, said where it is. */
-export const NOT_REVEALED: Readonly<Record<NotRevealed, () => string>> = {
+const NOT_REVEALED: Readonly<Record<NotRevealed, () => string>> = {
 	other: () => t('editor.secret.differentKey'),
 	unreadable: () => t('editor.secret.unreadable'),
 };
@@ -305,11 +307,7 @@ export const NOT_REVEALED: Readonly<Record<NotRevealed, () => string>> = {
  * "Add its key", for a secret made with a key the device does not have:
  * pressed, the host asks for that key, and `added` runs once it is kept.
  */
-export const addKeyButton = (
-	host: SecretHost,
-	armor: string,
-	added: () => void
-): HTMLButtonElement => {
+const addKeyButton = (host: SecretHost, armor: string, added: () => void): HTMLButtonElement => {
 	const button = document.createElement('button');
 	button.setAttribute('type', 'button');
 	button.setAttribute('class', 'secret-add-key');
@@ -325,6 +323,71 @@ export const addKeyButton = (
 			});
 	});
 	return button;
+};
+
+interface RevealOptions {
+	readonly into: HTMLElement;
+	readonly host: SecretHost;
+	readonly armor: () => string;
+	readonly press: (armor: string) => Promise<NotRevealed | undefined>;
+	readonly problem?: NotRevealed;
+	readonly gone?: () => boolean;
+}
+
+interface RevealControl {
+	readonly button: HTMLButtonElement;
+	readonly press: () => void;
+}
+
+/**
+ * Reveal, why it could not be, and "Add its key" where it was made with a key
+ * the device does not have, put at the end of `into`. `press` reveals it, and
+ * answers why not where that is to be said here; `problem` is what to say as
+ * it is drawn, for an editor that draws it again to say it (`secretRaw.ts`).
+ */
+export const revealControl = ({
+	into,
+	host,
+	armor,
+	press,
+	problem,
+	gone,
+}: RevealOptions): RevealControl => {
+	const button = document.createElement('button');
+	button.setAttribute('type', 'button');
+	button.setAttribute('class', 'secret-reveal');
+	button.append(t('editor.secret.reveal'));
+	const said = document.createElement('span');
+	said.setAttribute('class', 'secret-note');
+	said.setAttribute('role', 'status');
+	into.append(button, said);
+
+	const adding = cell<HTMLButtonElement | undefined>(undefined);
+	// An answer is about the armor that was pressed, whatever a pull has made of
+	// the block since.
+	const say = (why: NotRevealed | undefined, asked: string) => {
+		said.replaceChildren(why === undefined ? '' : NOT_REVEALED[why]());
+		adding.current?.remove();
+		adding.current = undefined;
+		if (why !== 'other' || gone?.() === true) return;
+		adding.current = addKeyButton(host, asked, pressed);
+		into.append(adding.current);
+	};
+	const pressed = () => {
+		const asked = armor();
+		say(undefined, asked);
+		button.setAttribute('disabled', '');
+		void press(asked)
+			.finally(() => {
+				button.removeAttribute('disabled');
+			})
+			.then((why) => {
+				say(why, asked);
+			});
+	};
+	button.addEventListener('click', pressed);
+	say(problem, armor());
+	return { button, press: pressed };
 };
 
 /**
@@ -354,7 +417,7 @@ export const insertSecret = async (
  * What is in every panel kept: all of it is in the note already, but for a
  * character an input method is still composing.
  */
-export const keepAll = (doc: SecretDocument, panels: SecretPanels): void => {
+const keepAll = (doc: SecretDocument, panels: SecretPanels): void => {
 	panels.all().forEach(([, { panel }]) => {
 		keep(doc, panels, panel);
 		keepLabel(doc, panels, panel);
@@ -368,7 +431,7 @@ const keepers = new WeakMap<object, () => void>();
  * Register what keeps `view`'s panels (`keepAll`), for `keepSecrets` to call;
  * the answer lets go of it, as the editor goes.
  */
-export const keepSecretsWith = (view: object, keep: () => void): (() => void) => {
+const keepSecretsWith = (view: object, keep: () => void): (() => void) => {
 	keepers.set(view, keep);
 	return () => {
 		keepers.delete(view);
@@ -390,11 +453,41 @@ export const keepSecrets = (view: object): void => {
  * Every panel closed as the tab locks, at once: what the lock is for is that
  * the words are not on screen. What is typed in them is kept first.
  */
-export const lockAll = (doc: SecretDocument, panels: SecretPanels): void => {
+const lockAll = (doc: SecretDocument, panels: SecretPanels): void => {
 	keepAll(doc, panels);
 	const draft = doc.draftAt();
 	panels.takeAll();
 	if (draft !== undefined) doc.endDraft();
+};
+
+/**
+ * An editor's panels for as long as it is there: closed as the tab locks, a
+ * new secret begun as the host asks (the palette), and kept when its owner
+ * asks (`keepSecrets`). The answer ends it, as the editor goes, and the words
+ * go with it: what they held is in the note already, a character still being
+ * composed included, where its owner asked first.
+ */
+export const secretSession = (
+	view: object,
+	doc: SecretDocument,
+	host: SecretHost,
+	panels: SecretPanels
+): (() => void) => {
+	const stopLock = host.locked(() => {
+		lockAll(doc, panels);
+	});
+	const stopReceiving = host.receive(() => {
+		void insertSecret(doc, host, panels);
+	});
+	const stopKeeping = keepSecretsWith(view, () => {
+		keepAll(doc, panels);
+	});
+	return () => {
+		stopKeeping();
+		stopLock();
+		stopReceiving();
+		panels.takeAll();
+	};
 };
 
 /**

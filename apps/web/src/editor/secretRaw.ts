@@ -18,23 +18,18 @@ import {
 } from '@codemirror/view';
 import { armor as armorOf, type Cell, cell, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
 
-import { t } from '../i18n/t.js';
 import type { SecretHost } from './secretHost.js';
 import type { SecretPanel } from './secretPanel.js';
 import {
-	addKeyButton,
 	createSecretPanels,
 	DRAFT,
-	insertSecret,
-	keepAll,
-	keepSecretsWith,
 	leftBehind,
-	lockAll,
-	NOT_REVEALED,
 	type NotRevealed,
 	reveal,
+	revealControl,
 	type SecretDocument,
 	type SecretPanels,
+	secretSession,
 } from './secretPanels.js';
 
 /**
@@ -577,31 +572,17 @@ const revealWidget = (
 	host: SecretHost
 ): WidgetType =>
 	widgetOf(() => {
-		const button = document.createElement('button');
-		button.setAttribute('type', 'button');
-		button.setAttribute('class', 'secret-reveal');
-		button.toggleAttribute('hidden', hidden);
-		button.append(t('editor.secret.reveal'));
-		button.addEventListener('click', () => {
-			button.setAttribute('disabled', '');
-			void press(armor).finally(() => {
-				button.removeAttribute('disabled');
-			});
-		});
-		const said = document.createElement('span');
-		said.setAttribute('class', 'secret-note');
-		said.setAttribute('role', 'status');
-		said.append(problem === undefined ? '' : NOT_REVEALED[problem]());
 		const bar = document.createElement('span');
 		bar.setAttribute('class', 'secret-raw-bar');
-		bar.append(button, said);
-		if (problem === 'other') {
-			bar.append(
-				addKeyButton(host, armor, () => {
-					void press(armor);
-				})
-			);
-		}
+		const { button } = revealControl({
+			into: bar,
+			host,
+			armor: () => armor,
+			// What it says is kept with the editor's, and drawn again from there.
+			press: (pressed) => press(pressed).then(() => undefined),
+			...(problem === undefined ? {} : { problem }),
+		});
+		button.toggleAttribute('hidden', hidden);
 		return bar;
 	});
 
@@ -664,15 +645,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 			};
 			const shown = cell(draw());
 			const stopShowing = panels.subscribe(said);
-			const stopLock = host.locked(() => {
-				lockAll(doc, panels);
-			});
-			const stopReceiving = host.receive(() => {
-				void insertSecret(doc, host, panels);
-			});
-			const stopKeeping = keepSecretsWith(view, () => {
-				keepAll(doc, panels);
-			});
+			const endSession = secretSession(view, doc, host, panels);
 			return {
 				shown,
 				press,
@@ -695,12 +668,8 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 				},
 				destroy: () => {
 					gone.current = true;
-					stopKeeping();
 					stopShowing();
-					stopLock();
-					stopReceiving();
-					// The editor is going: the words with it.
-					panels.takeAll();
+					endSession();
 				},
 			};
 		},
