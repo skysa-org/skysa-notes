@@ -67,7 +67,7 @@ import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from
  * other source, and nothing is carried into another account.
  *
  * Two things the sync store relies on, and so are guaranteed here
- * (docs/ARCHITECTURE.md, Phase 2 UI item):
+ * (docs/history.md, Phase 2 UI item):
  *
  * - **A row's key is its connection and its id**, so a row that moves is
  *   deleted and added, two notes of one id can meet where they land, and an

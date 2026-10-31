@@ -142,7 +142,7 @@ const RATE_LIMITED = new Set([
  * fires only for a shape that page does not document. It is there because the shared
  * Google error model puts the condition in `error.status`, and a quota read as
  * an ordinary failure blocks the queue over something that will pass. Whether
- * Drive ever sends it is on the live-check list (docs/ARCHITECTURE.md, Phase 4).
+ * Drive ever sends it is on the live-check list (docs/history.md, Phase 4).
  */
 const throttled = (failure: DriveFailure): boolean =>
 	failure.status === 429 ||

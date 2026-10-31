@@ -70,7 +70,7 @@ export const connectionRoutes = (deps: RouteDeps) => {
 			// The provider's own id for the account. Not a secret, and the client
 			// needs it: reconnecting the same account after a disconnect gets a new
 			// connection id, and only this says the notes it holds from before
-			// belong to it (docs/ARCHITECTURE.md, Phase 2).
+			// belong to it (docs/history.md, Phase 2).
 			accountId: connection.accountId,
 			rootId: connection.rootId,
 			createdAt: connection.createdAt.getTime(),

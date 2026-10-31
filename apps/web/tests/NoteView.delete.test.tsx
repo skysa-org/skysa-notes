@@ -115,7 +115,7 @@ describe('deleting a note with an edit still pending', () => {
 	 * the one before starting the other — and IndexedDB does not promise to
 	 * finish them in that order. Either order has to leave the note deleted: an
 	 * edit that lands on a tombstone is written into it and does not bring the
-	 * note back (§7, "the delete wins").
+	 * note back (§7: the delete wins).
 	 */
 	it('stays deleted, and closes', async () => {
 		const user = userEvent.setup();

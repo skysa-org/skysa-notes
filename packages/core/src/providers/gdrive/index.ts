@@ -75,7 +75,7 @@ import {
  *   here, since the feed will not say what is inside it.
  *
  * Not in the reference pages, and so still to be confirmed against a live
- * account (docs/ARCHITECTURE.md, Phase 4): what an unusable page token answers; whether
+ * account (docs/history.md, Phase 4): what an unusable page token answers; whether
  * trashing or renaming a folder lists its descendants; that files this app made
  * on one device are visible from another under `drive.file`; that a name search
  * finds a file created a moment before (verify-after-create and every path walk
