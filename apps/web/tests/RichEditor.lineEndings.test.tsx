@@ -17,7 +17,7 @@ import { render } from './support/notices.js';
  * found a difference and answered no, which is how every CRLF note in a user's
  * folder came to be told it contained markdown the rich editor could not show.
  *
- * Mocking `rich.js` would hide this entirely: the whole defect lives in what
+ * Mocking `rich/` would hide this entirely: the whole defect lives in what
  * the real transformer does with the real string.
  */
 

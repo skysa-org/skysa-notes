@@ -1,6 +1,6 @@
 import type { Editor } from '@milkdown/kit/core';
 
-import { createRichEditor, type RichEditorSetup } from '../../src/editor/rich.js';
+import { createRichEditor, type RichEditorSetup } from '../../src/editor/rich/createRichEditor.js';
 
 const editors: Editor[] = [];
 

@@ -2,7 +2,8 @@ import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Adoption } from '../src/editor/editorBinding.js';
-import { adoptBody, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
+import { adoptBody, whatIsLost } from '../src/editor/rich/adopt.js';
+import type { RichEditorSetup } from '../src/editor/rich/createRichEditor.js';
 import { RichEditor } from '../src/editor/RichEditor.js';
 
 /**
@@ -14,7 +15,7 @@ import { RichEditor } from '../src/editor/RichEditor.js';
 
 let setup: RichEditorSetup | undefined;
 
-vi.mock('../src/editor/rich.js', () => ({
+vi.mock('../src/editor/rich/createRichEditor.js', () => ({
 	createRichEditor: (options: RichEditorSetup) => {
 		setup = options;
 		return {
@@ -32,6 +33,9 @@ vi.mock('../src/editor/rich.js', () => ({
 			destroy: () => Promise.resolve(),
 		};
 	},
+}));
+
+vi.mock('../src/editor/rich/adopt.js', () => ({
 	adoptBody: vi.fn((): Adoption => 'replaced'),
 	whatIsLost: vi.fn(() => undefined),
 }));

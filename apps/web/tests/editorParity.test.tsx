@@ -18,7 +18,7 @@ import { EMPTY_QUERY, type FindQuery, type FindTarget } from '../src/editor/find
 import { rawFindTarget } from '../src/editor/findRaw.js';
 import { richFindTarget } from '../src/editor/findRich.js';
 import { RawEditor } from '../src/editor/RawEditor.js';
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { RichEditor } from '../src/editor/RichEditor.js';
 import type { SecretHost } from '../src/editor/secretHost.js';
 import { settleEditors } from '../src/store/heldEdits.js';

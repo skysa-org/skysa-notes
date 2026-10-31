@@ -2,7 +2,7 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

@@ -12,7 +12,7 @@ import {
 	setLink,
 	SLASH_COMMANDS,
 } from '../src/editor/commands.js';
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**

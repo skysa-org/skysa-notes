@@ -15,7 +15,7 @@ import {
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
 import { INSERT_COMMANDS, SLASH_COMMANDS } from '../src/editor/commands.js';
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { settleEditors } from '../src/store/heldEdits.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 

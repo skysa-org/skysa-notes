@@ -11,7 +11,7 @@ import {
 } from '../src/editor/attachHost.js';
 import { ATTACHMENT } from '../src/editor/attachment.js';
 import { selectedKey } from '../src/editor/nodeBar.js';
-import { currentMarkdown } from '../src/editor/rich.js';
+import { currentMarkdown } from '../src/editor/rich/adopt.js';
 import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
