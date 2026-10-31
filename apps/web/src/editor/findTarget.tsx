@@ -1,8 +1,7 @@
-import { cell } from '@skysa/core';
 import { createContext, type ReactNode, useContext, useState, useSyncExternalStore } from 'react';
 
-import { createEmitter } from '../store/emitter.js';
 import type { FindTarget } from './find.js';
+import { createOffers, type Offers } from './offers.js';
 
 /**
  * How the bar reaches whichever editor is open.
@@ -19,51 +18,17 @@ import type { FindTarget } from './find.js';
  * it, and setting React state from there is a cascading render — where telling
  * an external system is exactly what an effect is for.
  *
- * Exactly one editor is mounted at a time (`NoteView` renders one or the
- * other), so this holds one target and not a list. A mode switch unmounts one
+ * One editor is open at a time (`NoteView` renders one or the other; `offers.ts`
+ * for the moments it is giving way to another). A mode switch unmounts one
  * editor and mounts the other, which is why the bar keeps the query and the
  * editors keep only their own matches: the query is the user's and outlives the
  * editor it was typed against.
  */
 
-interface TargetStore {
-	/** Offer this editor; the returned function takes it away again. */
-	readonly offer: (target: FindTarget) => () => void;
-	readonly get: () => FindTarget | null;
-	readonly subscribe: (listener: () => void) => () => void;
-}
-
-const createTargetStore = (): TargetStore => {
-	const held = cell<FindTarget | null>(null);
-	const changes = createEmitter();
-	const changed = () => {
-		changes.emit();
-	};
-
-	return {
-		offer: (target) => {
-			held.current = target;
-			changed();
-			return () => {
-				// Only if it is still ours, which is the same guard
-				// `commands/registry.ts` keeps and for the same reason: under
-				// React's strict-mode double mount the new offer lands before
-				// the old cleanup runs, and clearing unconditionally would take
-				// the live one away.
-				if (held.current !== target) return;
-				held.current = null;
-				changed();
-			};
-		},
-		get: () => held.current,
-		subscribe: changes.subscribe,
-	};
-};
-
-const FindTargetContext = createContext<TargetStore | undefined>(undefined);
+const FindTargetContext = createContext<Offers<FindTarget> | undefined>(undefined);
 
 export const FindTargetProvider = ({ children }: { children: ReactNode }) => {
-	const [store] = useState(createTargetStore);
+	const [store] = useState(createOffers<FindTarget>);
 	return <FindTargetContext.Provider value={store}>{children}</FindTargetContext.Provider>;
 };
 
@@ -83,10 +48,7 @@ export const useOfferFindTarget = (): ((target: FindTarget) => () => void) =>
 
 /** The editor the bar should act on, or null when there is none. */
 export const useFindTarget = (): FindTarget | null => {
-	const store = useContext(FindTargetContext);
-	return useSyncExternalStore(
-		store?.subscribe ?? IGNORED,
-		store?.get ?? NO_TARGET,
-		store?.get ?? NO_TARGET
-	);
+	const offers = useContext(FindTargetContext);
+	const current = offers === undefined ? NO_TARGET : () => offers.current() ?? null;
+	return useSyncExternalStore(offers?.subscribe ?? IGNORED, current, current);
 };
