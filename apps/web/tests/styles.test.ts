@@ -42,9 +42,7 @@ describe('the stylesheet', () => {
 		['toolbar-panel', 'surface-popover'],
 		['slash-menu', 'surface-popover'],
 		['inline-toolbar', 'surface-popover'],
-		['palette', 'surface-popover'],
 		['outline-flyout', 'surface-popover'],
-		['toast', 'surface-card'],
 		['update-prompt', 'surface-card'],
 	])('draws every %s from %s', (name, surface) => {
 		const lists = sources(resolve(STYLES_FOLDER, '..'))

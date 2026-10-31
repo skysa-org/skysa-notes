@@ -32,6 +32,12 @@ describe('Toast', () => {
 		expect(onDismiss).toHaveBeenCalledTimes(1);
 	});
 
+	it('is drawn as a card, in its tone', () => {
+		const { container } = render(<Toast message="Saved" tone="error" onDismiss={vi.fn()} />);
+
+		expect(container.querySelector('.toast')?.classList.contains('surface-card')).toBe(true);
+	});
+
 	it('is the message and a way to dismiss it, and no link, when there is nowhere to go', () => {
 		render(<Toast message="Storage connected." tone="success" onDismiss={() => undefined} />);
 
