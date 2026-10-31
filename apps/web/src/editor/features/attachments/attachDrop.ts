@@ -17,6 +17,7 @@ import { t } from '../../../i18n/t.js';
 import { pickFiles } from '../../../lib/pickFiles.js';
 import { settleAfter } from '../../../store/heldEdits.js';
 import { HARD_BREAK_NODE, LIST_ITEM_NODE } from '../../rich/schema.js';
+import { el } from '../../shared/dom.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
@@ -47,13 +48,13 @@ type PendingMeta =
 	  }>
 	| Readonly<{ done: symbol }>;
 
-const placeholder = (name: string) => (): HTMLElement => {
-	const element = document.createElement('span');
-	element.setAttribute('class', 'attachment-pending');
-	element.setAttribute('aria-busy', 'true');
-	element.append(iconElement('file'), t('editor.attach.adding', { name }));
-	return element;
-};
+const placeholder = (name: string) => (): HTMLElement =>
+	el(
+		'span',
+		{ class: 'attachment-pending', 'aria-busy': 'true' },
+		iconElement('file'),
+		t('editor.attach.adding', { name })
+	);
 
 /** Where each file on its way is going, kept where it was through every edit meanwhile. */
 export const pendingFiles = new Plugin<DecorationSet>({

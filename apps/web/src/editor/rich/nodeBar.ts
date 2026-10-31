@@ -3,17 +3,11 @@ import { NodeSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
 import { iconElement, type IconName } from '../../components/ui/icons.js';
+import { buttonEl } from '../shared/dom.js';
 
 /** A button in the bar under a chip — or over a picture (`image.ts`) — selected whole. */
-export const barButton = (icon: IconName, label: string): HTMLButtonElement => {
-	const element = document.createElement('button');
-	element.setAttribute('type', 'button');
-	element.setAttribute('class', 'attachment-action');
-	element.setAttribute('aria-label', label);
-	element.setAttribute('title', label);
-	element.append(iconElement(icon));
-	return element;
-};
+export const barButton = (icon: IconName, label: string): HTMLButtonElement =>
+	buttonEl({ class: 'attachment-action', 'aria-label': label, title: label }, iconElement(icon));
 
 /**
  * The bar of buttons a node selected whole shows — under a chip, over a

@@ -1,6 +1,7 @@
 import { cell } from '@skysa/core';
 
 import { t } from '../../../i18n/t.js';
+import { buttonEl, el } from '../../shared/dom.js';
 
 /**
  * A secret's words, revealed (docs/ARCHITECTURE.md §7, "Secrets in a note"):
@@ -75,10 +76,7 @@ export interface SecretPanel {
 }
 
 const button = (label: string, className: string, press: () => void): HTMLButtonElement => {
-	const element = document.createElement('button');
-	element.setAttribute('type', 'button');
-	element.setAttribute('class', className);
-	element.append(label);
+	const element = buttonEl({ class: className }, label);
 	element.addEventListener('click', press);
 	return element;
 };
@@ -112,43 +110,43 @@ export const createSecretPanel = ({
 	// The label: not secret, but the browser's helpers kept out of it all the
 	// same, as a password manager would take it for a login's name.
 	const keptLabel = cell(label);
-	const name = document.createElement('input');
-	name.setAttribute('type', 'text');
-	name.setAttribute('class', 'secret-label-field');
-	name.setAttribute('placeholder', t('editor.secret.label'));
-	name.setAttribute('maxlength', String(LABEL_MAX));
-	name.setAttribute('aria-describedby', hintId);
-	name.setAttribute('spellcheck', 'false');
-	name.setAttribute('autocomplete', 'off');
-	name.setAttribute('data-1p-ignore', '');
-	name.setAttribute('data-lpignore', 'true');
-	name.setAttribute('value', label);
+	const name = el('input', {
+		type: 'text',
+		class: 'secret-label-field',
+		placeholder: t('editor.secret.label'),
+		maxlength: String(LABEL_MAX),
+		'aria-describedby': hintId,
+		spellcheck: 'false',
+		autocomplete: 'off',
+		'data-1p-ignore': '',
+		'data-lpignore': 'true',
+		value: label,
+	});
 	name.addEventListener('input', (event) => {
 		if (!(event instanceof InputEvent && event.isComposing)) onLabel();
 	});
 	name.addEventListener('compositionend', onLabel);
 
-	const caption = document.createElement('label');
-	caption.setAttribute('class', 'secret-label-row');
-	caption.append(t('editor.secret.labelField'), name);
+	const caption = el('label', { class: 'secret-label-row' }, t('editor.secret.labelField'), name);
 
-	const hint = document.createElement('p');
-	hint.setAttribute('class', 'secret-label-hint');
-	hint.setAttribute('id', hintId);
-	hint.append(t('editor.secret.labelHint'));
+	const hint = el('p', { class: 'secret-label-hint', id: hintId }, t('editor.secret.labelHint'));
 
-	const field = document.createElement('textarea');
-	field.setAttribute('class', 'secret-words');
-	field.setAttribute('aria-label', t('editor.secret.words'));
-	field.setAttribute('spellcheck', 'false');
-	field.setAttribute('autocomplete', 'off');
-	field.setAttribute('autocorrect', 'off');
-	field.setAttribute('autocapitalize', 'off');
-	field.setAttribute('writingsuggestions', 'false');
-	field.setAttribute('data-1p-ignore', '');
-	field.setAttribute('data-lpignore', 'true');
-	field.setAttribute('rows', rowsFor(words));
-	field.append(words);
+	const field = el(
+		'textarea',
+		{
+			class: 'secret-words',
+			'aria-label': t('editor.secret.words'),
+			spellcheck: 'false',
+			autocomplete: 'off',
+			autocorrect: 'off',
+			autocapitalize: 'off',
+			writingsuggestions: 'false',
+			'data-1p-ignore': '',
+			'data-lpignore': 'true',
+			rows: rowsFor(words),
+		},
+		words
+	);
 	field.addEventListener('input', (event) => {
 		field.setAttribute('rows', rowsFor(field.value));
 		if (!(event instanceof InputEvent && event.isComposing)) onInput();
@@ -158,9 +156,7 @@ export const createSecretPanel = ({
 		event.preventDefault();
 	});
 
-	const said = document.createElement('p');
-	said.setAttribute('class', 'secret-said');
-	said.setAttribute('role', 'status');
+	const said = el('p', { class: 'secret-said', role: 'status' });
 
 	const say = (message: string | undefined) => {
 		said.replaceChildren(message ?? '');
@@ -174,21 +170,20 @@ export const createSecretPanel = ({
 	const cancel = button(t('editor.secret.cancel'), 'secret-cancel', onCancel);
 	cancel.setAttribute('data-dialog-close', '');
 	const done = button(t('editor.secret.done'), 'secret-done', onDone);
-	const answer = document.createElement('span');
-	answer.setAttribute('class', 'dialog-primary');
-	answer.setAttribute('data-dialog-primary', '');
-	answer.append(done);
+	const answer = el('span', { class: 'dialog-primary', 'data-dialog-primary': '' }, done);
 
 	// The row every dialog has (`DialogActions`), built as it builds it.
-	const actions = document.createElement('div');
-	actions.setAttribute('class', 'dialog-actions');
-	actions.append(cancel, copy, answer);
+	const actions = el('div', { class: 'dialog-actions' }, cancel, copy, answer);
 
-	const dom = document.createElement('div');
-	dom.setAttribute('class', 'secret-panel');
-	dom.setAttribute('role', 'group');
-	dom.setAttribute('aria-label', t('editor.secret.panel'));
-	dom.append(caption, hint, field, said, actions);
+	const dom = el(
+		'div',
+		{ class: 'secret-panel', role: 'group', 'aria-label': t('editor.secret.panel') },
+		caption,
+		hint,
+		field,
+		said,
+		actions
+	);
 
 	// The field's keys are its own, and the note's editor never hears them
 	// (the view stops them). Escape is Cancel, as in every dialog (the owner's

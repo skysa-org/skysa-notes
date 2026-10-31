@@ -4,6 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/
 
 import { t } from '../../i18n/t.js';
 import { appChange } from '../shared/dirty.js';
+import { buttonEl } from '../shared/dom.js';
 import { PARAGRAPH_NODE } from './schema.js';
 
 /**
@@ -62,16 +63,14 @@ const offerTail = (view: EditorView): void => {
 };
 
 const tailButton = (view: EditorView): HTMLElement => {
-	const button = document.createElement('button');
-	// Attributes rather than properties, the way `editor/rich/tasks.ts` builds its
-	// checkbox and for the same reason.
-	button.setAttribute('type', 'button');
-	button.setAttribute('class', 'editor-tail');
 	// A real button, so the keyboard has the same way out that the mouse does:
 	// inside a trailing code block every arrow key leads back into the code.
-	button.setAttribute('aria-label', t('editor.tail.label'));
-	button.setAttribute('title', t('editor.tail.title'));
-	button.setAttribute('contenteditable', 'false');
+	const button = buttonEl({
+		class: 'editor-tail',
+		'aria-label': t('editor.tail.label'),
+		title: t('editor.tail.title'),
+		contenteditable: 'false',
+	});
 	button.addEventListener('click', (event) => {
 		event.preventDefault();
 		offerTail(view);

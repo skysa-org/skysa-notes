@@ -17,6 +17,7 @@ import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
 import { barButton, nodeBar, removeNode, selectedKeys } from '../../rich/nodeBar.js';
 import { PARAGRAPH_NODE, stringAttr } from '../../rich/schema.js';
+import { el } from '../../shared/dom.js';
 import { secretHostCtx } from './secretHost.js';
 import {
 	createSecretPanels,
@@ -308,12 +309,7 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 					// may be in its block's view by then.
 					Decoration.widget(
 						place.from,
-						() => {
-							const holder = document.createElement('div');
-							holder.setAttribute('class', 'secret-draft');
-							holder.append(open.panel.dom);
-							return holder;
-						},
+						() => el('div', { class: 'secret-draft' }, open.panel.dom),
 						{
 							key: 'secret-draft',
 							side: -1,
@@ -351,11 +347,8 @@ const secretView = (ctx: Ctx) => {
 		const gone = cell(false);
 
 		// What it is called: its label, or the app's word for a secret.
-		const name = document.createElement('span');
-		name.setAttribute('class', 'secret-name');
-		const label = document.createElement('span');
-		label.setAttribute('class', 'secret-label');
-		label.append(iconElement('lock'), name);
+		const name = el('span', { class: 'secret-name' });
+		const label = el('span', { class: 'secret-label' }, iconElement('lock'), name);
 		const named = () => {
 			const called = secretLabel(labelOf(held.current));
 			name.replaceChildren(called ?? t('editor.secret.label'));
@@ -366,9 +359,7 @@ const secretView = (ctx: Ctx) => {
 		const remover = barButton('trash', t('editor.secret.remove'));
 		const bar = nodeBar(view, [remover], 'secret-actions');
 
-		const line = document.createElement('div');
-		line.setAttribute('class', 'secret-line');
-		line.append(label);
+		const line = el('div', { class: 'secret-line' }, label);
 		const { button: reveal, press } = revealControl({
 			into: line,
 			host,
@@ -377,16 +368,11 @@ const secretView = (ctx: Ctx) => {
 			gone: () => gone.current,
 		});
 
-		const row = document.createElement('div');
-		row.setAttribute('class', 'secret-bar');
-		row.append(line, bar.dom);
+		const row = el('div', { class: 'secret-bar' }, line, bar.dom);
 
-		const slot = document.createElement('div');
-		slot.setAttribute('class', 'secret-slot');
+		const slot = el('div', { class: 'secret-slot' });
 
-		const dom = document.createElement('div');
-		dom.setAttribute('class', 'secret-block');
-		dom.append(row, slot);
+		const dom = el('div', { class: 'secret-block' }, row, slot);
 
 		/**
 		 * The panel its block has, if it is the first block with that armor:

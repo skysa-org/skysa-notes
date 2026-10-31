@@ -2,6 +2,7 @@ import { cell } from '@skysa/core';
 
 import { t } from '../../../i18n/t.js';
 import { createEmitter } from '../../../store/emitter.js';
+import { buttonEl, el } from '../../shared/dom.js';
 import type { Sealer, SecretHost } from './secretHost.js';
 import { createSecretPanel, LABEL_MAX, type SecretPanel } from './secretPanel.js';
 
@@ -308,10 +309,7 @@ const NOT_REVEALED: Readonly<Record<NotRevealed, () => string>> = {
  * pressed, the host asks for that key, and `added` runs once it is kept.
  */
 const addKeyButton = (host: SecretHost, armor: string, added: () => void): HTMLButtonElement => {
-	const button = document.createElement('button');
-	button.setAttribute('type', 'button');
-	button.setAttribute('class', 'secret-add-key');
-	button.append(t('editor.secret.addKey'));
+	const button = buttonEl({ class: 'secret-add-key' }, t('editor.secret.addKey'));
 	button.addEventListener('click', () => {
 		button.setAttribute('disabled', '');
 		void host
@@ -353,13 +351,8 @@ export const revealControl = ({
 	problem,
 	gone,
 }: RevealOptions): RevealControl => {
-	const button = document.createElement('button');
-	button.setAttribute('type', 'button');
-	button.setAttribute('class', 'secret-reveal');
-	button.append(t('editor.secret.reveal'));
-	const said = document.createElement('span');
-	said.setAttribute('class', 'secret-note');
-	said.setAttribute('role', 'status');
+	const button = buttonEl({ class: 'secret-reveal' }, t('editor.secret.reveal'));
+	const said = el('span', { class: 'secret-note', role: 'status' });
 	into.append(button, said);
 
 	const adding = cell<HTMLButtonElement | undefined>(undefined);

@@ -4,6 +4,7 @@ import type { NodeView } from '@milkdown/kit/prose/view';
 import { $view } from '@milkdown/kit/utils';
 import { decodeCharacterReferences } from '@skysa/core';
 
+import { el } from '../shared/dom.js';
 import { stringAttr } from './schema.js';
 
 /**
@@ -19,10 +20,11 @@ import { stringAttr } from './schema.js';
  */
 const htmlView = (node: ProseNode): NodeView => {
 	const value = stringAttr(node, 'value');
-	const dom = document.createElement('span');
-	dom.setAttribute('data-type', 'html');
-	dom.setAttribute('data-value', value);
-	dom.append(decodeCharacterReferences(value));
+	const dom = el(
+		'span',
+		{ 'data-type': 'html', 'data-value': value },
+		decodeCharacterReferences(value)
+	);
 	return { dom };
 };
 

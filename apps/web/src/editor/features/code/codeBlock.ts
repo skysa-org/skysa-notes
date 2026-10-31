@@ -9,6 +9,7 @@ import { t } from '../../../i18n/t.js';
 import type { CodeDisplayStore } from '../../../store/codeDisplay.js';
 import { removeNode } from '../../rich/nodeBar.js';
 import { stringAttr } from '../../rich/schema.js';
+import { buttonEl, el } from '../../shared/dom.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
 
 /**
@@ -89,11 +90,7 @@ const toolButton = (
 	press: () => void,
 	options: Readonly<{ pressed?: boolean }> = {}
 ): HTMLButtonElement => {
-	const button = document.createElement('button');
-	button.setAttribute('type', 'button');
-	button.setAttribute('class', 'code-tool');
-	button.setAttribute('title', label);
-	button.setAttribute('aria-label', label);
+	const button = buttonEl({ class: 'code-tool', title: label, 'aria-label': label });
 	if (options.pressed !== undefined) button.setAttribute('aria-pressed', String(options.pressed));
 	button.append(iconElement(icon));
 
@@ -181,26 +178,28 @@ const codeBlockView =
 			{ pressed: display.get().lineNumbers }
 		);
 
-		const bar = document.createElement('div');
-		bar.setAttribute('class', 'code-block-tools');
-		bar.setAttribute('role', 'group');
-		bar.setAttribute('aria-label', t('editor.codeBlock.label'));
 		// Nothing in the bar is part of the note, so it is not part of the
 		// editable surface either: a cursor must not be able to land in it, and
 		// its own DOM changes are not document changes.
-		bar.setAttribute('contenteditable', 'false');
+		const bar = el('div', {
+			class: 'code-block-tools',
+			role: 'group',
+			'aria-label': t('editor.codeBlock.label'),
+			contenteditable: 'false',
+		});
 		bar.append(picker, wrap, numbers, copy, remove);
 
 		// The block's own rendering, rather than `codeBlockAttr`'s: that ctx exists
 		// for a theme to dress the default `<pre>`, and this view replaces it.
 		const code = document.createElement('code');
-		const pre = document.createElement('pre');
-		pre.append(code);
+		const pre = el('pre', {}, code);
 
-		const dom = document.createElement('div');
-		dom.setAttribute('class', 'code-block');
-		dom.setAttribute('data-language', languageOf(held.current));
-		dom.append(pre, bar);
+		const dom = el(
+			'div',
+			{ class: 'code-block', 'data-language': languageOf(held.current) },
+			pre,
+			bar
+		);
 
 		/**
 		 * The display settings, on the block and on the buttons that set them.

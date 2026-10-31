@@ -6,6 +6,7 @@ import { cell } from '@skysa/core';
 import type { CodeDisplayStore } from '../../../store/codeDisplay.js';
 import { ancestor } from '../../rich/lists.js';
 import { CODE_BLOCK_NODE } from '../../rich/schema.js';
+import { el } from '../../shared/dom.js';
 
 /**
  * What the editor draws around a code block that the node view cannot draw for
@@ -67,17 +68,15 @@ export const lineStarts = (text: string): readonly number[] =>
  */
 export const NUMBERED_LINE_LIMIT = 2000;
 
-const numberElement = (line: number) => (): HTMLElement => {
-	const element = document.createElement('span');
-	element.setAttribute('class', 'code-line-number');
-	// Out of the flow, so a wrapped line's second row still starts under the
-	// first row's text rather than under the number, and so the numbers cannot
-	// be selected or copied along with the code.
-	element.setAttribute('contenteditable', 'false');
-	element.setAttribute('aria-hidden', 'true');
-	element.append(String(line));
-	return element;
-};
+// Out of the flow, so a wrapped line's second row still starts under the first
+// row's text rather than under the number, and so the numbers cannot be selected
+// or copied along with the code.
+const numberElement = (line: number) => (): HTMLElement =>
+	el(
+		'span',
+		{ class: 'code-line-number', contenteditable: 'false', 'aria-hidden': 'true' },
+		String(line)
+	);
 
 const numbersFor = (doc: ProseNode): readonly Decoration[] => {
 	const found = cell<Decoration[]>([]);

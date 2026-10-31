@@ -3,6 +3,7 @@ import { cell } from '@skysa/core';
 import { modKeyLabel } from '../../../commands/chord.js';
 import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';
+import { buttonEl, el } from '../../shared/dom.js';
 
 /**
  * A link in a note, opened in the browser (docs/ARCHITECTURE.md §7, "Links
@@ -100,23 +101,15 @@ export interface LinkChip {
 export const linkChip = (): LinkChip => {
 	const held = cell<URL | undefined>(undefined);
 
-	const address = document.createElement('span');
-	address.setAttribute('class', 'link-chip-address');
-	const hint = document.createElement('span');
-	hint.setAttribute('class', 'link-chip-hint');
+	const address = el('span', { class: 'link-chip-address' });
+	const hint = el('span', { class: 'link-chip-hint' });
 	// Said by the button's name, and a screen reader's user is not clicking.
 	hint.setAttribute('aria-hidden', 'true');
 	hint.append(t('editor.link.clickHint', { key: modKeyLabel() }));
 
-	const button = document.createElement('button');
-	button.setAttribute('type', 'button');
-	button.setAttribute('class', 'link-chip-open');
-	button.append(iconElement('open'), address, hint);
+	const button = buttonEl({ class: 'link-chip-open' }, iconElement('open'), address, hint);
 
-	const dom = document.createElement('div');
-	dom.setAttribute('class', 'link-chip');
-	dom.setAttribute('hidden', '');
-	dom.append(button);
+	const dom = el('div', { class: 'link-chip', hidden: '' }, button);
 
 	// The editor keeps the focus, and the cursor stays in the link.
 	dom.addEventListener('mousedown', (event) => {
