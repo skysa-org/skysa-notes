@@ -386,7 +386,7 @@ Semantics the signatures do not carry:
   Every other capability question is answered by behaviour rather than a flag; this one cannot be, because the wrong answer is silent and costs a file.
 - `write` is create-or-update, never a blind overwrite.
   No `expectedVersion` means "I expect nothing here" — literally WebDAV's `If-None-Match: *` — so a file already at that path is a `ConflictError`.
-  That is what makes §7's "remote deleted, local dirty → re-create on push" safe: if the file came back in the meantime the write conflicts instead of clobbering it.
+  That is what makes §7's rule of re-creating on push a dirty note deleted remotely safe: if the file came back in the meantime the write conflicts instead of clobbering it.
   An `expectedVersion` for a path with no file is a `NotFoundError`.
 - `createFolder` and `delete` are idempotent, so a queued op is always safe to replay.
 - `move` may or may not change `version` — Dropbox's `rev` survives it, OneDrive's `eTag` does not — so the caller stores the returned entry rather than assuming either way.
@@ -1091,7 +1091,7 @@ The store layer was already keyed by connection; what was singular was everythin
   *Revised 2026-10-02:* the devices are now the *other* devices — this one cannot be removed from itself, and "this device" told the user nothing they did not know — and their rows fold behind a line that says how many there are ("2 other devices signed in on this account"), which is still asked for on open and still said without opening anything.
   The count is what the control was for: a theft shows as one more device than the user has.
   Open, each row names its device by its browser at sign-in (`grants.device`, below).
-  *Revised 2026-10-05:* in a wide window's sidebar, where the panel is now one line and a gear (§8, "The storage panel gave connection management up entirely"), the count is a device icon and a number in that line, beside the gear, and the rows open over everything from it.
+  *Revised 2026-10-05:* in a wide window's sidebar, where the panel is now one line and a gear (`history.md`, "The storage panel gave connection management up entirely"), the count is a device icon and a number in that line, beside the gear, and the rows open over everything from it.
   It is not in the gear's menu with the rest: there it would be said only to a user who went looking, and being said unasked is the property this control is for.
   *Revised 2026-10-06:* a compact window's source dropdown ends in the same line (§8), so the count is there too, at the line's end, and opens the same rows over everything; the fold-out list it had there is gone.
 - **A disconnect names the source it is for.**

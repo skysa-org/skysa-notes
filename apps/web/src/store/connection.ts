@@ -66,8 +66,7 @@ import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from
  * disconnect does fills the local pile, where it would be invisible behind any
  * other source, and nothing is carried into another account.
  *
- * Two things the sync store relies on, and so are guaranteed here
- * (docs/history.md, Phase 2 UI item):
+ * Two things the sync store relies on, and so are guaranteed here:
  *
  * - **A row's key is its connection and its id**, so a row that moves is
  *   deleted and added, two notes of one id can meet where they land, and an
