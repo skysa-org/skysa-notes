@@ -15,7 +15,7 @@
 
 .install-banner button.install-banner-install {
 	flex: none;
-	padding: 0.25rem 0.75rem;
+	padding: var(--space-2xs) var(--space-m);
 }
 
 .install-banner button.icon {

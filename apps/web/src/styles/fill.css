@@ -97,21 +97,21 @@
 /* Fill on sites (FillSetupDialog): the bookmarklet's link, drawn as a thing
    to pick up and drag, and what the dialog says of it. */
 .fill-setup-dialog h3 {
-	margin: 1rem 0 0.25rem;
+	margin: var(--space-l) 0 var(--space-2xs);
 	font-size: var(--text-body);
 }
 
 .fill-setup-dialog p {
-	margin: 0.5rem 0;
+	margin: var(--space-s) 0;
 }
 
 .fill-setup-dialog ul {
-	margin: 0.25rem 0;
+	margin: var(--space-2xs) 0;
 	padding-inline-start: 1.25rem;
 }
 
 .fill-setup-dialog li + li {
-	margin-top: 0.25rem;
+	margin-top: var(--space-2xs);
 }
 
 .fill-bookmarklet-holder {
@@ -120,7 +120,7 @@
 	align-items: center;
 	justify-content: center;
 	gap: var(--space-s) var(--space-m);
-	margin: 0.75rem 0;
+	margin: var(--space-m) 0;
 }
 
 .fill-bookmarklet {

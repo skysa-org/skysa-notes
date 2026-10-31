@@ -29,7 +29,7 @@
 	border-block-start: 1px solid var(--border);
 	display: flex;
 	flex-direction: column;
-	gap: 0.5rem;
+	gap: var(--space-s);
 }
 
 .account p,
@@ -41,7 +41,7 @@
 .account button:not(.icon),
 .clipboard button:not(.icon) {
 	font: inherit;
-	padding: 0.35rem 0.75rem;
+	padding: 0.35rem var(--space-m);
 	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--bg);
@@ -71,7 +71,7 @@
 .account-line {
 	display: flex;
 	align-items: center;
-	gap: 0.25rem;
+	gap: var(--space-2xs);
 }
 
 .account-status {
@@ -139,7 +139,7 @@ button.icon.account-devices-count {
 .account-confirm {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0.5rem;
+	gap: var(--space-s);
 }
 
 .account-confirm p,
@@ -154,7 +154,7 @@ button.icon.account-devices-count {
 }
 
 .import-line + .import-line {
-	margin-block-start: 0.5rem;
+	margin-block-start: var(--space-s);
 }
 
 /* The devices signed in to a source (`Devices`), opened over everything from
@@ -180,7 +180,7 @@ button.icon.account-devices-count {
 .account-devices li {
 	display: flex;
 	align-items: center;
-	gap: 0.5rem;
+	gap: var(--space-s);
 }
 
 .account-devices li > span {

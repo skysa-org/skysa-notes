@@ -66,8 +66,8 @@
 	z-index: 1;
 	display: flex;
 	align-items: flex-start;
-	gap: 0.75rem;
-	padding: 1.25rem var(--dialog-pad) 0.75rem;
+	gap: var(--space-m);
+	padding: 1.25rem var(--dialog-pad) var(--space-m);
 }
 
 .modal[data-scrolled] .modal-head {
@@ -106,7 +106,7 @@
 .modal button,
 .fill-page button:not(.icon, .link-button) {
 	font: inherit;
-	padding: 0.35rem 0.75rem;
+	padding: 0.35rem var(--space-m);
 	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--bg);
@@ -121,12 +121,12 @@
 	bottom: 0;
 	z-index: 1;
 	margin: 0 calc(-1 * var(--dialog-pad));
-	padding: 0.5rem var(--dialog-pad) 1.25rem;
+	padding: var(--space-s) var(--dialog-pad) 1.25rem;
 	background: var(--surface);
 }
 
 .modal[data-more] .dialog-foot {
-	padding-block-start: 0.75rem;
+	padding-block-start: var(--space-m);
 	box-shadow: 0 -1px 0 var(--border);
 }
 
@@ -137,7 +137,7 @@
 .dialog-actions {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0.5rem;
+	gap: var(--space-s);
 }
 
 /* The answer's slot places it and marks it for the focus; its button sits in
@@ -153,11 +153,11 @@
 /* What is under way, over the row: room kept for it, so the card does not jump. */
 .modal .dialog-status {
 	min-height: 1.6em;
-	margin: 0 0 0.5rem;
+	margin: 0 0 var(--space-s);
 }
 
 .modal p {
-	margin: 0 0 1rem;
+	margin: 0 0 var(--space-l);
 }
 
 /* What a step can go on to besides its answer (the Vault dialog's
@@ -165,7 +165,7 @@
    rather than more buttons in the row at its foot. */
 .dialog-options {
 	display: grid;
-	margin: 0 0 1rem;
+	margin: 0 0 var(--space-l);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-m);
 	overflow: hidden;
@@ -175,9 +175,9 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 0.75rem;
+	gap: var(--space-m);
 	min-height: 2.75rem;
-	padding: 0.5rem 0.75rem;
+	padding: var(--space-s) var(--space-m);
 	border: 0;
 	border-radius: 0;
 	background: none;
@@ -193,7 +193,7 @@
    is on. The passwords' in the Vault dialog. */
 .dialog-switch-words {
 	display: grid;
-	gap: 0.125rem;
+	gap: var(--space-3xs);
 }
 
 .dialog-switch-words .muted {
@@ -251,8 +251,8 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 0.5rem 0.75rem;
-	margin: 0 0 1rem;
+	gap: var(--space-s) var(--space-m);
+	margin: 0 0 var(--space-l);
 }
 
 .modal .dialog-tools .secrets-said {
@@ -274,7 +274,7 @@
 
 .import-body p,
 .run-body p {
-	margin: 0 0 0.75rem;
+	margin: 0 0 var(--space-m);
 }
 
 /* The bar in the app's own blue. A `progress` with no value is the browser's
@@ -284,7 +284,7 @@
 	display: block;
 	width: 100%;
 	height: 0.5rem;
-	margin: 0 0 0.25rem;
+	margin: 0 0 var(--space-2xs);
 	accent-color: var(--brand);
 }
 
@@ -294,7 +294,7 @@
 .run-file {
 	display: flex;
 	min-width: 0;
-	margin: 0 0 1rem;
+	margin: 0 0 var(--space-l);
 	color: var(--muted);
 	font-size: var(--text-s);
 	white-space: nowrap;
@@ -324,7 +324,7 @@
 }
 
 .secrets-step h3 {
-	margin: 0 0 0.5rem;
+	margin: 0 0 var(--space-s);
 	font-size: var(--text-body);
 }
 
@@ -341,7 +341,7 @@
 /* What is said as it happens: room kept for it, so the card does not jump. */
 .modal .secrets-said {
 	min-height: 1.6em;
-	margin: 0 0 0.5rem;
+	margin: 0 0 var(--space-s);
 }
 
 .secrets-said p {
@@ -358,7 +358,7 @@
 .group-field,
 .unlock-field {
 	width: 100%;
-	padding: 0.35rem 0.5rem;
+	padding: 0.35rem var(--space-s);
 	font: inherit;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
@@ -375,19 +375,19 @@
    it is shown and printed: three rows of four. Each group's number is over
    it, so a phone's narrow card leaves the field the room for its five. */
 .recovery-entry {
-	margin: 0 0 0.75rem;
+	margin: 0 0 var(--space-m);
 	font-family: var(--font-mono);
 }
 
 .recovery-cells {
 	display: grid;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
-	gap: 0.5rem;
+	gap: var(--space-s);
 }
 
 .recovery-cell {
 	display: grid;
-	gap: 0.125rem;
+	gap: var(--space-3xs);
 }
 
 .recovery-cell span {
@@ -396,27 +396,27 @@
 }
 
 .recovery-cell .group-field {
-	padding-inline: 0.25rem;
+	padding-inline: var(--space-2xs);
 	text-align: center;
 	letter-spacing: 0.05em;
 }
 
 .unlock-field {
-	margin: 0 0 0.75rem;
+	margin: 0 0 var(--space-m);
 }
 
 /* The key, in its twelve groups, numbered: the check asks for two by their
    numbers. Three rows of four on a phone as on a desktop, so a printed key
    and a written one look alike. */
 .recovery-key {
-	margin: 0 0 1rem;
+	margin: 0 0 var(--space-l);
 	font-family: var(--font-mono);
 	container: recovery-key / inline-size;
 }
 
 .recovery-prefix {
 	display: block;
-	margin: 0 0 0.25rem;
+	margin: 0 0 var(--space-2xs);
 	color: var(--muted);
 	font-size: var(--text-s);
 }
@@ -424,7 +424,7 @@
 .recovery-groups {
 	display: grid;
 	grid-template-columns: repeat(4, max-content);
-	gap: 0.25rem 1rem;
+	gap: var(--space-2xs) var(--space-l);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -466,7 +466,7 @@
 	display: block;
 	inline-size: 10rem;
 	block-size: 10rem;
-	margin: 0 0 1rem;
+	margin: 0 0 var(--space-l);
 	border-radius: var(--radius-xs);
 }
 
@@ -475,8 +475,8 @@
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
-	gap: 0.5rem;
-	margin-block-start: 0.75rem;
+	gap: var(--space-s);
+	margin-block-start: var(--space-m);
 }
 
 .scan-key-video {
@@ -501,8 +501,8 @@
    lock is offered, as a row of toggles. */
 .unlock-kinds {
 	display: flex;
-	gap: 0.25rem;
-	margin: 0 0 0.75rem;
+	gap: var(--space-2xs);
+	margin: 0 0 var(--space-m);
 }
 
 /* Where the kinds are chosen (`ChooseUnlock`): a container, so the choice
@@ -534,7 +534,7 @@
 .unlock-pattern {
 	display: grid;
 	justify-items: center;
-	margin: 0 0 0.5rem;
+	margin: 0 0 var(--space-s);
 }
 
 .pattern {

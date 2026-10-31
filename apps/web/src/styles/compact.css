@@ -340,7 +340,7 @@
 	flex: none;
 	place-items: center;
 	margin: -0.125rem;
-	padding: 0.125rem;
+	padding: var(--space-3xs);
 	border-radius: var(--radius-xs);
 }
 
@@ -427,7 +427,7 @@
 .new-folder {
 	width: calc(100% - 2 * var(--gutter));
 	margin: var(--space-s) var(--gutter);
-	padding: 0.35rem 0.5rem;
+	padding: 0.35rem var(--space-s);
 	font: inherit;
 	font-size: var(--text-m);
 	border: 1px solid var(--border);

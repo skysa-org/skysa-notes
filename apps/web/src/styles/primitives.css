@@ -72,9 +72,9 @@
 	position: absolute;
 	z-index: 2;
 	align-items: center;
-	gap: 0.125rem;
-	margin-block-start: 0.25rem;
-	padding: 0.2rem 0.25rem;
+	gap: var(--space-3xs);
+	margin-block-start: var(--space-2xs);
+	padding: 0.2rem var(--space-2xs);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);
@@ -85,7 +85,7 @@
 .toolstrip-button {
 	display: inline-flex;
 	align-items: center;
-	padding: 0.25rem;
+	padding: var(--space-2xs);
 	border: 0;
 	border-radius: var(--radius-xs);
 	background: none;

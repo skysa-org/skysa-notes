@@ -85,7 +85,7 @@
 	color: var(--fg);
 }
 [data-outline-depth='2'] button {
-	padding-inline-start: 1rem;
+	padding-inline-start: var(--space-l);
 }
 [data-outline-depth='3'] button {
 	padding-inline-start: 1.75rem;

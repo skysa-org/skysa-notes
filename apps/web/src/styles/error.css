@@ -9,19 +9,19 @@
 }
 
 .error-screen h1 {
-	margin: 0 0 0.5rem;
+	margin: 0 0 var(--space-s);
 	font-size: var(--text-xl);
 }
 
 .error-actions {
 	display: flex;
-	gap: 0.5rem;
+	gap: var(--space-s);
 	margin-block: 1.25rem;
 }
 
 .error-actions button {
 	font: inherit;
-	padding: 0.35rem 0.75rem;
+	padding: 0.35rem var(--space-m);
 	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--surface);
@@ -40,8 +40,8 @@
 
 /* A store error can be one long line; it wraps rather than widening the page. */
 .error-screen pre {
-	margin: 0.5rem 0 0;
-	padding: 0.6rem 0.75rem;
+	margin: var(--space-s) 0 0;
+	padding: 0.6rem var(--space-m);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);
