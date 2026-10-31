@@ -1,12 +1,8 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-	AUTOSAVE_RETRY_MS,
-	type SaveContext,
-	type Unstored,
-	useAutosave,
-} from '../src/editor/useAutosave.js';
+import { AUTOSAVE_RETRY_MS, type SaveContext, type Unstored } from '../src/editor/autosaveQueue.js';
+import { useAutosave } from '../src/editor/useAutosave.js';
 
 beforeEach(() => {
 	vi.useFakeTimers();
