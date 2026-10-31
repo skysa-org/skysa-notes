@@ -221,6 +221,11 @@ describe('a chip', () => {
 		const mounted = await mount('A [a.zip](a.zip) b.\n');
 		const actions = () => mounted.chips()[0]?.querySelector('.attachment-actions');
 		expect(actions()?.hasAttribute('hidden')).toBe(true);
+		// What it is positioned and drawn by: the bar without this has neither.
+		expect(actions()?.classList.contains('toolstrip')).toBe(true);
+		expect(actions()?.querySelector('button')?.classList.contains('toolstrip-button')).toBe(
+			true
+		);
 
 		selectChip(mounted);
 		expect(actions()?.hasAttribute('hidden')).toBe(false);

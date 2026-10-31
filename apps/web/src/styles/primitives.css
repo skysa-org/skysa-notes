@@ -1,8 +1,8 @@
-/* What more than one component is drawn from. Each comes before every
-   component, so a component's own rule of the same weight says where it differs. */
+/* What more than one component is drawn from. */
 
 /* The bar of small icon buttons that hangs off a block in the editor: a code
-   block's, a file chip's, a picture's. The block's text is selectable; the
+   block's, a file chip's, a picture's, a secret's (which sits in its block's
+   line instead, `.secret-actions`). The block's text is selectable; the
    chrome around it is not, or dragging from the last line downwards would
    select a control instead of code. Each says where it hangs and whether it
    shows. */
@@ -29,6 +29,13 @@
 	background: none;
 	color: var(--muted);
 	cursor: pointer;
+}
+
+/* A picture on the web or in the link has no file to open or save: only
+   Remove from note is on its bar. `display` above would otherwise show it
+   whatever `hidden` says. */
+.toolstrip-button[hidden] {
+	display: none;
 }
 
 @media (hover: hover) {

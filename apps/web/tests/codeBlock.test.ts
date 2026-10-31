@@ -33,7 +33,9 @@ const mount = async (
 	});
 
 	const tool = (name: string) =>
-		root.querySelector<HTMLButtonElement>(`button.code-tool[aria-label="${name}"]`);
+		root.querySelector<HTMLButtonElement>(
+			`.toolstrip.code-block-tools button.toolstrip-button.code-tool[aria-label="${name}"]`
+		);
 
 	return {
 		editor,

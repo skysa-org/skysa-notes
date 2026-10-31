@@ -379,7 +379,7 @@
 
 /*
  * The tools, under the block being edited (`editor/features/code/codeTools.ts` says which
- * one that is). Absolute, so the note's text does not move when they appear
+ * one that is). Absolute (`.toolstrip`), so the note's text does not move when they appear
  * and settle back when they go; over whatever follows, because a bar that
  * pushed the next paragraph down would make every click near a code block a
  * moving target.
@@ -712,12 +712,6 @@
 
 /* `display` above would otherwise show it whatever `hidden` says. */
 .attachment-actions[hidden] {
-	display: none;
-}
-
-/* A picture on the web or in the link has no file to open or save: only
-   Remove from note is on its bar. */
-.attachment-action[hidden] {
 	display: none;
 }
 
