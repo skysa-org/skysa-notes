@@ -45,10 +45,10 @@ import { usePressOutside } from './usePressOutside.js';
  * asked from: the `+` menu (`--z-popover`) and the compact source panel
  * (`--z-sheet`) are each a stacking context, and a dialog inside either is only
  * as high as they are — under the toast stack (`--z-float`), which it has to be
- * over. `aria-modal`
- * says the rest of the page is out of reach, so Tab goes round what is in the
- * dialog and nowhere else, and the shortcuts are held while it is up: a chord
- * pressed out of habit would act on a page the user cannot get at.
+ * over. `aria-modal` says the rest of the page is out of reach, so Tab goes
+ * round what is in the dialog and nowhere else, and the shortcuts are held
+ * while it is up: a chord pressed out of habit would act on a page the user
+ * cannot get at.
  */
 
 /** What the row is handed by the dialog it is in. */

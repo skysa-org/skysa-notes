@@ -5,6 +5,28 @@ import { describe, expect, it } from 'vitest';
 
 import { allStyles, importedStyles, STYLES_FOLDER } from './support/styles.js';
 
+const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** Written by a component as it draws, or by the brand's stylesheet (`brand.ts`). */
+const SET_ELSEWHERE: ReadonlySet<string> = new Set([
+	'--card-picture-ratio',
+	'--card-picture-width',
+	'--dialog-foot',
+	'--font-mono',
+	'--font-sans',
+	'--note-image-ratio',
+	'--note-image-width',
+	'--notebooks-left',
+	'--notebooks-right',
+	'--notes-left',
+	'--notes-right',
+	'--rule-start',
+	'--sources-left',
+	'--sources-right',
+	'--viewport-height',
+	'--viewport-top',
+]);
+
 describe('the stylesheet', () => {
 	// A file left out draws nothing, and the tests that read the sheet would not
 	// see its rules either.
@@ -15,24 +37,21 @@ describe('the stylesheet', () => {
 	});
 
 	// A name nobody declares is no error to a browser: the rule just goes away,
-	// and the corner goes square without a word.
-	it('uses only the steps tokens.css declares', () => {
-		const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
-		const step = String.raw`--(?:radius|shadow|text|z)-[\w-]+|--brand|--on-brand`;
-		const declared = new Set(
-			[
-				...withoutComments(
-					readFileSync(join(STYLES_FOLDER, 'tokens.css'), 'utf8')
-				).matchAll(new RegExp(`(${step})\\s*:`, 'g')),
-			].map((match) => match[1])
-		);
-		const used = [
-			...withoutComments(allStyles()).matchAll(
-				new RegExp(`var\\(\\s*(${step})\\s*[,)]`, 'g')
-			),
-		].map((match) => match[1]);
+	// and the corner goes square or the colour goes without a word.
+	it('uses only variables that are declared', () => {
+		const declaredIn = (css: string): Set<string | undefined> =>
+			new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((match) => match[1]));
+		const css = withoutComments(allStyles());
+		const declared = declaredIn(css);
+		const used = [...css.matchAll(/var\(\s*(--[\w-]+)/g)].map((match) => match[1] ?? '');
 
 		expect(used.length).toBeGreaterThan(0);
-		expect(used.filter((name) => !declared.has(name))).toEqual([]);
+		expect(used.filter((name) => !declared.has(name) && !SET_ELSEWHERE.has(name))).toEqual([]);
+
+		const tokens = declaredIn(
+			withoutComments(readFileSync(join(STYLES_FOLDER, 'tokens.css'), 'utf8'))
+		);
+		const STEP = /^--(?:radius|shadow|text|z)-|^--(?:on-)?brand$/;
+		expect(used.filter((name) => STEP.test(name) && !tokens.has(name))).toEqual([]);
 	});
 });
