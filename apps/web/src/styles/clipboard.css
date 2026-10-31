@@ -17,7 +17,7 @@
 	--clipboard-featured-bg: linear-gradient(
 		160deg,
 		var(--bg) 0%,
-		color-mix(in srgb, var(--brand, var(--accent)) 9%, var(--bg)) 100%
+		color-mix(in srgb, var(--brand) 9%, var(--bg)) 100%
 	);
 	--clipboard-glow: 22%;
 	--clipboard-glow-more: 30%;
@@ -36,7 +36,7 @@
 		--clipboard-bg: color-mix(in srgb, var(--fg) 4%, var(--surface));
 		--clipboard-featured-bg: linear-gradient(
 			160deg,
-			color-mix(in srgb, var(--brand, var(--accent)) 22%, var(--surface)) 0%,
+			color-mix(in srgb, var(--brand) 22%, var(--surface)) 0%,
 			var(--surface) 78%
 		);
 		--clipboard-glow: 28%;
@@ -62,21 +62,20 @@
 .clipboard-drop-ready {
 	background: var(--clipboard-featured-bg);
 	box-shadow:
-		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 42%, transparent),
-		0 0 12px color-mix(in srgb, var(--brand, var(--accent)) var(--clipboard-glow), transparent);
+		inset 0 0 0 1px color-mix(in srgb, var(--brand) 42%, transparent),
+		0 0 12px color-mix(in srgb, var(--brand) var(--clipboard-glow), transparent);
 }
 
 .clipboard-drop-ready {
 	box-shadow:
-		inset 0 0 0 2px color-mix(in srgb, var(--brand, var(--accent)) 65%, transparent),
-		0 0 20px
-			color-mix(in srgb, var(--brand, var(--accent)) var(--clipboard-glow-more), transparent);
+		inset 0 0 0 2px color-mix(in srgb, var(--brand) 65%, transparent),
+		0 0 20px color-mix(in srgb, var(--brand) var(--clipboard-glow-more), transparent);
 }
 
 .clipboard-drop-over {
 	box-shadow:
-		inset 0 0 0 3px var(--brand, var(--accent)),
-		0 0 24px color-mix(in srgb, var(--brand, var(--accent)) 60%, transparent);
+		inset 0 0 0 3px var(--brand),
+		0 0 24px color-mix(in srgb, var(--brand) 60%, transparent);
 }
 
 /* Its edge and glow, which are a state's colour, as a control's are. */
@@ -92,12 +91,12 @@
 .clipboard-window-drop {
 	position: fixed;
 	inset: 0;
-	z-index: 90;
+	z-index: var(--z-drop);
 	display: flex;
 	align-items: flex-end;
 	justify-content: center;
 	padding: var(--space-l) var(--gutter) calc(var(--space-l) + env(safe-area-inset-bottom));
-	box-shadow: inset 0 0 0 3px var(--brand, var(--accent));
+	box-shadow: inset 0 0 0 3px var(--brand);
 	pointer-events: none;
 	animation: fade-in var(--duration-s) var(--ease-out);
 }
@@ -105,16 +104,16 @@
 .clipboard-window-drop > .clipboard-drop-hint {
 	margin: 0;
 	padding: var(--space-s) var(--space-l);
-	border-radius: 999px;
+	border-radius: var(--radius-pill);
 	text-align: center;
 	font-weight: 600;
 	/* The brand's colour, a third of the way to the text's: readable on the
 	   page's own colour whatever colour a brand gives itself. */
-	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
+	color: color-mix(in srgb, var(--brand) 70%, var(--fg));
 	background: var(--bg);
 	box-shadow:
-		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 42%, transparent),
-		0 0 20px color-mix(in srgb, var(--brand, var(--accent)) 30%, transparent);
+		inset 0 0 0 1px color-mix(in srgb, var(--brand) 42%, transparent),
+		0 0 20px color-mix(in srgb, var(--brand) 30%, transparent);
 }
 
 /* Said to a screen reader, and shown over the item it is about instead. */
@@ -143,7 +142,7 @@
 .clipboard-empty {
 	padding: 0.75rem;
 	border: 2px dotted color-mix(in srgb, var(--muted) 55%, transparent);
-	border-radius: 0.5rem;
+	border-radius: var(--radius-m);
 	text-align: center;
 }
 
@@ -193,8 +192,8 @@
 
 @media (hover: hover) {
 	.clipboard button.clipboard-choose:hover {
-		border-color: color-mix(in srgb, var(--brand, var(--accent)) 55%, var(--border));
-		background: color-mix(in srgb, var(--brand, var(--accent)) 7%, var(--surface));
+		border-color: color-mix(in srgb, var(--brand) 55%, var(--border));
+		background: color-mix(in srgb, var(--brand) 7%, var(--surface));
 	}
 }
 
@@ -221,8 +220,8 @@
 	width: 1.25rem;
 	height: 1.25rem;
 	margin: -0.625rem 0 0 -0.625rem;
-	border: 2px solid color-mix(in srgb, var(--brand, var(--accent)) 25%, transparent);
-	border-block-start-color: var(--brand, var(--accent));
+	border: 2px solid color-mix(in srgb, var(--brand) 25%, transparent);
+	border-block-start-color: var(--brand);
 	border-radius: 50%;
 	pointer-events: none;
 }
@@ -234,9 +233,9 @@
 	align-items: center;
 	justify-content: center;
 	gap: 0.25rem;
-	border-radius: 0.375rem;
+	border-radius: var(--radius-s);
 	font-weight: 600;
-	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
+	color: color-mix(in srgb, var(--brand) 70%, var(--fg));
 	background: color-mix(in srgb, var(--surface) 88%, transparent);
 	pointer-events: none;
 }
@@ -276,7 +275,7 @@
 	display: block;
 	max-width: 100%;
 	max-height: 6rem;
-	border-radius: 0.25rem;
+	border-radius: var(--radius-xs);
 	object-fit: contain;
 }
 
@@ -292,7 +291,7 @@
 }
 
 .clipboard-size {
-	font-size: 0.8125rem;
+	font-size: var(--text-s);
 	white-space: nowrap;
 }
 

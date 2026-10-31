@@ -42,7 +42,7 @@
 .clipboard button:not(.icon) {
 	font: inherit;
 	padding: 0.35rem 0.75rem;
-	border-radius: 0.375rem;
+	border-radius: var(--radius-s);
 	border: 1px solid var(--border);
 	background: var(--bg);
 	color: var(--fg);
@@ -102,7 +102,7 @@
 	text-underline-offset: 0.2em;
 	background: none;
 	border: 0;
-	border-radius: 0.25rem;
+	border-radius: var(--radius-xs);
 	cursor: pointer;
 }
 

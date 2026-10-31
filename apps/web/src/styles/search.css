@@ -14,7 +14,7 @@
 
 .search-results {
 	position: absolute;
-	z-index: 30;
+	z-index: var(--z-float);
 	display: flex;
 	flex-direction: column;
 	overflow-y: auto;
@@ -30,7 +30,7 @@
 	width: min(28rem, calc(100vw - 2 * var(--gutter)));
 	max-height: min(36rem, 70dvh);
 	border: 1px solid var(--border);
-	border-radius: 0.5rem;
+	border-radius: var(--radius-m);
 	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
 
