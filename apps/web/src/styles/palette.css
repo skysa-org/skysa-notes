@@ -10,7 +10,7 @@
 	/* Near the top rather than centred: the list grows downwards, and a centred
 	   dialog moves its own field as it does. */
 	align-items: flex-start;
-	padding: 4rem 1rem 1rem;
+	padding: 4rem var(--space-l) var(--space-l);
 	background: rgb(0 0 0 / 35%);
 	animation: dim-in var(--duration-l) var(--ease-out);
 }
@@ -26,7 +26,7 @@
 
 .palette-field {
 	flex: none;
-	padding: 0.75rem;
+	padding: var(--space-m);
 	font: inherit;
 	font-size: var(--text-body);
 	border: 0;
@@ -39,15 +39,15 @@
 	flex: 1 1 auto;
 	overflow-y: auto;
 	margin: 0;
-	padding: 0.25rem;
+	padding: var(--space-2xs);
 	list-style: none;
 }
 
 .palette-row {
 	display: flex;
 	align-items: baseline;
-	gap: 0.5rem;
-	padding: 0.5rem;
+	gap: var(--space-s);
+	padding: var(--space-s);
 	font-size: var(--text-m);
 	border-radius: var(--radius-s);
 	color: var(--fg);

@@ -362,7 +362,7 @@ button.row.drop-over {
 	display: flex;
 	flex: none;
 	align-items: center;
-	gap: 0.25rem;
+	gap: var(--space-2xs);
 }
 
 /* The source panel's `+` menu, at the right of the window: hung back across it
@@ -519,7 +519,7 @@ button.danger {
 .note-search {
 	flex: 1;
 	min-width: 0;
-	padding: 0.35rem 0.5rem;
+	padding: 0.35rem var(--space-s);
 	font: inherit;
 	font-size: var(--text-m);
 	border: 1px solid var(--border);

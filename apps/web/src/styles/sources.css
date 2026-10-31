@@ -9,7 +9,7 @@
 	   The tabs sit on the bar's bottom edge, where their lit edge meets its
 	   border, rather than being stretched or floated up to the top. */
 	align-items: flex-end;
-	gap: 0.25rem;
+	gap: var(--space-2xs);
 	/* The first tab's name over the notebooks' heading, and the search's
 	   right-hand edge on the gutter the note's buttons end on. */
 	padding-inline: calc(var(--gutter) - var(--tab-inline)) var(--gutter);
@@ -33,7 +33,7 @@
 
 .source-tabs ul {
 	display: flex;
-	gap: 0.25rem;
+	gap: var(--space-2xs);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -197,7 +197,7 @@
 /* No radius: the bar is the top of the window, and a rounded corner up against
    the window's edge reads as a mistake in the rendering. */
 .source-add-button {
-	padding: 0.5rem 0.6rem;
+	padding: var(--space-s) 0.6rem;
 	font: inherit;
 	font-size: var(--text-body);
 	line-height: var(--tab-line);
@@ -286,7 +286,7 @@
 .connect-code-form {
 	display: flex;
 	flex-direction: column;
-	gap: 0.25rem;
+	gap: var(--space-2xs);
 	align-self: stretch;
 }
 
@@ -307,7 +307,7 @@
 	flex: 1;
 	min-width: 0;
 	font-size: var(--text-m);
-	padding: 0.35rem 0.5rem;
+	padding: 0.35rem var(--space-s);
 }
 
 .connect-code-form button {
@@ -378,7 +378,7 @@
 	align-items: center;
 	min-width: 0;
 	padding-block: 0.3rem;
-	padding-inline-start: 0.5rem;
+	padding-inline-start: var(--space-s);
 }
 
 .source-search .search-box {

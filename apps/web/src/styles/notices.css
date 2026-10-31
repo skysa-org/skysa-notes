@@ -19,7 +19,7 @@
 	z-index: var(--z-float);
 	display: flex;
 	flex-direction: column;
-	gap: 0.5rem;
+	gap: var(--space-s);
 	align-items: center;
 	/* The stack is as wide as the page and usually empty. Without this it takes
 	   the clicks meant for the note underneath it; each card takes its own back
