@@ -97,7 +97,7 @@ const toolButton = (
 	button.append(iconElement(icon));
 
 	// Before the browser moves focus and drops the selection — the same reason
-	// the formatting toolbar's buttons act on `mousedown` (`FormatToolbar.tsx`).
+	// the formatting toolbar's buttons act on `mousedown` (`press.ts`).
 	// It also keeps the block "active", so the bar does not vanish under the
 	// pointer as it is being clicked.
 	button.addEventListener('mousedown', (event) => {
