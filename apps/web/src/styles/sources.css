@@ -197,7 +197,7 @@
 /* No radius: the bar is the top of the window, and a rounded corner up against
    the window's edge reads as a mistake in the rendering. */
 .source-add-button {
-	padding: var(--space-s) var(--space-s);
+	padding: var(--space-s);
 	font: inherit;
 	font-size: var(--text-body);
 	line-height: var(--tab-line);

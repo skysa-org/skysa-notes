@@ -323,7 +323,7 @@
 .secret-words {
 	box-sizing: border-box;
 	inline-size: 100%;
-	padding: var(--space-s) var(--space-s);
+	padding: var(--space-s);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-s);
 	background: var(--surface);

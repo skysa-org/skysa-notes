@@ -20,7 +20,7 @@
 	border-inline-start: 1px solid var(--border);
 	/* Its words start on the gutter, as the note's do, less the entries' own
 	   padding. */
-	padding: calc(var(--gutter) - 0.2rem) calc(var(--gutter) - 0.35rem);
+	padding: calc(var(--gutter) - var(--space-2xs)) calc(var(--gutter) - var(--space-xs));
 }
 
 .outline ol {
