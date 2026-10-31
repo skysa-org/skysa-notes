@@ -54,7 +54,7 @@
    button of the same weight. */
 .toast {
 	position: relative;
-	padding-inline-end: calc(var(--toast-close) + 0.75rem);
+	padding-inline-end: calc(var(--toast-close) + var(--space-m));
 	--toast-close: 1.75rem;
 }
 

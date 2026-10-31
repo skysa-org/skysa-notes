@@ -23,7 +23,7 @@
 	   narrower (`--dialog-pad`), for a row of three buttons to fit in one
 	   line: by the window's width, without a media query (the layout module
 	   alone says where a compact window begins). */
-	padding: clamp(0.75rem, 3vw, 1rem);
+	padding: clamp(var(--space-m), 3vw, var(--space-l));
 	background: rgb(0 0 0 / 0.4);
 	animation: dim-in var(--duration-l) var(--ease-out);
 }
@@ -95,7 +95,7 @@
 	overscroll-behavior: contain;
 	padding: 0 var(--dialog-pad) 1.25rem;
 	/* A field the focus moves to is scrolled clear of the row over it. */
-	scroll-padding-block: 0.75rem calc(var(--dialog-foot, 0px) + 0.75rem);
+	scroll-padding-block: var(--space-m) calc(var(--dialog-foot, 0px) + var(--space-m));
 }
 
 .modal-body:has(.dialog-foot) {

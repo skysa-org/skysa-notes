@@ -38,7 +38,7 @@
 .format-toolbar-bottom {
 	border-block-end: 0;
 	border-block-start: 1px solid var(--border);
-	padding-block-end: max(0.25rem, env(safe-area-inset-bottom));
+	padding-block-end: max(var(--space-2xs), env(safe-area-inset-bottom));
 }
 
 .format-toolbar-bottom .toolbar-panel {
