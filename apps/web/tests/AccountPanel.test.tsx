@@ -1430,7 +1430,9 @@ describe('AccountPanel, with an account connected', () => {
 			const said = await screen.findByText(
 				/Imported 1 note\. They go up to Google Drive as it syncs\./
 			);
-			expect(said.closest('.toast-success')?.getAttribute('role')).toBe('status');
+			expect(said.closest("[data-toast-tone='success']")?.getAttribute('role')).toBe(
+				'status'
+			);
 			const note = await db.notes
 				.where('[connectionId+path]')
 				.equals(['c1', 'Work/plan.md'])
@@ -1467,7 +1469,7 @@ describe('AccountPanel, with an account connected', () => {
 			const said = await screen.findByText(
 				'Nothing to import: no notes or files were found.'
 			);
-			expect(said.closest('.toast-warning')?.getAttribute('role')).toBe('alert');
+			expect(said.closest("[data-toast-tone='warning']")?.getAttribute('role')).toBe('alert');
 			expect(screen.queryByRole('alertdialog')).toBeNull();
 		});
 

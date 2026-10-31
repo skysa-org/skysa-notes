@@ -186,7 +186,7 @@ export const Outline = ({ body, editor, onClose, focusEditor = true }: OutlinePr
 						// so neither is the key: the line is what tells them
 						// apart, and a line holds one heading.
 						key={heading.line}
-						className={`outline-h${String(heading.depth)}`}
+						data-outline-depth={heading.depth}
 					>
 						<button
 							type="button"

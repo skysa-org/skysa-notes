@@ -156,24 +156,24 @@
 }
 
 /* Each style shown in the style it sets, at a size a menu can hold. */
-.toolbar-sample-1 {
+[data-sample-level='1'] {
 	font-size: var(--text-xl);
 	font-weight: 600;
 }
 
-.toolbar-sample-2 {
+[data-sample-level='2'] {
 	font-size: 1.1rem;
 	font-weight: 600;
 }
 
-.toolbar-sample-3 {
+[data-sample-level='3'] {
 	font-size: var(--text-body);
 	font-weight: 600;
 }
 
-.toolbar-sample-4,
-.toolbar-sample-5,
-.toolbar-sample-6 {
+[data-sample-level='4'],
+[data-sample-level='5'],
+[data-sample-level='6'] {
 	font-size: 0.9rem;
 	font-weight: 600;
 }

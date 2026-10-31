@@ -255,6 +255,21 @@ describe('FormatToolbar', () => {
 		expect(editor.markdown()).toBe('# head\n');
 	});
 
+	it('shows each heading in the menu at its own size', async () => {
+		const editor = await harness('## head\n');
+		editor.withCtx(selecting('head'));
+		editor.redraw();
+
+		await userEvent.click(screen.getByRole('button', { name: 'Text style: Heading 2' }));
+
+		expect(
+			screen
+				.getByRole('button', { name: /Heading 3/ })
+				.querySelector('[data-sample-level]')
+				?.getAttribute('data-sample-level')
+		).toBe('3');
+	});
+
 	it('greys indentation out where it would do nothing', async () => {
 		const editor = await harness('plain\n');
 		editor.withCtx(selecting('plain'));

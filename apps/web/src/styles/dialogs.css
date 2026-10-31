@@ -355,12 +355,6 @@
 	margin: 0;
 }
 
-.secrets-field {
-	display: grid;
-	gap: 0.25rem;
-	margin: 0 0 0.75rem;
-}
-
 .group-field,
 .unlock-field {
 	width: 100%;

@@ -29,9 +29,12 @@ describe('the outline', () => {
 			'Middle',
 			'Deep',
 		]);
-		expect(screen.getByRole('button', { name: 'Deep' }).closest('li')?.className).toBe(
-			'outline-h3'
-		);
+		expect(
+			screen
+				.getByRole('button', { name: 'Deep' })
+				.closest('li')
+				?.getAttribute('data-outline-depth')
+		).toBe('3');
 	});
 
 	it('shows nothing at all for a note with no headings', () => {

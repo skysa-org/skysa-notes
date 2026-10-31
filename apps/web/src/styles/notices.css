@@ -40,29 +40,29 @@
    The wash is mixed into `--surface` rather than laid over it, so what the
    words sit on stays within a few percent of the colour they were designed
    against — a tinted card and not a coloured one. */
-.toast-success,
-.toast-warning,
-.toast-error {
+[data-toast-tone='success'],
+[data-toast-tone='warning'],
+[data-toast-tone='error'] {
 	border-inline-start: 4px solid var(--toast-accent);
 	background: color-mix(in srgb, var(--toast-accent) 10%, var(--surface));
 }
 
-.toast-success {
+[data-toast-tone='success'] {
 	--toast-accent: var(--ok);
 }
 
-.toast-warning {
+[data-toast-tone='warning'] {
 	--toast-accent: var(--warn);
 }
 
-.toast-error {
+[data-toast-tone='error'] {
 	--toast-accent: var(--bad);
 }
 
 /* Words are at stake, so neither is allowed to read as a footnote — the same
    reason `.banner-alert` (`install.css`) exists. The colour is not carrying this on its own:
    it is the one thing a reader may not be able to see. */
-.toast-warning span,
-.toast-error span {
+[data-toast-tone='warning'] span,
+[data-toast-tone='error'] span {
 	font-weight: 600;
 }
