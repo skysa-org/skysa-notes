@@ -2324,6 +2324,11 @@ Where the primary pointer is coarse (`@media (pointer: coarse)`, in `styles/touc
 Grown in place rather than given invisible hit areas, since most sit shoulder to shoulder; the bars take `--space-2xs` above and below instead, and the note header's gaps close to it, so a phone's header still fits and the three headers still meet.
 Two things are smaller on purpose: a task's box is 24px (WCAG 2.5.8's minimum; a list's lines are closer than 44px apart) with the task's words stepped in to clear it, and a link inside a sentence is its words, which 2.5.8 exempts.
 A mouse keeps the dense layout at every width.
+**Ticking a task leaves the keyboard where it is (2026-11-02).**
+A phone's keyboard can be put away while the editor keeps the focus, and then any tap raises it again, wherever the tap lands, and the browser scrolls to the cursor: on Chrome for Android, ticking a box brought both back.
+Nothing in the editor asks for this, and it is the touch rather than the tick that does it, so while the editor has the focus the box refuses the touch at `touchstart` and ticks on `touchend`, if the finger stayed within 10px (`editor/rich/tasks.ts`).
+Refusing `touchend` as well brings the keyboard back, measured on Chrome 133 in an emulated Pixel 9.
+The cost is that a swipe begun on a box does not scroll while the editor has the focus; with the focus elsewhere there is no keyboard to raise, so the touch goes through, a swipe scrolls, and the mouse events after a tap do the ticking.
 Fields under 16px were raised to it, since iOS zooms into a smaller one on focus.
 
 The query itself is deliberately *not* in the URL, unlike the open folder and note: those are where the user is and a reload should land there, while a half-typed query is not a place to come back to.
