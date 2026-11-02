@@ -50,16 +50,16 @@ const holdsItems = (item: ProseNode): boolean => {
 };
 
 /**
- * Where in its list an item goes, as the index of the gap it lands in: a
- * finished one to the very end, and one that is no longer finished up above the
- * finished ones directly over it. Only up, because a list written somewhere
- * else may have unfinished items further down, and those are no reason to send
- * this one past them.
+ * Where in its list an item goes, as the index of the gap it lands in: just
+ * below the last item still to do, which puts a finished one at the top of the
+ * finished ones and the latest done first. One that is no longer finished looks
+ * only above itself, because a list written somewhere else may have unfinished
+ * items further down, and those are no reason to send it past them.
  */
 const landingGap = (items: readonly ProseNode[], index: number, checked: boolean): number =>
-	checked
-		? items.length
-		: items.slice(0, index).findLastIndex((item) => item.attrs.checked !== true) + 1;
+	items.findLastIndex(
+		(item, at) => at !== index && (checked || at < index) && item.attrs.checked !== true
+	) + 1;
 
 /**
  * Finished items sink to the bottom of a checklist, so what is left to do stays
