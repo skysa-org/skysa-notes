@@ -119,6 +119,104 @@ describe('ticking a task', () => {
 	});
 });
 
+describe('tapping a box on a touch screen', () => {
+	/** A touch at a point on the box, as the browser would send it. */
+	const touch = (box: Element, type: string, y = 0, cancelable = true) => {
+		const event = new Event(type, { bubbles: true, cancelable });
+		Object.defineProperty(event, 'changedTouches', { value: [{ clientX: 0, clientY: y }] });
+		box.dispatchEvent(event);
+		return event;
+	};
+
+	const focused = async (body: string) => {
+		const mounted = await mount(body);
+		mounted.withCtx((ctx) => {
+			ctx.get(editorViewCtx).focus();
+		});
+		mounted.withCtx(afterWord('one'));
+		const box = mounted.root.querySelector('.task-checkbox');
+		if (box === null) throw new Error('no box');
+		return { ...mounted, box };
+	};
+
+	// Left to go through, the tap raises a keyboard the user has put away.
+	it('refuses the touch while the editor has the focus, and ticks when it ends', async () => {
+		const { box, withCtx } = await focused('- [ ] one\n');
+
+		expect(touch(box, 'touchstart').defaultPrevented).toBe(true);
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
+
+		touch(box, 'touchend');
+		expect(withCtx(currentMarkdown)).toBe('- [x] one\n');
+	});
+
+	// Refusing this one as well brought the keyboard back on a real phone.
+	it('does not refuse the end of the touch', async () => {
+		const { box } = await focused('- [ ] one\n');
+
+		touch(box, 'touchstart');
+
+		expect(touch(box, 'touchend').defaultPrevented).toBe(false);
+	});
+
+	it('leaves the cursor where it was', async () => {
+		const { box, withCtx } = await focused('- [ ] one\n- [ ] two\n');
+		const selection = () => withCtx((ctx) => ctx.get(editorViewCtx).state.selection.from);
+		const before = selection();
+
+		touch(box, 'touchstart');
+		touch(box, 'touchend');
+
+		expect(selection()).toBe(before);
+		expect(withCtx((ctx) => ctx.get(editorViewCtx).hasFocus())).toBe(true);
+	});
+
+	it('does not tick when the finger slid off', async () => {
+		const { box, withCtx } = await focused('- [ ] one\n');
+
+		touch(box, 'touchstart', 0);
+		touch(box, 'touchend', 40);
+
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
+	});
+
+	it('does not tick when the touch was called off', async () => {
+		const { box, withCtx } = await focused('- [ ] one\n');
+
+		touch(box, 'touchstart');
+		touch(box, 'touchcancel');
+		touch(box, 'touchend');
+
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
+	});
+
+	// With no keyboard to raise a swipe begun on a box still scrolls, and the
+	// mouse events that follow a tap are what tick it.
+	it('lets the touch through when the editor does not have the focus', async () => {
+		const { root, withCtx } = await mount('- [ ] one\n');
+		const box = root.querySelector('.task-checkbox');
+		if (box === null) throw new Error('no box');
+
+		expect(touch(box, 'touchstart').defaultPrevented).toBe(false);
+		touch(box, 'touchend');
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
+
+		box.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+		expect(withCtx(currentMarkdown)).toBe('- [x] one\n');
+	});
+
+	// Already scrolling: the browser will not let it be refused, and the mouse
+	// events are left to say whether this was a tap.
+	it('leaves a touch alone that cannot be refused', async () => {
+		const { box, withCtx } = await focused('- [ ] one\n');
+
+		touch(box, 'touchstart', 0, false);
+		touch(box, 'touchend');
+
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
+	});
+});
+
 describe('a checklist with items under items', () => {
 	/**
 	 * Press the box on the line that word is on. By the item's own first line

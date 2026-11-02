@@ -29,6 +29,9 @@ import { LIST_ITEM_NODE } from './schema.js';
 /** A tick, so the rule below can tell one from a newly made item. */
 const TASK_TOGGLE = 'skysa/taskToggle';
 
+/** How far a finger may wander, in CSS pixels, and still have tapped a box. */
+const TAP_SLOP = 10;
+
 /**
  * Tick or untick the item at a position inside it, and everything that follows
  * from it.
@@ -121,12 +124,46 @@ const checkbox =
 		// browser's own toggling of a checkbox is not something to rely on, and
 		// the default would put the selection somewhere the editor did not ask
 		// for. The tick comes back from the document either way.
-		input.addEventListener('mousedown', (event) => {
-			event.preventDefault();
+		const press = (): void => {
 			const at = getPos();
 			if (at === undefined) return;
 			const tr = toggleAt(view.state, at);
 			if (tr !== null) view.dispatch(tr);
+		};
+
+		input.addEventListener('mousedown', (event) => {
+			event.preventDefault();
+			press();
+		});
+
+		// A tap anywhere while the editor has the focus raises a keyboard the
+		// user has put away, and the browser then scrolls to the cursor. Only
+		// refusing the touch at its start prevents that (measured on Chrome for
+		// Android; refusing `touchend` as well brings the keyboard back, so it
+		// is left alone here). The cost is that a swipe begun on the box does
+		// not scroll, so it is paid only where there is a keyboard to raise:
+		// with the focus elsewhere, the mouse events above do it.
+		const touched = cell<Readonly<{ x: number; y: number }> | null>(null);
+		input.addEventListener(
+			'touchstart',
+			(event) => {
+				const touch = event.changedTouches[0];
+				if (touch === undefined || !event.cancelable || !view.hasFocus()) return;
+				event.preventDefault();
+				touched.current = { x: touch.clientX, y: touch.clientY };
+			},
+			{ passive: false }
+		);
+		input.addEventListener('touchend', (event) => {
+			const from = touched.current;
+			const touch = event.changedTouches[0];
+			touched.current = null;
+			if (from === null || touch === undefined) return;
+			const moved = Math.hypot(touch.clientX - from.x, touch.clientY - from.y);
+			if (moved <= TAP_SLOP) press();
+		});
+		input.addEventListener('touchcancel', () => {
+			touched.current = null;
 		});
 
 		return input;
