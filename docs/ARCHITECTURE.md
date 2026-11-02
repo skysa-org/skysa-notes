@@ -2507,6 +2507,13 @@ An empty first paragraph with more after it is written as nothing, since an item
 **One `<br />` is still written:** an empty task item's, `- [ ] <br />`, because GFM writes the box only before a paragraph and `- [ ]` with nothing after it is the words "[ ]".
 It is read back as the empty paragraph it stands for, there and nowhere else.
 
+**A finished task sinks (2026-11-02).**
+In a checklist one level deep, ticking an item moves it to the very bottom of its list, below the ones already done, so what is left to do stays together at the top; unticking it moves it back up, above the done ones directly over it (`editor/rich/tasks.ts`).
+It rewrites the file's order, so it happens only on a tick, in the tick's own undo step, and never on opening a note: a list written somewhere else keeps its order until an item in it is ticked, and then only that item moves.
+A list with items under items stays as it is, since a place under a parent says what the item is part of, and so does a list with plain items among its tasks.
+A selection inside the item goes with it.
+Since the next box then sits under the pointer, a press within 300ms of the last is ignored, and the box never toggles itself: a double press ticks one task, not two.
+
 Every other `<br />` is the author's html and stays in the document as an inline atom, written back as it was — on a line of its own as much as inside a sentence, and so also one an older version of this app wrote for an empty line, which shows as `<br />` in rich text and can be deleted there.
 Milkdown's own reader (`remarkPreserveEmptyLinePlugin`) took every `<br>`, in four spellings and anywhere in the note, and deleted it — `first<br />second` became `firstsecond`, and the fidelity check below rightly sent the note to raw mode — so it is left out, with its options.
 `previewLines` draws a `<br />` alone on a line as no line, below, for the notes that hold one.
