@@ -1,6 +1,7 @@
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { sinkListItemCommand, splitListItemCommand } from '@milkdown/kit/preset/commonmark';
+import { undo } from '@milkdown/kit/prose/history';
 import type { Schema } from '@milkdown/kit/prose/model';
 import { EditorState, Plugin, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
@@ -45,6 +46,12 @@ const afterWord = (word: string) => (ctx: Ctx) => {
 	view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, at.current)));
 };
 
+/** Type at the cursor. */
+const typeHere = (text: string) => (ctx: Ctx) => {
+	const view = ctx.get(editorViewCtx);
+	view.dispatch(view.state.tr.insertText(text));
+};
+
 /** What the Enter key is bound to inside a list. */
 const enter = (ctx: Ctx) => {
 	callCommand(splitListItemCommand.key)(ctx);
@@ -86,6 +93,18 @@ describe('ticking a task', () => {
 		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
 	});
 
+	// A press can change nothing (the second of a double one), and the click
+	// after it would otherwise leave a box saying what the document does not.
+	it('does not let the browser toggle the box by itself', async () => {
+		const { root, withCtx } = await mount('- [ ] one\n');
+		const box = root.querySelector<HTMLInputElement>('.task-checkbox');
+
+		box?.click();
+
+		expect(box?.checked).toBe(false);
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n');
+	});
+
 	it('draws no box on a plain list item', async () => {
 		const { root } = await mount('- one\n');
 		expect(root.querySelector('.task-checkbox')).toBeNull();
@@ -116,6 +135,151 @@ describe('ticking a task', () => {
 
 		expect(handled).toBe(false);
 		expect(withCtx(currentMarkdown)).toBe('- one\n');
+	});
+});
+
+describe('where a ticked task goes', () => {
+	/** Press the box on the item with this word in it. */
+	const press = (root: HTMLElement, word: string) => {
+		const item = [...root.querySelectorAll('li')].find(
+			(li) => li.querySelector(':scope > p')?.textContent.includes(word) === true
+		);
+		item?.querySelector('.task-checkbox')?.dispatchEvent(
+			new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+		);
+	};
+
+	const pressing = async (body: string, word: string) => {
+		const { root, withCtx } = await mount(body);
+		press(root, word);
+		return withCtx(currentMarkdown);
+	};
+
+	it('goes to the bottom of the list', async () => {
+		expect(await pressing('- [ ] one\n- [ ] two\n- [ ] three\n', 'one')).toBe(
+			'- [ ] two\n- [ ] three\n- [x] one\n'
+		);
+	});
+
+	it('goes below the ones already done', async () => {
+		expect(await pressing('- [ ] one\n- [ ] two\n- [x] three\n', 'one')).toBe(
+			'- [ ] two\n- [x] three\n- [x] one\n'
+		);
+	});
+
+	it('stays put when it is already the last', async () => {
+		expect(await pressing('- [ ] one\n- [ ] two\n', 'two')).toBe('- [ ] one\n- [x] two\n');
+	});
+
+	it('moves only within its own list', async () => {
+		expect(await pressing('- [ ] one\n- [ ] two\n\nwords\n\n1. [ ] three\n', 'one')).toBe(
+			'- [ ] two\n- [x] one\n\nwords\n\n1. [ ] three\n'
+		);
+	});
+
+	it('takes everything in the item with it', async () => {
+		expect(await pressing('- [ ] one\n\n  more\n\n- [ ] two\n', 'one')).toBe(
+			'- [ ] two\n\n- [x] one\n\n  more\n'
+		);
+	});
+
+	it('leaves an ordered list numbered in order', async () => {
+		expect(await pressing('1. [ ] one\n2. [ ] two\n3. [ ] three\n', 'one')).toBe(
+			'1. [ ] two\n2. [ ] three\n3. [x] one\n'
+		);
+	});
+
+	it('goes back above the done ones when it is unticked', async () => {
+		expect(await pressing('- [ ] one\n- [x] two\n- [x] three\n', 'three')).toBe(
+			'- [ ] one\n- [ ] three\n- [x] two\n'
+		);
+	});
+
+	it('goes to the top when it is unticked and nothing else is left to do', async () => {
+		expect(await pressing('- [x] one\n- [x] two\n', 'two')).toBe('- [ ] two\n- [x] one\n');
+	});
+
+	it('is not sent down past the unfinished items of a list written elsewhere', async () => {
+		expect(await pressing('- [x] one\n- [ ] two\n', 'one')).toBe('- [ ] one\n- [ ] two\n');
+	});
+
+	// The next box has moved up under the pointer by the time of the second.
+	it('ticks one task for a double press, and the next on a press after that', async () => {
+		const { root, withCtx } = await mount('- [ ] one\n- [ ] two\n- [ ] three\n');
+		const pressAt = (word: string, timeStamp: number) => {
+			const item = [...root.querySelectorAll('li')].find(
+				(li) => li.querySelector(':scope > p')?.textContent.includes(word) === true
+			);
+			const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+			Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+			item?.querySelector('.task-checkbox')?.dispatchEvent(event);
+		};
+
+		pressAt('one', 1000);
+		pressAt('two', 1100);
+		expect(withCtx(currentMarkdown)).toBe('- [ ] two\n- [ ] three\n- [x] one\n');
+
+		pressAt('two', 1400);
+		expect(withCtx(currentMarkdown)).toBe('- [ ] three\n- [x] one\n- [x] two\n');
+	});
+
+	it('is one undo step, order and tick together', async () => {
+		const { root, withCtx } = await mount('- [ ] one\n- [ ] two\n');
+
+		press(root, 'one');
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			undo(view.state, view.dispatch.bind(view));
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n- [ ] two\n');
+	});
+
+	it('leaves a cursor in another item in its words', async () => {
+		const { root, withCtx } = await mount('- [ ] one\n- [ ] two\n');
+		withCtx(afterWord('two'));
+
+		press(root, 'one');
+		withCtx(typeHere('!'));
+
+		expect(withCtx(currentMarkdown)).toBe('- [ ] two!\n- [x] one\n');
+	});
+
+	it('takes the cursor with it from the keyboard, and back again', async () => {
+		const { withCtx } = await mount('- [ ] one\n- [ ] two\n');
+		withCtx(afterWord('one'));
+		const toggle = (ctx: Ctx) => {
+			const view = ctx.get(editorViewCtx);
+			toggleTaskCommand(view.state, view.dispatch.bind(view), view);
+		};
+
+		withCtx(toggle);
+		withCtx(typeHere('!'));
+		expect(withCtx(currentMarkdown)).toBe('- [ ] two\n- [x] one!\n');
+
+		withCtx(toggle);
+		withCtx(typeHere('?'));
+		expect(withCtx(currentMarkdown)).toBe('- [ ] two\n- [ ] one!?\n');
+	});
+
+	// A place under a parent says what the item is part of.
+	it('stays in place in a list with items under items', async () => {
+		expect(await pressing('- [ ] one\n  - [ ] two\n- [ ] three\n', 'one')).toBe(
+			'- [x] one\n  - [x] two\n- [ ] three\n'
+		);
+		expect(await pressing('- [ ] one\n  - [ ] two\n  - [ ] three\n', 'two')).toBe(
+			'- [ ] one\n  - [x] two\n  - [ ] three\n'
+		);
+	});
+
+	it('stays in place among plain items', async () => {
+		expect(await pressing('- [ ] one\n- two\n', 'one')).toBe('- [x] one\n- two\n');
+	});
+
+	// The order is the file's until the user ticks something.
+	it('does not sort a list that has only been opened', async () => {
+		const { withCtx } = await mount('- [x] one\n- [ ] two\n');
+		expect(withCtx(currentMarkdown)).toBe('- [x] one\n- [ ] two\n');
 	});
 });
 
@@ -159,15 +323,14 @@ describe('tapping a box on a touch screen', () => {
 		expect(touch(box, 'touchend').defaultPrevented).toBe(false);
 	});
 
-	it('leaves the cursor where it was', async () => {
+	it('leaves the cursor in the words it was in', async () => {
 		const { box, withCtx } = await focused('- [ ] one\n- [ ] two\n');
-		const selection = () => withCtx((ctx) => ctx.get(editorViewCtx).state.selection.from);
-		const before = selection();
 
 		touch(box, 'touchstart');
 		touch(box, 'touchend');
 
-		expect(selection()).toBe(before);
+		withCtx(typeHere('!'));
+		expect(withCtx(currentMarkdown)).toBe('- [ ] two\n- [x] one!\n');
 		expect(withCtx((ctx) => ctx.get(editorViewCtx).hasFocus())).toBe(true);
 	});
 

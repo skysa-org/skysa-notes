@@ -1,4 +1,4 @@
-import type { Node as ProseNode } from '@milkdown/kit/prose/model';
+import type { Node as ProseNode, ResolvedPos } from '@milkdown/kit/prose/model';
 import {
 	type Command,
 	type EditorState,
@@ -6,6 +6,7 @@ import {
 	PluginKey,
 	type Transaction,
 } from '@milkdown/kit/prose/state';
+import { StepMap } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { cell } from '@skysa/core';
 
@@ -31,6 +32,83 @@ const TASK_TOGGLE = 'skysa/taskToggle';
 
 /** How far a finger may wander, in CSS pixels, and still have tapped a box. */
 const TAP_SLOP = 10;
+
+/** A press this soon after the last, in ms, is the second half of a double one. */
+const DOUBLE_PRESS = 300;
+
+/** When each editor's boxes were last pressed. */
+const lastPress = new WeakMap<EditorView, number>();
+
+/** Does this item have list items of its own, however far down? */
+const holdsItems = (item: ProseNode): boolean => {
+	const found = cell(false);
+	item.descendants((node) => {
+		if (node.type.name === LIST_ITEM_NODE) found.current = true;
+		return !found.current;
+	});
+	return found.current;
+};
+
+/**
+ * Where in its list an item goes, as the index of the gap it lands in: a
+ * finished one to the very end, and one that is no longer finished up above the
+ * finished ones directly over it. Only up, because a list written somewhere
+ * else may have unfinished items further down, and those are no reason to send
+ * this one past them.
+ */
+const landingGap = (items: readonly ProseNode[], index: number, checked: boolean): number =>
+	checked
+		? items.length
+		: items.slice(0, index).findLastIndex((item) => item.attrs.checked !== true) + 1;
+
+/**
+ * Finished items sink to the bottom of a checklist, so what is left to do stays
+ * together at the top.
+ *
+ * Only a list of nothing but tasks, one level deep. Under a parent an item's
+ * place says what it is part of, and a plain item among tasks is not a
+ * checklist's to reorder. Other items keep the order they have: this moves what
+ * was ticked and tidies nothing else in the file.
+ *
+ * A selection inside the item goes with it, so what is typed next lands in the
+ * words the cursor was in.
+ */
+const moveToItsGroup = (
+	tr: Transaction,
+	$inside: ResolvedPos,
+	found: Ancestor,
+	checked: boolean
+): void => {
+	if (ancestors($inside, [LIST_ITEM_NODE]).length > 1) return;
+
+	const list = $inside.node(found.depth - 1);
+	const items = Array.from({ length: list.childCount }, (_, at) => list.child(at));
+	if (!items.every((item) => isTask(item) && !holdsItems(item))) return;
+
+	const index = $inside.index(found.depth - 1);
+	const gap = landingGap(items, index, checked);
+	if (gap === index || gap === index + 1) return;
+
+	const size = found.node.nodeSize;
+	const gapAt = items
+		.slice(0, gap)
+		.reduce((at, item) => at + item.nodeSize, $inside.start(found.depth - 1));
+	const landed = gap > index ? gapAt - size : gapAt;
+
+	const moved = tr.doc.nodeAt(found.pos);
+	if (moved === null) return;
+
+	const { selection } = tr;
+	const travels = selection.from >= found.pos && selection.to <= found.pos + size;
+	tr.delete(found.pos, found.pos + size).insert(landed, moved);
+	if (travels)
+		tr.setSelection(
+			selection
+				.getBookmark()
+				.map(StepMap.offset(landed - found.pos))
+				.resolve(tr.doc)
+		);
+};
 
 /**
  * Tick or untick the item at a position inside it, and everything that follows
@@ -85,6 +163,8 @@ const toggleAt = (state: EditorState, inside: number): Transaction | null => {
 			});
 	}
 
+	moveToItsGroup(tr, $pos, found, checked);
+
 	return tr.setMeta(TASK_TOGGLE, true);
 };
 
@@ -98,7 +178,7 @@ const toggleAt = (state: EditorState, inside: number): Transaction | null => {
 export const toggleTaskCommand: Command = (state, dispatch) => {
 	const tr = toggleAt(state, state.selection.from);
 	if (tr === null) return false;
-	dispatch?.(tr);
+	dispatch?.(tr.scrollIntoView());
 	return true;
 };
 
@@ -124,7 +204,14 @@ const checkbox =
 		// browser's own toggling of a checkbox is not something to rely on, and
 		// the default would put the selection somewhere the editor did not ask
 		// for. The tick comes back from the document either way.
-		const press = (): void => {
+		//
+		// A tick can move the item, and then the next box is under the pointer:
+		// the second half of a double press would tick a task nobody meant to.
+		const press = (event: Event): void => {
+			const previous = lastPress.get(view);
+			if (previous !== undefined && event.timeStamp - previous < DOUBLE_PRESS) return;
+			lastPress.set(view, event.timeStamp);
+
 			const at = getPos();
 			if (at === undefined) return;
 			const tr = toggleAt(view.state, at);
@@ -133,7 +220,13 @@ const checkbox =
 
 		input.addEventListener('mousedown', (event) => {
 			event.preventDefault();
-			press();
+			press(event);
+		});
+
+		// What is on screen is the document's tick, so the browser's own toggle
+		// never gets to run, as it would after a press that changed nothing.
+		input.addEventListener('click', (event) => {
+			event.preventDefault();
 		});
 
 		// A tap anywhere while the editor has the focus raises a keyboard the
@@ -160,7 +253,7 @@ const checkbox =
 			touched.current = null;
 			if (from === null || touch === undefined) return;
 			const moved = Math.hypot(touch.clientX - from.x, touch.clientY - from.y);
-			if (moved <= TAP_SLOP) press();
+			if (moved <= TAP_SLOP) press(event);
 		});
 		input.addEventListener('touchcancel', () => {
 			touched.current = null;
