@@ -155,15 +155,31 @@ describe('where a ticked task goes', () => {
 		return withCtx(currentMarkdown);
 	};
 
-	it('goes to the bottom of the list', async () => {
+	it('goes to the bottom of a list with nothing done yet', async () => {
 		expect(await pressing('- [ ] one\n- [ ] two\n- [ ] three\n', 'one')).toBe(
 			'- [ ] two\n- [ ] three\n- [x] one\n'
 		);
 	});
 
-	it('goes below the ones already done', async () => {
+	it('goes above the ones already done', async () => {
 		expect(await pressing('- [ ] one\n- [ ] two\n- [x] three\n', 'one')).toBe(
-			'- [ ] two\n- [x] three\n- [x] one\n'
+			'- [ ] two\n- [x] one\n- [x] three\n'
+		);
+	});
+
+	it('goes up to the top of the done ones from below them', async () => {
+		expect(await pressing('- [ ] one\n- [x] two\n- [ ] three\n', 'three')).toBe(
+			'- [ ] one\n- [x] three\n- [x] two\n'
+		);
+	});
+
+	it('goes to the top when it is the last left to do', async () => {
+		expect(await pressing('- [x] one\n- [ ] two\n', 'two')).toBe('- [x] two\n- [x] one\n');
+	});
+
+	it('stays put when it is already just above the done ones', async () => {
+		expect(await pressing('- [ ] one\n- [ ] two\n- [x] three\n', 'two')).toBe(
+			'- [ ] one\n- [x] two\n- [x] three\n'
 		);
 	});
 
@@ -220,7 +236,7 @@ describe('where a ticked task goes', () => {
 		expect(withCtx(currentMarkdown)).toBe('- [ ] two\n- [ ] three\n- [x] one\n');
 
 		pressAt('two', 1400);
-		expect(withCtx(currentMarkdown)).toBe('- [ ] three\n- [x] one\n- [x] two\n');
+		expect(withCtx(currentMarkdown)).toBe('- [ ] three\n- [x] two\n- [x] one\n');
 	});
 
 	it('is one undo step, order and tick together', async () => {

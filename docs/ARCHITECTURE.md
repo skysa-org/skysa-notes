@@ -2508,7 +2508,7 @@ An empty first paragraph with more after it is written as nothing, since an item
 It is read back as the empty paragraph it stands for, there and nowhere else.
 
 **A finished task sinks (2026-11-02).**
-In a checklist one level deep, ticking an item moves it to the very bottom of its list, below the ones already done, so what is left to do stays together at the top; unticking it moves it back up, above the done ones directly over it (`editor/rich/tasks.ts`).
+In a checklist one level deep, ticking an item moves it just below the last item still to do, at the top of the ones already done, so what is left to do stays together at the top and the latest done comes first; unticking it moves it back up, above the done ones directly over it (`editor/rich/tasks.ts`).
 It rewrites the file's order, so it happens only on a tick, in the tick's own undo step, and never on opening a note: a list written somewhere else keeps its order until an item in it is ticked, and then only that item moves.
 A list with items under items stays as it is, since a place under a parent says what the item is part of, and so does a list with plain items among its tasks.
 A selection inside the item goes with it.
