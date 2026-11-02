@@ -1,5 +1,20 @@
 # @skysa/web
 
+## 2.1.0
+
+### Minor Changes
+
+- c7f1aad: Ticking a task in a checklist one level deep moves it to the bottom of the list, and unticking it moves it back up above the finished ones.
+
+### Patch Changes
+
+- 5d628d1: Dialogs, toasts and search results draw their shadow, and the find field its corner, from the same steps as everything else, so they scale with a larger browser font. Nothing moves at the default size.
+- dc8535d: Most small padding, margins and gaps around a note sit on one set of steps, moving by two pixels at most. Menus are slightly tighter.
+- 246e1a8: The app's words sit on one scale of sizes: most move by less than a pixel, none by more than one. That includes note titles and previews in the lists. Text inside the editors does not change.
+- 91182c0: "Insert secret" from the palette keeps working on the open note after an editor that was still being built as you switched modes goes away, as adding a picked file already did.
+- 23737c8: Ticking a task on a phone no longer brings back a keyboard that was put away, or scrolls the note to the cursor.
+- @skysa/core@2.1.0
+
 ## 2.0.0
 
 ### Minor Changes
