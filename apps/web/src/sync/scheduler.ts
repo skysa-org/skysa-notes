@@ -8,13 +8,13 @@ import {
 	isRateLimitError,
 	type MergeInput,
 	messageOf,
-	NOTES_WATCH,
 	type ProviderKind,
 	type StorageProvider,
 	type SyncEngine,
 	type SyncOp,
 	type SyncOutcome,
 	type SyncProgress,
+	type Watch,
 } from '@skysa/core';
 import { liveQuery } from 'dexie';
 
@@ -32,9 +32,6 @@ import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
-import { type ClipboardSync, createClipboardSync } from './clipboard.js';
-import { createFileReader, type FileRead } from './fileReads.js';
-import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
 import type { RelayFactory, RelayLink } from './relay.js';
 import { createDexieSyncStore, toSyncOp } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
@@ -154,7 +151,8 @@ export interface SchedulerEnvironment {
 	readonly withLock: <T>(name: string, work: () => Promise<T>) => Promise<T>;
 }
 
-const browserEnvironment = (): SchedulerEnvironment => ({
+/** The browser's clock, network, visibility and locks. */
+export const browserEnvironment = (): SchedulerEnvironment => ({
 	now: Date.now,
 	isOnline: () => navigator.onLine,
 	isVisible: () => document.visibilityState === 'visible',
@@ -218,6 +216,11 @@ export interface SyncSchedulerOptions {
 	 * and the vault, which are dot-named.
 	 */
 	syncsHidden: (path: string) => boolean;
+	/**
+	 * What a pull is to say it met, for the engine (`SyncEngineOptions.watch`):
+	 * the app reads it in what it attaches (`attach`).
+	 */
+	watch?: Watch;
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
 	debounceMs?: number;
@@ -251,11 +254,34 @@ export interface SyncSchedulerOptions {
 	 * a provider's change feed can trail the write the notice is about.
 	 */
 	afterNoticeMs?: readonly number[];
-	/**
-	 * How long after a pull that met the clipboard's folder to list it again:
-	 * a provider's listing can trail its change feed.
-	 */
-	relistMs?: number;
+}
+
+/**
+ * The session running for a connection, for what the app syncs beside its
+ * documents through it: the clipboard, the key file, a file read when it is
+ * opened.
+ */
+interface SessionLink {
+	readonly provider: StorageProvider;
+	/** Once more after a fresh token, for work that met an expired one. */
+	readonly withAuth: <T>(work: () => Promise<T>) => Promise<T>;
+	/** Tell the connection's other devices, through the relay, that it wrote. */
+	readonly told: () => void;
+	/** Settles once the session has no run in flight. */
+	readonly idle: () => Promise<void>;
+}
+
+/**
+ * Something the app syncs beside its documents, told of each session's life
+ * (`attach`). Each is optional, and none is waited for.
+ */
+export interface Companion {
+	/** A session started syncing the connection: not one started paused. */
+	readonly started?: (connectionId: string) => void;
+	/** A run of the connection's came to `outcome`, and the status says so. */
+	readonly synced?: (connectionId: string, outcome: SyncOutcome) => void;
+	/** The session ended: anything armed for it goes with it. */
+	readonly ended?: (connectionId: string) => void;
 }
 
 export interface SyncScheduler {
@@ -297,28 +323,10 @@ export interface SyncScheduler {
 	 * store, which its requests being aborted makes quick.
 	 */
 	readonly halt: (connectionId: string) => Promise<() => void>;
-	/**
-	 * A file beside a note, for showing it: from this device if it holds the
-	 * bytes, and otherwise downloaded through the session running for
-	 * `connectionId`, if one is, and kept (`sync/fileReads.ts`). Never rejects.
-	 */
-	readonly readFile: (
-		connectionId: string,
-		fileId: string,
-		signal?: AbortSignal
-	) => Promise<FileRead>;
-	/**
-	 * A source's clipboard, through the session running for it
-	 * (`sync/clipboard.ts`): read again, sent, and an item's bytes read. Each
-	 * does nothing, or answers `unavailable`, for a source not being synced.
-	 */
-	readonly clipboard: ClipboardSync;
-	/**
-	 * A source's key file for secrets, through the session running for it
-	 * (`sync/keyFile.ts`): read again, and written. Each does nothing, or
-	 * answers `unavailable`, for a source not being synced.
-	 */
-	readonly keyFile: KeyFileSync;
+	/** The session running for `connectionId`, if one is and it has a provider. */
+	readonly sessionFor: (connectionId: string) => SessionLink | undefined;
+	/** Be told of each session's life, for as long as the scheduler lives. */
+	readonly attach: (companion: Companion) => void;
 }
 
 /**
@@ -399,26 +407,18 @@ const RETRY_AFTER_CAP_MS = 15 * 60_000;
 const AFTER_NOTICE_MS: readonly number[] = [3000, 10_000];
 
 /**
- * How long after a pull met the clipboard's folder to list it a second time.
- * Drive's search goes on listing a file for a moment after it is trashed
- * (docs/ARCHITECTURE.md §5.1), and a listing taken in that moment, by a pull
- * that met the trashing soon after, keeps the item. The feed has moved on by
- * then, so nothing else would ask again.
- */
-const RELIST_MS = 3000;
-
-/**
  * `next`: the poll, or a backoff's retry. `debounce`: a local edit's sync.
  * `lazy`: the sync a lazy write waits for (`lazyMs`). `notice`: a look after
- * the relay's last notice. `relist`: the clipboard's second listing.
- * `keyFile`: the key file's second read, for the same reason.
+ * the relay's last notice.
  */
-type Timer = 'next' | 'debounce' | 'lazy' | 'notice' | 'relist' | 'keyFile';
+type Timer = 'next' | 'debounce' | 'lazy' | 'notice';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
 	const { db, client, createProvider, lockName, document, merge, syncsHidden } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
+	// None, as the engine's own default is: a pull then says it met nothing.
+	const watch = options.watch ?? {};
 	const { lazyMs } = options;
 	const intervalMs = options.intervalMs ?? 60_000;
 	const backoffMs = options.backoffMs ?? 5000;
@@ -427,7 +427,6 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const blockedRetryMs = options.blockedRetryMs ?? 15 * 60_000;
 	const progressMs = options.progressMs ?? 150;
 	const afterNoticeMs = options.afterNoticeMs ?? AFTER_NOTICE_MS;
-	const relistMs = options.relistMs ?? RELIST_MS;
 
 	/** The session for the connection that is bound, if one is. */
 	const bound = cell<Session | undefined>(undefined);
@@ -440,6 +439,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const sessionUnsubscribers = new Set<() => void>();
 	const listeners = new Set<(status: SchedulerStatus) => void>();
 	const statusBox = cell<SchedulerStatus>({ phase: 'local', conflicts: [] });
+	const companions = new Set<Companion>();
 
 	const status = (): SchedulerStatus => statusBox.current;
 
@@ -830,24 +830,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// the connection's other devices to pull.
 		if (result.outcome.pushed > 0) session.relay?.pushed();
 		await synced(session, result.outcome);
-		// Not waited for: a refresh downloads, and a flush waits for this run to
-		// end before it sends anything (`sync/clipboard.ts`).
-		if (result.outcome.met?.includes('clipboard') === true) {
-			void clipboard.refresh(session.connectionId);
-			arm('relist', relistMs, () => {
-				void clipboard.refresh(session.connectionId);
-			});
-		}
-		void clipboard.flush(session.connectionId);
-		// Another device may have set the source up for secrets, or replaced its
-		// key. Read twice, as the clipboard is listed: a listing can trail the
-		// feed that reported a new file.
-		if (result.outcome.met?.includes('encryption') === true) {
-			void keyFile.heard(session.connectionId);
-			arm('keyFile', relistMs, () => {
-				void keyFile.heard(session.connectionId);
-			});
-		}
+		companions.forEach((companion) => {
+			companion.synced?.(session.connectionId, result.outcome);
+		});
 	};
 
 	/**
@@ -929,11 +914,14 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		cancel('debounce');
 		cancel('lazy');
 		cancel('notice');
-		cancel('relist');
-		cancel('keyFile');
 		cancelProgress();
-		bound.current?.abort.abort();
+		const ending = bound.current;
+		ending?.abort.abort();
 		bound.current = undefined;
+		if (ending === undefined) return;
+		companions.forEach((companion) => {
+			companion.ended?.(ending.connectionId);
+		});
 	};
 
 	// ----------------------------------------------------------- progress
@@ -1199,10 +1187,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 							document,
 							...(merge === undefined ? {} : { merge }),
 							syncsHidden,
-							// What the clipboard's and the key file's syncs below
-							// read again, which is why it is set here and not by
-							// the app (`NOTES_WATCH`).
-							watch: NOTES_WATCH,
+							watch,
 							store: createDexieSyncStore(db, { connectionId }),
 							reauthorize: () => reauthorize(tokens),
 							maxAttempts,
@@ -1238,32 +1223,15 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		watchEdits(session);
 		if (paused) return;
 		void run(session);
-		// What the clipboard holds now, and what was pasted here while nothing
-		// sent it. Neither waits for the run: a refresh asks only for the
-		// folder, and a flush waits for the run itself.
-		void clipboard.refresh(connectionId);
-		void clipboard.flush(connectionId);
-		// Whether the source is set up for secrets, and with which key, where
-		// that could have changed since this device last asked.
-		void keyFile.started(connectionId);
+		companions.forEach((companion) => {
+			companion.started?.(connectionId);
+		});
 	};
 
 	/** The user asking again: a pause of this session's connection is over. */
 	const resume = (session: Session) => {
 		if (isPaused(session.connectionId)) pausedFor.current = undefined;
 	};
-
-	const reader = createFileReader({
-		db,
-		isOnline: environment.isOnline,
-		now: environment.now,
-		sessionFor: (connectionId) => {
-			const session = bound.current;
-			const provider = session?.provider;
-			if (session?.connectionId !== connectionId || provider === undefined) return undefined;
-			return { provider, withAuth: (work) => withAuth(session, work) };
-		},
-	});
 
 	/** Settles once the session has no run in flight, however many follow each other. */
 	const idle = async (session: Session): Promise<void> => {
@@ -1273,8 +1241,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await idle(session);
 	};
 
-	/** The session for `connectionId`, for what is synced beside the notes. */
-	const besideNotes = (connectionId: string) => {
+	const sessionFor = (connectionId: string): SessionLink | undefined => {
 		const session = bound.current;
 		const provider = session?.provider;
 		if (session?.connectionId !== connectionId || provider === undefined) return undefined;
@@ -1287,18 +1254,6 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			idle: () => idle(session),
 		};
 	};
-
-	const clipboard = createClipboardSync({
-		db,
-		isOnline: environment.isOnline,
-		sessionFor: besideNotes,
-	});
-
-	const keyFile = createKeyFileSync({
-		db,
-		isOnline: environment.isOnline,
-		sessionFor: besideNotes,
-	});
 
 	/**
 	 * The page is going out of sight: whatever is waiting to be sent goes now.
@@ -1474,8 +1429,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			};
 		},
 
-		readFile: reader.read,
-		clipboard,
-		keyFile,
+		sessionFor,
+		attach: (companion) => {
+			companions.add(companion);
+		},
 	};
 };

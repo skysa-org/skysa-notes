@@ -1,4 +1,10 @@
-import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import {
+	CLIPBOARD_FOLDER,
+	NOTE_FORMAT,
+	type SyncOutcome,
+	syncsHidden,
+	type Watch,
+} from '@skysa/core';
 import { TEST_FOLDER } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,6 +19,7 @@ import {
 	DEBOUNCE,
 	deferred,
 	INTERVAL,
+	pastedElsewhere,
 	quiet,
 	reaches,
 	remote,
@@ -335,5 +342,90 @@ describe('offline', () => {
 
 		expect(h.scheduler.status()).toMatchObject({ phase: 'offline', error: undefined });
 		expect(h.env.pending()).toEqual([]);
+	});
+});
+
+describe('what the app syncs beside its documents', () => {
+	// The scheduler knows none of this app's folders, and builds none of what
+	// it syncs beside the notes: the app hands it a watch and attaches each
+	// (`sync/notesSync.ts`). Every other test here runs it as the app does.
+	const bare = (db: Awaited<ReturnType<typeof bound>>, watch?: Watch) => {
+		const env = fakeEnvironment();
+		const theRemote = remote();
+		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
+			syncsHidden,
+			...(watch === undefined ? {} : { watch }),
+			db,
+			client: tokenServer(),
+			createProvider: theRemote.factory,
+			environment: env.environment,
+		});
+		cleanups.unshift(() => {
+			scheduler.stop();
+		});
+		const told: string[] = [];
+		const outcomes: SyncOutcome[] = [];
+		scheduler.attach({
+			started: (connectionId) => told.push(`started ${connectionId}`),
+			synced: (connectionId, outcome) => {
+				told.push(`synced ${connectionId} ${outcome.status}`);
+				outcomes.push(outcome);
+			},
+			ended: (connectionId) => told.push(`ended ${connectionId}`),
+		});
+		return { scheduler, remote: theRemote, told, outcomes };
+	};
+
+	it('tells what is attached that a session started, synced and ended', async () => {
+		const db = await bound();
+		const h = bare(db);
+
+		h.scheduler.start();
+		await reaches(h.scheduler, 'idle');
+		h.scheduler.stop();
+
+		expect(h.told).toEqual(['started c1', 'synced c1 ok', 'ended c1']);
+	});
+
+	it('does not say a paused session started', async () => {
+		const db = await bound();
+		const h = bare(db);
+		h.scheduler.start();
+		await reaches(h.scheduler, 'idle');
+
+		h.scheduler.pause();
+		await reaches(h.scheduler, 'paused');
+
+		expect(h.told).toEqual(['started c1', 'synced c1 ok', 'ended c1']);
+	});
+
+	it('says what a pull met of the watch it was handed, and nothing without one', async () => {
+		const db = await bound();
+		const watched = bare(db, { clipboard: (path) => path.startsWith(`${CLIPBOARD_FOLDER}/`) });
+		const unwatched = bare(await bound('c2'));
+		for (const h of [watched, unwatched]) {
+			h.scheduler.start();
+			await reaches(h.scheduler, 'idle');
+			await pastedElsewhere(h.remote.fake);
+
+			await h.scheduler.syncNow();
+		}
+
+		expect(watched.outcomes.at(-1)?.met).toEqual(['clipboard']);
+		expect(unwatched.outcomes.at(-1)?.met).toBeUndefined();
+	});
+
+	it('lends the session to what is synced beside, for its connection only', async () => {
+		const db = await bound();
+		const h = bare(db);
+		h.scheduler.start();
+		await reaches(h.scheduler, 'idle');
+
+		expect(h.scheduler.sessionFor('c1')?.provider).toBeDefined();
+		expect(h.scheduler.sessionFor('c2')).toBeUndefined();
+		h.scheduler.stop();
+		expect(h.scheduler.sessionFor('c1')).toBeUndefined();
 	});
 });

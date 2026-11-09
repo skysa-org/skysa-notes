@@ -1,6 +1,6 @@
 import type { ApiClient, InstanceConfig } from '../../api/client.js';
 import type { Asked } from '../../api/instanceConfig.js';
-import type { SyncScheduler } from '../../sync/scheduler.js';
+import type { NotesSync } from '../../sync/notesSync.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
 
 /**
@@ -11,7 +11,7 @@ import type { AccountSlot } from '../sources/SourcePanel.js';
 export type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
 
 export type Sync = Pick<
-	SyncScheduler,
+	NotesSync,
 	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'pause' | 'clipboard' | 'keyFile'
 >;
 

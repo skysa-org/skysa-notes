@@ -28,7 +28,7 @@ import { addClips, type ClipInput, listClips, removeClip } from '../../store/cli
 import { useDb } from '../../store/database.js';
 import type { ClipKey, ClipRecord } from '../../store/db.js';
 import type { FileRead } from '../../sync/fileReads.js';
-import type { SyncScheduler } from '../../sync/scheduler.js';
+import type { NotesSync } from '../../sync/notesSync.js';
 import { sizeOf } from '../attachments/AttachedFiles.js';
 import { browserFiles, type FileBrowser, saveBytes } from '../attachments/fileActions.js';
 import { FILE_ICONS, Icon } from '../ui/icons.js';
@@ -58,7 +58,7 @@ import { inEditor } from './useFileDropGuard.js';
  * for a file — which no browser puts on a clipboard — saves it.
  */
 
-type Sync = Pick<SyncScheduler, 'clipboard'>;
+type Sync = Pick<NotesSync, 'clipboard'>;
 
 export interface ClipboardPanelProps {
 	connectionId: string;

@@ -17,12 +17,11 @@ import { bindConnection } from '../../src/store/connection.js';
 import type { NotesDatabase } from '../../src/store/db.js';
 import { SYNC_LOCK } from '../../src/sync/lock.js';
 import {
-	createSyncScheduler,
-	type ProviderFactory,
-	type SyncPhase,
-	type SyncScheduler,
-	type SyncSchedulerOptions,
-} from '../../src/sync/scheduler.js';
+	createNotesSync,
+	type NotesSync,
+	type NotesSyncOptions,
+} from '../../src/sync/notesSync.js';
+import type { ProviderFactory, SyncPhase, SyncScheduler } from '../../src/sync/scheduler.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';
 import { fakeEnvironment } from './fakes/environment.js';
@@ -184,20 +183,19 @@ export const bound = async (connectionId = 'c1') => {
 
 export interface Harness {
 	db: NotesDatabase;
-	scheduler: SyncScheduler;
+	scheduler: NotesSync;
 	env: FakeEnvironment;
 	server: ReturnType<typeof tokenServer>;
 	remote: Remote;
 }
 
-export const started = (
-	db: NotesDatabase,
-	overrides: Partial<SyncSchedulerOptions> = {}
-): Harness => {
+export const started = (db: NotesDatabase, overrides: Partial<NotesSyncOptions> = {}): Harness => {
 	const env = fakeEnvironment();
 	const server = tokenServer();
 	const theRemote = remote();
-	const scheduler = createSyncScheduler({
+	// As the app makes it (`sync/runtime.ts`): with the clipboard, the key file
+	// and the files beside notes attached.
+	const scheduler = createNotesSync({
 		lockName: SYNC_LOCK,
 		document: NOTE_FORMAT,
 		syncsHidden,

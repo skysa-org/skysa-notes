@@ -184,7 +184,7 @@ export {
 export { readRecoveryKey, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from './secrets/recoveryKey.js';
 export { openSecret, opensSecret, resealSecret, sealSecret } from './secrets/sealing.js';
 export { createSyncEngine, type MergeInput, type SyncEngine } from './sync/engine.js';
-export { messageOf, type SyncOutcome } from './sync/outcome.js';
+export { messageOf, type SyncOutcome, type Watch } from './sync/outcome.js';
 export type { SyncProgress } from './sync/progress.js';
 export {
 	type ConflictResolution,

@@ -3466,12 +3466,13 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
-The first five seams are cut:
+The first five seams are cut, and the sixth in part:
 - the adapters are handed the app's folder (§3), and the scheduler its lock's name;
 - the engine and the adapters are handed what a document is (`NOTE_FORMAT`);
 - the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy");
 - the engine is handed which hidden paths sync (`syncsHidden`) and which a pull is to say it met (`watch`, and `SyncOutcome.met`), and this app's are in `appFolder.ts`;
-- the queue and the scheduler say when a push goes: an app may queue writes lazily and give the scheduler `lazyMs`, and this app does neither (§7, "When a push goes").
+- the queue and the scheduler say when a push goes: an app may queue writes lazily and give the scheduler `lazyMs`, and this app does neither (§7, "When a push goes");
+- the scheduler builds nothing of this app's own: the clipboard, the key file and the files beside notes are attached to it, with the watch they read (`sync/notesSync.ts`), and the rest of the client's ports are to follow.
 
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
