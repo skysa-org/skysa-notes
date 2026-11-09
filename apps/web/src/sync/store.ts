@@ -61,6 +61,11 @@ import { eachInSlices } from '../store/slices.js';
  * Tombstones are notes like any other here. The port asks every read to see a
  * note whose delete is still queued, because the row is what carries the
  * `remoteId` the delete needs; the UI is what hides them.
+ *
+ * Its documents are notes, and it is the app's, not the shared kit's
+ * (docs/decisions/0018-the-shared-kit.md): it reads each file into a note's
+ * row, frontmatter and all, so a conflict copy is notes' (`conflictContent`,
+ * `NOTE_FORMAT`'s) rather than a format's it is handed.
  */
 
 /**

@@ -165,7 +165,7 @@ const device = async (
 ): Promise<Device> => {
 	const provider = around(remote.adapter());
 	await provider.ensureRoot();
-	const store = createMemoryStore();
+	const store = createMemoryStore(NOTE_FORMAT);
 	const counter = { next: 0 };
 	const engine = createSyncEngine({
 		document: NOTE_FORMAT,

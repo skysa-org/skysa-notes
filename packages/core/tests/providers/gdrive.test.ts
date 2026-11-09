@@ -921,7 +921,7 @@ describe('the app folder, from one sync to the next', () => {
 	it('trashed, written around, and restored keeps every note it held', async () => {
 		const world = driveWorld();
 		world.add({ id: 'a', name: 'a.md', parent: world.root.id, content: 'A' });
-		const store = createMemoryStore();
+		const store = createMemoryStore(NOTE_FORMAT);
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
 			provider: world.provider,
@@ -1392,7 +1392,7 @@ describe('changes', () => {
 		const { stub, provider } = stubbed();
 		await provider.ensureRoot();
 		await provider.createFolder('.clipboard');
-		const store = createMemoryStore();
+		const store = createMemoryStore(NOTE_FORMAT);
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
 			watch: NOTES_WATCH,
@@ -1563,7 +1563,7 @@ describe('changes', () => {
 
 	it('scan through the engine when the feed runs long, and find what it would have said', async () => {
 		const world = driveWorld();
-		const store = createMemoryStore();
+		const store = createMemoryStore(NOTE_FORMAT);
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
 			provider: world.provider,
@@ -1625,7 +1625,7 @@ describe('changes', () => {
 		world.add({ id: 'out', name: 'Archive', parent: 'my-drive', mimeType: FOLDER });
 		world.add({ id: 'old', name: 'old.md', parent: 'out', content: 'O' });
 		world.hooks.pageSize = 1;
-		const store = createMemoryStore();
+		const store = createMemoryStore(NOTE_FORMAT);
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
 			provider: world.provider,

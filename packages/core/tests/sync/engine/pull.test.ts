@@ -9,7 +9,6 @@ import { reporting } from '../kit/engine.js';
 import { entryAt, remoteAt } from '../kit/remote.js';
 import { boundTo } from '../kit/seed.js';
 import { syncWorld } from '../kit/world.js';
-import { createMemoryStore } from '../memoryStore.js';
 
 /**
  * A pull, and a sync, as a whole: a cursor that has died and the rescan
@@ -24,6 +23,7 @@ import { createMemoryStore } from '../memoryStore.js';
 const {
 	world,
 	copyId,
+	newStore,
 	engineWith,
 	pullNow,
 	pullPages,
@@ -290,7 +290,7 @@ describe('pull', () => {
 		// deletion the scan would have proved — are never looked at again.
 		world.provider = createFakeProvider({ pageSize: 1 });
 		await world.provider.ensureRoot();
-		world.store = createMemoryStore();
+		world.store = newStore();
 		world.engine = engineWith();
 		await world.provider.write('a.md', '1\n', {});
 		await world.provider.write('b.md', '2\n', {});
@@ -316,7 +316,7 @@ describe('pull', () => {
 	it('drains every page before it finishes', async () => {
 		world.provider = createFakeProvider({ pageSize: 1 });
 		await world.provider.ensureRoot();
-		world.store = createMemoryStore();
+		world.store = newStore();
 		world.engine = engineWith();
 		await world.provider.write('a.md', '1\n', {});
 		await world.provider.write('b.md', '2\n', {});
@@ -940,7 +940,7 @@ describe('a dead cursor', () => {
 			// whole point of the flag, undone by paging alone.
 			world.provider = createFakeProvider({ pageSize: 1 });
 			await world.provider.ensureRoot();
-			world.store = createMemoryStore();
+			world.store = newStore();
 			world.engine = engineWith();
 			await world.provider.write('a.md', 'one\n', {});
 			await world.provider.write('b.md', 'two\n', {});
@@ -1019,7 +1019,7 @@ describe('a dead cursor', () => {
 		await world.provider.write('a.md', '1\n', {});
 		await world.provider.write('b.md', '2\n', {});
 		await world.provider.write('c.md', '3\n', {});
-		world.store = createMemoryStore();
+		world.store = newStore();
 		world.engine = engineWith({
 			// One id per note. A constant here would have all three land on one
 			// row, and the test would fail for a reason of its own making.

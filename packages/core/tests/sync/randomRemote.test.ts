@@ -365,7 +365,7 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 		it.each(Array.from({ length: seeds }, (__, seed) => seed + 1))('seed %i', async (seed) => {
 			const { backing, adapter } = make();
 			await adapter.ensureRoot();
-			const store = createMemoryStore();
+			const store = createMemoryStore(NOTE_FORMAT);
 			const remote = createRemote(seed, backing, encodings, attached);
 			// What each page said, for the trace a failure prints.
 			const reporting: StorageProvider = {

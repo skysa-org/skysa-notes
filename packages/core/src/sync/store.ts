@@ -749,11 +749,11 @@ export const remoteOf = (change: PullChange): RemoteEntry | undefined =>
  * real edit made between the two. A queued `move` is left alone: it is the
  * user's rename, and the conflict rule is about content.
  *
- * `copyContent` is `conflictContent(noteContent, copyId)` for the note's content
- * as the engine read it. The store makes the copy from the note as it is when
- * the resolution is applied — the same thing unless the user typed while the
- * engine was at the network, in which case the older copy would leave the newest
- * words out. Refusing instead would stall every pull and push for as long as
+ * `copyContent` is the format's copy (`DocumentFormat.conflictContent`) of the
+ * note's content as the engine read it, claiming `copyId`. The store makes the
+ * copy the same way, from the note as it is when the resolution is applied —
+ * the same thing unless the user typed while the engine was at the network, in
+ * which case the older copy would leave the newest words out. Refusing instead would stall every pull and push for as long as
  * someone keeps typing into a conflicted note.
  */
 export interface ConflictResolution {

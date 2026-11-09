@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect } from 'vitest';
 
+import type { DocumentFormat } from '../../../src/documentFormat.js';
+import { NOTE_FORMAT } from '../../../src/markdown/format.js';
 import { createFakeProvider, type FakeProvider } from '../../../src/providers/fake.js';
 import { CursorResetError } from '../../../src/providers/types.js';
 import type { SyncEngine } from '../../../src/sync/engine.js';
@@ -31,26 +33,32 @@ interface SyncWorld {
  * lose user data. A sync that drops an edit is worse than a sync that does
  * nothing, so where a branch could go either way they assert the timid
  * answer.
+ *
+ * The world's documents are `document`'s kind, notes' unless a file says
+ * otherwise: the store and every engine over it are handed that format.
  */
-export const syncWorld = () => {
+export const syncWorld = (document: DocumentFormat = NOTE_FORMAT) => {
 	// Filled in before the first test runs, and again before every one after.
 	const world = {} as SyncWorld;
 	/** How many `copy-N` ids the file's engine has given out. */
 	const ids = { count: 0 };
 
+	/** An empty store of the world's documents, for a test that puts another in place. */
+	const newStore = () => createMemoryStore(document);
+
 	beforeEach(async () => {
 		ids.count = 0;
 		world.provider = createFakeProvider({ startAt: new Date('2026-01-01T00:00:00Z') });
 		await world.provider.ensureRoot();
-		world.store = createMemoryStore();
+		world.store = newStore();
 		world.engine = engineWith({ newId: copyId });
 	});
 
 	// The provider and store alone: the rest of the world is not an engine's option.
-	const { engineWith, pullNow, pullPages } = engineFixture(() => ({
-		provider: world.provider,
-		store: world.store,
-	}));
+	const { engineWith, pullNow, pullPages } = engineFixture(
+		() => ({ provider: world.provider, store: world.store }),
+		document
+	);
 
 	/** The file engine's ids, `copy-N`, for a test that builds that engine again. */
 	const copyId = (): string => {
@@ -108,6 +116,7 @@ export const syncWorld = () => {
 	return {
 		world,
 		copyId,
+		newStore,
 		engineWith,
 		pullNow,
 		pullPages,

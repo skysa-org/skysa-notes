@@ -6,7 +6,6 @@ import { expectSoundStore } from '../kit/invariants.js';
 import { entryAt } from '../kit/remote.js';
 import { editHere } from '../kit/userActions.js';
 import { syncWorld } from '../kit/world.js';
-import { createMemoryStore } from '../memoryStore.js';
 
 /**
  * One path, more than one claim on it: reused, re-created in one window,
@@ -14,7 +13,8 @@ import { createMemoryStore } from '../memoryStore.js';
  * neither of which ends up there (`pull/occupancy`, `pull/reconcile`,
  * `pull/replay`).
  */
-const { world, engineWith, pullNow, remoteFile, noteAt, folderPaths, notePaths } = syncWorld();
+const { world, newStore, engineWith, pullNow, remoteFile, noteAt, folderPaths, notePaths } =
+	syncWorld();
 
 describe('a file created, deleted and re-created in one window', () => {
 	it('leaves one note at that path, not one per entry', async () => {
@@ -229,7 +229,7 @@ describe('a file moved back onto the path a folder rename carried its note off',
 			// version: same bytes, new version, read and found unchanged.
 			const remote = createFakeProvider({ folderChanges });
 			await remote.ensureRoot();
-			const local = createMemoryStore();
+			const local = newStore();
 			const solo = engineWith({ provider: remote, store: local });
 			const folder = await remote.createFolder('A');
 			const file = await remote.write('A/x.md', 'one\n', {});

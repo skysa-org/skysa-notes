@@ -86,7 +86,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   This one is cut: the type is `DocumentFormat` in `packages/core/src/documentFormat.ts`, this app's is `NOTE_FORMAT` in `markdown/format.ts`, and the engine and the adapters are handed it.
   The names they use are made from its extension (`documentNames`), and this app's own are `names/notes.ts`.
   A format may refuse text as not a document, which the engine holds as unreadable, as skysa-draw does with a `.svg` that is not a drawing; this app's refuses none.
-  The stores still make a conflict copy's contents with this app's own function, since they are the client's, and they take the format with the client's ports.
+  The in-memory store and the store contract, which go with the engine, are handed the format too, and the Dexie store, which stays, makes notes' copies (the client's ports, part 3, below).
   A lint rule keeps `markdown/`, `NOTE_EXTENSION` and `names/notes.ts` out of `providers/`, `sync/` and the names they share.
 - **A merge before a conflict copy, where the app can make one.**
   This is memoriam's optional `merge({ path, local, remote })` and its `merge-note` change, with their store-contract cases.
@@ -121,7 +121,11 @@ Each is a pull request of its own in this repository, released as usual, so that
      A request given up on fails with a `TimeoutError` that says what the app hands the factory (`timedOut`), since that message goes through the engine and is kept on an op that fails with it.
      The catalog's `scheduler` words, which nothing reached, are gone.
      This part is cut.
-  3. The stores take the format, and make a conflict copy with it.
+  3. The stores that move take the format, and make a conflict copy with it.
+     The in-memory store and the store contract are handed it, and the contract's in-memory run uses a format that is not notes', so that a store reading markdown for itself shows.
+     The Dexie store is not handed one: it stays with the app, and reads each file into a note's row, frontmatter and all, so a format it was handed could only be notes'.
+     A lint rule holds the two that move to what the engine is held to.
+     This part is cut.
   4. The credential, the token source and the relay reach the database through ports.
   5. The scheduler reaches the database through one port, and none of what moves imports the app's `store/`, Dexie or its words.
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has, memoriam's checks of the root in the contract suite among them.
