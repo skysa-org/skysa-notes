@@ -485,6 +485,11 @@ export interface OpQueueRecord {
 	attempts: number;
 	lastError?: string;
 	queuedAt: number;
+	/**
+	 * A write to be sent with the next sync rather than straight after
+	 * (`queueWrite`'s `timing`). Set on writes only, and on none in this app.
+	 */
+	lazy?: true;
 }
 
 export type NotesDatabase = Dexie & {
