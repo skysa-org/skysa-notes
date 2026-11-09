@@ -1,9 +1,11 @@
 import {
+	type AppFolderSpec,
 	createDropboxProvider,
 	createGDriveProvider,
 	createOneDriveProvider,
 	type FetchLike,
 	isHidden,
+	NOTES_FOLDER,
 	parentPath,
 	type StorageProvider,
 } from '@skysa/core';
@@ -49,6 +51,7 @@ import {
 } from '../src/store/notes.js';
 import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { disconnectAccount } from '../src/sync/account.js';
+import { SYNC_LOCK } from '../src/sync/lock.js';
 import { createSyncScheduler, type SyncScheduler } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
 import { holdCredential } from './support/connection.js';
@@ -106,6 +109,7 @@ interface Remote {
 
 const over = <T>(
 	create: (options: {
+		folder: AppFolderSpec;
 		fetch: FetchLike;
 		getAccessToken: () => Promise<string>;
 		appVersion: string;
@@ -115,6 +119,7 @@ const over = <T>(
 	clientId: string
 ): T =>
 	create({
+		folder: NOTES_FOLDER,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -271,6 +276,7 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 	await bindConnection(db, ACCOUNT);
 	const env = fakeEnvironment();
 	const scheduler = createSyncScheduler({
+		lockName: SYNC_LOCK,
 		db,
 		client: tokenServer(),
 		// The install's own id, which is what the marker file reports and what
@@ -1135,6 +1141,7 @@ describe('one browser over two sources', () => {
 		}
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
 			db,
 			client: tokenServer(),
 			// Which storage a run reaches is decided by the connection it is for,

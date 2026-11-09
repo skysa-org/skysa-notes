@@ -1,4 +1,3 @@
-import { MARKER_FILE } from '../../config.js';
 import { basename, joinPath, normalizePath, parentPath, ROOT } from '../../paths.js';
 import {
 	type HttpProviderOptions,
@@ -33,7 +32,6 @@ import {
 	FOLDER,
 	isFolder,
 	isLeft,
-	LEFT_KEY,
 	LEFT_VALUE,
 	toEntry,
 	usableName,
@@ -101,6 +99,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		named,
 		settleCreate,
 		trash,
+		tags,
 	} = client;
 	const appFolder = createAppFolder(client);
 	const { rootId, establishRoot, itemAt, folderIdAt, idOf } = appFolder;
@@ -128,7 +127,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const id = await establishRoot();
 		await writeMarkerOnce(
 			{ ...options, provider: 'gdrive' },
-			async () => (await itemAt(MARKER_FILE)) !== undefined,
+			async () => (await itemAt(options.folder.marker.file)) !== undefined,
 			createNote
 		);
 		return { rootId: id };
@@ -202,11 +201,11 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * making it here asked for. Nothing is sent for a folder never left.
 	 */
 	const takenBack = async (folder: DriveFile): Promise<DriveFile> =>
-		folder.id !== undefined && isLeft(folder)
+		folder.id !== undefined && isLeft(folder, tags)
 			? call<DriveFile>(
 					'PATCH',
 					fileUrl(folder.id),
-					jsonBody({ appProperties: { [LEFT_KEY]: null } })
+					jsonBody({ appProperties: { [tags.left]: null } })
 				)
 			: folder;
 
@@ -223,7 +222,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const result = await attempt<unknown>(
 			'PATCH',
 			fileUrl(id),
-			jsonBody({ appProperties: { [LEFT_KEY]: LEFT_VALUE } })
+			jsonBody({ appProperties: { [tags.left]: LEFT_VALUE } })
 		);
 		if (result.ok || result.failure.status === 404) return;
 		raise(result.failure);

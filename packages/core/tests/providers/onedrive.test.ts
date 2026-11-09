@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { NOTES_FOLDER } from '../../src/config.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import {
@@ -25,6 +26,7 @@ const GRAPH = 'https://graph.microsoft.com/v1.0';
 
 const over = (doFetch: FetchLike): StorageProvider =>
 	createOneDriveProvider({
+		folder: NOTES_FOLDER,
 		fetch: doFetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',

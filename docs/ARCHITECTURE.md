@@ -119,6 +119,8 @@ Marker file `.notesapp.json`, written by `ensureRoot()` on first connect and nev
 `createdBy` exists only for debugging (which install created this folder, with what version).
 It contains no account identifiers.
 `schemaVersion` gates future layout migrations; if a client sees a higher version than it understands, it opens read-only with a banner.
+The marker's name, its `app` and its version, with the folder's name and Drive's tag on it (§5.1), are `NOTES_FOLDER` in `config.ts`, which the app hands the adapters as an `AppFolderSpec` rather than their importing it ([record 0018](decisions/0018-the-shared-kit.md)).
+A test pins each value: a library already connected is found by them.
 
 Note file:
 
@@ -463,6 +465,7 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
 - Scope: `https://www.googleapis.com/auth/drive.file` plus `openid email` for identity.
   Non-restricted; standard OAuth verification only.
 - Root: a folder `APP_FOLDER_NAME` (mimeType `application/vnd.google-apps.folder`) at the top of My Drive, tagged `appProperties: { notesapp: "root" }` and found by that tag, never by name, so a user who renames or moves it keeps their notes, whatever it is called.
+  The key is the app's (`AppFolderSpec`'s `driveTag`, §3), and this app's is `notesapp`.
   **Only `ensureRoot` and a round from nothing make one**: a pull on a stored cursor, and every read and write, only look (a search that misses the folder for a moment is an error to retry, never a second folder).
   Where one is made, the search is asked again, and every tagged folder but the earliest is folded into it — what is inside moved across (the marker trashed instead where the earliest has one), and a folder put in the trash only when a fold finds it already empty, since a device whose last pull was against it may still be writing into it; that device's next pull resets and folds again.
   That settles two devices connecting at once, and a folder restored from the trash beside the one made while it was gone, with nothing written to either left unread; names that meet in the move are separated by the scan that follows.
@@ -3248,7 +3251,8 @@ packages/
   core/                       # zero framework deps; runs in browser, Node, and Workers
     src/
       index.ts                # what the apps may use, by name; tests/exports.test.ts lists the values (#449)
-      config.ts               # APP_FOLDER_NAME, MARKER_FILE
+      config.ts               # APP_FOLDER_NAME; NOTES_FOLDER, this app's folder as the adapters are handed it
+      folderSpec.ts           # AppFolderSpec: an app's folder, its marker and Drive's tag on it (record 0018)
       cell.ts                 # cell(): the one way to hold a value that changes, where `let` is not allowed (#457)
       marker.ts paths.ts      # the marker file; paths as POSIX, relative to the app's root
       hash.ts json.ts         # content hashes; JSON from outside, parsed without throwing (no schema)
@@ -3431,6 +3435,7 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
+The first seam is cut: the adapters are handed the app's folder (§3), and the scheduler its lock's name.
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

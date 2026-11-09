@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { NOTES_FOLDER } from '../../src/config.js';
+import type { AppFolderSpec } from '../../src/folderSpec.js';
 import { conflictFilePath } from '../../src/names/conflicts.js';
 import { isNoteName } from '../../src/names/fold.js';
 import {
@@ -48,6 +50,7 @@ interface Remote {
 
 const over = <T>(
 	create: (options: {
+		folder: AppFolderSpec;
 		fetch: FetchLike;
 		getAccessToken: () => Promise<string>;
 		appVersion: string;
@@ -56,6 +59,7 @@ const over = <T>(
 	fetch: FetchLike
 ): T =>
 	create({
+		folder: NOTES_FOLDER,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',

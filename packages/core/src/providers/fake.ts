@@ -1,5 +1,6 @@
 import { cell } from '../cell.js';
-import { MARKER_FILE, type ProviderKind } from '../config.js';
+import type { ProviderKind } from '../config.js';
+import type { AppFolderSpec } from '../folderSpec.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../paths.js';
 import { decodeText } from './text.js';
@@ -70,7 +71,20 @@ export interface FakeCall {
 /** Return an error to make the call fail, or `undefined` to let it through. */
 export type FakeFault = (call: FakeCall) => Error | undefined;
 
+/**
+ * The folder the fake stands in for when a test names none: an app's that is
+ * not this one's, so that whatever the engine and the apps do with the fake
+ * shows they assume no app folder of their own (docs/decisions/0018-the-shared-kit.md).
+ */
+export const TEST_FOLDER: AppFolderSpec = {
+	name: 'test-app',
+	driveTag: 'testapp',
+	marker: { file: '.testapp.json', app: 'test-app', version: 1 },
+};
+
 export interface FakeProviderOptions {
+	/** The app's folder; `TEST_FOLDER` unless the test says otherwise. */
+	folder?: AppFolderSpec;
 	/** Which provider this stands in for. Not part of `PROVIDER_KINDS`' business. */
 	kind?: ProviderKind;
 	appVersion?: string;
@@ -132,6 +146,7 @@ const LOG = /^fake:l:(\d+)$/;
 
 export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvider => {
 	const {
+		folder = TEST_FOLDER,
 		kind = 'dropbox',
 		appVersion = '0.1.0',
 		clientId = 'fake-client',
@@ -277,9 +292,10 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		settle('ensureRoot', undefined, () => {
 			const id = rootId.current ?? 'id:root';
 			rootId.current = id;
-			if (nodes.has(MARKER_FILE)) return { rootId: id };
+			if (nodes.has(folder.marker.file)) return { rootId: id };
 
 			const marker = buildMarker({
+				marker: folder.marker,
 				appVersion,
 				provider: kind,
 				clientId,
@@ -288,7 +304,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 			});
 			put({
 				remoteId: `id:${String(bump('id'))}`,
-				path: MARKER_FILE,
+				path: folder.marker.file,
 				kind: 'file',
 				version: `v${String(bump('version'))}`,
 				modifiedAt: iso(),

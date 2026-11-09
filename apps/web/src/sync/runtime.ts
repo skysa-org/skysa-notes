@@ -1,7 +1,9 @@
+import { NOTES_FOLDER } from '@skysa/core';
 import { useSyncExternalStore } from 'react';
 
 import { api } from '../api/client.js';
 import { db } from '../store/db.js';
+import { SYNC_LOCK } from './lock.js';
 import { createProviderFactory } from './providers.js';
 import { createRelayFactory } from './relay.js';
 import { createSyncScheduler, type SchedulerStatus, type SyncScheduler } from './scheduler.js';
@@ -19,7 +21,8 @@ const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '0.0.0-dev';
 export const syncScheduler: SyncScheduler = createSyncScheduler({
 	db,
 	client: api,
-	createProvider: createProviderFactory({ appVersion: APP_VERSION }),
+	createProvider: createProviderFactory({ folder: NOTES_FOLDER, appVersion: APP_VERSION }),
+	lockName: SYNC_LOCK,
 	// Asks `/config` first, so an instance without a relay is never asked for
 	// a ticket (`sync/relay.ts`).
 	relay: createRelayFactory({ db, client: api }),

@@ -22,19 +22,28 @@ export const FOLDER = 'application/vnd.google-apps.folder';
 
 export const NOTE_TYPE = 'text/markdown';
 
-export const ROOT_KEY = 'notesapp';
-
-export const ROOT_VALUE = 'root';
-
 /**
- * The mark on a folder the app has left (`leaveFolder`). A key of its own, so
- * that setting or clearing it can never touch the app folder's `notesapp`. Set
- * and cleared by `files.update` with `appProperties`, whose keys are merged —
- * a key set to `null` is removed and the others are kept — and private to the
- * OAuth client that set them.
+ * The `appProperties` keys the app marks folders with, made from its folder's
+ * `driveTag` (`AppFolderSpec`). `root`, set to `ROOT_VALUE`, is the app
+ * folder's tag, which it is found by whatever it is called. `left`, set to
+ * `LEFT_VALUE`, is the mark on a folder the app has left (`leaveFolder`): a key
+ * of its own, so that setting or clearing it can never touch the app folder's
+ * tag. Set and cleared by `files.update` with `appProperties`, whose keys are
+ * merged — a key set to `null` is removed and the others are kept — and private
+ * to the OAuth client that set them.
  * https://developers.google.com/workspace/drive/api/guides/properties
  */
-export const LEFT_KEY = 'notesappLeft';
+export interface DriveTags {
+	readonly root: string;
+	readonly left: string;
+}
+
+const driveTagsOf = (driveTag: string): DriveTags => ({
+	root: driveTag,
+	left: `${driveTag}Left`,
+});
+
+export const ROOT_VALUE = 'root';
 
 export const LEFT_VALUE = '1';
 
@@ -211,14 +220,15 @@ export const toEntry = (file: DriveFile, path: string): RemoteEntry => {
 };
 
 /** Whether the app has left it (`leaveFolder`). */
-export const isLeft = (file: DriveFile): boolean => file.appProperties?.[LEFT_KEY] !== undefined;
+export const isLeft = (file: DriveFile, tags: DriveTags): boolean =>
+	file.appProperties?.[tags.left] !== undefined;
 
 /**
  * A file as the tree takes it. Trashed — explicitly, or with a folder above it
  * — is gone, and so is a name no path can hold. Revisions are the version, so a
  * move leaves a file's version alone, as Dropbox's `rev` does.
  */
-export const treeItemOf = (file: DriveFile): TreeItem => {
+export const treeItemOf = (file: DriveFile, tags: DriveTags): TreeItem => {
 	const id = file.id;
 	if (id === undefined || id === '')
 		throw new ProviderResponseError('gdrive sent a file with no id');
@@ -230,7 +240,7 @@ export const treeItemOf = (file: DriveFile): TreeItem => {
 		parent: file.parents?.[0] ?? '',
 		name: file.name,
 		folder,
-		...(folder && isLeft(file) ? { left: true } : {}),
+		...(folder && isLeft(file, tags) ? { left: true } : {}),
 		version: folder ? '' : (file.headRevisionId ?? ''),
 		modifiedAt: file.modifiedTime ?? '',
 		size: file.size === undefined ? -1 : Number(file.size),
@@ -349,6 +359,9 @@ export const createDriveClient = (options: HttpProviderOptions) => {
 	};
 
 	return {
+		/** The app's folder, as the app describes it. */
+		folder: options.folder,
+		tags: driveTagsOf(options.folder.driveTag),
 		send,
 		attempt,
 		call,

@@ -1,6 +1,8 @@
+import { TEST_FOLDER } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { SYNC_LOCK } from '../src/sync/lock.js';
 import { createSyncScheduler, type SchedulerEvent } from '../src/sync/scheduler.js';
 import { watchedDatabase } from './support/db.js';
 import { fakeEnvironment } from './support/fakes/environment.js';
@@ -43,7 +45,8 @@ describe('syncing a connection', () => {
 			expect(theRemote.fake.contentAt(note.path)).toContain('# Plan');
 		});
 
-		expect(theRemote.fake.contentAt('.notesapp.json')).toBeDefined();
+		// The marker the provider's folder names: the fake's own, here.
+		expect(theRemote.fake.contentAt(TEST_FOLDER.marker.file)).toBeDefined();
 		const state = await db.syncState.get('c1');
 		expect(state?.rootId).toBeDefined();
 		expect(state?.cursor).toBeDefined();
@@ -85,6 +88,7 @@ describe('syncing a connection', () => {
 		await db.syncState.update('c1', { lastSyncAt: 42 });
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
 			db,
 			client: tokenServer(),
 			createProvider: remote().factory,
@@ -264,6 +268,7 @@ describe('offline', () => {
 		const theRemote = remote();
 		const server = tokenServer();
 		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
 			db,
 			client: server,
 			createProvider: theRemote.factory,

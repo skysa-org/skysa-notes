@@ -71,13 +71,15 @@ So a new storage option is a minor release of the kit, and an app has it once it
 Each is a pull request of its own in this repository, released as usual, so that moving the code is a move and not a rewrite.
 
 - **The app's folder is described, not imported.**
-  Its name, the marker file with the app and the layout version the marker names, and the key Drive tags the folder with become one value, `AppFolderSpec`, that each app hands the adapters.
+  Its name, the marker file with the app and the layout version the marker names, and the key Drive tags the folder with are one value, `AppFolderSpec`, that each app hands the adapters.
   The scheduler is handed the name of its sync lock the same way.
   This app hands over exactly what it has now, and a test pins each one: renaming any of them leaves every library already connected unfound, as §8, "Brand", says of the brand.
   Nothing else needs handing over.
   The server's flow cookies are `__Host-` cookies, and the update channel and the key a connect code is kept under are the browser's: each belongs to one origin, and every app is served from an origin of its own.
   The IndexedDB name stays with each app's database.
   The type is not called an identity, a word this repository keeps for the sign-in it decided against (§6, "No sign-in separate from storage").
+  This one is cut: the type is in `packages/core/src/folderSpec.ts`, this app's folder is `NOTES_FOLDER` in `config.ts`, and its lock is `SYNC_LOCK` in `apps/web/src/sync/lock.ts`.
+  The fake works in a folder that is no app's, `TEST_FOLDER`, so the engine's whole suite runs without this app's names, and a lint rule keeps them out of `providers/`, `marker.ts` and `folderSpec.ts`.
 - **A document format, not a note.**
   This is skysa-draw's seam (`sync/document.ts` there): a document's extension and media type, the id a file claims, a conflict copy's contents, and every read that holds a file as a document.
   Here it is over `NOTE_EXTENSION`, `text/markdown`, `parseNoteFile` and `serializeNoteFile`, and the layers that move take them from it rather than importing them.

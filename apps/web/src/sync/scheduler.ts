@@ -196,6 +196,11 @@ export interface SyncSchedulerOptions {
 	db: NotesDatabase;
 	client: Pick<ApiClient, 'withCredential'>;
 	createProvider: ProviderFactory;
+	/**
+	 * The name of the Web Lock a sync of a connection runs under: the same in
+	 * every tab of the app, whichever build it runs (`sync/lock.ts`).
+	 */
+	lockName: (connectionId: string) => string;
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
 	debounceMs?: number;
@@ -385,7 +390,7 @@ const RELIST_MS = 3000;
 type Timer = 'next' | 'debounce' | 'notice' | 'relist' | 'keyFile';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
-	const { db, client, createProvider } = options;
+	const { db, client, createProvider, lockName } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
 	const intervalMs = options.intervalMs ?? 60_000;
@@ -959,7 +964,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	/** Run `work` holding the connection's sync lock, known here to be this tab's. */
 	const underSyncLock = <T>(connectionId: string, work: () => Promise<T>): Promise<T> =>
-		environment.withLock(`skysa-notes:sync:${connectionId}`, async () => {
+		environment.withLock(lockName(connectionId), async () => {
 			heldHere.add(connectionId);
 			try {
 				return await work();

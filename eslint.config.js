@@ -123,6 +123,18 @@ const CORE_IMPORTS = [
 ];
 
 /**
+ * Notes' own app folder, which the layers bound for the shared kit are handed
+ * (`AppFolderSpec`) rather than import, so that they name no app
+ * (docs/decisions/0018-the-shared-kit.md).
+ */
+const NO_APP_FOLDER = {
+	group: ['**/config.js'],
+	importNames: ['APP_FOLDER_NAME', 'NOTES_FOLDER'],
+	message:
+		'the app folder is handed in as an AppFolderSpec, not imported (docs/decisions/0018-the-shared-kit.md).',
+};
+
+/**
  * Words the user reads, written straight into JSX: a sentence there is one no
  * translation can reach. They come from the catalog, `t()` in
  * `apps/web/src/i18n/t.ts` (docs/ARCHITECTURE.md §7, "The app's words").
@@ -399,8 +411,9 @@ export default tseslint.config(
 	{
 		// A provider moves bytes and names for the sync engine; it knows nothing
 		// of the engine. What both need — a conflict copy's name, say — lives
-		// below them both, in names/ (#449). Repeats core's patterns, since a
-		// rule set here replaces the one above rather than adding to it.
+		// below them both, in names/ (#449). Nor does it know which app's folder
+		// it works in: it is handed that. Repeats core's patterns, since a rule
+		// set here replaces the one above rather than adding to it.
 		files: ['packages/core/src/providers/**/*.ts'],
 		rules: {
 			'no-restricted-imports': [
@@ -408,10 +421,19 @@ export default tseslint.config(
 				{
 					patterns: [
 						...CORE_IMPORTS,
+						NO_APP_FOLDER,
 						NOT_ABOVE(['sync'], 'a provider does not import the sync engine.'),
 					],
 				},
 			],
+		},
+	},
+	{
+		// The marker, and what describes an app's folder, are any app's: the
+		// folder they are about is handed to them.
+		files: ['packages/core/src/marker.ts', 'packages/core/src/folderSpec.ts'],
+		rules: {
+			'no-restricted-imports': ['error', { patterns: [...CORE_IMPORTS, NO_APP_FOLDER] }],
 		},
 	},
 	{

@@ -1,4 +1,5 @@
 import {
+	type AppFolderSpec,
 	cell,
 	createDropboxProvider,
 	createGDriveProvider,
@@ -158,6 +159,8 @@ export const timedFetch =
 	};
 
 export interface ProviderFactoryOptions {
+	/** The app's folder on every provider: its name, its marker, Drive's tag for it. */
+	folder: AppFolderSpec;
 	/** Reported in the marker file. */
 	appVersion: string;
 	/** Resolved per call by default, so a test can stub the global. */
@@ -170,7 +173,13 @@ export const createProviderFactory = (options: ProviderFactoryOptions): Provider
 	const ms = options.timeoutMs ?? PROVIDER_TIMEOUT_MS;
 	return ({ provider, clientId, getAccessToken, signal }) => {
 		const fetch = timedFetch(base, ms, signal);
-		const adapter = { fetch, getAccessToken, appVersion: options.appVersion, clientId };
+		const adapter = {
+			folder: options.folder,
+			fetch,
+			getAccessToken,
+			appVersion: options.appVersion,
+			clientId,
+		};
 		if (provider === 'dropbox') return createDropboxProvider(adapter);
 		if (provider === 'onedrive') return createOneDriveProvider(adapter);
 		if (provider === 'gdrive') return createGDriveProvider(adapter);

@@ -1,4 +1,3 @@
-import { MARKER_FILE } from '../config.js';
 import { isJsonObject, parseJson } from '../json.js';
 import { normalizePath, ROOT } from '../paths.js';
 import {
@@ -346,7 +345,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		await writeMarkerOnce(
 			{ ...options, provider: 'dropbox' },
-			async () => (await metadataAt(MARKER_FILE)) !== undefined,
+			async () => (await metadataAt(options.folder.marker.file)) !== undefined,
 			(path, content) => write(path, content, {})
 		);
 		return { rootId: ROOT_ID };

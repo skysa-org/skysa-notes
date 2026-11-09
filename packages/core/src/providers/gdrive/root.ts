@@ -1,5 +1,4 @@
 import { cell } from '../../cell.js';
-import { APP_FOLDER_NAME, MARKER_FILE } from '../../config.js';
 import { pathSegments } from '../../paths.js';
 import { jsonBody } from '../http.js';
 import { CursorResetError, type EntryRef, NotFoundError, ProviderResponseError } from '../types.js';
@@ -14,7 +13,6 @@ import {
 	isFolder,
 	literal,
 	outOfReach,
-	ROOT_KEY,
 	ROOT_VALUE,
 } from './wire.js';
 
@@ -25,7 +23,18 @@ import {
  * reads it and forgets it (`foundId`, `forget`).
  */
 export const createAppFolder = (client: DriveClient) => {
-	const { attempt, call, raise, fileUrl, search, childrenOf, named, trash } = client;
+	const {
+		attempt,
+		call,
+		raise,
+		fileUrl,
+		search,
+		childrenOf,
+		named,
+		trash,
+		folder: spec,
+		tags,
+	} = client;
 	/** The app folder's id, found again at the start of every `changes` call. */
 	const foundRoot = cell<string | undefined>(undefined);
 	/**
@@ -39,7 +48,7 @@ export const createAppFolder = (client: DriveClient) => {
 	const taggedRoots = async (): Promise<DriveFile[]> =>
 		byAge(
 			await search(
-				`appProperties has { key=${literal(ROOT_KEY)} and value=${literal(ROOT_VALUE)} } and mimeType = ${literal(FOLDER)} and trashed = false`
+				`appProperties has { key=${literal(tags.root)} and value=${literal(ROOT_VALUE)} } and mimeType = ${literal(FOLDER)} and trashed = false`
 			)
 		);
 
@@ -110,10 +119,10 @@ export const createAppFolder = (client: DriveClient) => {
 							'POST',
 							`${FILES}?fields=${FIELDS}`,
 							jsonBody({
-								name: APP_FOLDER_NAME,
+								name: spec.name,
 								mimeType: FOLDER,
 								parents: ['root'],
-								appProperties: { [ROOT_KEY]: ROOT_VALUE },
+								appProperties: { [tags.root]: ROOT_VALUE },
 							})
 						),
 					];
@@ -147,10 +156,10 @@ export const createAppFolder = (client: DriveClient) => {
 			await trash(otherId);
 			return;
 		}
-		const hasMarker = (await named(rootIdNow, MARKER_FILE)).length > 0;
+		const hasMarker = (await named(rootIdNow, spec.marker.file)).length > 0;
 		await children.reduce(async (done, child) => {
 			await done;
-			if (hasMarker && child.name === MARKER_FILE && !isFolder(child)) {
+			if (hasMarker && child.name === spec.marker.file && !isFolder(child)) {
 				await trash(child.id ?? '');
 				return;
 			}
