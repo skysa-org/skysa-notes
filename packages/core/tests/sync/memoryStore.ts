@@ -1,4 +1,4 @@
-import { conflictContent } from '../../src/markdown/conflictCopy.js';
+import type { DocumentFormat } from '../../src/documentFormat.js';
 import { foldName } from '../../src/names/fold.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../src/paths.js';
 import {
@@ -95,7 +95,11 @@ export interface MemoryStore extends SyncStore {
 	readonly lastError: (seq: number) => string | undefined;
 }
 
-export const createMemoryStore = (): MemoryStore => {
+/**
+ * A store of `document`'s kind of document, whose conflict copies it makes as
+ * the format says, the way the engine it is handed to was told to.
+ */
+export const createMemoryStore = (document: DocumentFormat): MemoryStore => {
 	const notes = new Map<string, SyncNote>();
 	const files = new Map<string, SyncFile>();
 	const held = new Map<string, HeldBytes>();
@@ -136,7 +140,7 @@ export const createMemoryStore = (): MemoryStore => {
 		const note = requireNote(resolution.noteId);
 		// From the note as it stands: the user may have typed since the engine
 		// read it, and a copy of the older file would leave those words out.
-		const copyContent = conflictContent(note.content, resolution.copyId);
+		const copyContent = document.conflictContent(note.content, resolution.copyId);
 		// The remote takes the path it claims, which is not necessarily the one
 		// the local note was at: a note can be moved and edited between syncs.
 		ensureFolderChain(parentPath(resolution.remote.path));

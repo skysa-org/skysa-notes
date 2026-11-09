@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { conflictContent } from '../../src/markdown/conflictCopy.js';
+import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { RemoteEntry } from '../../src/providers/types.js';
 import type { NewSyncOp, SyncFile, SyncFolder, SyncNote, SyncStore } from '../../src/sync/store.js';
 
@@ -11,6 +11,11 @@ import type { NewSyncOp, SyncFile, SyncFolder, SyncNote, SyncStore } from '../..
  * with it, that a note stays dirty if it changed while it was being pushed —
  * and an implementation that quietly drops one of them loses an edit somewhere
  * far away from itself.
+ *
+ * `document` is the format the store is for. A conflict copy's text is the
+ * format's (`DocumentFormat.conflictContent`): made some other way, the copy
+ * can go on claiming the note's own id, and two files claiming one id are one
+ * document.
  *
  * Deliberately not a `*.test.ts`: `vitest.config.ts` collects only those, so
  * this runs where it is registered rather than twice.
@@ -63,6 +68,7 @@ const folder = (path: string, id: string): RemoteEntry => ({
 
 export const describeSyncStoreContract = (
 	name: string,
+	document: DocumentFormat,
 	create: () => StoreHarness | Promise<StoreHarness>
 ): void => {
 	describe(`SyncStore contract: ${name}`, () => {
@@ -212,7 +218,7 @@ export const describeSyncStoreContract = (
 								remote: remote('a.md', 'r1', 'v2'),
 								copyId: 'c1',
 								copyPath: 'a (conflict).md',
-								copyContent: conflictContent('mine\n', 'c1'),
+								copyContent: document.conflictContent('mine\n', 'c1'),
 							},
 						},
 					],
@@ -1133,7 +1139,10 @@ export const describeSyncStoreContract = (
 									remote: remote('a.md', 'r1', 'v2'),
 									copyId: 'c1',
 									copyPath: 'a (conflict).md',
-									copyContent: conflictContent('what the engine read\n', 'c1'),
+									copyContent: document.conflictContent(
+										'what the engine read\n',
+										'c1'
+									),
 								},
 							},
 						],
@@ -1141,7 +1150,7 @@ export const describeSyncStoreContract = (
 					});
 
 					expect((await store.noteById('c1'))?.content).toBe(
-						conflictContent('typed since\n', 'c1')
+						document.conflictContent('typed since\n', 'c1')
 					);
 				});
 			});
@@ -1654,7 +1663,7 @@ export const describeSyncStoreContract = (
 				remote: remote('a.md', 'r1', 'v2'),
 				copyId: 'c1',
 				copyPath: 'a (conflict 2026-09-15T14-32).md',
-				copyContent: conflictContent('mine\n', 'c1'),
+				copyContent: document.conflictContent('mine\n', 'c1'),
 			};
 
 			it('gives the remote the path and the local edit a note of its own', async () => {
@@ -1674,7 +1683,9 @@ export const describeSyncStoreContract = (
 
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
 				expect((await store.noteById('n1'))?.dirty).toBe(false);
-				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
+				expect((await store.noteById('c1'))?.content).toBe(
+					document.conflictContent('mine\n', 'c1')
+				);
 				expect((await store.noteById('c1'))?.dirty).toBe(true);
 			});
 
@@ -1905,7 +1916,7 @@ export const describeSyncStoreContract = (
 						remote: remote('a.md', 'r1', 'v2'),
 						copyId: 'c1',
 						copyPath: 'a (conflict).md',
-						copyContent: conflictContent('mine\n', 'c1'),
+						copyContent: document.conflictContent('mine\n', 'c1'),
 					})
 				).rejects.toThrow();
 
@@ -1933,7 +1944,7 @@ export const describeSyncStoreContract = (
 					remote: remote('Moved/There/a.md', 'r1', 'v2'),
 					copyId: 'c1',
 					copyPath: 'a (conflict).md',
-					copyContent: conflictContent('mine\n', 'c1'),
+					copyContent: document.conflictContent('mine\n', 'c1'),
 				});
 
 				expect(await store.folderByPath('Moved')).toBeDefined();
@@ -1961,14 +1972,16 @@ export const describeSyncStoreContract = (
 					remote: remote('a.md', 'r1', 'v2'),
 					copyId: 'c1',
 					copyPath: 'a (conflict).md',
-					copyContent: conflictContent('mine\n', 'c1'),
+					copyContent: document.conflictContent('mine\n', 'c1'),
 				});
 
 				const ops = await store.pendingOps();
 				expect(ops.find((op) => op.seq === seq)).toBeUndefined();
 				expect(ops.map((op) => op.path)).toEqual(['a (conflict).md']);
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
-				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
+				expect((await store.noteById('c1'))?.content).toBe(
+					document.conflictContent('mine\n', 'c1')
+				);
 			});
 
 			it('takes a resolution for an op withdrawn while it was at the network', async () => {
@@ -1997,11 +2010,13 @@ export const describeSyncStoreContract = (
 					remote: remote('a.md', 'r1', 'v2'),
 					copyId: 'c1',
 					copyPath: 'a (conflict).md',
-					copyContent: conflictContent('mine\n', 'c1'),
+					copyContent: document.conflictContent('mine\n', 'c1'),
 				});
 
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
-				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
+				expect((await store.noteById('c1'))?.content).toBe(
+					document.conflictContent('mine\n', 'c1')
+				);
 			});
 		});
 

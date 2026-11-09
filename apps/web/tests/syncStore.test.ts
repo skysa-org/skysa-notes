@@ -54,7 +54,7 @@ const remote = (path: string, id = 'r1', version = 'v1'): RemoteEntry => ({
 	size: 1,
 });
 
-describeSyncStoreContract('Dexie', async () => {
+describeSyncStoreContract('Dexie', NOTE_FORMAT, async () => {
 	const db = freshDatabase();
 	const store = await boundStore(db, { connectionId: CONNECTION });
 	return {

@@ -475,6 +475,18 @@ export default tseslint.config(
 		},
 	},
 	{
+		// The in-memory store and the store contract go to the kit with the
+		// engine, as its testing half: like it, they are handed the app's folder,
+		// what its documents are and which of its hidden paths count.
+		files: ['packages/core/tests/sync/{memoryStore,storeContract}.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT, ...NO_APP_PATHS] },
+			],
+		},
+	},
+	{
 		// The marker, what describes an app's folder and its documents, and the
 		// path rules every layer here uses, are any app's: what they are about
 		// is handed to them.

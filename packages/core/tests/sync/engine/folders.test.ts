@@ -11,7 +11,6 @@ import { expectSoundStore } from '../kit/invariants.js';
 import { entryAt, remoteAt } from '../kit/remote.js';
 import { boundTo } from '../kit/seed.js';
 import { syncWorld } from '../kit/world.js';
-import { createMemoryStore } from '../memoryStore.js';
 
 /**
  * Folders moved and deleted on the remote, alone or with their ancestors in
@@ -19,8 +18,17 @@ import { createMemoryStore } from '../memoryStore.js';
  * the other still uses them; and the notes inside through all of it
  * (`pull/folders`, `push/folders`, `pull/cascade`).
  */
-const { world, engineWith, pullNow, remoteFile, killTheCursor, noteAt, folderPaths, notePaths } =
-	syncWorld();
+const {
+	world,
+	newStore,
+	engineWith,
+	pullNow,
+	remoteFile,
+	killTheCursor,
+	noteAt,
+	folderPaths,
+	notePaths,
+} = syncWorld();
 
 describe('a batch that both deletes a folder and reconciles a scan', () => {
 	it('does not name a note the folder delete already took', async () => {
@@ -767,7 +775,7 @@ describe('a remote folder delete', () => {
 		// Losing the second to a change in the first is not a trade worth making.
 		const folderOnly = createFakeProvider({ folderChanges: 'folder-only' });
 		await folderOnly.ensureRoot();
-		const local = createMemoryStore();
+		const local = newStore();
 		const solo = engineWith({ provider: folderOnly, store: local });
 
 		await folderOnly.createFolder('Work');
@@ -1295,7 +1303,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// takes what is under it whether the app can see it or not. It is
 		// marked as left instead, which touches nothing in it.
 		const blind = createFakeProvider({ listsEverything: false });
-		const theirs = createMemoryStore();
+		const theirs = newStore();
 		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
@@ -1325,7 +1333,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// Another device's, written after this one last pulled: the same gate
 		// that keeps a delete from taking it keeps the directory a notebook.
 		const blind = createFakeProvider({ listsEverything: false });
-		const theirs = createMemoryStore();
+		const theirs = newStore();
 		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();
@@ -1345,7 +1353,7 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 	it('does nothing where the provider can neither delete nor leave a directory', async () => {
 		const fake = createFakeProvider({ listsEverything: false });
 		const blind: StorageProvider = { ...fake, leaveFolder: undefined };
-		const theirs = createMemoryStore();
+		const theirs = newStore();
 		const theirEngine = engineWith({ provider: blind, store: theirs });
 		const made = await blind.createFolder('Work');
 		await theirEngine.pull();

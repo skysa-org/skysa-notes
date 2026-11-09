@@ -1,3 +1,4 @@
+import { TEXT_FORMAT } from './kit/textFormat.js';
 import { createMemoryStore } from './memoryStore.js';
 import { describeSyncStoreContract } from './storeContract.js';
 
@@ -7,10 +8,13 @@ import { describeSyncStoreContract } from './storeContract.js';
  * `apps/web/tests/syncStore.test.ts` instead — `core` cannot import `apps/*` —
  * so the engine's promises are checked against the thing the app actually runs
  * rather than only against the fixture.
+ *
+ * The Dexie store is notes' and runs with `NOTE_FORMAT`; this one runs with a
+ * format that is not, so that a store reading markdown for itself would show.
  */
 
-describeSyncStoreContract('in-memory', () => {
-	const store = createMemoryStore();
+describeSyncStoreContract('in-memory', TEXT_FORMAT, () => {
+	const store = createMemoryStore(TEXT_FORMAT);
 	return {
 		store,
 		seed: store.put,

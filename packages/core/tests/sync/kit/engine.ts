@@ -1,7 +1,7 @@
 import { beforeEach } from 'vitest';
 
 import { NOTES_WATCH, syncsHidden } from '../../../src/appFolder.js';
-import { NOTE_FORMAT } from '../../../src/markdown/format.js';
+import type { DocumentFormat } from '../../../src/documentFormat.js';
 import type { ChangeEntry, StorageProvider } from '../../../src/providers/types.js';
 import { createSyncEngine, type SyncEngineOptions } from '../../../src/sync/engine.js';
 import type { SyncStore } from '../../../src/sync/store.js';
@@ -57,11 +57,12 @@ interface World {
 
 /**
  * Engines over the provider and store `world` answers, read each time one is
- * made, so a test that puts a new provider in place gets engines over it.
+ * made, so a test that puts a new provider in place gets engines over it, and
+ * over documents of `document`'s kind.
  * `syncWorld` (`kit/world.ts`) is its one caller, once per test file — a file
  * calls that, not this: it resets its ids before each test.
  */
-export const engineFixture = (world: () => World) => {
+export const engineFixture = (world: () => World, document: DocumentFormat) => {
 	const fresh = { count: 0 };
 	beforeEach(() => {
 		fresh.count = 0;
@@ -82,7 +83,7 @@ export const engineFixture = (world: () => World) => {
 	/** An engine over the file's provider and store at `AT`, with what a test changes. */
 	const engineWith = (overrides: Partial<SyncEngineOptions> = {}) =>
 		createSyncEngine({
-			document: NOTE_FORMAT,
+			document,
 			syncsHidden,
 			watch: NOTES_WATCH,
 			...world(),

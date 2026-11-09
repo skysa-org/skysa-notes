@@ -1,26 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DocumentFormat } from '../../../src/documentFormat.js';
+import { TEXT_FORMAT } from '../kit/textFormat.js';
 import { syncWorld } from '../kit/world.js';
 
 /**
  * The engine asks the format it is handed what a document is, and knows no
  * file format of its own (docs/decisions/0018-the-shared-kit.md). Every other
  * engine test runs with notes' (`NOTE_FORMAT`); these run with one that is
- * not, so that anything still reading markdown for itself shows here.
+ * not (`TEXT_FORMAT`), the store included, so that anything still reading
+ * markdown for itself shows here.
  */
-const { world, engineWith, copyId, remoteFile } = syncWorld();
+const { world, engineWith, copyId, remoteFile } = syncWorld(TEXT_FORMAT);
 
-/** Plain text: `.txt` files, claiming an id on a first line `@id <id>`, refusing any that start `BINARY`. */
-const TEXT: DocumentFormat = {
-	extension: '.txt',
-	mediaType: 'text/plain',
-	claimedId: (content) => /^@id (\S+)\n/.exec(content)?.[1],
-	conflictContent: (localContent, id) => `@id ${id}\n${localContent.replace(/^@id \S+\n/, '')}`,
-	isDocumentText: (content) => !content.startsWith('BINARY'),
-};
-
-const textEngine = () => engineWith({ document: TEXT, newId: copyId });
+const textEngine = () => engineWith({ newId: copyId });
 
 describe('an engine handed a format that is not notes’', () => {
 	it('makes documents of the files its extension names, and of no others', async () => {
@@ -54,7 +46,7 @@ describe('an engine handed a format that is not notes’', () => {
 		expect(world.provider.contentAt('b.txt')).toBe('BINARYÿ\n');
 	});
 
-	it('names a conflict copy with the format’s extension', async () => {
+	it('makes a conflict copy as the format says, named with its extension', async () => {
 		const first = await remoteFile('a.txt', 'original\n');
 		await textEngine().pull();
 		const note = world.store.notes()[0];
@@ -65,5 +57,9 @@ describe('an engine handed a format that is not notes’', () => {
 		const result = await textEngine().pull();
 
 		expect(result.conflicts).toEqual(['a (conflict 2026-09-15T14-32).txt']);
+		// Its text is the format's, claiming the copy's own id: the note took
+		// the first one the engine gave out.
+		const copy = world.store.notes().find((each) => each.path.endsWith('T14-32).txt'));
+		expect(copy?.content).toBe('@id copy-2\nmine\n');
 	});
 });
