@@ -7,11 +7,11 @@ import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
 import type { SyncStateRecord } from '../../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../../sync/account.js';
-import { runSentence } from '../../sync/progress.js';
 import { syncScheduler, useSyncStatus } from '../../sync/runtime.js';
 import type { SchedulerStatus, SyncScheduler } from '../../sync/scheduler.js';
 import { Dialog, DialogActions } from '../ui/Dialog.js';
 import { RunProgress } from '../ui/RunProgress.js';
+import { runSentence } from './statusWords.js';
 
 /**
  * A source's first import, as it happens, and the way out of it.

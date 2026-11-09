@@ -1,3 +1,5 @@
+import { extensionOf } from '../names/extension.js';
+
 /**
  * Every extension the app knows something about, and everything it knows: one
  * row each, from which what used to be six hand-kept tables are read (#449).
@@ -162,3 +164,15 @@ export const extensionForType = (type: string): string | undefined => EXTENSION_
 /** Whether a folded extension is a picture's, whether or not a browser draws it. */
 export const isImageExtension = (extension: string): boolean =>
 	mediaOf(extension)?.kind === 'image';
+
+/**
+ * The type to tell a provider a file is, as it is uploaded, by its name (the
+ * table's `upload`). Anything else goes up as bytes. This is what the provider
+ * records and nothing more — the app reads the extension, never this — so it is
+ * not `safeOpenType` in `attachments.ts`, which is about what this origin will
+ * show.
+ */
+export const contentTypeOf = (name: string): string | undefined => {
+	const media = mediaOf(extensionOf(name));
+	return media?.upload === true ? media.type : undefined;
+};

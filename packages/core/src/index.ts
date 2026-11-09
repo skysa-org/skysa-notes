@@ -33,8 +33,6 @@ export {
 	ENCRYPTION_FILE,
 	NOTE_EXTENSION,
 	NOTES_FOLDER,
-	PROVIDER_KINDS,
-	type ProviderKind,
 	SCRATCHPAD_FOLDER,
 	VAULT_FOLDER,
 } from './config.js';
@@ -60,7 +58,6 @@ export {
 	type RateLimiter,
 } from './entitlements.js';
 export {
-	contentTypeOf,
 	downloadName,
 	drawsFromData,
 	fileKind,
@@ -69,7 +66,7 @@ export {
 	showsInline,
 } from './files/attachments.js';
 export { type ClipName, clipName, clipPath, clipStamp, readClipName } from './files/clipboard.js';
-export type { FileKind } from './files/mediaTypes.js';
+export { contentTypeOf, type FileKind } from './files/mediaTypes.js';
 export {
 	imageInfo,
 	type PictureInfo,
@@ -149,6 +146,7 @@ export {
 	replaceBasename,
 	ROOT,
 } from './paths.js';
+export { PROVIDER_KINDS, type ProviderKind } from './providerKinds.js';
 export { createDropboxProvider } from './providers/dropbox.js';
 export { createGDriveProvider } from './providers/gdrive/index.js';
 export type { FetchLike } from './providers/http.js';

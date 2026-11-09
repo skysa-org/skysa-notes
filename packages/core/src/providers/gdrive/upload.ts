@@ -1,4 +1,4 @@
-import { concatBytes } from '../../age/bytes.js';
+import { concatBytes } from '../../bytes.js';
 import { asObject, parseJson } from '../../json.js';
 import { basename, parentPath } from '../../paths.js';
 import type { RequestParts } from '../http.js';

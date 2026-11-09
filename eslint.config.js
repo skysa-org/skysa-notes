@@ -1,4 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
+import { dirname, relative, resolve, sep } from 'node:path';
 
 import js from '@eslint/js';
 import prettierConfig from 'eslint-config-prettier';
@@ -213,6 +215,187 @@ const NO_APP_PATHS = [
 	},
 	{ group: ['**/appFolder.js'], message: APP_PATHS_MESSAGE },
 ];
+
+/**
+ * Where each module bound for the shared kit goes, and the packages each may
+ * use: the table in docs/decisions/0018-the-shared-kit.md, in code. A path
+ * ending in `/` is a folder and everything in it. The deny-lists above say why
+ * a thing is handed in rather than imported; `kit/fence` below is the floor
+ * under them, that a module bound for one package imports only what goes to
+ * it or to a package beneath it, so that moving the code is a move.
+ */
+const KIT = {
+	protocol: {
+		uses: [],
+		paths: [
+			'packages/core/src/api.ts',
+			'packages/core/src/entitlements.ts',
+			'packages/core/src/relay.ts',
+			'packages/core/src/providerKinds.ts',
+		],
+	},
+	storage: {
+		uses: ['protocol'],
+		paths: [
+			'packages/core/src/providers/',
+			'packages/core/src/names/fold.ts',
+			'packages/core/src/names/conflicts.ts',
+			'packages/core/src/names/bytes.ts',
+			'packages/core/src/names/extension.ts',
+			'packages/core/src/paths.ts',
+			'packages/core/src/marker.ts',
+			'packages/core/src/folderSpec.ts',
+			'packages/core/src/documentFormat.ts',
+			'packages/core/src/hash.ts',
+			'packages/core/src/json.ts',
+			'packages/core/src/cell.ts',
+			'packages/core/src/bytes.ts',
+			'packages/core/src/files/mediaTypes.ts',
+		],
+	},
+	sync: { uses: ['protocol', 'storage'], paths: ['packages/core/src/sync/'] },
+	server: {
+		uses: ['protocol', 'storage'],
+		paths: ['apps/api/src/'],
+		// The deployment's: it reads the environment and hands the rest in.
+		except: ['apps/api/src/worker.ts'],
+	},
+	client: {
+		uses: ['protocol', 'storage', 'sync'],
+		paths: [
+			'apps/web/src/api/',
+			'apps/web/src/sync/tokens.ts',
+			'apps/web/src/sync/providers.ts',
+			'apps/web/src/sync/relay.ts',
+			'apps/web/src/sync/scheduler.ts',
+			'apps/web/src/sync/wakeLock.ts',
+			'apps/web/src/sync/beforeUpdate.ts',
+			'apps/web/src/sync/progress.ts',
+			'apps/web/src/store/credentials.ts',
+			'apps/web/src/store/connectCode.ts',
+			'apps/web/src/store/emitter.ts',
+		],
+	},
+	pwa: { uses: [], paths: ['apps/web/brand.ts', 'apps/web/pwa.ts', 'apps/web/scripts/'] },
+};
+
+/** The kit's package a repository path goes to, or undefined where it stays. */
+const kitPackageOf = (path) =>
+	Object.keys(KIT).find(
+		(name) =>
+			!(KIT[name].except ?? []).includes(path) &&
+			KIT[name].paths.some((entry) =>
+				entry.endsWith('/') ? path.startsWith(entry) : path === entry
+			)
+	);
+
+/** A path as the table above writes one: from the repository's root, with `/`. */
+const fromRoot = (path) =>
+	relative(import.meta.dirname, path)
+		.split(sep)
+		.join('/');
+
+/** The file an import names, `.js` written for the `.ts` or `.tsx` it is. */
+const sourceOf = (path) =>
+	[path.replace(/\.js$/, '.ts'), path.replace(/\.js$/, '.tsx'), `${path}.ts`].find(existsSync) ??
+	path;
+
+/**
+ * The module each name `@skysa/core` offers comes from, read from its barrel,
+ * whose every line is `export { … } from './module.js'` (#449). An app's module
+ * bound for the kit imports core by name, and the name's module is what moves.
+ */
+const CORE_BARREL = resolve(import.meta.dirname, 'packages/core/src/index.ts');
+const CORE_NAMES = new Map(
+	[
+		...readFileSync(CORE_BARREL, 'utf8').matchAll(
+			/export\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g
+		),
+	].flatMap(([, names, from]) =>
+		names
+			.split(',')
+			.map((name) => name.trim().replace(/^type\s+/, ''))
+			.filter((name) => name !== '')
+			.map((name) => [
+				name.split(/\s+as\s+/).at(-1),
+				fromRoot(sourceOf(resolve(dirname(CORE_BARREL), from))),
+			])
+	)
+);
+
+/** A local rule: what `KIT` says a module bound for the kit may import. */
+const KIT_FENCE = {
+	meta: {
+		type: 'problem',
+		messages: {
+			stays: 'a module bound for @skysa/{{from}} imports {{target}}, which stays with the app (docs/decisions/0018-the-shared-kit.md).',
+			above: '@skysa/{{from}} does not use @skysa/{{to}}, which {{target}} goes to (docs/decisions/0018-the-shared-kit.md).',
+		},
+		schema: [],
+	},
+	create: (context) => {
+		const from = kitPackageOf(fromRoot(context.filename));
+		if (from === undefined) return {};
+
+		const judge = (node, target) => {
+			const to = kitPackageOf(target);
+			if (to === undefined) {
+				context.report({ node, messageId: 'stays', data: { from, target } });
+				return;
+			}
+			if (to !== from && !KIT[from].uses.includes(to))
+				context.report({ node, messageId: 'above', data: { from, to, target } });
+		};
+
+		/** `names` are what is taken from core by name; `*` is all of it. */
+		const check = (node, specifier, names) => {
+			if (typeof specifier !== 'string') return;
+			if (specifier.startsWith('.')) {
+				judge(node, fromRoot(sourceOf(resolve(dirname(context.filename), specifier))));
+				return;
+			}
+			if (specifier === '@skysa/core') {
+				names.forEach((name) => {
+					judge(node, CORE_NAMES.get(name) ?? `@skysa/core's ${name}`);
+				});
+				return;
+			}
+			// Another of this repository's packages, or a part of one, stays.
+			if (specifier.startsWith('@skysa/')) judge(node, specifier);
+		};
+
+		const nameOf = (specifier) =>
+			specifier.type === 'ImportSpecifier'
+				? (specifier.imported.name ?? specifier.imported.value)
+				: '*';
+
+		return {
+			ImportDeclaration: (node) => {
+				check(
+					node,
+					node.source.value,
+					node.specifiers.length === 0 ? ['*'] : node.specifiers.map(nameOf)
+				);
+			},
+			ExportNamedDeclaration: (node) => {
+				if (node.source !== null && node.source !== undefined)
+					check(
+						node,
+						node.source.value,
+						node.specifiers.map(
+							(specifier) => specifier.local.name ?? specifier.local.value
+						)
+					);
+			},
+			ExportAllDeclaration: (node) => {
+				check(node, node.source.value, ['*']);
+			},
+			ImportExpression: (node) => {
+				if (node.source.type === 'Literal') check(node, node.source.value, ['*']);
+			},
+		};
+	},
+};
 
 /**
  * Words the user reads, written straight into JSX: a sentence there is one no
@@ -721,6 +904,17 @@ export default tseslint.config(
 	{
 		files: ['apps/web/src/store/{credentials,connectCode}.ts'],
 		rules: { 'no-restricted-imports': ['error', { patterns: [STORE_LAYER, ...CLIENT_PORTS] }] },
+	},
+	{
+		// Everything bound for the shared kit imports only what goes with it
+		// (`KIT`). A rule of its own, so it adds to each layer's
+		// `no-restricted-imports` rather than replacing it.
+		files: Object.values(KIT).flatMap(({ paths }) =>
+			paths.map((path) => (path.endsWith('/') ? `${path}**` : path))
+		),
+		ignores: Object.values(KIT).flatMap(({ except }) => except ?? []),
+		plugins: { kit: { rules: { fence: KIT_FENCE } } },
+		rules: { 'kit/fence': 'error' },
 	},
 	{
 		// The bottom layer: plain browser helpers, for anything above to use.

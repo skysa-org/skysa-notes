@@ -1,6 +1,6 @@
+import { concatBytes } from '../bytes.js';
 import { cell } from '../cell.js';
 import { decodeBase64, encodeBase64 } from './base64.js';
-import { concatBytes } from './bytes.js';
 import { AgeError } from './errors.js';
 
 /**
