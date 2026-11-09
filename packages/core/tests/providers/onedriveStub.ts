@@ -3,6 +3,7 @@ import {
 	createFakeProvider,
 	type FakeProvider,
 	type FakeProviderOptions,
+	TEST_FOLDER,
 } from '../../src/providers/fake.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
@@ -72,6 +73,9 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 	});
 	const pageSize = options.pageSize ?? Number.POSITIVE_INFINITY;
 	const requests: StubRequest[] = [];
+	// What Graph calls the app folder, which is the registration's name: the
+	// test's folder's, as the app registers under its folder's name.
+	const rootName = (options.folder ?? TEST_FOLDER).name;
 
 	let seq = 0;
 	let downloadCount = 0;
@@ -143,7 +147,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 				id: parentIdOf(entry.path),
 				...(delta
 					? {}
-					: { path: `/drive/root:/Apps/skysa-notes/${parentPath(entry.path)}` }),
+					: { path: `/drive/root:/Apps/${rootName}/${parentPath(entry.path)}` }),
 			},
 		};
 		if (entry.kind === 'folder') {
@@ -167,7 +171,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 
 	const rootItem = () => ({
 		id: STUB_ROOT_ID,
-		name: 'skysa-notes',
+		name: rootName,
 		eTag: '"{APPROOT},1"',
 		folder: { childCount: 0 },
 		parentReference: { driveId: 'stub-drive', id: 'APPS!1' },

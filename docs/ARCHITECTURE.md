@@ -3479,7 +3479,8 @@ The first six seams are cut:
 - the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule keeps Dexie, the app's tables and its words out of everything that moves.
 
 Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked are here.
-A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, holds every source module that moves to what goes with it; the tests that move are to follow.
+A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, holds every module that moves, and every test that moves with it, to what goes with it.
+Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests; the client's tests that run over this app's database are to follow.
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

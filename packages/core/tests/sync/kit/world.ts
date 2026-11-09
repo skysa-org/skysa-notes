@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect } from 'vitest';
 
 import type { DocumentFormat } from '../../../src/documentFormat.js';
-import { NOTE_FORMAT } from '../../../src/markdown/format.js';
 import { createFakeProvider, type FakeProvider } from '../../../src/providers/fake.js';
 import { CursorResetError } from '../../../src/providers/types.js';
 import type { SyncEngine } from '../../../src/sync/engine.js';
+import { TEST_FORMAT } from '../../support/testFormat.js';
 import { createMemoryStore, type MemoryStore } from '../memoryStore.js';
-import { engineFixture } from './engine.js';
+import { engineFixture, type Rules } from './engine.js';
 import { expectSoundStore } from './invariants.js';
 
 /**
@@ -34,10 +34,13 @@ interface SyncWorld {
  * nothing, so where a branch could go either way they assert the timid
  * answer.
  *
- * The world's documents are `document`'s kind, notes' unless a file says
- * otherwise: the store and every engine over it are handed that format.
+ * The world's documents are `document`'s kind, `TEST_FORMAT`'s unless a file
+ * says otherwise: the store and every engine over it are handed that format.
+ * Its engines are handed `rules` too, and none unless a file says otherwise,
+ * so that no hidden path syncs and none is watched: an app's own are its
+ * tests' to hand in (notes' are in `tests/appFolder.sync.test.ts`).
  */
-export const syncWorld = (document: DocumentFormat = NOTE_FORMAT) => {
+export const syncWorld = (document: DocumentFormat = TEST_FORMAT, rules: Rules = {}) => {
 	// Filled in before the first test runs, and again before every one after.
 	const world = {} as SyncWorld;
 	/** How many `copy-N` ids the file's engine has given out. */
@@ -57,7 +60,8 @@ export const syncWorld = (document: DocumentFormat = NOTE_FORMAT) => {
 	// The provider and store alone: the rest of the world is not an engine's option.
 	const { engineWith, pullNow, pullPages } = engineFixture(
 		() => ({ provider: world.provider, store: world.store }),
-		document
+		document,
+		rules
 	);
 
 	/** The file engine's ids, `copy-N`, for a test that builds that engine again. */

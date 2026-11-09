@@ -1,6 +1,6 @@
-import { isNoteName } from '../../src/names/notes.js';
 import type { FakeProvider } from '../../src/providers/fake.js';
 import type { RemoteEntry } from '../../src/providers/types.js';
+import { isDocumentName } from '../support/testFormat.js';
 
 /**
  * A request body as the stubs read it: the bytes the adapter sent.
@@ -31,7 +31,7 @@ export const createFrom = (
 	path: string,
 	bytes: Uint8Array<ArrayBuffer>
 ): Promise<RemoteEntry> =>
-	isNoteName(path)
+	isDocumentName(path)
 		? backing.write(path, new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes), {})
 		: backing.createFile(path, bytes);
 

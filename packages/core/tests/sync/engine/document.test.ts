@@ -9,15 +9,15 @@ import { syncWorld } from '../kit/world.js';
 /**
  * The engine asks the format it is handed what a document is, and knows no
  * file format of its own (docs/decisions/0018-the-shared-kit.md). Every other
- * engine test runs with notes' (`NOTE_FORMAT`); these run with one that is
- * not (`TEXT_FORMAT`), the store included, so that anything still reading
+ * engine test runs with markdown (`TEST_FORMAT`); these run with plain text
+ * (`TEXT_FORMAT`), the store included, so that anything still reading
  * markdown for itself shows here.
  */
 const { world, engineWith, copyId, remoteFile, noteAt, pulledNote } = syncWorld(TEXT_FORMAT);
 
 const textEngine = () => engineWith({ newId: copyId });
 
-describe('an engine handed a format that is not notes’', () => {
+describe('an engine handed a format that is not markdown', () => {
 	it('makes documents of the files its extension names, and of no others', async () => {
 		await remoteFile('a.txt', 'plain\n');
 		await remoteFile('b.md', '# not a document here\n');

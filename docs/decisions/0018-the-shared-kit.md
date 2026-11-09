@@ -148,14 +148,24 @@ Each is a pull request of its own in this repository, released as usual, so that
   A module bound for one package imports only what goes to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
   What it takes from `@skysa/core` it takes by name, and the module each name comes from is held to the same.
   The deny-lists each seam added stay, since they say why a thing is handed in rather than imported, and the fence is the floor under them.
-  It is cut in two parts, each a pull request of its own.
+  It is cut in three parts, each a pull request of its own.
   1. The source.
      Six imports crossed it, and each moved to where it goes: `PROVIDER_KINDS` to `providerKinds.ts`, `HIDDEN_PREFIX` to `paths.ts`, `concatBytes` to `bytes.ts` (where skysa-draw keeps it), and `contentTypeOf` to `files/mediaTypes.ts`.
      The two helpers the client imported, which all three apps have, join it: `sync/progress.ts`, once its one sentence went to the status's other words, and `store/emitter.ts`.
      `names/notes.ts` and `names/slug.ts` stay with the app, since they name notes and nothing that moves imports them; so `slug.ts`'s byte cap, which leaves room for `.md`, is each app's own, and skysa-draw's leaves room for `.svg`.
      This part is cut.
   2. The tests that go with the kit.
-     The engine's and the adapters' own, and the sync kit they run in, hand notes' format, its folder and its hidden paths today, and are to run on the kit's own before the fence takes them in.
+     The engine's and the adapters' own, and the sync kit they run in, handed notes' format, its folder and its hidden paths, and run on the kit's own now.
+     `TEST_FORMAT`, in `tests/support/testFormat.ts`, is the partner of the fake's `TEST_FOLDER`: markdown claiming an id on an `id:` line of a leading block, read by a line rather than by notes' parser.
+     Every engine test passed on it as they stood, so none of them was about notes' format, which notes tests for itself.
+     The sync kit hands the engine no hidden-path rules unless a test does, so notes' four hidden folders are a test of notes' own (`tests/appFolder.sync.test.ts`), and the Drive stub holds whatever folder it is told.
+     Four of Drive's cases ran the engine, which storage does not use, so they went to the engine's tests (`sync/overDrive.test.ts`); the two conflict-name cases that hang on notes' slug went to `names/slug.test.ts`.
+     What notes keeps of its own is pinned by notes: `folderSpec.test.ts` holds a marker as 1.0 wrote it, byte for byte, which this app reads and writes the same, since the marker's code moves.
+     `KIT` names each package's tests beside its source, and the fence reads `@skysa/core/testing` by name as it reads `@skysa/core`.
+     This part is cut.
+  3. The client's tests over this app's database, and the build's share target.
+     The scheduler's, the token source's and the relay's tests run over notes' Dexie database, and follow once the client has in-memory ports to run them on.
+     `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, so it is handed in or left behind before the build's own tests can follow.
 
 The operator's seams do not change: `EntitlementProvider` with its gate, `checkCode` and `hold`, `RateLimiter`, `RelayHub`, `ENABLED_PROVIDERS` and `RELAY`.
 

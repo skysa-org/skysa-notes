@@ -1,4 +1,5 @@
-import { type FetchLike, NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
+import type { FetchLike } from '@skysa/core';
+import { TEST_FOLDER, TEST_FORMAT } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';
@@ -24,8 +25,8 @@ const input = {
 describe('provider requests', () => {
 	it('are given up on when the network never answers', async () => {
 		const factory = createProviderFactory({
-			folder: NOTES_FOLDER,
-			document: NOTE_FORMAT,
+			folder: TEST_FOLDER,
+			document: TEST_FORMAT,
 			appVersion: '1.2.3',
 			timedOut,
 			fetch: hanging,
@@ -41,8 +42,8 @@ describe('provider requests', () => {
 		// deadline is a minute the connection's lock is held for nothing.
 		const session = new AbortController();
 		const factory = createProviderFactory({
-			folder: NOTES_FOLDER,
-			document: NOTE_FORMAT,
+			folder: TEST_FOLDER,
+			document: TEST_FORMAT,
 			appVersion: '1.2.3',
 			timedOut,
 			fetch: hanging,
@@ -272,8 +273,8 @@ describe('provider requests', () => {
 			)
 		);
 		const provider = createProviderFactory({
-			folder: NOTES_FOLDER,
-			document: NOTE_FORMAT,
+			folder: TEST_FOLDER,
+			document: TEST_FORMAT,
 			appVersion: '1.2.3',
 			timedOut,
 			fetch,
@@ -295,8 +296,8 @@ describe('provider requests', () => {
 			Promise.resolve(Response.json({ value: [] }, { status: 200 }))
 		);
 		const provider = createProviderFactory({
-			folder: NOTES_FOLDER,
-			document: NOTE_FORMAT,
+			folder: TEST_FOLDER,
+			document: TEST_FORMAT,
 			appVersion: '1.2.3',
 			timedOut,
 			fetch,
@@ -322,8 +323,8 @@ describe('provider requests', () => {
 			)
 		);
 		const provider = createProviderFactory({
-			folder: NOTES_FOLDER,
-			document: NOTE_FORMAT,
+			folder: TEST_FOLDER,
+			document: TEST_FORMAT,
 			appVersion: '1.2.3',
 			timedOut,
 			fetch,
@@ -343,8 +344,8 @@ describe('provider requests', () => {
 	it('have no adapter for webdav yet', () => {
 		expect(
 			createProviderFactory({
-				folder: NOTES_FOLDER,
-				document: NOTE_FORMAT,
+				folder: TEST_FOLDER,
+				document: TEST_FORMAT,
 				appVersion: '1.2.3',
 				timedOut,
 			})({

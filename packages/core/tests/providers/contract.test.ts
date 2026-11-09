@@ -1,17 +1,17 @@
-import { NOTES_FOLDER } from '../../src/config.js';
 import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
-import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
 	type FakeProvider,
 	type FakeProviderOptions,
+	TEST_FOLDER,
 } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import type { StorageProvider } from '../../src/providers/types.js';
+import { TEST_FORMAT } from '../support/testFormat.js';
 import { describeProviderContract, type ProviderContractOptions } from './contract.js';
 import { createDropboxStub } from './dropboxStub.js';
 import { createGDriveStub } from './gdriveStub.js';
@@ -59,12 +59,6 @@ describeProviderContract('in-memory fake, provider reports whole subtrees', () =
  * with a 400, which is neither of the answers that scenario is checking for.
  */
 const DROPBOX_STALE_REV = 'ffffffffffffffff';
-
-/**
- * The folder every adapter below is made with, and the suite told of: notes'
- * own, which the Drive stub answers to and the live accounts hold.
- */
-const FOLDER = NOTES_FOLDER;
 
 /** What every adapter is made from: one shape, so one table registers them all. */
 type CreateAdapter = (options: {
@@ -156,8 +150,8 @@ for (const adapter of adapters) {
 				const stub = adapter.stub(stubOptions);
 				return {
 					provider: adapter.create({
-						folder: FOLDER,
-						document: NOTE_FORMAT,
+						folder: TEST_FOLDER,
+						document: TEST_FORMAT,
 						fetch: stub.fetch,
 						getAccessToken: () => Promise.resolve('stub-token'),
 						appVersion: '0.1.0',
@@ -166,7 +160,7 @@ for (const adapter of adapters) {
 					...beneath(stub.backing),
 				};
 			},
-			{ ...adapter.options, folder: FOLDER }
+			{ ...adapter.options, folder: TEST_FOLDER }
 		);
 	}
 }
@@ -186,8 +180,8 @@ for (const adapter of adapters) {
 		`${adapter.name} (live account)`,
 		() => {
 			const provider = adapter.create({
-				folder: FOLDER,
-				document: NOTE_FORMAT,
+				folder: TEST_FOLDER,
+				document: TEST_FORMAT,
 				fetch: globalThis.fetch.bind(globalThis),
 				getAccessToken: () => Promise.resolve(token),
 				appVersion: '0.1.0',
@@ -202,6 +196,6 @@ for (const adapter of adapters) {
 				},
 			};
 		},
-		{ ...adapter.live, folder: FOLDER }
+		{ ...adapter.live, folder: TEST_FOLDER }
 	);
 }

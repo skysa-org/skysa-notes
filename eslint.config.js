@@ -218,8 +218,9 @@ const NO_APP_PATHS = [
 
 /**
  * Where each module bound for the shared kit goes, and the packages each may
- * use: the table in docs/decisions/0018-the-shared-kit.md, in code. A path
- * ending in `/` is a folder and everything in it. The deny-lists above say why
+ * use: the table in docs/decisions/0018-the-shared-kit.md, in code, with the
+ * tests that go with each package's code. A path ending in `/` is a folder and
+ * everything in it. The deny-lists above say why
  * a thing is handed in rather than imported; `kit/fence` below is the floor
  * under them, that a module bound for one package imports only what goes to
  * it or to a package beneath it, so that moving the code is a move.
@@ -233,6 +234,7 @@ const KIT = {
 			'packages/core/src/relay.ts',
 			'packages/core/src/providerKinds.ts',
 		],
+		tests: [],
 	},
 	storage: {
 		uses: ['protocol'],
@@ -252,13 +254,28 @@ const KIT = {
 			'packages/core/src/bytes.ts',
 			'packages/core/src/files/mediaTypes.ts',
 		],
+		tests: [
+			'packages/core/tests/providers/',
+			'packages/core/tests/support/',
+			'packages/core/tests/names/conflicts.test.ts',
+			'packages/core/tests/paths.test.ts',
+			'packages/core/tests/marker.test.ts',
+			'packages/core/tests/json.test.ts',
+			'packages/core/tests/files/mediaTypes.test.ts',
+		],
 	},
-	sync: { uses: ['protocol', 'storage'], paths: ['packages/core/src/sync/'] },
+	sync: {
+		uses: ['protocol', 'storage'],
+		paths: ['packages/core/src/sync/'],
+		// `@skysa/core/testing`: everything it offers goes with the kit.
+		tests: ['packages/core/tests/sync/', 'packages/core/tests/testing.ts'],
+	},
 	server: {
 		uses: ['protocol', 'storage'],
 		paths: ['apps/api/src/'],
+		tests: ['apps/api/tests/'],
 		// The deployment's: it reads the environment and hands the rest in.
-		except: ['apps/api/src/worker.ts'],
+		except: ['apps/api/src/worker.ts', 'apps/api/tests/worker.test.ts'],
 	},
 	client: {
 		uses: ['protocol', 'storage', 'sync'],
@@ -275,16 +292,36 @@ const KIT = {
 			'apps/web/src/store/connectCode.ts',
 			'apps/web/src/store/emitter.ts',
 		],
+		// The scheduler's, the token source's and the relay's run over this
+		// app's database, and follow once they have ports of their own.
+		tests: [
+			'apps/web/tests/apiClient.test.ts',
+			'apps/web/tests/beforeUpdate.test.ts',
+			'apps/web/tests/connectCode.test.ts',
+			'apps/web/tests/emitter.test.ts',
+			'apps/web/tests/instanceConfig.test.tsx',
+			'apps/web/tests/providers.test.ts',
+			'apps/web/tests/runBar.test.ts',
+			'apps/web/tests/wakeLock.test.ts',
+			'apps/web/tests/support/fakes/environment.ts',
+		],
 	},
-	pwa: { uses: [], paths: ['apps/web/brand.ts', 'apps/web/pwa.ts', 'apps/web/scripts/'] },
+	pwa: {
+		uses: [],
+		paths: ['apps/web/brand.ts', 'apps/web/pwa.ts', 'apps/web/scripts/'],
+		tests: ['apps/web/tests/brand.test.ts'],
+	},
 };
+
+/** Every path `KIT` gives a package, its source's and its tests'. */
+const kitPaths = ({ paths, tests }) => [...paths, ...tests];
 
 /** The kit's package a repository path goes to, or undefined where it stays. */
 const kitPackageOf = (path) =>
 	Object.keys(KIT).find(
 		(name) =>
 			!(KIT[name].except ?? []).includes(path) &&
-			KIT[name].paths.some((entry) =>
+			kitPaths(KIT[name]).some((entry) =>
 				entry.endsWith('/') ? path.startsWith(entry) : path === entry
 			)
 	);
@@ -301,27 +338,36 @@ const sourceOf = (path) =>
 	path;
 
 /**
- * The module each name `@skysa/core` offers comes from, read from its barrel,
- * whose every line is `export { … } from './module.js'` (#449). An app's module
- * bound for the kit imports core by name, and the name's module is what moves.
+ * The module each name a barrel offers comes from, read from the barrel,
+ * whose every line is `export { … } from './module.js'` (#449). A module bound
+ * for the kit imports core by name, and the name's module is what moves.
  */
-const CORE_BARREL = resolve(import.meta.dirname, 'packages/core/src/index.ts');
-const CORE_NAMES = new Map(
+const namesIn = (barrel) =>
+	new Map(
+		[
+			...readFileSync(barrel, 'utf8').matchAll(
+				/export\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g
+			),
+		].flatMap(([, names, from]) =>
+			names
+				.split(',')
+				.map((name) => name.trim().replace(/^type\s+/, ''))
+				.filter((name) => name !== '')
+				.map((name) => [
+					name.split(/\s+as\s+/).at(-1),
+					fromRoot(sourceOf(resolve(dirname(barrel), from))),
+				])
+		)
+	);
+
+/** Core's entries, each read once when the config loads: the app's, and the tests'. */
+const CORE_ENTRIES = new Map([
+	['@skysa/core', namesIn(resolve(import.meta.dirname, 'packages/core/src/index.ts'))],
 	[
-		...readFileSync(CORE_BARREL, 'utf8').matchAll(
-			/export\s+(?:type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/g
-		),
-	].flatMap(([, names, from]) =>
-		names
-			.split(',')
-			.map((name) => name.trim().replace(/^type\s+/, ''))
-			.filter((name) => name !== '')
-			.map((name) => [
-				name.split(/\s+as\s+/).at(-1),
-				fromRoot(sourceOf(resolve(dirname(CORE_BARREL), from))),
-			])
-	)
-);
+		'@skysa/core/testing',
+		namesIn(resolve(import.meta.dirname, 'packages/core/tests/testing.ts')),
+	],
+]);
 
 /** A local rule: what `KIT` says a module bound for the kit may import. */
 const KIT_FENCE = {
@@ -354,9 +400,10 @@ const KIT_FENCE = {
 				judge(node, fromRoot(sourceOf(resolve(dirname(context.filename), specifier))));
 				return;
 			}
-			if (specifier === '@skysa/core') {
+			const entry = CORE_ENTRIES.get(specifier);
+			if (entry !== undefined) {
 				names.forEach((name) => {
-					judge(node, CORE_NAMES.get(name) ?? `@skysa/core's ${name}`);
+					judge(node, entry.get(name) ?? `${specifier}'s ${name}`);
 				});
 				return;
 			}
@@ -909,8 +956,8 @@ export default tseslint.config(
 		// Everything bound for the shared kit imports only what goes with it
 		// (`KIT`). A rule of its own, so it adds to each layer's
 		// `no-restricted-imports` rather than replacing it.
-		files: Object.values(KIT).flatMap(({ paths }) =>
-			paths.map((path) => (path.endsWith('/') ? `${path}**` : path))
+		files: Object.values(KIT).flatMap((kit) =>
+			kitPaths(kit).map((path) => (path.endsWith('/') ? `${path}**` : path))
 		),
 		ignores: Object.values(KIT).flatMap(({ except }) => except ?? []),
 		plugins: { kit: { rules: { fence: KIT_FENCE } } },

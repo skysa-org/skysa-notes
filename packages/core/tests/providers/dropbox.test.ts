@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTES_FOLDER } from '../../src/config.js';
-import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
+import { TEST_FOLDER } from '../../src/providers/fake.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import {
 	AuthError,
@@ -12,6 +11,7 @@ import {
 	NotFoundError,
 	RateLimitError,
 } from '../../src/providers/types.js';
+import { TEST_FORMAT } from '../support/testFormat.js';
 import { createDropboxStub } from './dropboxStub.js';
 
 /**
@@ -23,8 +23,8 @@ import { createDropboxStub } from './dropboxStub.js';
 
 const provider = (doFetch: FetchLike) =>
 	createDropboxProvider({
-		folder: NOTES_FOLDER,
-		document: NOTE_FORMAT,
+		folder: TEST_FOLDER,
+		document: TEST_FORMAT,
 		fetch: doFetch,
 		getAccessToken: () => Promise.resolve('token-123'),
 		appVersion: '0.1.0',

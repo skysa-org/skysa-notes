@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTES_WATCH } from '../../src/appFolder.js';
-import { NOTES_FOLDER } from '../../src/config.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
-import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { conflictFolderName, conflictNameKeepingExtension } from '../../src/names/conflicts.js';
-import { conflictFilename } from '../../src/names/notes.js';
-import type { HttpProviderOptions } from '../../src/providers/adapter.js';
-import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
-import type { FetchLike } from '../../src/providers/http.js';
+import { TEST_FOLDER } from '../../src/providers/fake.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -18,334 +12,46 @@ import {
 	NotFoundError,
 	ProviderResponseError,
 	RateLimitError,
-	type StorageProvider,
 } from '../../src/providers/types.js';
-import { createSyncEngine } from '../../src/sync/engine.js';
-import { createMemoryStore } from '../sync/memoryStore.js';
+import { conflictFilename } from '../support/testFormat.js';
 import { drainChanges } from './contract.js';
+import {
+	AT,
+	CHILDREN,
+	driveError,
+	driveWorld,
+	emptyFeed,
+	feedRequests,
+	FOLDER,
+	MARKER_FILE,
+	over,
+} from './driveWorld.js';
 import { createGDriveStub, STUB_ROOT_ID } from './gdriveStub.js';
-import { bodyText, sameBytes } from './wireBody.js';
+import { sameBytes } from './wireBody.js';
 
 /**
  * What the contract suite cannot see: which requests go by name and which by id,
  * what is checked before and after a write Drive cannot make conditional, and
  * what the adapter does with the things Drive allows and a path cannot hold —
  * two items with one name above all. The stub's store keeps paths unique, so
- * those run against `driveWorld` below, which does not.
+ * those run against `driveWorld` (`driveWorld.ts`), which does not.
  */
 
 const API = 'https://www.googleapis.com';
-const FOLDER = 'application/vnd.google-apps.folder';
-const AT = new Date('2026-09-17T12:00:00Z');
-
-const MARKER_FILE = NOTES_FOLDER.marker.file;
 
 /** Another app's documents, for the cases that show the adapter goes by the format it is handed. */
 const SVG = { extension: '.svg', mediaType: 'image/svg+xml' };
-
-const over = (
-	doFetch: FetchLike,
-	folder: AppFolderSpec = NOTES_FOLDER,
-	document: HttpProviderOptions['document'] = NOTE_FORMAT
-): StorageProvider =>
-	createGDriveProvider({
-		folder,
-		document,
-		fetch: doFetch,
-		getAccessToken: () => Promise.resolve('stub-token'),
-		appVersion: '0.1.0',
-		clientId: 'client-1',
-		now: () => AT,
-	});
 
 const stubbed = (options: Parameters<typeof createGDriveStub>[0] = {}) => {
 	const stub = createGDriveStub(options);
 	return { stub, provider: over(stub.fetch) };
 };
 
-const driveError = (status: number, reason: string, location?: string) =>
-	new Response(
-		JSON.stringify({
-			error: {
-				code: status,
-				message: reason,
-				errors: [{ reason, ...(location === undefined ? {} : { location }) }],
-			},
-		}),
-		{
-			status,
-		}
-	);
-
 const livePaths = (entries: readonly ChangeEntry[]) =>
 	entries.filter((entry) => entry.deleted !== true).map((entry) => entry.path);
 
 const deletedPaths = (entries: readonly ChangeEntry[]) =>
 	entries.filter((entry) => entry.deleted === true).map((entry) => entry.path);
-
-interface WorldFile {
-	id: string;
-	name: string;
-	mimeType: string;
-	parents: string[];
-	headRevisionId?: string;
-	modifiedTime: string;
-	createdTime: string;
-	size?: string;
-	md5Checksum?: string;
-	trashed: boolean;
-	appProperties?: Record<string, string>;
-	content?: string;
-}
-
-interface Seen {
-	method: string;
-	url: URL;
-	body: string;
-}
-
-const LITERAL = String.raw`'((?:[^'\\]|\\.)*)'`;
-const unescape = (literal: string): string => literal.replace(/\\(.)/g, '$1');
-const TAGGED = new RegExp(String.raw`^appProperties has \{ key=${LITERAL} and value='root' \}`);
-const NAMED = new RegExp(`^name = ${LITERAL} and ${LITERAL} in parents and trashed = false$`);
-const CHILDREN = new RegExp(`^${LITERAL} in parents and trashed = false$`);
-
-/**
- * Drive as a list of files, where nothing stops two sharing a folder and a
- * name, with a change feed that records every change made through it — by the
- * adapter or by a test standing in for another device. `intercept` answers a
- * request first when a scenario needs Drive to say something particular.
- */
-const driveWorld = () => {
-	const files: WorldFile[] = [];
-	const feed: { fileId: string; removed: boolean; file?: WorldFile }[] = [];
-	const seen: Seen[] = [];
-	const clock = { at: 0 };
-	const hooks: {
-		intercept?: (request: Seen) => Response | undefined;
-		/** Items per page, for `files.list` and `changes.list` alike. */
-		pageSize?: number;
-	} = {};
-
-	const stamp = () => {
-		clock.at += 1;
-		return new Date(Date.parse('2026-01-01T00:00:00Z') + clock.at * 1000).toISOString();
-	};
-	const find = (id: string) => files.find((file) => file.id === id);
-	const record = (file: WorldFile) => {
-		feed.push({ fileId: file.id, removed: false, file: { ...file } });
-	};
-	const trashedOrUnder = (file: WorldFile, depth = 0): boolean => {
-		if (file.trashed) return true;
-		const parent = find(file.parents[0] ?? '');
-		return parent !== undefined && depth < 100 && trashedOrUnder(parent, depth + 1);
-	};
-	const shown = (file: WorldFile) => {
-		const { content: _content, ...rest } = file;
-		return { ...rest, trashed: trashedOrUnder(file) };
-	};
-	/** Drive's merge: a key given is set, one given as `null` removed, the rest kept. */
-	const merged = (
-		file: WorldFile,
-		given: Record<string, string | null>
-	): Record<string, string> | undefined => {
-		const kept = Object.entries({ ...file.appProperties, ...given }).flatMap(([key, value]) =>
-			value === null ? [] : [[key, value] as const]
-		);
-		return kept.length === 0 ? undefined : Object.fromEntries(kept);
-	};
-
-	const add = (fields: Partial<WorldFile> & { id: string; name: string; parent: string }) => {
-		const { parent, ...rest } = fields;
-		const folder = rest.mimeType === FOLDER;
-		const file: WorldFile = {
-			mimeType: 'text/markdown',
-			parents: [parent],
-			modifiedTime: stamp(),
-			createdTime: stamp(),
-			trashed: false,
-			...(folder ? {} : { headRevisionId: `rev-${fields.id}-1`, content: '', size: '0' }),
-			...rest,
-		};
-		files.push(file);
-		record(file);
-		return file;
-	};
-	const patch = (id: string, fields: Partial<WorldFile>) => {
-		const file = find(id);
-		if (file === undefined) throw new Error(`no ${id}`);
-		Object.assign(file, fields);
-		record(file);
-		return file;
-	};
-	const destroy = (id: string) => {
-		files.splice(files.indexOf(find(id) as WorldFile), 1);
-		feed.push({ fileId: id, removed: true });
-	};
-
-	const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
-
-	const search = (q: string) => {
-		const live = files.filter((file) => !trashedOrUnder(file));
-		const tagged = TAGGED.exec(q);
-		if (tagged !== null) {
-			return live.filter(
-				(file) => file.appProperties?.[unescape(tagged[1] ?? '')] === 'root'
-			);
-		}
-		const named = NAMED.exec(q);
-		if (named !== null) {
-			return live.filter(
-				(file) =>
-					file.name === unescape(named[1] ?? '') &&
-					file.parents[0] === unescape(named[2] ?? '')
-			);
-		}
-		const children = CHILDREN.exec(q);
-		if (children !== null) {
-			return live.filter((file) => file.parents[0] === unescape(children[1] ?? ''));
-		}
-		if (q === 'trashed = false') return live;
-		throw new Error(`world cannot answer ${q}`);
-	};
-
-	const multipart = (body: string) => {
-		const boundary = /^--(\S+)\r\n/.exec(body)?.[1] ?? '';
-		const [head = '', tail = ''] = body.split(`\r\n--${boundary}`);
-		const metadata = JSON.parse(head.slice(head.indexOf('\r\n\r\n') + 4)) as {
-			name: string;
-			parents: string[];
-		};
-		return { metadata, content: tail.slice(tail.indexOf('\r\n\r\n') + 4) };
-	};
-
-	const changeList = (url: URL): Response => {
-		const from = Number(url.searchParams.get('pageToken'));
-		if (!Number.isInteger(from) || from > feed.length) {
-			return driveError(400, 'invalid', 'pageToken');
-		}
-		const until = Math.min(feed.length, from + (hooks.pageSize ?? feed.length));
-		return json({
-			changes: feed
-				.slice(from, until)
-				.map((change) =>
-					change.file === undefined ? change : { ...change, file: shown(change.file) }
-				),
-			...(until < feed.length
-				? { nextPageToken: String(until) }
-				: { newStartPageToken: String(feed.length) }),
-		});
-	};
-
-	const fileList = (url: URL): Response => {
-		const all = search(url.searchParams.get('q') ?? '').map(shown);
-		const from = Number(url.searchParams.get('pageToken') ?? 0);
-		const until = Math.min(all.length, from + (hooks.pageSize ?? all.length));
-		return json({
-			files: all.slice(from, until),
-			...(until < all.length ? { nextPageToken: String(until) } : {}),
-		});
-	};
-
-	const create = (body: string, upload: boolean): Response => {
-		const id = `made-${String(files.length + 1)}`;
-		if (!upload) {
-			const fields = JSON.parse(body) as Partial<WorldFile>;
-			const parent = fields.parents?.[0] ?? '';
-			return json(shown(add({ ...fields, id, name: fields.name ?? '', parent })));
-		}
-		const { metadata, content } = multipart(body);
-		const parent = metadata.parents[0] ?? '';
-		return json(shown(add({ id, name: metadata.name, parent, content })));
-	};
-
-	const upload = (id: string, body: string): Response => {
-		const file = find(id);
-		if (file === undefined) return driveError(404, 'notFound');
-		const revision = Number(file.headRevisionId?.split('-').at(-1) ?? 0) + 1;
-		const headRevisionId = `rev-${file.id}-${String(revision)}`;
-		return json(shown(patch(file.id, { content: body, headRevisionId })));
-	};
-
-	const onFile = (request: Seen, id: string): Response => {
-		const { method, url, body } = request;
-		const file = find(id);
-		if (file === undefined) return driveError(404, 'notFound');
-		if (method === 'GET' && url.searchParams.get('alt') === 'media') {
-			return new Response(file.content ?? '', { status: 200 });
-		}
-		if (method === 'GET') return json(shown(file));
-		if (method === 'DELETE') {
-			destroy(file.id);
-			return new Response(null, { status: 204 });
-		}
-		const to = url.searchParams.get('addParents');
-		const { appProperties: given, ...fields } = JSON.parse(body) as Omit<
-			Partial<WorldFile>,
-			'appProperties'
-		> & { appProperties?: Record<string, string | null> };
-		return json(
-			shown(
-				patch(file.id, {
-					...fields,
-					...(given === undefined ? {} : { appProperties: merged(file, given) }),
-					...(to === null ? {} : { parents: [to] }),
-				})
-			)
-		);
-	};
-
-	const route = (request: Seen): Response => {
-		const { method, url, body } = request;
-		const at = `${method} ${url.pathname}`;
-		if (at === 'GET /drive/v3/changes/startPageToken') {
-			return json({ startPageToken: String(feed.length) });
-		}
-		if (at === 'GET /drive/v3/changes') return changeList(url);
-		if (at === 'GET /drive/v3/files') return fileList(url);
-		if (at === 'POST /drive/v3/files') return create(body, false);
-		if (at === 'POST /upload/drive/v3/files') return create(body, true);
-		const media = /^PATCH \/upload\/drive\/v3\/files\/(.+)$/.exec(at);
-		if (media !== null) return upload(decodeURIComponent(media[1] ?? ''), body);
-		const item = /^\/drive\/v3\/files\/(.+)$/.exec(url.pathname);
-		if (item === null) return driveError(405, 'unscripted');
-		return onFile(request, decodeURIComponent(item[1] ?? ''));
-	};
-
-	const doFetch: FetchLike = (raw, init) => {
-		const request = {
-			method: init.method ?? 'GET',
-			url: new URL(raw),
-			body: bodyText(init.body),
-		};
-		seen.push(request);
-		return Promise.resolve(hooks.intercept?.(request) ?? route(request));
-	};
-
-	/** The app folder and its marker, as a first `ensureRoot` would leave them. */
-	const root = add({
-		id: 'root-1',
-		name: 'skysa-notes',
-		parent: 'my-drive',
-		mimeType: FOLDER,
-		appProperties: { notesapp: 'root' },
-	});
-	add({ id: 'marker', name: MARKER_FILE, parent: root.id, content: '{}' });
-
-	return {
-		files,
-		feed,
-		seen,
-		hooks,
-		add,
-		patch,
-		destroy,
-		find,
-		root,
-		doFetch,
-		provider: over(doFetch),
-	};
-};
 
 describe('requests', () => {
 	it('all go to www.googleapis.com with the token, downloads included', async () => {
@@ -565,17 +271,17 @@ describe('the app folder', () => {
 		const posts = stub.requests.filter((r) => r.method === 'POST');
 		expect(posts).toHaveLength(2);
 		expect(JSON.parse(posts[0]?.body ?? '')).toEqual({
-			name: 'skysa-notes',
+			name: 'test-app',
 			mimeType: FOLDER,
 			parents: ['root'],
-			appProperties: { notesapp: 'root' },
+			appProperties: { testapp: 'root' },
 		});
 		expect(posts[1]?.url).toContain('/upload/drive/v3/files?uploadType=multipart');
 	});
 
 	it('is the one the app describes, beside another app’s on the same Drive', async () => {
 		// Its name, its tag, its marker and the mark on a folder it has left all
-		// come from the app's `AppFolderSpec`, so this app's folder is not taken
+		// come from the app's `AppFolderSpec`, so the test's folder is not taken
 		// for that one's, nor that one's touched.
 		const other: AppFolderSpec = {
 			name: 'other-app',
@@ -603,7 +309,7 @@ describe('the app folder', () => {
 		await provider.leaveFolder?.({ remoteId: 'work', path: 'Work' });
 
 		expect(world.find('work')?.appProperties).toEqual({ otherappLeft: '1' });
-		expect(world.find(world.root.id)?.appProperties).toEqual({ notesapp: 'root' });
+		expect(world.find(world.root.id)?.appProperties).toEqual({ testapp: 'root' });
 	});
 
 	it('made by two devices at once is settled on the earlier, and ours is trashed', async () => {
@@ -615,10 +321,10 @@ describe('the app folder', () => {
 			if (request.method !== 'POST' || world.find('theirs') !== undefined) return undefined;
 			world.add({
 				id: 'theirs',
-				name: 'skysa-notes',
+				name: 'test-app',
 				parent: 'my-drive',
 				mimeType: FOLDER,
-				appProperties: { notesapp: 'root' },
+				appProperties: { testapp: 'root' },
 			});
 			return undefined;
 		};
@@ -627,7 +333,7 @@ describe('the app folder', () => {
 		expect(world.seen.some((r) => r.method === 'DELETE')).toBe(false);
 		expect(world.find('made-2')?.trashed).toBe(true);
 		expect(
-			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+			world.files.filter((file) => file.appProperties?.testapp === 'root' && !file.trashed)
 		).toHaveLength(1);
 	});
 
@@ -645,7 +351,7 @@ describe('the app folder', () => {
 		const { rootId } = await world.provider.ensureRoot();
 		const { entries } = await drainChanges(world.provider);
 
-		const roots = world.files.filter((file) => file.appProperties?.notesapp === 'root');
+		const roots = world.files.filter((file) => file.appProperties?.testapp === 'root');
 		expect(roots.map((root) => [root.id, root.trashed === true])).toEqual([[rootId, false]]);
 		expect(livePaths(entries)).toEqual([MARKER_FILE]);
 	});
@@ -659,7 +365,7 @@ describe('the app folder', () => {
 		const fresh = await drainChanges(world.provider);
 		expect(livePaths(fresh.entries)).toEqual([]);
 		expect(
-			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+			world.files.filter((file) => file.appProperties?.testapp === 'root' && !file.trashed)
 		).toHaveLength(1);
 	});
 
@@ -672,7 +378,7 @@ describe('the app folder', () => {
 		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
 		await drainChanges(world.provider);
 		expect(
-			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+			world.files.filter((file) => file.appProperties?.testapp === 'root' && !file.trashed)
 		).toHaveLength(1);
 	});
 
@@ -697,7 +403,7 @@ describe('the app folder', () => {
 		await drainChanges(reloaded);
 		expect(
 			world.files
-				.filter((file) => file.appProperties?.notesapp === 'root')
+				.filter((file) => file.appProperties?.testapp === 'root')
 				.map((root) => root.id)
 		).toEqual([world.root.id]);
 	});
@@ -722,10 +428,10 @@ describe('the app folder', () => {
 		const { cursor } = await drainChanges(world.provider);
 		const earlier = {
 			id: 'root-0',
-			name: 'skysa-notes',
+			name: 'test-app',
 			parent: 'my-drive',
 			mimeType: FOLDER,
-			appProperties: { notesapp: 'root' },
+			appProperties: { testapp: 'root' },
 			createdTime: '2025-01-01T00:00:00Z',
 		};
 		world.add(earlier);
@@ -773,7 +479,7 @@ describe('the app folder', () => {
 		await round;
 		expect(
 			world.files.filter(
-				(file) => file.appProperties?.notesapp === 'root' && file.id !== known
+				(file) => file.appProperties?.testapp === 'root' && file.id !== known
 			)
 		).toHaveLength(1);
 	});
@@ -801,10 +507,10 @@ describe('the app folder', () => {
 		const { cursor } = await drainChanges(world.provider);
 		world.add({
 			id: 'root-0',
-			name: 'skysa-notes',
+			name: 'test-app',
 			parent: 'my-drive',
 			mimeType: FOLDER,
-			appProperties: { notesapp: 'root' },
+			appProperties: { testapp: 'root' },
 			createdTime: '2025-01-01T00:00:00Z',
 		});
 		world.feed.pop();
@@ -903,7 +609,7 @@ describe('the app folder, from one sync to the next', () => {
 		expect(String(failed)).toMatch(/app folder not found/);
 		expect(
 			world.seen.some(
-				(r) => r.method === 'POST' && JSON.stringify(r.body).includes('notesapp')
+				(r) => r.method === 'POST' && JSON.stringify(r.body).includes('testapp')
 			)
 		).toBe(false);
 		expect(world.files.filter((file) => file.mimeType === FOLDER)).toHaveLength(1);
@@ -918,62 +624,15 @@ describe('the app folder, from one sync to the next', () => {
 		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
 	});
 
-	it('trashed, written around, and restored keeps every note it held', async () => {
-		const world = driveWorld();
-		world.add({ id: 'a', name: 'a.md', parent: world.root.id, content: 'A' });
-		const store = createMemoryStore(NOTE_FORMAT);
-		const engine = createSyncEngine({
-			document: NOTE_FORMAT,
-			provider: world.provider,
-			store,
-			now: () => AT,
-		});
-		expect((await engine.sync()).status).toBe('ok');
-
-		// Into the trash; the next rounds make another folder and write there.
-		world.patch(world.root.id, { trashed: true });
-		expect((await engine.sync()).status).toBe('ok');
-		store.put({ id: 'b', path: 'b.md', content: 'written meanwhile', dirty: true });
-		store.queue({ op: 'write', noteId: 'b', path: 'b.md' });
-		expect((await engine.sync()).status).toBe('ok');
-
-		// Back out of the trash: it is the earlier folder, so it is the one, and
-		// what was written into the other is moved into it.
-		world.patch(world.root.id, { trashed: false });
-		expect((await engine.sync()).status).toBe('ok');
-		expect((await engine.sync()).status).toBe('ok');
-
-		expect(
-			store
-				.notes()
-				.map((note) => [note.path, note.content])
-				.sort()
-		).toEqual([
-			['a.md', 'A'],
-			['b.md', 'written meanwhile'],
-		]);
-		const b = world.files.find((file) => file.name === 'b.md');
-		expect(b?.parents).toEqual([world.root.id]);
-		// The folder made meanwhile is emptied; it goes once a fold finds it so.
-		const others = world.files.filter(
-			(file) => file.appProperties?.notesapp === 'root' && file.id !== world.root.id
-		);
-		expect(
-			others.flatMap((other) =>
-				world.files.filter((file) => file.parents[0] === other.id && !file.trashed)
-			)
-		).toEqual([]);
-	});
-
 	it('leaves a folder it has emptied in place until a fold finds it empty', async () => {
 		// Another device may still be writing into the later folder.
 		const world = driveWorld();
 		world.add({
 			id: 'root-2',
-			name: 'skysa-notes',
+			name: 'test-app',
 			parent: 'my-drive',
 			mimeType: FOLDER,
-			appProperties: { notesapp: 'root' },
+			appProperties: { testapp: 'root' },
 		});
 		world.add({ id: 'marker-2', name: MARKER_FILE, parent: 'root-2', content: '{}' });
 		world.add({ id: 'b', name: 'b.md', parent: 'root-2', content: 'B' });
@@ -1014,7 +673,7 @@ describe('creating', () => {
 
 	it('uploads and updates a document as the type of the format it was made with', async () => {
 		const { stub } = stubbed();
-		const provider = over(stub.fetch, NOTES_FOLDER, SVG);
+		const provider = over(stub.fetch, TEST_FOLDER, SVG);
 		await provider.ensureRoot();
 		const before = stub.requests.length;
 
@@ -1385,40 +1044,6 @@ describe('changes', () => {
 		});
 	});
 
-	it('name an item sent here and trashed elsewhere before they reported it by its id alone, which a pull counts as the clipboard', async () => {
-		// A picture pasted on a phone and removed from a desktop before the
-		// phone's next pull. The phone's tree learns what it uploads only from
-		// the feed, and the feed reports the file once, already in the trash.
-		const { stub, provider } = stubbed();
-		await provider.ensureRoot();
-		await provider.createFolder('.clipboard');
-		const store = createMemoryStore(NOTE_FORMAT);
-		const engine = createSyncEngine({
-			document: NOTE_FORMAT,
-			watch: NOTES_WATCH,
-			provider,
-			store,
-			now: () => AT,
-		});
-		await engine.pull();
-		const { cursor } = await drainChanges(provider);
-		const item = await provider.createFile(
-			'.clipboard/20261006T153012123Z-pasted-image-3f9a1c2b.png',
-			new Uint8Array([1, 2, 3]),
-			{ contentType: 'image/png' }
-		);
-
-		await over(stub.fetch).delete(item);
-
-		const { entries } = await drainChanges(provider, cursor);
-		expect(entries).toEqual([{ deleted: true, remoteId: item.remoteId }]);
-		expect(await engine.pull()).toMatchObject({
-			status: 'ok',
-			pulled: 0,
-			met: ['clipboard', 'encryption'],
-		});
-	});
-
 	it('reset on a page token Drive will not take', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);
@@ -1437,27 +1062,6 @@ describe('changes', () => {
 		expect(stub.requests.at(-1)?.url).toContain('/drive/v3/changes');
 	});
 
-	/**
-	 * A round of `pages` pages with nothing on them the app can see, as Drive
-	 * pages through other apps' changes under `drive.file`, the last of them the
-	 * feed's end.
-	 */
-	const emptyFeed = (world: ReturnType<typeof driveWorld>, pages: number) => {
-		world.hooks.intercept = (request) => {
-			if (request.url.pathname !== '/drive/v3/changes') return undefined;
-			const token = request.url.searchParams.get('pageToken') ?? '';
-			const at = token.startsWith('empty-') ? Number(token.slice('empty-'.length)) : 0;
-			return new Response(
-				JSON.stringify(
-					at + 1 < pages
-						? { changes: [], nextPageToken: `empty-${String(at + 1)}` }
-						: { changes: [], newStartPageToken: String(world.feed.length) }
-				)
-			);
-		};
-	};
-	const feedRequests = (world: ReturnType<typeof driveWorld>) =>
-		world.seen.filter((request) => request.url.pathname === '/drive/v3/changes').length;
 	const tagSearches = (world: ReturnType<typeof driveWorld>) =>
 		world.seen.filter(
 			(request) => request.url.searchParams.get('q')?.startsWith('appProperties has') === true
@@ -1561,33 +1165,6 @@ describe('changes', () => {
 		expect(feedRequests(world)).toBe(8);
 	});
 
-	it('scan through the engine when the feed runs long, and find what it would have said', async () => {
-		const world = driveWorld();
-		const store = createMemoryStore(NOTE_FORMAT);
-		const engine = createSyncEngine({
-			document: NOTE_FORMAT,
-			provider: world.provider,
-			store,
-			now: () => AT,
-		});
-		expect((await engine.sync()).status).toBe('ok');
-		// Made since, and on no page the feed will send.
-		world.add({ id: 'new', name: 'new.md', parent: world.root.id, content: 'N' });
-		emptyFeed(world, 50);
-		world.seen.length = 0;
-
-		expect((await engine.sync()).status).toBe('ok');
-
-		expect(feedRequests(world)).toBe(4);
-		expect(
-			world.seen.some((request) => request.url.searchParams.get('q') === 'trashed = false')
-		).toBe(true);
-		expect(store.notes().map((note) => [note.path, note.content])).toContainEqual([
-			'new.md',
-			'N',
-		]);
-	});
-
 	it('do not reset over a 400 about anything but the page token, or a rate limit', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);
@@ -1604,76 +1181,6 @@ describe('changes', () => {
 			expect(error).toBeInstanceOf(Error);
 			expect(error).not.toBeInstanceOf(CursorResetError);
 		}, Promise.resolve());
-	});
-
-	it('are read across pages: duplicates and arrivals split between them come out whole', async () => {
-		const world = driveWorld();
-		world.add({
-			id: 'later',
-			name: 'a.md',
-			parent: world.root.id,
-			createdTime: '2026-02-01T00:00:00Z',
-			content: 'L',
-		});
-		world.add({
-			id: 'earlier',
-			name: 'a.md',
-			parent: world.root.id,
-			createdTime: '2026-01-01T00:00:00Z',
-			content: 'E',
-		});
-		world.add({ id: 'out', name: 'Archive', parent: 'my-drive', mimeType: FOLDER });
-		world.add({ id: 'old', name: 'old.md', parent: 'out', content: 'O' });
-		world.hooks.pageSize = 1;
-		const store = createMemoryStore(NOTE_FORMAT);
-		const engine = createSyncEngine({
-			document: NOTE_FORMAT,
-			provider: world.provider,
-			store,
-			now: () => AT,
-		});
-
-		expect((await engine.sync()).status).toBe('ok');
-		const renamed = conflictFilename('a.md', AT, [MARKER_FILE, 'a.md', 'a.md']);
-		const notes = () =>
-			store
-				.notes()
-				.map((note) => [note.path, note.remoteId, note.content])
-				.sort();
-		expect(notes()).toEqual(
-			[
-				['a.md', 'earlier', 'E'],
-				[renamed, 'later', 'L'],
-			].sort()
-		);
-
-		// A restored duplicate made earlier than the one this device holds, and
-		// a folder moved in, each among other changes one page at a time.
-		world.add({ id: 'x', name: 'x.md', parent: world.root.id, content: 'X' });
-		world.add({
-			id: 'restored',
-			name: 'a.md',
-			parent: world.root.id,
-			createdTime: '2025-12-01T00:00:00Z',
-			content: 'R',
-		});
-		world.patch('out', { parents: [world.root.id] });
-		expect((await engine.sync()).status).toBe('ok');
-		expect((await engine.sync()).status).toBe('ok');
-
-		const paths = store.notes().map((note) => note.path);
-		expect(paths).toEqual([...new Set(paths)]);
-		expect(store.notes().find((note) => note.path === 'a.md')?.remoteId).toBe('restored');
-		expect(
-			notes()
-				.map(([, id]) => id)
-				.sort()
-		).toEqual(['earlier', 'later', 'old', 'restored', 'x']);
-		expect(store.notes().find((note) => note.remoteId === 'old')?.path).toBe('Archive/old.md');
-		const names = world.files
-			.filter((file) => file.parents[0] === world.root.id && !file.trashed)
-			.map((file) => file.name);
-		expect(names).toEqual([...new Set(names)]);
 	});
 
 	it('report a note under a trashed folder as deleted where it was', async () => {
@@ -1773,7 +1280,7 @@ describe('changes', () => {
 
 			const { entries } = await drainChanges(world.provider, cursor);
 
-			const renamed = conflictFilename('a.md', AT, ['.notesapp.json', 'a.md']);
+			const renamed = conflictFilename('a.md', AT, ['.testapp.json', 'a.md']);
 			expect(world.find('known')?.name).toBe(renamed);
 			expect(entries.map((entry) => [entry.remoteId, entry.path])).toEqual([
 				['restored', 'a.md'],
@@ -1790,14 +1297,9 @@ describe('changes', () => {
 
 			const { entries } = await drainChanges(world.provider, cursor);
 
-			const first = conflictFolderName('Work', AT, [
-				'.notesapp.json',
-				'Work',
-				'Work',
-				'Work',
-			]);
+			const first = conflictFolderName('Work', AT, ['.testapp.json', 'Work', 'Work', 'Work']);
 			const second = conflictFolderName('Work', AT, [
-				'.notesapp.json',
+				'.testapp.json',
 				'Work',
 				'Work',
 				'Work',
@@ -1810,7 +1312,7 @@ describe('changes', () => {
 					.filter((file) => file.mimeType === FOLDER)
 					.map((f) => f.name)
 					.sort()
-			).toEqual(['Work', first, second, 'skysa-notes'].sort());
+			).toEqual(['Work', first, second, 'test-app'].sort());
 		});
 
 		it('leave them alone when Drive no longer has both', async () => {
@@ -2038,7 +1540,7 @@ describe('changes', () => {
 			// bytes are two documents, renamed apart with their own extension, and
 			// two `.md` files are files like any other.
 			const world = driveWorld();
-			const drawings = over(world.doFetch, NOTES_FOLDER, SVG);
+			const drawings = over(world.doFetch, TEST_FOLDER, SVG);
 			const same = { parent: world.root.id, size: '1', md5Checksum: 'same', content: 'x' };
 			world.add({ ...same, id: 'one', name: 'a.svg' });
 			world.add({ ...same, id: 'two', name: 'a.svg' });
@@ -2061,7 +1563,7 @@ describe('changes', () => {
 
 			const { entries } = await drainChanges(world.provider);
 
-			const renamed = conflictFilename('a.md', AT, ['.notesapp.json', 'a.md', 'a.md']);
+			const renamed = conflictFilename('a.md', AT, ['.testapp.json', 'a.md', 'a.md']);
 			expect(livePaths(entries).sort()).toEqual([MARKER_FILE, 'a.md', renamed].sort());
 			expect(world.find('two')?.name).toBe(renamed);
 		});
@@ -2071,7 +1573,7 @@ describe('changes', () => {
 describe('a folder the app has left', () => {
 	// Marked rather than trashed, since `drive.file` hides what the user put in
 	// it, and not reported while nothing the app can see is in it (§5.1).
-	const LEFT = { notesappLeft: '1' };
+	const LEFT = { testappLeft: '1' };
 	const patches = (world: ReturnType<typeof driveWorld>) =>
 		world.seen
 			.filter((request) => request.method === 'PATCH')
@@ -2085,7 +1587,7 @@ describe('a folder the app has left', () => {
 		await world.provider.leaveFolder?.({ remoteId: 'work', path: 'Work' });
 
 		expect(patches(world)).toEqual([
-			['/drive/v3/files/work', { appProperties: { notesappLeft: '1' } }],
+			['/drive/v3/files/work', { appProperties: { testappLeft: '1' } }],
 		]);
 		expect(world.seen.some((request) => request.body.includes('trashed'))).toBe(false);
 		expect(world.find('work')).toMatchObject({ trashed: false, appProperties: LEFT });
@@ -2115,7 +1617,7 @@ describe('a folder the app has left', () => {
 		expect(await world.provider.createFolder('Play')).toMatchObject({ remoteId: 'play' });
 
 		expect(patches(world)).toEqual([
-			['/drive/v3/files/work', { appProperties: { notesappLeft: null } }],
+			['/drive/v3/files/work', { appProperties: { testappLeft: null } }],
 		]);
 		expect(world.find('work')?.appProperties).toBeUndefined();
 	});

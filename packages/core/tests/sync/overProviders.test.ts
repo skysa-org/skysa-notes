@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTES_FOLDER } from '../../src/config.js';
 import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
-import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { conflictFilePath } from '../../src/names/conflicts.js';
-import { isNoteName } from '../../src/names/notes.js';
 import {
 	ancestorPaths,
 	basename,
@@ -15,7 +12,7 @@ import {
 	rebasePath,
 } from '../../src/paths.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
-import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
+import { createFakeProvider, type FakeProvider, TEST_FOLDER } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
@@ -26,6 +23,7 @@ import { createDropboxStub } from '../providers/dropboxStub.js';
 import { createGDriveStub } from '../providers/gdriveStub.js';
 import { createOneDriveStub } from '../providers/onedriveStub.js';
 import { mulberry32 } from '../support/random.js';
+import { isDocumentName, TEST_FORMAT } from '../support/testFormat.js';
 import { AT } from './kit/engine.js';
 import { entryAt } from './kit/remote.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
@@ -62,8 +60,8 @@ const over = <T>(
 	fetch: FetchLike
 ): T =>
 	create({
-		folder: NOTES_FOLDER,
-		document: NOTE_FORMAT,
+		folder: TEST_FOLDER,
+		document: TEST_FORMAT,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -165,10 +163,10 @@ const device = async (
 ): Promise<Device> => {
 	const provider = around(remote.adapter());
 	await provider.ensureRoot();
-	const store = createMemoryStore(NOTE_FORMAT);
+	const store = createMemoryStore(TEST_FORMAT);
 	const counter = { next: 0 };
 	const engine = createSyncEngine({
-		document: NOTE_FORMAT,
+		document: TEST_FORMAT,
 		provider,
 		store,
 		now: () => AT,
@@ -494,7 +492,7 @@ const remoteUnreadable = (remote: Remote): string[] =>
 			(entry) =>
 				entry.kind === 'file' &&
 				!isHidden(entry.path) &&
-				isNoteName(entry.path) &&
+				isDocumentName(entry.path) &&
 				remote.backing.contentAt(entry.path) === undefined
 		)
 		.map((entry) => entry.path)
@@ -514,7 +512,7 @@ const remoteAttachments = (remote: Remote): Place[] =>
 	remote.backing
 		.snapshot()
 		.filter(
-			(entry) => entry.kind === 'file' && !isHidden(entry.path) && !isNoteName(entry.path)
+			(entry) => entry.kind === 'file' && !isHidden(entry.path) && !isDocumentName(entry.path)
 		)
 		.map((entry) => ({ path: entry.path, remoteId: entry.remoteId, size: entry.size }))
 		.sort(byPlace);

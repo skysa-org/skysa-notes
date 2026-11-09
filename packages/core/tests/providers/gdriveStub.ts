@@ -1,9 +1,9 @@
-import { NOTES_FOLDER } from '../../src/config.js';
 import { basename, joinPath, parentPath } from '../../src/paths.js';
 import {
 	createFakeProvider,
 	type FakeProvider,
 	type FakeProviderOptions,
+	TEST_FOLDER,
 } from '../../src/providers/fake.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
@@ -33,11 +33,11 @@ import { createFrom } from './wireBody.js';
 
 const API = 'https://www.googleapis.com';
 const FOLDER = 'application/vnd.google-apps.folder';
-export const STUB_ROOT_ID = 'folder-skysa-notes';
+export const STUB_ROOT_ID = 'folder-app';
 const MY_DRIVE = 'my-drive';
 const BASE_TIME = Date.parse('2026-01-01T00:00:00Z');
 
-export type GDriveStubOptions = Omit<FakeProviderOptions, 'folder' | 'folderChanges' | 'kind'> & {
+export type GDriveStubOptions = Omit<FakeProviderOptions, 'folderChanges' | 'kind'> & {
 	/**
 	 * What the `PUT` that finishes a resumable upload answers with: the fields
 	 * the session asked for, as Drive is expected to, or only Drive's defaults
@@ -124,19 +124,18 @@ const driveError = (status: number, reason: string) =>
 const LITERAL = String.raw`'((?:[^'\\]|\\.)*)'`;
 const unescape = (literal: string): string => literal.replace(/\\(.)/g, '$1');
 
-/**
- * The app folder the stub holds is notes' (`NOTES_FOLDER`), found by its tag:
- * the adapter in front of it is made with the same spec.
- */
-const { name: ROOT_NAME, driveTag: ROOT_TAG } = NOTES_FOLDER;
-const ROOT_QUERY = new RegExp(
-	String.raw`^appProperties has \{ key='${ROOT_TAG}' and value='root' \} and mimeType = '${FOLDER}' and trashed = false$`
-);
 const NAMED_QUERY = new RegExp(`^name = ${LITERAL} and ${LITERAL} in parents and trashed = false$`);
 const CHILDREN_QUERY = new RegExp(`^${LITERAL} in parents and trashed = false$`);
 
 export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub => {
 	const { resumableAnswer = 'asked', ...fakeOptions } = options;
+	// The app folder the stub holds, found by its tag: `options.folder`, which
+	// the adapter in front of it is made with too, and the fake's unless a test
+	// says otherwise.
+	const { name: rootName, driveTag: rootTag } = options.folder ?? TEST_FOLDER;
+	const rootQuery = new RegExp(
+		String.raw`^appProperties has \{ key='${rootTag}' and value='root' \} and mimeType = '${FOLDER}' and trashed = false$`
+	);
 	const backing = createFakeProvider({
 		...fakeOptions,
 		kind: 'gdrive',
@@ -183,7 +182,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 
 	const rootFile = (): DriveFile => ({
 		id: STUB_ROOT_ID,
-		name: ROOT_NAME,
+		name: rootName,
 		mimeType: FOLDER,
 		parents: [MY_DRIVE],
 		modifiedTime: new Date(BASE_TIME).toISOString(),
@@ -294,7 +293,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	const listFiles = (url: URL): Response => {
 		const q = url.searchParams.get('q') ?? '';
 		const token = url.searchParams.get('pageToken');
-		if (ROOT_QUERY.test(q)) return json(page(rootMade ? [rootFile()] : [], token, 'files'));
+		if (rootQuery.test(q)) return json(page(rootMade ? [rootFile()] : [], token, 'files'));
 		const named = NAMED_QUERY.exec(q);
 		if (named !== null) {
 			const name = unescape(named[1] ?? '');
@@ -325,7 +324,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 			parents?: string[];
 			appProperties?: Record<string, string>;
 		};
-		if (request.appProperties?.[ROOT_TAG] === 'root') {
+		if (request.appProperties?.[rootTag] === 'root') {
 			if (rootMade) return driveError(500, 'stubCannotHoldTwoRoots');
 			rootMade = true;
 			return json(rootFile());

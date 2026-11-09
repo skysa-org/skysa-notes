@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { conflictPath } from '../../../src/names/notes.js';
 import { basename } from '../../../src/paths.js';
+import { conflictPath } from '../../support/testFormat.js';
 import { AT } from '../kit/engine.js';
 import { remoteAt } from '../kit/remote.js';
 import { boundTo } from '../kit/seed.js';

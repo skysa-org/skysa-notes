@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTES_FOLDER } from '../src/config.js';
 import { buildMarker, parseMarker, serializeMarker } from '../src/marker.js';
 import { TEST_FOLDER } from '../src/providers/fake.js';
 
-const SPEC = NOTES_FOLDER.marker;
+const SPEC = TEST_FOLDER.marker;
 
 const input = {
 	marker: SPEC,
@@ -20,7 +19,7 @@ describe('buildMarker', () => {
 		const marker = buildMarker(input);
 		expect(marker).toEqual({
 			schemaVersion: 1,
-			app: 'skysa-notes',
+			app: 'test-app',
 			createdAt: '2026-09-14T13:02:11.000Z',
 			createdBy: {
 				appVersion: '0.1.0',
@@ -52,7 +51,7 @@ describe('serializeMarker', () => {
 	it('writes pretty JSON with a trailing newline', () => {
 		const text = serializeMarker(buildMarker(input));
 		expect(text.endsWith('\n')).toBe(true);
-		expect(text).toContain('\n  "app": "skysa-notes"');
+		expect(text).toContain('\n  "app": "test-app"');
 	});
 });
 
@@ -89,11 +88,12 @@ describe('parseMarker', () => {
 	});
 
 	it('reads by the spec it is given, so another app’s marker is that app’s alone', () => {
-		const theirs = serializeMarker(buildMarker({ ...input, marker: TEST_FOLDER.marker }));
-		expect(parseMarker(theirs, TEST_FOLDER.marker).status).toBe('ok');
+		const other = { file: '.otherapp.json', app: 'other-app', version: 1 };
+		const theirs = serializeMarker(buildMarker({ ...input, marker: other }));
+		expect(parseMarker(theirs, other).status).toBe('ok');
 		expect(parseMarker(theirs, SPEC)).toEqual({
 			status: 'invalid',
-			reason: 'marker belongs to a different app: test-app',
+			reason: 'marker belongs to a different app: other-app',
 		});
 	});
 

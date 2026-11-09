@@ -1,6 +1,5 @@
 import { beforeEach } from 'vitest';
 
-import { NOTES_WATCH, syncsHidden } from '../../../src/appFolder.js';
 import type { DocumentFormat } from '../../../src/documentFormat.js';
 import type { ChangeEntry, StorageProvider } from '../../../src/providers/types.js';
 import { createSyncEngine, type SyncEngineOptions } from '../../../src/sync/engine.js';
@@ -55,14 +54,17 @@ interface World {
 	store: SyncStore;
 }
 
+/** What an app hands the engine of its hidden paths: which sync, and which it is told of. */
+export type Rules = Pick<SyncEngineOptions, 'syncsHidden' | 'watch'>;
+
 /**
  * Engines over the provider and store `world` answers, read each time one is
  * made, so a test that puts a new provider in place gets engines over it, and
- * over documents of `document`'s kind.
+ * over documents of `document`'s kind, handed `rules`.
  * `syncWorld` (`kit/world.ts`) is its one caller, once per test file — a file
  * calls that, not this: it resets its ids before each test.
  */
-export const engineFixture = (world: () => World, document: DocumentFormat) => {
+export const engineFixture = (world: () => World, document: DocumentFormat, rules: Rules) => {
 	const fresh = { count: 0 };
 	beforeEach(() => {
 		fresh.count = 0;
@@ -84,8 +86,7 @@ export const engineFixture = (world: () => World, document: DocumentFormat) => {
 	const engineWith = (overrides: Partial<SyncEngineOptions> = {}) =>
 		createSyncEngine({
 			document,
-			syncsHidden,
-			watch: NOTES_WATCH,
+			...rules,
 			...world(),
 			now: () => AT,
 			...overrides,
