@@ -347,6 +347,19 @@ describe('a note that carries its own id', () => {
 
 		expect(noteAt('a.md')?.id).toBe('copy-1');
 	});
+
+	it('writes the id it invents into nothing, so the note is not dirty from a load', async () => {
+		// The file keeps its bytes until the user edits it (CLAUDE.md: a note
+		// becomes dirty only on a user's edit), when the save writes the id in.
+		// skysa-draw's, where a drawing's id is an attribute.
+		await remoteFile('a.md', 'no frontmatter\n');
+
+		await world.engine.sync();
+
+		expect(noteAt('a.md')).toMatchObject({ content: 'no frontmatter\n', dirty: false });
+		expect(world.provider.contentAt('a.md')).toBe('no frontmatter\n');
+		expect(world.store.ops()).toEqual([]);
+	});
 });
 
 describe('an entry the provider sent twice', () => {

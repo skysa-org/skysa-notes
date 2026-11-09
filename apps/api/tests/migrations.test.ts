@@ -52,6 +52,23 @@ const addConnection = (db: DatabaseSync, id: string, userId: string, accountId: 
 	).run(id, userId, 'dropbox', accountId, 'x', 'c', 'i', 'k1');
 };
 
+describe('every migration', () => {
+	it('separates every statement, so wrangler can stop at the one that failed', () => {
+		// The `;`s outside a statement's comments, which may hold their own.
+		const ends = (statement: string): number =>
+			statement
+				.split('\n')
+				.filter((line) => !line.trimStart().startsWith('--'))
+				.join('\n')
+				.split(';').length - 1;
+		for (const name of files()) {
+			for (const statement of statements(name)) {
+				expect(ends(statement), `${name}: ${statement}`).toBe(1);
+			}
+		}
+	});
+});
+
 describe('0003_one_user_per_account', () => {
 	it('applies to a database that already holds two users on one account', () => {
 		// Reachable at 0002: account-first permitted it, and two signed-out

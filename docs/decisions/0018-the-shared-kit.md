@@ -138,8 +138,13 @@ Each is a pull request of its own in this repository, released as usual, so that
      A lint rule keeps Dexie, the app's tables and stores, and the catalog out of the modules in the table above.
      Two helpers they import are in neither list, `sync/progress.ts` and `store/emitter.ts`, and the fence below says where they go.
      This part is cut.
-- **The forks' fixes come back first**, so that the kit starts with every fix any of the three has, memoriam's checks of the root in the contract suite among them.
+- **The forks' fixes come back first**, so that the kit starts with every fix any of the three has.
+  Every fix either fork made to a shared layer was this repository's already: memoriam's checks of the root in the contract suite are #497 and #511, ported to it, and skysa-draw's changes were the seams above.
+  What they had that this lacked was tests, and four of their cases are mutations no test here caught: a file the format refuses, met by the pull's and the push's reads of a file as a document, and the hidden paths an engine syncs, asked of a deletion and of a scan's count.
+  They are here now, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
+  This part is done.
 - **A lint rule fences what is to move** from what stays, and once it passes the move can be made.
+  `names/slug.ts` is one thing it will find: it takes `.md` from `config.ts` for `noteFilename`, `uniqueFilename` and `attachmentName`, and its byte cap leaves room for those three bytes, where skysa-draw's leaves room for `.svg`'s four, so the cap is to follow the extension.
 
 The operator's seams do not change: `EntitlementProvider` with its gate, `checkCode` and `hold`, `RateLimiter`, `RelayHub`, `ENABLED_PROVIDERS` and `RELAY`.
 

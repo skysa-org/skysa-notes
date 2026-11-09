@@ -3478,6 +3478,7 @@ The first six seams are cut:
 - the credential, the token source and the relay reach the database through ports (`CredentialTable`, `TokenStates`), made over the app's database in `sync/dexiePorts.ts`;
 - the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule keeps Dexie, the app's tables and its words out of everything that moves.
 
+Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked are here.
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>
