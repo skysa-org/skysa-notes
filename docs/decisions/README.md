@@ -25,3 +25,4 @@ A new decision gets the next number and a line below, and is written one sentenc
 | [0015](0015-passwords-in-the-vault.md) | Passwords in the vault | 2026-10-15 |
 | [0016](0016-dialogs.md) | Dialogs | 2026-10-15 |
 | [0017](0017-filling-in-on-a-site.md) | Filling in on a site | 2026-10-16 |
+| [0018](0018-the-shared-kit.md) | The shared kit | 2026-11-09 |

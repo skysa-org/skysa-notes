@@ -3424,6 +3424,15 @@ Operators running an instance for many users should know two things, both to be 
 - Back up D1 with `wrangler d1 export` on a cron trigger.
   The database holds encrypted refresh tokens and connection metadata, never note content.
 
+<a id="the-shared-kit"></a>
+### The shared kit (2026-11-09)
+
+The layers here that do not care what a file holds are to move to a repository of their own, `skysa-org/skysa-kit`, which this app, skysa-draw and memoriam will depend on from npm.
+They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
+Every storage option, today's three and any added later, is built there and nowhere else.
+Until this app depends on it, this repository is still the whole product, as above.
+The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
+
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>
 ## 14. Not planned (possible future add-ons)
 
