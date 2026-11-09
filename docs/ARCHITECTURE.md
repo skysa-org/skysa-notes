@@ -474,7 +474,7 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
   A path is resolved by walking names from the app folder (`name = '…' and '<parent>' in parents and trashed = false`, with `'` and `\` escaped, compared exactly afterwards), and where a name matches more than once the **canonical** item — earliest `createdTime`, then lowest id — is what the path means, on every device.
   No id cache: one would send a write into the wrong folder after a remote rename, and notes sit a few levels deep.
 - Nothing on Drive is conditional: v3 has no `If-Match` and nothing like create-if-absent.
-  - Create: look up the name (taken → `ConflictError`, parent missing → `NotFoundError`), upload with `POST /upload/drive/v3/files?uploadType=multipart` (`text/markdown`, bytes exactly as given), then **search again**: if another device's file of that name was made earlier, ours goes to the trash (a third device may already have written into it) and `ConflictError` names theirs, so the engine makes its conflict copy.
+  - Create: look up the name (taken → `ConflictError`, parent missing → `NotFoundError`), upload with `POST /upload/drive/v3/files?uploadType=multipart` (`text/markdown`, the media type of `NOTE_FORMAT`, the document format the adapter is handed; bytes exactly as given), then **search again**: if another device's file of that name was made earlier, ours goes to the trash (a third device may already have written into it) and `ConflictError` names theirs, so the engine makes its conflict copy.
     A folder is made the same way, and one that exists already is returned.
   - A file that is not a note (`createFile`, 2026-10-03, #187): the same look, create and look again, with the bytes as the multipart body's second part and the given type as its `mimeType` (`application/octet-stream` if none).
     Over 5 MB, where Drive's guide stops recommending multipart, it is a resumable upload instead — for a note that size too, which goes the same way: `POST …?uploadType=resumable` with the metadata, then every byte in one `PUT` to the `Location` that answers it (https://developers.google.com/workspace/drive/api/guides/manage-uploads).
@@ -1680,7 +1680,8 @@ UTC so two devices in different zones name the same conflict the same way rather
 A minute is not unique enough on its own, so a second conflict on the same note inside one minute gets `-2`, `-3`, and so on; the comparison is case-insensitive, because Drive, Dropbox and macOS all are.
 The name is deliberately **not** slugified: the copy has to be recognisable as the note it came from and sort next to it.
 
-The names are `packages/core/src/names/conflicts.ts`; the copy's contents, with its own `id`, are `packages/core/src/sync/conflicts.ts`.
+The names are `packages/core/src/names/conflicts.ts`; the copy's contents, with its own `id`, are `packages/core/src/markdown/conflictCopy.ts`.
+The engine asks for both through the document format it is handed, `NOTE_FORMAT` in `markdown/format.ts` ([record 0018](decisions/0018-the-shared-kit.md)), and reads no markdown for itself.
 
 <a id="edits-the-editor-has-not-saved-yet"></a>
 ### Edits the editor has not saved yet
@@ -3253,6 +3254,7 @@ packages/
       index.ts                # what the apps may use, by name; tests/exports.test.ts lists the values (#449)
       config.ts               # APP_FOLDER_NAME; NOTES_FOLDER, this app's folder as the adapters are handed it
       folderSpec.ts           # AppFolderSpec: an app's folder, its marker and Drive's tag on it (record 0018)
+      documentFormat.ts       # DocumentFormat: what an app's synced files are — extension, media type, claimed id, conflict copy (record 0018)
       cell.ts                 # cell(): the one way to hold a value that changes, where `let` is not allowed (#457)
       marker.ts paths.ts      # the marker file; paths as POSIX, relative to the app's root
       hash.ts json.ts         # content hashes; JSON from outside, parsed without throwing (no schema)
@@ -3274,9 +3276,11 @@ packages/
         adapter.ts            # and on the contract's side: the marker, read as text, the root's guard, isSelf
       names/                  # what a file is called, below both providers and sync (#449): fold.ts (one name as every provider compares it)
                               #   bytes.ts (the 255-byte cap, cut at a character) slug.ts (a title, tag or folder as a name; a free name)
-                              #   extension.ts (a name's extension) conflicts.ts (a conflict copy's name and path)
+                              #   extension.ts (a name's extension) conflicts.ts (a conflict copy's name and path; documentNames, by extension)
+                              #   notes.ts (this app's: isNoteName, and a note's copy's name and path)
       sync/
-        engine.ts conflicts.ts
+        engine.ts
+        document.ts           # a document read: the provider's read, and the format's word on whether the text is one
         context.ts            # what every part of the engine is handed (EngineContext): provider, store, clock, ids, bounds, meter
         names.ts              # finding a free conflict name: tried in turn, bounded, the last refusal thrown (findFreeName)
         providerOps.ts        # asking the provider where "nothing there" is an answer: orIfNotFound, withParent
@@ -3300,6 +3304,8 @@ packages/
                               #   conflicts.ts (a write the remote would not take: set aside under a conflict name, or reconciled)
                               #   drain.ts (the queue drained in order, op by op, writes sent together, a failed op answered; createPush wires the parts)
       markdown/
+        format.ts             # NOTE_FORMAT: this app's documents, as the engine and the adapters are handed them (record 0018)
+        conflictCopy.ts       # a conflict copy's contents: the local note's, with a fresh id
         frontmatter/          # split.ts (the block found and taken off the body) read.ts (the fields the app understands)
                               #   write.ts (fields written back, nothing else touched, or refused up front); each builds on the one before (#449)
         attachments.ts
@@ -3322,6 +3328,7 @@ Dependency rule: `core` imports nothing from `apps/*`.
 
 Inside `apps/web/src` the layers point one way too (2026-10-22, ESLint's `no-restricted-imports`): `lib/` is the bottom, plain browser helpers that import nothing of the app; `store/` is the data layer and imports neither the sync layer, the UI nor the editors; `sync/` imports the store, `api/`, `errors/` and `i18n/`, and no UI; `editor/` does not import `routes/` or `sync/`.
 Inside `core`, nothing under `providers/` imports `sync/` (#449): what both need, a conflict copy's name say, sits below them in `names/`, which imports neither of them nor `markdown/`.
+Nor do `providers/` and `sync/` import `markdown/`, `NOTE_EXTENSION` or notes' names (`names/notes.ts`): they are handed a `DocumentFormat` instead ([record 0018](decisions/0018-the-shared-kit.md)).
 Neither `core` nor the Worker may import a Node built-in, and the list is Node's own (`module.builtinModules`), not a hand-kept one.
 
 A `.ts` and a `.tsx` may not share a stem in the same directory.
@@ -3435,7 +3442,7 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
-The first seam is cut: the adapters are handed the app's folder (§3), and the scheduler its lock's name.
+The first two seams are cut: the adapters are handed the app's folder (§3), and the scheduler its lock's name; the engine and the adapters are handed what a document is (`NOTE_FORMAT`).
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

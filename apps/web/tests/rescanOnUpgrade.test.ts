@@ -1,4 +1,4 @@
-import { createSyncEngine } from '@skysa/core';
+import { createSyncEngine, NOTE_FORMAT } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -62,6 +62,7 @@ const passedOver = async () => {
 
 const pullInto = async (db: NotesDatabase, provider: ReturnType<typeof createFakeProvider>) => {
 	const engine = createSyncEngine({
+		document: NOTE_FORMAT,
 		provider,
 		store: createDexieSyncStore(db, { connectionId: 'c1' }),
 	});

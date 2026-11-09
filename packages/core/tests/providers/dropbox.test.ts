@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { NOTES_FOLDER } from '../../src/config.js';
+import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import {
@@ -23,6 +24,7 @@ import { createDropboxStub } from './dropboxStub.js';
 const provider = (doFetch: FetchLike) =>
 	createDropboxProvider({
 		folder: NOTES_FOLDER,
+		document: NOTE_FORMAT,
 		fetch: doFetch,
 		getAccessToken: () => Promise.resolve('token-123'),
 		appVersion: '0.1.0',

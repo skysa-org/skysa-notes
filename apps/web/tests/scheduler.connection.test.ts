@@ -1,3 +1,4 @@
+import { NOTE_FORMAT } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, detachConnection } from '../src/store/connection.js';
@@ -84,6 +85,7 @@ describe('following the connection', () => {
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
 			db,
 			client: tokenServer(),
 			createProvider: first.remote.factory,
@@ -112,6 +114,7 @@ describe('following the connection', () => {
 		theRemote.fake.setFault((call) => (call.op === 'read' ? new Error('502') : undefined));
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
 			db,
 			client: tokenServer(),
 			createProvider: theRemote.factory,
@@ -317,6 +320,7 @@ describe('following the connection', () => {
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
 			db,
 			client: tokenServer(),
 			createProvider: first.remote.factory,

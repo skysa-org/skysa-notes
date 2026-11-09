@@ -4,6 +4,7 @@ import {
 	createDropboxProvider,
 	createGDriveProvider,
 	createOneDriveProvider,
+	type DocumentFormat,
 	type FetchLike,
 } from '@skysa/core';
 
@@ -161,6 +162,8 @@ export const timedFetch =
 export interface ProviderFactoryOptions {
 	/** The app's folder on every provider: its name, its marker, Drive's tag for it. */
 	folder: AppFolderSpec;
+	/** What the app's documents are, as far as a provider is told (`DocumentFormat`). */
+	document: Pick<DocumentFormat, 'extension' | 'mediaType'>;
 	/** Reported in the marker file. */
 	appVersion: string;
 	/** Resolved per call by default, so a test can stub the global. */
@@ -175,6 +178,7 @@ export const createProviderFactory = (options: ProviderFactoryOptions): Provider
 		const fetch = timedFetch(base, ms, signal);
 		const adapter = {
 			folder: options.folder,
+			document: options.document,
 			fetch,
 			getAccessToken,
 			appVersion: options.appVersion,

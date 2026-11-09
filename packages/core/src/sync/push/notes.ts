@@ -1,5 +1,4 @@
 import { contentHash } from '../../hash.js';
-import { conflictPath } from '../../names/conflicts.js';
 import { parentPath } from '../../paths.js';
 import {
 	type EntryRef,
@@ -24,7 +23,7 @@ import type { FolderPush } from './folders.js';
 const MOVE_ASIDE_ATTEMPTS = 10;
 
 export const createNotePush = (
-	{ provider, store, now }: EngineContext,
+	{ provider, store, names, now }: EngineContext,
 	{
 		ensureRemoteFolder,
 		fileState,
@@ -213,7 +212,7 @@ export const createNotePush = (
 	 */
 	const moveAside = (from: EntryRef, target: string): Promise<RemoteEntry> =>
 		findFreeName<RemoteEntry>({
-			candidate: (taken) => conflictPath(target, now(), taken),
+			candidate: (taken) => names.conflictPath(target, now(), taken),
 			claim: (candidate) =>
 				provider
 					.move(from, candidate)

@@ -2,7 +2,7 @@
  * A scheduler under test: a remote, a server minting tokens, and a fake clock,
  * for the `scheduler.*.test.ts` files.
  */
-import { AuthError, CLIPBOARD_FOLDER, type StorageProvider } from '@skysa/core';
+import { AuthError, CLIPBOARD_FOLDER, NOTE_FORMAT, type StorageProvider } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { expect, vi } from 'vitest';
 
@@ -193,6 +193,7 @@ export const started = (
 	const theRemote = remote();
 	const scheduler = createSyncScheduler({
 		lockName: SYNC_LOCK,
+		document: NOTE_FORMAT,
 		db,
 		client: server,
 		createProvider: theRemote.factory,

@@ -1,4 +1,4 @@
-import { conflictFolderPath, conflictPath } from '../../names/conflicts.js';
+import { conflictFolderPath } from '../../names/conflicts.js';
 import {
 	ancestorPaths,
 	basename,
@@ -32,7 +32,7 @@ import { folderBefore, folderNow, remoteNow } from './replay.js';
 export type Decide = (entry: ChangeEntry, step: Step) => Promise<PullChange[]>;
 
 export const createPullFolders = (
-	{ store, now }: EngineContext,
+	{ store, names, now }: EngineContext,
 	{
 		decide,
 		cascadeOver,
@@ -482,7 +482,7 @@ export const createPullFolders = (
 				{
 					kind: 'displace-note',
 					id: entry.note.id,
-					path: conflictPath(entry.path, now(), taken),
+					path: names.conflictPath(entry.path, now(), taken),
 				},
 			];
 		}, Promise.resolve([]));

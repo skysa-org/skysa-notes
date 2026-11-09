@@ -1,4 +1,4 @@
-import { createSyncEngine, isHidden, NotFoundError } from '@skysa/core';
+import { createSyncEngine, isHidden, NOTE_FORMAT, NotFoundError } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -170,6 +170,7 @@ describe('binding a connection', () => {
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
 		});
@@ -641,6 +642,7 @@ describe('checking a resumed connection against its remote', () => {
 		await fake.delete(fake.snapshot().find((entry) => entry.path === 'Work')!);
 		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: 'dropbox-2' }),
 		});
@@ -733,6 +735,7 @@ describe('checking a resumed connection against its remote', () => {
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: 'dropbox-1' }),
 		});
@@ -955,7 +958,11 @@ const syncedThenDisconnected = async (
 	const fake = createFakeProvider();
 	await fake.ensureRoot();
 	const engineFor = (connectionId: string) =>
-		createSyncEngine({ provider: fake, store: createDexieSyncStore(db, { connectionId }) });
+		createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: fake,
+			store: createDexieSyncStore(db, { connectionId }),
+		});
 	await createFolder(db, { name: 'Work' });
 	const made = await createNote(db, { folderPath: 'Work', title: 'Plan', body: '# Plan\n' });
 	const also = await createNote(db, { folderPath: 'Work', title: 'Other', body: '# Other\n' });
@@ -1184,6 +1191,7 @@ describe('a sync still at the network when the connection changes', () => {
 		const gate = new Map<'release', () => void>();
 		const held = new Promise<void>((resolve) => gate.set('release', resolve));
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: {
 				...fake,
 				changes: async (cursor) => {
@@ -1270,6 +1278,7 @@ describe('a device used before connecting, then connected', () => {
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
 		});
@@ -1304,6 +1313,7 @@ describe('a device used before connecting, then connected', () => {
 		await fake.write(plan.path, theirs, {});
 		await bindConnection(db, DROPBOX);
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
 		});

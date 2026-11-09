@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { conflictContent } from '../../src/markdown/conflictCopy.js';
 import type { RemoteEntry } from '../../src/providers/types.js';
-import { conflictContent } from '../../src/sync/conflicts.js';
 import type { NewSyncOp, SyncFile, SyncFolder, SyncNote, SyncStore } from '../../src/sync/store.js';
 
 /**

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveTitle, titleFromFilename } from '../../src/markdown/title.js';
-import { isNoteName } from '../../src/names/fold.js';
+import { isNoteName } from '../../src/names/notes.js';
 import { noteFilename, sanitizeFolderName, slugify, uniqueFilename } from '../../src/names/slug.js';
 
 /** Both caps in `slug.ts`, and the property a provider adapter needs of a name. */

@@ -1,8 +1,8 @@
 import { contentHash } from '../../hash.js';
-import { conflictPath } from '../../names/conflicts.js';
 import { basename } from '../../paths.js';
 import { isConflictError, isUnreadableError, type RemoteEntry } from '../../providers/types.js';
 import type { EngineContext, FromPull } from '../context.js';
+import { readDocument } from '../document.js';
 import { findFreeName, FREE_PATH_ATTEMPTS } from '../names.js';
 import type { SyncNote, SyncOp, UnreadableFile } from '../store.js';
 import type { NotePush } from './notes.js';
@@ -26,7 +26,7 @@ export interface Settled {
 }
 
 export const createConflictPush = (
-	{ provider, store, now }: EngineContext,
+	{ provider, store, document, names, now }: EngineContext,
 	{ write, fileState, resolutionFor }: Pick<NotePush, 'write'> & FromPull
 ) => {
 	/**
@@ -66,7 +66,7 @@ export const createConflictPush = (
 		// op fails and is retried, where a note displaced onto a taken name
 		// would stand on another note's path.
 		findFreeName<string>({
-			candidate: (names) => conflictPath(path, now(), names),
+			candidate: (taken) => names.conflictPath(path, now(), taken),
 			claim: async (candidate) => {
 				if ((await store.noteByPath(candidate)) !== undefined) return { taken: candidate };
 				if (!onRemote) return { free: candidate };
@@ -262,7 +262,7 @@ export const createConflictPush = (
 		// aside and stays bound to it, as below: that file may be fine, and a
 		// copy made here would leave it behind with no note. Any other note's
 		// edit goes up as a new file now (`setAside`).
-		const read = await provider.read(remote).catch((error: unknown) => {
+		const read = await readDocument(provider, remote, document).catch((error: unknown) => {
 			if (isUnreadableError(error)) return undefined;
 			throw error;
 		});

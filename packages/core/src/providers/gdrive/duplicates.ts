@@ -1,9 +1,8 @@
 import {
-	conflictFilename,
 	conflictFolderName,
 	conflictNameKeepingExtension,
+	type DocumentNames,
 } from '../../names/conflicts.js';
-import { isNoteName } from '../../names/fold.js';
 import { jsonBody } from '../http.js';
 import { applyItem, type Page, pathOf } from '../idTree.js';
 import { byAge, type DriveClient, type DriveFile, isFolder, treeItemOf } from './wire.js';
@@ -25,24 +24,30 @@ import { byAge, type DriveClient, type DriveFile, isFolder, treeItemOf } from '.
  * devices hold them, and a note that disappears is a remote delete to each;
  * renaming keeps both, as it always has. Never a folder, which has no bytes.
  */
-const sameBytes = (canonical: DriveFile, other: DriveFile): boolean =>
+const sameBytes = (documents: DocumentNames, canonical: DriveFile, other: DriveFile): boolean =>
 	!isFolder(canonical) &&
 	!isFolder(other) &&
-	!isNoteName(other.name ?? '') &&
+	!documents.isDocumentName(other.name ?? '') &&
 	canonical.md5Checksum !== undefined &&
 	canonical.md5Checksum === other.md5Checksum &&
 	canonical.size === other.size;
 
 /**
- * How a duplicate is renamed: a folder with no extension, a note with `.md`,
- * and any other file with the extension it had — `conflictFilename` would make
- * `photo.png (conflict …).md` of a picture, which the engine would then take for
- * a note.
+ * How a duplicate is renamed: a folder with no extension, a note as a note's
+ * copy is (`DocumentNames.conflictFilename`), and any other file with the
+ * extension it had — a note's copy name would make `photo.png (conflict …).md`
+ * of a picture, which the engine would then take for a note.
  */
-const nameBeside = (file: DriveFile, name: string, at: Date, taken: readonly string[]): string => {
+const nameBeside = (
+	documents: DocumentNames,
+	file: DriveFile,
+	name: string,
+	at: Date,
+	taken: readonly string[]
+): string => {
 	if (isFolder(file)) return conflictFolderName(name, at, taken);
-	return isNoteName(name)
-		? conflictFilename(name, at, taken)
+	return documents.isDocumentName(name)
+		? documents.conflictFilename(name, at, taken)
 		: conflictNameKeepingExtension(name, at, taken);
 };
 
@@ -72,7 +77,17 @@ export const clashes = (page: Page): Clash[] => {
 };
 
 export const createSeparate = (client: DriveClient, now: () => Date) => {
-	const { attempt, call, raise, fileUrl, named, childrenOf, trash, tags } = client;
+	const {
+		attempt,
+		call,
+		raise,
+		fileUrl,
+		named,
+		childrenOf,
+		trash,
+		tags,
+		names: documents,
+	} = client;
 
 	/**
 	 * Two items at one path, made one again under §7's rule for a conflict: the
@@ -122,15 +137,17 @@ export const createSeparate = (client: DriveClient, now: () => Date) => {
 			// listed is not trashed for what it was. That narrows the window to
 			// the length of one request; it cannot close it, and what lands in it
 			// is in Drive's trash for thirty days rather than gone.
-			const other = sameBytes(canonical, listed) ? await stillHere(listed.id ?? '') : listed;
+			const other = sameBytes(documents, canonical, listed)
+				? await stillHere(listed.id ?? '')
+				: listed;
 			// Gone or moved since: no longer a duplicate, and the feed says where.
 			if (other === undefined) return names;
-			if (sameBytes(canonical, other)) {
+			if (sameBytes(documents, canonical, other)) {
 				await trash(other.id ?? '');
 				applyItem(page, { id: other.id ?? '', gone: true });
 				return names;
 			}
-			const renamed = nameBeside(other, name, now(), [...taken, ...names]);
+			const renamed = nameBeside(documents, other, name, now(), [...taken, ...names]);
 			const result = await call<DriveFile>(
 				'PATCH',
 				fileUrl(other.id ?? ''),

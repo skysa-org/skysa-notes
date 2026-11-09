@@ -1,3 +1,4 @@
+import { documentNames } from '../../names/conflicts.js';
 import { normalizePath, ROOT } from '../../paths.js';
 import type { HttpProviderOptions } from '../adapter.js';
 import { createTransport, jsonBody, parseRetryAfter, rateLimited, readErrorBody } from '../http.js';
@@ -19,8 +20,6 @@ export const UPLOADS = `${API}/upload/drive/v3/files`;
 export const CHANGES = `${API}/drive/v3/changes`;
 
 export const FOLDER = 'application/vnd.google-apps.folder';
-
-export const NOTE_TYPE = 'text/markdown';
 
 /**
  * The `appProperties` keys the app marks folders with, made from its folder's
@@ -362,6 +361,9 @@ export const createDriveClient = (options: HttpProviderOptions) => {
 		/** The app's folder, as the app describes it. */
 		folder: options.folder,
 		tags: driveTagsOf(options.folder.driveTag),
+		/** What a document is: its media type, sent on its uploads, and its names. */
+		document: options.document,
+		names: documentNames(options.document.extension),
 		send,
 		attempt,
 		call,

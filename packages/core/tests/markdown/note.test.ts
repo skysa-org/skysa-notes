@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../src/hash.js';
+import { conflictContent } from '../../src/markdown/conflictCopy.js';
 import { frontmatterHasDeclinedId } from '../../src/markdown/frontmatter/index.js';
 import { parseNoteFile, serializeNoteFile } from '../../src/markdown/note.js';
-import { conflictContent } from '../../src/sync/conflicts.js';
 
 describe('parseNoteFile', () => {
 	it('reads a note the app wrote', () => {

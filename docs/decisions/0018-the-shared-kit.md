@@ -83,6 +83,11 @@ Each is a pull request of its own in this repository, released as usual, so that
 - **A document format, not a note.**
   This is skysa-draw's seam (`sync/document.ts` there): a document's extension and media type, the id a file claims, a conflict copy's contents, and every read that holds a file as a document.
   Here it is over `NOTE_EXTENSION`, `text/markdown`, `parseNoteFile` and `serializeNoteFile`, and the layers that move take them from it rather than importing them.
+  This one is cut: the type is `DocumentFormat` in `packages/core/src/documentFormat.ts`, this app's is `NOTE_FORMAT` in `markdown/format.ts`, and the engine and the adapters are handed it.
+  The names they use are made from its extension (`documentNames`), and this app's own are `names/notes.ts`.
+  A format may refuse text as not a document, which the engine holds as unreadable, as skysa-draw does with a `.svg` that is not a drawing; this app's refuses none.
+  The stores still make a conflict copy's contents with this app's own function, since they are the client's, and they take the format with the client's ports.
+  A lint rule keeps `markdown/`, `NOTE_EXTENSION` and `names/notes.ts` out of `providers/`, `sync/` and the names they share.
 - **A merge before a conflict copy, where the app can make one.**
   This is memoriam's optional `merge({ path, local, remote })` and its `merge-note` change, with their store-contract cases.
   This app passes none, and its conflict rule (§7, "Conflict rule (concrete)") is unchanged.

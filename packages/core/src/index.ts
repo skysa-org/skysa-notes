@@ -17,6 +17,7 @@ export { encodeIdentity, generateIdentity } from './age/keys.js';
 export { type Cell, cell } from './cell.js';
 export { API_ERROR_CODES, type ApiErrorCode, AUTH_MODES, type AuthMode } from './api.js';
 export { isEncryptionFile, isScratchPath, isVaultPath } from './appFolder.js';
+export type { DocumentFormat } from './documentFormat.js';
 export type { AppFolderSpec } from './folderSpec.js';
 export {
 	APP_FOLDER_NAME,
@@ -93,6 +94,8 @@ export {
 	writeFrontmatter,
 } from './markdown/frontmatter/index.js';
 export { toLf } from './markdown/lineEndings.js';
+export { conflictContent } from './markdown/conflictCopy.js';
+export { NOTE_FORMAT } from './markdown/format.js';
 export { type ParsedNoteFile, parseNoteFile, serializeNoteFile } from './markdown/note.js';
 export { type Heading, headings } from './markdown/outline.js';
 export { STRINGIFY_OPTIONS } from './markdown/pipeline.js';
@@ -116,9 +119,10 @@ export {
 } from './markdown/secretBlocks.js';
 export { deriveTitle, titleFromFilename, UNTITLED_TITLE } from './markdown/title.js';
 export { clusters } from './names/bytes.js';
-export { conflictFilePath, conflictFolderPath, conflictPath } from './names/conflicts.js';
+export { conflictFilePath, conflictFolderPath } from './names/conflicts.js';
 export { extensionOf } from './names/extension.js';
 export { foldName } from './names/fold.js';
+export { conflictPath } from './names/notes.js';
 export {
 	attachmentName,
 	normalizeTag,
@@ -173,7 +177,6 @@ export {
 } from './secrets/encryptionFile.js';
 export { readRecoveryKey, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from './secrets/recoveryKey.js';
 export { openSecret, opensSecret, resealSecret, sealSecret } from './secrets/sealing.js';
-export { conflictContent } from './sync/conflicts.js';
 export { createSyncEngine, type SyncEngine } from './sync/engine.js';
 export { messageOf, type SyncOutcome } from './sync/outcome.js';
 export type { SyncProgress } from './sync/progress.js';

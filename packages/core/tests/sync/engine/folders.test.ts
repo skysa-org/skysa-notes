@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../../src/hash.js';
-import { conflictFolderPath, conflictPath } from '../../../src/names/conflicts.js';
+import { conflictFolderPath } from '../../../src/names/conflicts.js';
+import { conflictPath } from '../../../src/names/notes.js';
 import { parentPath } from '../../../src/paths.js';
 import { createFakeProvider } from '../../../src/providers/fake.js';
 import type { StorageProvider } from '../../../src/providers/types.js';

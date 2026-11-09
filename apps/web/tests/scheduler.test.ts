@@ -1,3 +1,4 @@
+import { NOTE_FORMAT } from '@skysa/core';
 import { TEST_FOLDER } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -89,6 +90,7 @@ describe('syncing a connection', () => {
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
 			db,
 			client: tokenServer(),
 			createProvider: remote().factory,
@@ -269,6 +271,7 @@ describe('offline', () => {
 		const server = tokenServer();
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
 			db,
 			client: server,
 			createProvider: theRemote.factory,

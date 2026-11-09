@@ -1,6 +1,6 @@
+import { conflictContent } from '../../src/markdown/conflictCopy.js';
 import { foldName } from '../../src/names/fold.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../src/paths.js';
-import { conflictContent } from '../../src/sync/conflicts.js';
 import {
 	type ConflictResolution,
 	type FileChange,

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type FetchLike, NOTES_FOLDER } from '@skysa/core';
+import { type FetchLike, NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -128,6 +128,7 @@ describe('Content-Security-Policy', () => {
 		};
 		const provider = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch,
 		})({
@@ -172,6 +173,7 @@ describe('Content-Security-Policy', () => {
 		};
 		const provider = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch,
 		})({
@@ -208,6 +210,7 @@ describe('Content-Security-Policy', () => {
 		};
 		const provider = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch,
 		})({

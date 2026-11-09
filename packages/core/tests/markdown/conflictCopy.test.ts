@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { conflictContent } from '../../src/markdown/conflictCopy.js';
 import {
 	frontmatterIsEditable,
 	readFrontmatter,
 	splitFrontmatter,
 } from '../../src/markdown/frontmatter/index.js';
-import { conflictContent } from '../../src/sync/conflicts.js';
 
 /**
  * The contents of a conflict copy: an id of its own, so the copy and the

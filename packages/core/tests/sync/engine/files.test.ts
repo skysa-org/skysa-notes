@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { conflictFilePath, conflictPath } from '../../../src/names/conflicts.js';
+import { conflictFilePath } from '../../../src/names/conflicts.js';
+import { conflictPath } from '../../../src/names/notes.js';
 import { basename } from '../../../src/paths.js';
 import { createFakeProvider } from '../../../src/providers/fake.js';
 import {

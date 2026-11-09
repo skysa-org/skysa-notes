@@ -1,4 +1,10 @@
-import { conflictContent, contentHash, createSyncEngine, type RemoteEntry } from '@skysa/core';
+import {
+	conflictContent,
+	contentHash,
+	createSyncEngine,
+	NOTE_FORMAT,
+	type RemoteEntry,
+} from '@skysa/core';
 import { createFakeProvider, describeSyncStoreContract } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -809,6 +815,7 @@ describe('two connected sources holding one note id', () => {
 		const provider = createFakeProvider();
 		await provider.ensureRoot();
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider,
 			store,
 			now: () => new Date('2026-09-15T14:32:00Z'),
@@ -876,6 +883,7 @@ describe('a note deleted here', () => {
 		const provider = createFakeProvider();
 		await provider.ensureRoot();
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider,
 			store,
 			now: () => new Date('2026-09-15T14:32:00Z'),

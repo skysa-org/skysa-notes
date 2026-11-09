@@ -1,4 +1,4 @@
-import { createSyncEngine, type PictureInfo, type PictureVariant } from '@skysa/core';
+import { createSyncEngine, NOTE_FORMAT, type PictureInfo, type PictureVariant } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -236,6 +236,7 @@ const connected = async () => {
 	const fake = createFakeProvider();
 	await fake.ensureRoot();
 	const engine = createSyncEngine({
+		document: NOTE_FORMAT,
 		provider: fake,
 		store: createDexieSyncStore(db, scope),
 		now: () => new Date('2026-10-08T10:00:00Z'),
