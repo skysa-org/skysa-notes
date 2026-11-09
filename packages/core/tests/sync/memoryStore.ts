@@ -496,6 +496,7 @@ export const createMemoryStore = (): MemoryStore => {
 	};
 
 	type ListChange = Extract<PullChange, { kind: 'unreadable' | 'forget-unreadable' }>;
+	type MergeChange = Extract<PullChange, { kind: 'merge-note' }>;
 
 	/**
 	 * The list of files that could not be read, which no row has anything to do
@@ -530,10 +531,16 @@ export const createMemoryStore = (): MemoryStore => {
 			applyFileChange(change);
 			return;
 		}
+		if (change.kind === 'merge-note') {
+			applyMerge(change);
+			return;
+		}
 		applyRowChange(change);
 	};
 
-	const applyRowChange = (change: Exclude<PullChange, ListChange | FileChange>): void => {
+	const applyRowChange = (
+		change: Exclude<PullChange, ListChange | FileChange | MergeChange>
+	): void => {
 		if (change.kind === 'upsert-note') {
 			upsert(change);
 			return;
@@ -652,6 +659,35 @@ export const createMemoryStore = (): MemoryStore => {
 			return;
 		}
 		applyConflict(change.resolution);
+	};
+
+	const applyMerge = (change: MergeChange): void => {
+		const note = requireNote(change.id);
+		// Made from the note as the engine read it: anything typed since would
+		// be left out of what is about to be called the note.
+		if (note.content !== change.base) {
+			throw new Error(`note ${change.id} changed since the merge was made`);
+		}
+		ensureFolderChain(parentPath(change.path));
+		notes.set(note.id, {
+			...note,
+			path: change.path,
+			content: change.content,
+			remoteId: change.remote.remoteId,
+			remoteVersion: change.remote.version,
+			syncedHash: change.syncedHash,
+			dirty: !change.clean,
+		});
+		rebaseOps(note.id, note.path, change.path);
+		originIsNow(note.id, change.remote.path);
+		const writes = [...ops.values()].filter((op) => op.op === 'write' && op.noteId === note.id);
+		// The remote holds all of it: a write queued would send its own bytes
+		// back under a new version, as one a conflict leaves would.
+		if (change.clean) {
+			for (const op of writes) ops.delete(op.seq);
+			return;
+		}
+		if (writes.length === 0) queue({ op: 'write', noteId: note.id, path: change.path });
 	};
 
 	const applyFolderMove = (from: string, to: string, remoteId?: string): void => {

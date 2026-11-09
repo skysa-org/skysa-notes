@@ -6,6 +6,7 @@ import {
 	type DocumentFormat,
 	isAuthError,
 	isRateLimitError,
+	type MergeInput,
 	messageOf,
 	type ProviderKind,
 	type StorageProvider,
@@ -204,6 +205,11 @@ export interface SyncSchedulerOptions {
 	lockName: (connectionId: string) => string;
 	/** What the app's documents are, for the engine (`DocumentFormat`). */
 	document: DocumentFormat;
+	/**
+	 * The two sides of a document that both changed, made one where the app
+	 * can, for the engine (`SyncEngineOptions.merge`). This app passes none.
+	 */
+	merge?: (file: MergeInput) => string | undefined;
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
 	debounceMs?: number;
@@ -393,7 +399,7 @@ const RELIST_MS = 3000;
 type Timer = 'next' | 'debounce' | 'notice' | 'relist' | 'keyFile';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
-	const { db, client, createProvider, lockName, document } = options;
+	const { db, client, createProvider, lockName, document, merge } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
 	const intervalMs = options.intervalMs ?? 60_000;
@@ -1137,6 +1143,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					: createSyncEngine({
 							provider,
 							document,
+							...(merge === undefined ? {} : { merge }),
 							store: createDexieSyncStore(db, { connectionId }),
 							reauthorize: () => reauthorize(tokens),
 							maxAttempts,

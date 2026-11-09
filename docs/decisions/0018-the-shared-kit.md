@@ -91,6 +91,9 @@ Each is a pull request of its own in this repository, released as usual, so that
 - **A merge before a conflict copy, where the app can make one.**
   This is memoriam's optional `merge({ path, local, remote })` and its `merge-note` change, with their store-contract cases.
   This app passes none, and its conflict rule (§7, "Conflict rule (concrete)") is unchanged.
+  This one is cut: the option is `SyncEngineOptions.merge`, asked in `sync/pull/notes.ts` and `sync/push/conflicts.ts`, and the scheduler passes it through (§7, "Merge before the copy").
+  Both stores here apply `merge-note` and the contract holds them to it, so the kit's stores start with memoriam's rules.
+  memoriam's own merge, `mergeFile`, stays in memoriam.
 - **Which hidden paths sync, and which a pull should mention.**
   `syncsHidden(path)` takes the place of the folders `paths.ts` lists, the scratchpad's and the vault's.
   `watch`, a set of named tests of a path whose flags the outcome carries, takes the place of the clipboard's and the key file's flags in `sync/outcome.ts`.

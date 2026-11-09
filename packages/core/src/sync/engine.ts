@@ -43,6 +43,15 @@ export type { SyncProgress } from './progress.js';
 /** Times an op may fail before the engine stops asking and surfaces it. */
 const MAX_ATTEMPTS = 5;
 
+/** One file as each side holds it, for `SyncEngineOptions.merge`. */
+export interface MergeInput {
+	readonly path: string;
+	/** As this device holds it, with edits the remote has not seen. */
+	readonly local: string;
+	/** As the remote holds it, changed since this device last synced it. */
+	readonly remote: string;
+}
+
 export interface SyncEngineOptions {
 	provider: StorageProvider;
 	store: SyncStore;
@@ -51,6 +60,15 @@ export interface SyncEngineOptions {
 	 * conflict copy's contents (docs/decisions/0018-the-shared-kit.md).
 	 */
 	document: DocumentFormat;
+	/**
+	 * The two sides of a file that both changed, made one where the app can
+	 * make them one (docs/ARCHITECTURE.md §7, "Merge before the copy").
+	 * Undefined where it cannot, and the conflict rule applies as it always
+	 * did. Asked at both places the rule is: a pull that finds the note dirty,
+	 * and a write the remote refused. Absent, nothing is merged, which is this
+	 * app's way; memoriam's merges a passage practised on two devices.
+	 */
+	merge?: (file: MergeInput) => string | undefined;
 	/**
 	 * Mint a fresh access token. Called once on an `AuthError`, after which the
 	 * failing operation is retried exactly once. `packages/core` cannot know how
@@ -89,8 +107,20 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		newId = () => crypto.randomUUID(),
 		maxAttempts = MAX_ATTEMPTS,
 		onProgress = () => undefined,
+		merge,
 	} = options;
 	const writesAtOnce = Math.max(1, provider.writesAtOnce ?? 1);
+
+	/** `EngineContext.mergedOf`, over the `merge` option. */
+	const mergedOf = (path: string, local: string, remote: string): string | undefined => {
+		if (merge === undefined) return undefined;
+		try {
+			return merge({ path, local, remote });
+		} catch {
+			return undefined;
+		}
+	};
+
 	const meter = createProgress(onProgress);
 	const context: EngineContext = {
 		provider,
@@ -107,6 +137,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return true;
 		},
 		meter,
+		mergedOf,
 	};
 
 	/**

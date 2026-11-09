@@ -1558,6 +1558,94 @@ export const describeSyncStoreContract = (
 			});
 		});
 
+		describe('a merge', () => {
+			// Both sides changed the note, and the app's merge made the two one
+			// file (docs/ARCHITECTURE.md §7, "Merge before the copy"). This app
+			// passes none, but the kit's stores take one all the same.
+			const merge = (over: Partial<{ path: string; clean: boolean; base: string }> = {}) =>
+				({
+					kind: 'merge-note',
+					id: 'n1',
+					path: over.path ?? 'a.md',
+					base: over.base ?? 'mine\n',
+					content: 'both\n',
+					clean: over.clean ?? false,
+					remote: remote('a.md', 'r1', 'v2'),
+					syncedHash: 'theirs-hash',
+				}) as const;
+			const mine = {
+				id: 'n1',
+				path: 'a.md',
+				content: 'mine\n',
+				remoteId: 'r1',
+				remoteVersion: 'v1',
+				syncedHash: 'old-hash',
+				dirty: true,
+			};
+
+			it('takes the merge, bound to the remote, still owed to it', async () => {
+				const { store, seed, seedOp } = await harness();
+				await seed(mine);
+				await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+				await store.applyChanges({ changes: [merge()], cursor: 'x' });
+
+				expect(await store.noteById('n1')).toMatchObject({
+					content: 'both\n',
+					remoteId: 'r1',
+					remoteVersion: 'v2',
+					syncedHash: 'theirs-hash',
+					dirty: true,
+				});
+				const writes = (await store.pendingOps()).filter((op) => op.op === 'write');
+				expect(writes.map((op) => op.noteId)).toEqual(['n1']);
+				expect(await store.cursor()).toBe('x');
+			});
+
+			it('queues a write for a note that had none', async () => {
+				const { store, seed } = await harness();
+				await seed(mine);
+				await store.applyChanges({ changes: [merge()] });
+
+				const writes = (await store.pendingOps()).filter((op) => op.op === 'write');
+				expect(writes.map((op) => [op.noteId, op.path])).toEqual([['n1', 'a.md']]);
+			});
+
+			it("is clean, with nothing to send, when the merge is the remote's own bytes", async () => {
+				const { store, seed, seedOp } = await harness();
+				await seed(mine);
+				await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+				await store.applyChanges({ changes: [merge({ clean: true })] });
+
+				expect((await store.noteById('n1'))?.dirty).toBe(false);
+				expect((await store.pendingOps()).filter((op) => op.op === 'write')).toEqual([]);
+			});
+
+			it('moves the note, and its queued work, to where the remote has it', async () => {
+				const { store, seed, seedOp } = await harness();
+				await seed(mine);
+				await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+				await store.applyChanges({ changes: [merge({ path: 'Work/a.md' })] });
+
+				expect((await store.noteById('n1'))?.path).toBe('Work/a.md');
+				expect(await store.folderByPath('Work')).toBeDefined();
+				const writes = (await store.pendingOps()).filter((op) => op.op === 'write');
+				expect(writes.map((op) => op.path)).toEqual(['Work/a.md']);
+			});
+
+			it('is refused, and the batch with it, when the note changed since', async () => {
+				// An edit made while the engine was at the network: the merge was
+				// made without it, and would take it away.
+				const { store, seed } = await harness();
+				await seed({ ...mine, content: 'a newer edit\n' });
+				await expect(
+					store.applyChanges({ changes: [merge()], cursor: 'x' })
+				).rejects.toThrow();
+
+				expect((await store.noteById('n1'))?.content).toBe('a newer edit\n');
+				expect(await store.cursor()).toBeUndefined();
+			});
+		});
+
 		describe('a conflict', () => {
 			const resolution = {
 				noteId: 'n1',

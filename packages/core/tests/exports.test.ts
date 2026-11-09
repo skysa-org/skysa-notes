@@ -183,6 +183,7 @@ type Types = [
 	Core.FetchLike,
 	Core.FileKind,
 	Core.Heading,
+	Core.MergeInput,
 	Core.NewSyncOp,
 	Core.NoteFrontmatter,
 	Core.OpOutcome,

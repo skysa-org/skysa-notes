@@ -1683,6 +1683,21 @@ The name is deliberately **not** slugified: the copy has to be recognisable as t
 The names are `packages/core/src/names/conflicts.ts`; the copy's contents, with its own `id`, are `packages/core/src/markdown/conflictCopy.ts`.
 The engine asks for both through the document format it is handed, `NOTE_FORMAT` in `markdown/format.ts` ([record 0018](decisions/0018-the-shared-kit.md)), and reads no markdown for itself.
 
+<a id="merge-before-the-copy"></a>
+### Merge before the copy
+An app may make the two sides one before the conflict rule applies, through the engine's `merge` option ([record 0018](decisions/0018-the-shared-kit.md)).
+This app passes none, so for it the rule above is the whole of it; memoriam's merges a passage practised on two devices.
+- **The option.** `merge({ path, local, remote })` returns the merged text, or `undefined` where the two cannot be one.
+  A merge that throws counts as none: a merge that cannot be made is a conflict copy, never a sync that stops.
+- **Where it is asked.** At both places the conflict rule is:
+  - a pull that finds a dirty note whose remote bytes changed (`decideKnown` in `sync/pull/notes.ts`);
+  - a write the remote refused (`pushMerged` in `sync/push/conflicts.ts`), which sends the merge against the version it read.
+- **The `merge-note` change** carries the merge to the store, which applies it only while the note still holds the text the merge was made from (`base`).
+  Otherwise the whole pull is refused, and the next one merges again from the note as it is.
+  - A merge that equals the remote's bytes leaves the note clean, and drops its queued writes.
+  - Any other merge leaves it dirty, with a write queued, so the merge is sent.
+  - A rename queued here is kept: the note stays at the name the user gave it.
+
 <a id="edits-the-editor-has-not-saved-yet"></a>
 ### Edits the editor has not saved yet
 "Local dirty" is the `dirty` flag, and an edit reaches it only when autosave runs, up to 2 s after the keystroke.
@@ -3442,7 +3457,11 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
-The first two seams are cut: the adapters are handed the app's folder (§3), and the scheduler its lock's name; the engine and the adapters are handed what a document is (`NOTE_FORMAT`).
+The first three seams are cut:
+- the adapters are handed the app's folder (§3), and the scheduler its lock's name;
+- the engine and the adapters are handed what a document is (`NOTE_FORMAT`);
+- the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy").
+
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>
