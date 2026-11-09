@@ -3466,7 +3466,7 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
-The first five seams are cut, and the sixth in part:
+The first six seams are cut:
 - the adapters are handed the app's folder (§3), and the scheduler its lock's name;
 - the engine and the adapters are handed what a document is (`NOTE_FORMAT`);
 - the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy");
@@ -3475,7 +3475,8 @@ The first five seams are cut, and the sixth in part:
 - the scheduler builds nothing of this app's own: the clipboard, the key file and the files beside notes are attached to it, with the watch they read (`sync/notesSync.ts`);
 - the scheduler and the provider factory say nothing in words of their own, and the factory is handed what a timeout says (`timedOut`);
 - the in-memory store and the store contract are handed the format, and make a conflict copy with it, while the Dexie store, which is notes', makes notes';
-- the credential, the token source and the relay reach the database through ports (`CredentialTable`, `TokenStates`), made over the app's database in `sync/dexiePorts.ts`; the scheduler's port is to follow.
+- the credential, the token source and the relay reach the database through ports (`CredentialTable`, `TokenStates`), made over the app's database in `sync/dexiePorts.ts`;
+- the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule keeps Dexie, the app's tables and its words out of everything that moves.
 
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 

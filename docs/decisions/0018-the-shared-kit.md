@@ -110,7 +110,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   Hiding the page sends whatever is waiting, here as in memoriam, so an edit made just before the app goes out of sight no longer waits out its two seconds in a page a phone may have frozen.
   A write the Dexie store owes again, because the note changed while it was on its way, is queued as lazily as the one that landed.
 - **The client's modules reach IndexedDB through ports**, with Dexie adapters over tables the app owns.
-  This one is cut in five parts, each a pull request of its own.
+  This one was cut in five parts, each a pull request of its own, and all five are cut.
   1. What the app syncs beside its documents is the app's (`sync/notesSync.ts`).
      The scheduler builds none of it: the clipboard, the key file and the files beside notes are made by the app over the session the scheduler lends (`sessionFor`), and attached to it (`attach`), to be told when a session starts, syncs and ends.
      The app hands it the watch, `NOTES_WATCH`, beside the two that read it.
@@ -133,6 +133,11 @@ Each is a pull request of its own in this repository, released as usual, so that
      The app's adapter for the token's row is in `sync/dexiePorts.ts`, not `store/`, since the store layer may not import the sync layer's types.
      This part is cut.
   5. The scheduler reaches the database through one port, and none of what moves imports the app's `store/`, Dexie or its words.
+     The port is `ClientStore`, in `sync/scheduler.ts`: the source shown, the connection's row (its root, when a pull last reached the end, the first import, a re-scan), the queue (its seqs, what came after one, the ops out of attempts and giving them back), the engine's store, the credentials, the token's row, what this tab waits on, and the queue's limit on attempts.
+     The app's adapter is `clientStoreOf` in `sync/dexiePorts.ts`, and `createNotesSync` hands it over.
+     A lint rule keeps Dexie, the app's tables and stores, and the catalog out of the modules in the table above.
+     Two helpers they import are in neither list, `sync/progress.ts` and `store/emitter.ts`, and the fence below says where they go.
+     This part is cut.
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has, memoriam's checks of the root in the contract suite among them.
 - **A lint rule fences what is to move** from what stays, and once it passes the move can be made.
 

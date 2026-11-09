@@ -14,27 +14,14 @@ import {
 	type SyncOp,
 	type SyncOutcome,
 	type SyncProgress,
+	type SyncStore,
 	type Watch,
 } from '@skysa/core';
-import { liveQuery } from 'dexie';
 
 import type { ApiClient, Denial, Refusal } from '../api/client.js';
-import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
-import {
-	activeConnectionId,
-	type NotesDatabase,
-	type OpQueueRecord,
-	type SyncStateRecord,
-} from '../store/db.js';
-import { updateLive } from '../store/detached.js';
-import { heldUpOf } from '../store/heldUp.js';
-import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
-import { rowsOf } from '../store/rows.js';
-import { isLiveSource } from '../store/rowStates.js';
-import { tokenStatesOf } from './dexiePorts.js';
+import type { CredentialStore } from '../store/credentials.js';
 import type { RelayFactory, RelayLink } from './relay.js';
-import { createDexieSyncStore, toSyncOp } from './store.js';
-import { createTokenSource, type TokenSource } from './tokens.js';
+import { createTokenSource, type TokenSource, type TokenStates } from './tokens.js';
 
 /**
  * When to sync, and what the last attempt came to. The engine decides nothing
@@ -193,8 +180,108 @@ interface ProviderInput {
 /** The adapter for a connection, or `undefined` for a provider this build cannot sync. */
 export type ProviderFactory = (input: ProviderInput) => StorageProvider | undefined;
 
+/** The source the app shows, as much of it as syncing one needs. */
+interface ShownSource {
+	readonly connectionId: string;
+	/** Absent where the row never said: nothing here can sync it. */
+	readonly provider?: ProviderKind | undefined;
+	/** This device, as the provider's adapter names it. */
+	readonly clientId: string;
+	readonly lastSyncAt?: number | undefined;
+	/** Let go, and kept for what it never sent: shown, and not synced. */
+	readonly detached: boolean;
+}
+
+/**
+ * A queued op out of attempts, as the engine reads it — a row of a kind this
+ * version does not know is `malformed`, not a kind with no words for it — and
+ * what the provider said the last time it was tried.
+ */
+interface FailingOp {
+	readonly op: SyncOp;
+	readonly lastError?: string | undefined;
+}
+
+/** The transaction this tab is waiting on another for, where the store can tell. */
+interface HeldUp {
+	/** The same object for as long as one wait lasts, and `undefined` while none is. */
+	readonly waiting: () => object | undefined;
+	/** Called as a wait begins or ends. Returns the way to stop listening. */
+	readonly subscribe: (listener: () => void) => () => void;
+}
+
+/**
+ * What the scheduler reads and writes on the device. It goes to the shared
+ * kit (docs/decisions/0018-the-shared-kit.md) and reaches IndexedDB only
+ * through this, which this app makes over its own database
+ * (`sync/dexiePorts.ts`). Every write is onto a source the device still
+ * syncs: one let go meanwhile does not get its row back, and one kept
+ * detached is not written to.
+ */
+export interface ClientStore {
+	/** The source the app shows, now and whenever that changes. Returns the way to stop. */
+	readonly watchShown: (next: (source: ShownSource | undefined) => void) => () => void;
+	/**
+	 * A count that moves whenever the device is bound to a connection or lets
+	 * one go: a run that sees it move was overtaken.
+	 */
+	readonly bindings: () => Promise<number>;
+	/**
+	 * Before a resumed connection's first sync, whether the remote turned out
+	 * to be another one (`superseded`). The store writes nothing for the
+	 * connection until this has been asked.
+	 */
+	readonly verifyResume: (
+		connectionId: string,
+		provider: StorageProvider
+	) => Promise<Readonly<{ superseded: boolean }>>;
+	/** Whether the connection's marker has yet to be found: a row with no root. */
+	readonly needsRoot: (connectionId: string) => Promise<boolean>;
+	readonly keepRoot: (connectionId: string, rootId: string) => Promise<void>;
+	/** When a pull last reached the end. */
+	readonly pulled: (connectionId: string, at: number) => Promise<void>;
+	/** The first import is over, once the queue has been through. */
+	readonly finishImport: (connectionId: string) => Promise<void>;
+	/**
+	 * Forget the cursor and give every op its attempts back, together, so a
+	 * scan about to run cannot start against a half-reset queue.
+	 */
+	readonly rescan: (connectionId: string) => Promise<void>;
+	/** Give every op its attempts back, all at once: an op completed meanwhile is not put back. */
+	readonly releaseOps: (connectionId: string) => Promise<void>;
+	/** The ops out of attempts at `maxAttempts`, in no order. */
+	readonly failingOps: (
+		connectionId: string,
+		maxAttempts: number
+	) => Promise<readonly FailingOp[]>;
+	/** The queue's seqs, now and whenever they change. Returns the way to stop. */
+	readonly watchQueue: (
+		connectionId: string,
+		next: (seqs: readonly number[]) => void
+	) => () => void;
+	/** The ops queued after `seq`, and whether each was queued lazily (`lazyMs`). */
+	readonly queuedAfter: (
+		connectionId: string,
+		seq: number
+	) => Promise<readonly Readonly<{ lazy?: boolean | undefined }>[]>;
+	/** The engine's store for the connection. */
+	readonly syncStore: (connectionId: string) => SyncStore;
+	/** Where the device's credentials are held, for minting tokens. */
+	readonly credentials: CredentialStore;
+	/** Where a connection's token is kept between loads. */
+	readonly tokens: TokenStates;
+	/** What this tab is waiting on another for, where the store can tell. */
+	readonly heldUp: () => HeldUp | undefined;
+	/**
+	 * Failures in a row before an op is left alone: the queue's rule, which
+	 * the app's own words about unsent work follow too.
+	 */
+	readonly maxAttempts: number;
+}
+
 export interface SyncSchedulerOptions {
-	db: NotesDatabase;
+	/** The device's side of syncing (`ClientStore`). */
+	store: ClientStore;
 	client: Pick<ApiClient, 'withCredential'>;
 	createProvider: ProviderFactory;
 	/**
@@ -237,7 +324,10 @@ export interface SyncSchedulerOptions {
 	/** The first retry after a failure; each one after doubles, up to `maxBackoffMs`. */
 	backoffMs?: number;
 	maxBackoffMs?: number;
-	/** Failures in a row before an op is left alone (`blocked`), passed to the engine. */
+	/**
+	 * Failures in a row before an op is left alone (`blocked`), passed to the
+	 * engine. The store's (`ClientStore.maxAttempts`) unless a test says.
+	 */
 	maxAttempts?: number;
 	/** How long an op is left `blocked` before it is tried again on its own. */
 	blockedRetryMs?: number;
@@ -414,7 +504,7 @@ const AFTER_NOTICE_MS: readonly number[] = [3000, 10_000];
 type Timer = 'next' | 'debounce' | 'lazy' | 'notice';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
-	const { db, client, createProvider, lockName, document, merge, syncsHidden } = options;
+	const { store, client, createProvider, lockName, document, merge, syncsHidden } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
 	// None, as the engine's own default is: a pull then says it met nothing.
@@ -423,7 +513,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const intervalMs = options.intervalMs ?? 60_000;
 	const backoffMs = options.backoffMs ?? 5000;
 	const maxBackoffMs = options.maxBackoffMs ?? 5 * 60_000;
-	const maxAttempts = options.maxAttempts ?? MAX_OP_ATTEMPTS;
+	const maxAttempts = options.maxAttempts ?? store.maxAttempts;
 	const blockedRetryMs = options.blockedRetryMs ?? 15 * 60_000;
 	const progressMs = options.progressMs ?? 150;
 	const afterNoticeMs = options.afterNoticeMs ?? AFTER_NOTICE_MS;
@@ -512,12 +602,11 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	/** The marker file, on the first sync of a connection. */
 	const ensureRoot = async (session: Session, provider: StorageProvider) => {
-		const state = await db.syncState.get(session.connectionId);
-		if (state === undefined || state.rootId !== undefined) return;
+		if (!(await store.needsRoot(session.connectionId))) return;
 		const { rootId } = await withAuth(session, provider.ensureRoot);
 		// A connection let go of meanwhile does not get its row back, and one
 		// kept detached is not given a root.
-		await updateLive(db, session.connectionId, (live) => ({ ...live, rootId }));
+		await store.keepRoot(session.connectionId, rootId);
 	};
 
 	/** `engine.sync`, saying whether the pull reached the end whatever the push did. */
@@ -529,13 +618,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		if (pulled.status !== 'ok') return { outcome: pulled };
 		const pulledAt = environment.now();
 		// As above: only while the device still syncs it.
-		await updateLive(db, session.connectionId, (live) => ({ ...live, lastSyncAt: pulledAt }));
+		await store.pulled(session.connectionId, pulledAt);
 		const pushed = await engine.push();
 		// The first import is done once the queue has been through: sent, or
 		// stuck on an op the panel will name. Not on a push that will be tried
 		// again — the pile is still the only whole copy of anything it owes.
 		if (pushed.status === 'ok' || pushed.status === 'blocked') {
-			await finishImport(db, session.connectionId);
+			await store.finishImport(session.connectionId);
 		}
 		return {
 			outcome: {
@@ -555,22 +644,22 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		engine: SyncEngine
 	): Promise<RunResult> => {
 		if (!environment.isOnline()) return { kind: 'offline' };
-		const before = await bindingCount(db);
-		const changed = async () => (await bindingCount(db)) !== before;
+		const before = await store.bindings();
+		const changed = async () => (await store.bindings()) !== before;
 		try {
 			// Before anything that writes: the store refuses to until it has.
-			const verdict = await withAuth(session, () =>
-				verifyResume(db, session.connectionId, provider)
+			const { superseded } = await withAuth(session, () =>
+				store.verifyResume(session.connectionId, provider)
 			);
-			if (verdict === 'superseded') return { kind: 'superseded' };
+			if (superseded) return { kind: 'superseded' };
 			// A copy re-binds, which is this run's own doing.
-			const since = await bindingCount(db);
+			const since = await store.bindings();
 			await ensureRoot(session, provider);
 			const { outcome, pulledAt } = await syncOnce(session, engine);
 			// A store refusing to write for a connection that has just been let go
 			// of, or re-bound, reads to the engine as a transient failure. It is
 			// not one, and is not shown as one.
-			if (outcome.status !== 'ok' && (await bindingCount(db)) !== since) {
+			if (outcome.status !== 'ok' && (await store.bindings()) !== since) {
 				return { kind: 'superseded' };
 			}
 			return { kind: 'synced', outcome, pulledAt };
@@ -584,21 +673,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		}
 	};
 
-	/** Every op of the connection gets its attempts back. Inside a transaction. */
-	const resetAttempts = async (connectionId: string): Promise<void> => {
-		const tried = await rowsOf(db.opQueue, connectionId)
-			.filter((op) => op.attempts > 0)
-			.toArray();
-		await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
-	};
-
-	const releaseOps = (connectionId: string): Promise<void> =>
-		// One transaction, so an op the engine completes meanwhile is not put back.
-		db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
-
 	/** Attempts given back: nothing is out of them, so nothing is stuck. */
 	const released = async (session: Session): Promise<void> => {
-		await releaseOps(session.connectionId);
+		await store.releaseOps(session.connectionId);
 		session.stuck.current = undefined;
 	};
 
@@ -611,17 +688,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * Only an upload, and the run was blocked for that upload alone.
 	 */
 	const stuckOp = async (connectionId: string): Promise<StuckOp | undefined> => {
-		const failing = await rowsOf(db.opQueue, connectionId)
-			.filter((op) => outOfAttempts(op, maxAttempts))
-			.toArray();
-		const upload = (op: OpQueueRecord): number => (op.op === 'upload' ? 1 : 0);
+		const failing = await store.failingOps(connectionId, maxAttempts);
+		const upload = ({ op }: FailingOp): number => (op.op === 'upload' ? 1 : 0);
 		const first = [...failing]
-			.sort((a, b) => upload(a) - upload(b) || (a.seq ?? 0) - (b.seq ?? 0))
+			.sort((a, b) => upload(a) - upload(b) || a.op.seq - b.op.seq)
 			.at(0);
 		if (first === undefined) return undefined;
-		// As the engine read it: a row of a kind this version does not know is
-		// named as one it cannot read, not by a kind with no words for it.
-		const op = toSyncOp(first);
+		const { op } = first;
 		return {
 			op: op.op,
 			path: op.path,
@@ -1029,7 +1102,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * two things at once. Returns the way to stop.
 	 */
 	const watchWaits = (session: Session): (() => void) => {
-		const held = heldUpOf(db);
+		const held = store.heldUp();
 		if (held === undefined) return () => undefined;
 		const on = cell<object | undefined>(undefined);
 		const timer = cell<(() => void) | undefined>(undefined);
@@ -1074,7 +1147,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	/** Connections a cancel is holding still: no session starts for them. */
 	const halted = new Set<string>();
 	/** The row the app last showed, for `follow` to be asked again about. */
-	const shown = cell<SyncStateRecord | undefined>(undefined);
+	const shown = cell<ShownSource | undefined>(undefined);
 
 	/** A local edit's sync, `debounceMs` after the last op it queued. */
 	const soon = (session: Session) => {
@@ -1090,7 +1163,11 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * first starts the wait and the rest join it, so changes made every few
 	 * seconds are still sent every `wait`.
 	 */
-	const owed = (session: Session, ops: readonly OpQueueRecord[], wait: number) => {
+	const owed = (
+		session: Session,
+		ops: readonly Readonly<{ lazy?: boolean | undefined }>[],
+		wait: number
+	) => {
 		if (!isCurrent(session) || ops.length === 0) return;
 		if (ops.some((op) => op.lazy !== true)) {
 			soon(session);
@@ -1104,34 +1181,25 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	/** A local edit queues an op, so a new highest seq is an edit to push. */
 	const watchEdits = (session: Session) => {
-		const subscription = liveQuery(() =>
-			rowsOf(db.opQueue, session.connectionId).primaryKeys()
-		).subscribe({
-			next: (seqs) => {
-				const highest = Math.max(0, ...seqs);
-				const seen = session.lastSeq.current;
-				session.lastSeq.current = Math.max(highest, seen ?? 0);
-				// The first answer is what was already queued; the run on open
-				// covers that.
-				if (seen === undefined || highest <= seen || !isCurrent(session)) return;
-				if (lazyMs === undefined) {
-					soon(session);
-					return;
-				}
-				void rowsOf(db.opQueue, session.connectionId)
-					.filter((op) => (op.seq ?? 0) > seen)
-					.toArray()
-					.then((ops) => {
-						owed(session, ops, lazyMs);
-					});
-			},
+		const stop = store.watchQueue(session.connectionId, (seqs) => {
+			const highest = Math.max(0, ...seqs);
+			const seen = session.lastSeq.current;
+			session.lastSeq.current = Math.max(highest, seen ?? 0);
+			// The first answer is what was already queued; the run on open
+			// covers that.
+			if (seen === undefined || highest <= seen || !isCurrent(session)) return;
+			if (lazyMs === undefined) {
+				soon(session);
+				return;
+			}
+			void store.queuedAfter(session.connectionId, seen).then((ops) => {
+				owed(session, ops, lazyMs);
+			});
 		});
-		sessionUnsubscribers.add(() => {
-			subscription.unsubscribe();
-		});
+		sessionUnsubscribers.add(stop);
 	};
 
-	const follow = (showing: SyncStateRecord | undefined) => {
+	const follow = (showing: ShownSource | undefined) => {
 		// A detached source is shown and is not synced: it has no credential to
 		// mint a token with and no cursor to pull from, and the rows it holds are
 		// waiting for the user, not for the network. So it gets no session — not
@@ -1139,7 +1207,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// the user to connect again about a source that already says so. Asked
 		// here, on every change of the row, so a session running when its source
 		// is detached ends there, and one starts when it is connected again.
-		const live = showing?.detached === undefined ? showing : undefined;
+		const live = showing?.detached === true ? undefined : showing;
 		// Held by a cancel, which is about to ask the server to let it go.
 		const state = live !== undefined && halted.has(live.connectionId) ? undefined : live;
 		// Another source shown, or none, ends a pause: showing a source is what
@@ -1157,8 +1225,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		generations.current = generation;
 		const { connectionId } = state;
 		const tokens = createTokenSource({
-			credentials: db,
-			states: tokenStatesOf(db),
+			credentials: store.credentials,
+			states: store.tokens,
 			client,
 			connectionId,
 			now: environment.now,
@@ -1188,7 +1256,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 							...(merge === undefined ? {} : { merge }),
 							syncsHidden,
 							watch,
-							store: createDexieSyncStore(db, { connectionId }),
+							store: store.syncStore(connectionId),
 							reauthorize: () => reauthorize(tokens),
 							maxAttempts,
 							onProgress: (progress) => {
@@ -1279,19 +1347,14 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			// A device may hold several connected sources (docs/ARCHITECTURE.md §6), each
 			// with its own queue and cursor, and the scheduler syncs the one in
 			// front of the user — otherwise the notes on screen and the notes
-			// being synced belong to different accounts. `activeConnectionId`
-			// reads `prefs` as well, so switching sources moves the session.
-			const subscription = liveQuery(async () =>
-				db.syncState.get(await activeConnectionId(db))
-			).subscribe({
-				next: (state) => {
-					shown.current = state;
-					follow(state);
-				},
-			});
-			unsubscribers.add(() => {
-				subscription.unsubscribe();
-			});
+			// being synced belong to different accounts. Switching sources moves
+			// the session.
+			unsubscribers.add(
+				store.watchShown((source) => {
+					shown.current = source;
+					follow(source);
+				})
+			);
 			unsubscribers.add(environment.listen('focus', () => void nudgeCurrent()));
 			unsubscribers.add(
 				environment.listen('visibilitychange', () => {
@@ -1345,21 +1408,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			// lands. Clearing outside the lock would put that cursor back after
 			// ours went, and the re-scan the user asked for would never happen —
 			// silently, since the run that overwrote it reports success.
-			await underSyncLock(session.connectionId, () =>
-				// One transaction: the cursor and the attempts go together, so a
-				// scan that is about to run cannot start against a half-reset queue.
-				db.transaction('rw', db.syncState, db.opQueue, async () => {
-					const state = await db.syncState.get(session.connectionId);
-					// Let go of meanwhile: there is nothing to re-scan, and a `put`
-					// would bring the row back. Detached is let go as well.
-					if (state === undefined || !isLiveSource(state)) return;
-					// `rootId` is kept: it is the same folder, and finding it again
-					// costs a search whose answer we already have.
-					const { cursor: _cursor, ...kept } = state;
-					await db.syncState.put(kept);
-					await resetAttempts(session.connectionId);
-				})
-			);
+			await underSyncLock(session.connectionId, () => store.rescan(session.connectionId));
 			// Nothing below needs to ask whether the connection is still bound,
 			// though the wait for the lock is as long as the round that held it
 			// and the user can switch accounts inside it: all of it is this

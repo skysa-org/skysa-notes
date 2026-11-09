@@ -54,6 +54,7 @@ import {
 } from '../src/store/notes.js';
 import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { disconnectAccount } from '../src/sync/account.js';
+import { clientStoreOf } from '../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../src/sync/lock.js';
 import { createSyncScheduler, type SyncScheduler } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
@@ -284,7 +285,7 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 		lockName: SYNC_LOCK,
 		document: NOTE_FORMAT,
 		syncsHidden,
-		db,
+		store: clientStoreOf(db),
 		client: tokenServer(),
 		// The install's own id, which is what the marker file reports and what
 		// tells the two of them apart on the remote.
@@ -1153,7 +1154,7 @@ describe('one browser over two sources', () => {
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
 			syncsHidden,
-			db,
+			store: clientStoreOf(db),
 			client: tokenServer(),
 			// Which storage a run reaches is decided by the connection it is for,
 			// and by nothing else. A source that could be handed the other's

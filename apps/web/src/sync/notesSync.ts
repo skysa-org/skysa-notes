@@ -1,6 +1,8 @@
 import { cell, NOTES_WATCH, type SyncOutcome } from '@skysa/core';
 
+import type { NotesDatabase } from '../store/db.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';
+import { clientStoreOf } from './dexiePorts.js';
 import { createFileReader, type FileReader } from './fileReads.js';
 import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
 import {
@@ -30,7 +32,9 @@ import {
  */
 const RELIST_MS = 3000;
 
-export interface NotesSyncOptions extends Omit<SyncSchedulerOptions, 'watch'> {
+export interface NotesSyncOptions extends Omit<SyncSchedulerOptions, 'watch' | 'store'> {
+	/** The app's database, which the scheduler reaches through `clientStoreOf`. */
+	db: NotesDatabase;
 	/**
 	 * How long after a pull that met the clipboard's folder, or the key file,
 	 * to read it again: a provider's listing can trail its change feed.
@@ -141,11 +145,15 @@ const keyFileCompanion = (
 };
 
 export const createNotesSync = (options: NotesSyncOptions): NotesSync => {
-	const { relistMs: _relistMs, ...schedulerOptions } = options;
-	const { db } = options;
+	const { relistMs: _relistMs, db, ...schedulerOptions } = options;
 	const relistMs = options.relistMs ?? RELIST_MS;
 	const environment = options.environment ?? browserEnvironment();
-	const scheduler = createSyncScheduler({ ...schedulerOptions, environment, watch: NOTES_WATCH });
+	const scheduler = createSyncScheduler({
+		...schedulerOptions,
+		store: clientStoreOf(db),
+		environment,
+		watch: NOTES_WATCH,
+	});
 	const { sessionFor } = scheduler;
 	const { isOnline, now } = environment;
 	const clipboard = createClipboardSync({ db, isOnline, sessionFor });

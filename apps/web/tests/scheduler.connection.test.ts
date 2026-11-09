@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import type { NotesDatabase } from '../src/store/db.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { clientStoreOf } from '../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../src/sync/lock.js';
 import {
 	createSyncScheduler,
@@ -87,7 +88,7 @@ describe('following the connection', () => {
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
 			syncsHidden,
-			db,
+			store: clientStoreOf(db),
 			client: tokenServer(),
 			createProvider: first.remote.factory,
 			environment: env.environment,
@@ -117,7 +118,7 @@ describe('following the connection', () => {
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
 			syncsHidden,
-			db,
+			store: clientStoreOf(db),
 			client: tokenServer(),
 			createProvider: theRemote.factory,
 			environment: env.environment,
@@ -324,7 +325,7 @@ describe('following the connection', () => {
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
 			syncsHidden,
-			db,
+			store: clientStoreOf(db),
 			client: tokenServer(),
 			createProvider: first.remote.factory,
 			environment: env.environment,
