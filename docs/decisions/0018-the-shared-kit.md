@@ -100,7 +100,8 @@ Each is a pull request of its own in this repository, released as usual, so that
   This one is cut: `paths.ts`'s `isHidden` is any app's now, hiding every dot-named segment, and the engine takes `syncsHidden` and `watch`; a pull says by name what it met (`SyncOutcome.met`).
   This app's are in `appFolder.ts`: `syncsHidden` lets `.scratchpad/` and `.vault/` through, `isPassedOver` is the rule its own screens and import ask, and `NOTES_WATCH` names the clipboard's folder and the key file.
   What syncs is exactly what synced before, so no cursor is dropped.
-  The scheduler sets the watch itself until the clipboard's and the key file's syncs become ports, and requires `syncsHidden`, since without it a scan would forget the scratchpad's and the vault's clean notes.
+  The scheduler requires `syncsHidden`, since without it a scan would forget the scratchpad's and the vault's clean notes.
+  It set the watch itself until the clipboard's and the key file's syncs were attached to it by the app, which now hands it the watch with them (below).
   A lint rule keeps `appFolder.ts` and those places' names out of `paths.ts`, `providers/` and `sync/`.
 - **When a push goes.**
   A scheduler option, with memoriam's lazy writes as one setting and this app's two seconds after the last edit as the default.
@@ -109,6 +110,15 @@ Each is a pull request of its own in this repository, released as usual, so that
   Hiding the page sends whatever is waiting, here as in memoriam, so an edit made just before the app goes out of sight no longer waits out its two seconds in a page a phone may have frozen.
   A write the Dexie store owes again, because the note changed while it was on its way, is queued as lazily as the one that landed.
 - **The client's modules reach IndexedDB through ports**, with Dexie adapters over tables the app owns.
+  This one is cut in five parts, each a pull request of its own.
+  1. What the app syncs beside its documents is the app's (`sync/notesSync.ts`).
+     The scheduler builds none of it: the clipboard, the key file and the files beside notes are made by the app over the session the scheduler lends (`sessionFor`), and attached to it (`attach`), to be told when a session starts, syncs and ends.
+     The app hands it the watch, `NOTES_WATCH`, beside the two that read it.
+     This part is cut.
+  2. The scheduler and the provider factory answer with codes, and the app words them.
+  3. The stores take the format, and make a conflict copy with it.
+  4. The credential, the token source and the relay reach the database through ports.
+  5. The scheduler reaches the database through one port, and none of what moves imports the app's `store/`, Dexie or its words.
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has, memoriam's checks of the root in the contract suite among them.
 - **A lint rule fences what is to move** from what stays, and once it passes the move can be made.
 

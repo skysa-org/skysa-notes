@@ -10,8 +10,8 @@ import { useDb } from '../store/database.js';
 import type { SyncStateRecord } from '../store/db.js';
 import { isLiveSource } from '../store/rowStates.js';
 import { tabName } from '../sync/account.js';
+import type { NotesSync } from '../sync/notesSync.js';
 import { syncScheduler } from '../sync/runtime.js';
-import type { SyncScheduler } from '../sync/scheduler.js';
 import { forgetShare, readShare, type Received } from './received.js';
 
 /**
@@ -42,7 +42,7 @@ export interface TakeShareProps {
 	onRead: () => void;
 	/** What was shared is on the clipboard: show it, where it is out of sight. */
 	onAdded: () => void;
-	sync?: Pick<SyncScheduler, 'clipboard'>;
+	sync?: Pick<NotesSync, 'clipboard'>;
 	/** Where the worker kept it. Injected: jsdom has no Cache Storage. */
 	storage?: CacheStorage;
 }
