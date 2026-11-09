@@ -6,7 +6,7 @@ import {
 	conflictFolderPath,
 	contentHash,
 	foldName,
-	isHidden,
+	isPassedOver,
 	isVaultPath,
 	joinPath,
 	linkedFiles,
@@ -88,7 +88,7 @@ export type SkipReason =
 	| 'not-text'
 	/**
 	 * A note whose name, or a folder's along its path, begins with a dot, which
-	 * the app keeps hidden (`isHidden`): brought in, it would be a file in the
+	 * the app keeps hidden (`isPassedOver`): brought in, it would be a file in the
 	 * user's storage that no list here ever shows.
 	 */
 	| 'hidden'
@@ -206,7 +206,7 @@ const tidy = (path: string): string => normalizePath(path.replaceAll('\\', '/'))
 const excluded = (path: string): 'system' | 'hidden-note' | 'hidden' | undefined => {
 	const tidied = tidy(path);
 	if (isSystemPath(tidied)) return 'system';
-	if (!isHidden(tidied)) return undefined;
+	if (!isPassedOver(tidied)) return undefined;
 	return isNote(tidied) ? 'hidden-note' : 'hidden';
 };
 
@@ -478,7 +478,7 @@ export const planImport = (picked: Picked): ImportPlan => {
 	const kept = picked.files
 		.filter((file) => excluded(file.path) === undefined)
 		.map((file) => ({ ...file, ...placed(file.path), was: file.path }))
-		.filter((file) => file.path !== '' && !isHidden(file.path));
+		.filter((file) => file.path !== '' && !isPassedOver(file.path));
 	const notes = kept.flatMap((file) => {
 		if (!isNote(file.path)) return [];
 		const source = textOf(file.bytes);
@@ -493,7 +493,7 @@ export const planImport = (picked: Picked): ImportPlan => {
 	const listed = picked.folders
 		.filter((folder) => excluded(folder) === undefined)
 		.map((folder) => placed(folder).path)
-		.filter((folder) => folder !== '' && !isHidden(folder));
+		.filter((folder) => folder !== '' && !isPassedOver(folder));
 	const folders = new Map<string, string>();
 	[...notes, ...files]
 		.flatMap((item) => ancestorPaths(item.path))
@@ -612,7 +612,7 @@ export const planScratchImport = (picked: Picked): ImportPlan => {
 			(path) =>
 				isNote(path) &&
 				excluded(path) === undefined &&
-				!isHidden(path) &&
+				!isPassedOver(path) &&
 				!isVaultPath(path)
 		);
 	return {

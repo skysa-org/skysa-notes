@@ -97,6 +97,11 @@ Each is a pull request of its own in this repository, released as usual, so that
 - **Which hidden paths sync, and which a pull should mention.**
   `syncsHidden(path)` takes the place of the folders `paths.ts` lists, the scratchpad's and the vault's.
   `watch`, a set of named tests of a path whose flags the outcome carries, takes the place of the clipboard's and the key file's flags in `sync/outcome.ts`.
+  This one is cut: `paths.ts`'s `isHidden` is any app's now, hiding every dot-named segment, and the engine takes `syncsHidden` and `watch`; a pull says by name what it met (`SyncOutcome.met`).
+  This app's are in `appFolder.ts`: `syncsHidden` lets `.scratchpad/` and `.vault/` through, `isPassedOver` is the rule its own screens and import ask, and `NOTES_WATCH` names the clipboard's folder and the key file.
+  What syncs is exactly what synced before, so no cursor is dropped.
+  The scheduler sets the watch itself until the clipboard's and the key file's syncs become ports, and requires `syncsHidden`, since without it a scan would forget the scratchpad's and the vault's clean notes.
+  A lint rule keeps `appFolder.ts` and those places' names out of `paths.ts`, `providers/` and `sync/`.
 - **When a push goes.**
   A scheduler option, with memoriam's lazy writes as one setting and this app's two seconds after the last edit as the default.
 - **The client's modules reach IndexedDB through ports**, with Dexie adapters over tables the app owns.

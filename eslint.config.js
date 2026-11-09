@@ -148,6 +148,24 @@ const NO_NOTE_FORMAT = [
 ];
 
 /**
+ * Notes' own places in its folder — the scratchpad's, the vault's, the
+ * clipboard's, the key file — which the sync engine is handed as rules
+ * (`syncsHidden`, `watch`) rather than import, so that neither it nor the
+ * path rules beneath it name a place of this app's
+ * (docs/decisions/0018-the-shared-kit.md).
+ */
+const APP_PATHS_MESSAGE =
+	'which hidden paths sync, and which a pull reports, are handed to the engine, not imported (docs/decisions/0018-the-shared-kit.md).';
+const NO_APP_PATHS = [
+	{
+		group: ['**/config.js'],
+		importNames: ['SCRATCHPAD_FOLDER', 'VAULT_FOLDER', 'CLIPBOARD_FOLDER', 'ENCRYPTION_FILE'],
+		message: APP_PATHS_MESSAGE,
+	},
+	{ group: ['**/appFolder.js'], message: APP_PATHS_MESSAGE },
+];
+
+/**
  * Words the user reads, written straight into JSX: a sentence there is one no
  * translation can reach. They come from the catalog, `t()` in
  * `apps/web/src/i18n/t.ts` (docs/ARCHITECTURE.md §7, "The app's words").
@@ -437,6 +455,7 @@ export default tseslint.config(
 						...CORE_IMPORTS,
 						NO_APP_FOLDER,
 						...NO_NOTE_FORMAT,
+						...NO_APP_PATHS,
 						NOT_ABOVE(['sync'], 'a provider does not import the sync engine.'),
 					],
 				},
@@ -444,28 +463,31 @@ export default tseslint.config(
 		},
 	},
 	{
-		// The sync engine, like the providers, is handed the app's folder and
-		// what its documents are, and reads neither for itself.
+		// The sync engine, like the providers, is handed the app's folder, what
+		// its documents are and which of its hidden paths count, and reads none
+		// of them for itself.
 		files: ['packages/core/src/sync/**/*.ts'],
 		rules: {
 			'no-restricted-imports': [
 				'error',
-				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT] },
+				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT, ...NO_APP_PATHS] },
 			],
 		},
 	},
 	{
-		// The marker, and what describes an app's folder and its documents, are
-		// any app's: what they are about is handed to them.
+		// The marker, what describes an app's folder and its documents, and the
+		// path rules every layer here uses, are any app's: what they are about
+		// is handed to them.
 		files: [
 			'packages/core/src/marker.ts',
 			'packages/core/src/folderSpec.ts',
 			'packages/core/src/documentFormat.ts',
+			'packages/core/src/paths.ts',
 		],
 		rules: {
 			'no-restricted-imports': [
 				'error',
-				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT] },
+				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT, ...NO_APP_PATHS] },
 			],
 		},
 	},

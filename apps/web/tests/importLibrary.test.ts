@@ -1,4 +1,10 @@
-import { createSyncEngine, isHidden, MAX_ATTACHMENT_BYTES, NOTE_FORMAT } from '@skysa/core';
+import {
+	createSyncEngine,
+	isPassedOver,
+	MAX_ATTACHMENT_BYTES,
+	NOTE_FORMAT,
+	syncsHidden,
+} from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -331,6 +337,7 @@ describe('planScratchImport', () => {
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, scope),
 		});
@@ -338,7 +345,7 @@ describe('planScratchImport', () => {
 		expect(
 			fake
 				.snapshot()
-				.filter((entry) => !isHidden(entry.path))
+				.filter((entry) => !isPassedOver(entry.path))
 				.map((entry) => [entry.kind, entry.path])
 		).toEqual([
 			['folder', '.scratchpad'],
@@ -375,6 +382,7 @@ describe('importLibrary', () => {
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, scope),
 		});
@@ -383,7 +391,7 @@ describe('importLibrary', () => {
 		expect(
 			fake
 				.snapshot()
-				.filter((entry) => !isHidden(entry.path))
+				.filter((entry) => !isPassedOver(entry.path))
 				.map((entry) => [entry.kind, entry.path])
 		).toEqual([
 			['folder', 'Empty'],
@@ -451,6 +459,7 @@ describe('importLibrary', () => {
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, scope),
 		});
@@ -459,7 +468,7 @@ describe('importLibrary', () => {
 		expect(
 			fake
 				.snapshot()
-				.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+				.filter((entry) => entry.kind === 'file' && !isPassedOver(entry.path))
 				.map((entry) => entry.path)
 				.sort()
 		).toEqual(queue.flatMap(([op, path]) => (op === 'mkdir' ? [] : [path])).sort());

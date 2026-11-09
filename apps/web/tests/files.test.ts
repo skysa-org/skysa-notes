@@ -1,10 +1,11 @@
 import {
 	bytesHash,
 	createSyncEngine,
-	isHidden,
+	isPassedOver,
 	MAX_ATTACHMENT_BYTES,
 	NOTE_FORMAT,
 	type StorageProvider,
+	syncsHidden,
 } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
@@ -908,6 +909,7 @@ const connected = async () => {
 	};
 	const engine = createSyncEngine({
 		document: NOTE_FORMAT,
+		syncsHidden,
 		provider,
 		store,
 		now: () => new Date('2026-10-03T10:00:00Z'),
@@ -932,7 +934,7 @@ const remoteAttachments = async (fake: FakeProvider) =>
 				.filter(
 					(entry) =>
 						entry.kind === 'file' &&
-						!isHidden(entry.path) &&
+						!isPassedOver(entry.path) &&
 						!entry.path.endsWith('.md')
 				)
 				.map(async (entry): Promise<[string, string]> => [
@@ -1121,7 +1123,14 @@ describe('a source let go with a file not uploaded', () => {
 		await fake.ensureRoot();
 		const store = createDexieSyncStore(db, scope);
 		expect(
-			(await createSyncEngine({ document: NOTE_FORMAT, provider: fake, store }).sync()).status
+			(
+				await createSyncEngine({
+					document: NOTE_FORMAT,
+					syncsHidden,
+					provider: fake,
+					store,
+				}).sync()
+			).status
 		).toBe('ok');
 		expect(await remoteAttachments(fake)).toEqual({ [added.path]: 'a' });
 		expect((await unsyncedIn(db, CONNECTION)).files).toEqual([]);

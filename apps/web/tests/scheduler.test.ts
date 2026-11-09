@@ -1,4 +1,4 @@
-import { NOTE_FORMAT } from '@skysa/core';
+import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
 import { TEST_FOLDER } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -53,6 +53,20 @@ describe('syncing a connection', () => {
 		expect(state?.cursor).toBeDefined();
 	});
 
+	it('brings in the scratchpad’s notes, which are dot-named and synced all the same', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		await h.remote.fake.createFolder('.scratchpad');
+		await h.remote.fake.write('.scratchpad/milk.md', 'milk, eggs\n', {});
+
+		await h.scheduler.syncNow();
+
+		expect((await db.notes.toArray()).map((note) => note.path)).toEqual([
+			'.scratchpad/milk.md',
+		]);
+	});
+
 	it('uses the token the server minted, and remembers when it last synced', async () => {
 		const db = await bound();
 		const { scheduler, server, env, remote: theRemote } = started(db);
@@ -91,6 +105,7 @@ describe('syncing a connection', () => {
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
+			syncsHidden,
 			db,
 			client: tokenServer(),
 			createProvider: remote().factory,
@@ -272,6 +287,7 @@ describe('offline', () => {
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
+			syncsHidden,
 			db,
 			client: server,
 			createProvider: theRemote.factory,

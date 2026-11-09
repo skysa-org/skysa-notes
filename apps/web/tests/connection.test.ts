@@ -1,4 +1,10 @@
-import { createSyncEngine, isHidden, NOTE_FORMAT, NotFoundError } from '@skysa/core';
+import {
+	createSyncEngine,
+	isPassedOver,
+	NOTE_FORMAT,
+	NotFoundError,
+	syncsHidden,
+} from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -171,6 +177,7 @@ describe('binding a connection', () => {
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
 		});
@@ -643,6 +650,7 @@ describe('checking a resumed connection against its remote', () => {
 		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: 'dropbox-2' }),
 		});
@@ -736,6 +744,7 @@ describe('checking a resumed connection against its remote', () => {
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: 'dropbox-1' }),
 		});
@@ -930,7 +939,7 @@ describe('resuming onto a connection that already has rows in the way', () => {
 const filesOn = (fake: ReturnType<typeof createFakeProvider>) =>
 	fake
 		.snapshot()
-		.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+		.filter((entry) => entry.kind === 'file' && !isPassedOver(entry.path))
 		.map((entry) => entry.path);
 
 const ACCOUNT = { provider: 'dropbox', accountId: 'dbid:1' } as const;
@@ -960,6 +969,7 @@ const syncedThenDisconnected = async (
 	const engineFor = (connectionId: string) =>
 		createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId }),
 		});
@@ -1192,6 +1202,7 @@ describe('a sync still at the network when the connection changes', () => {
 		const held = new Promise<void>((resolve) => gate.set('release', resolve));
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: {
 				...fake,
 				changes: async (cursor) => {
@@ -1279,6 +1290,7 @@ describe('a device used before connecting, then connected', () => {
 		await fake.ensureRoot();
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
 		});
@@ -1290,7 +1302,7 @@ describe('a device used before connecting, then connected', () => {
 		const files = Object.fromEntries(
 			fake
 				.snapshot()
-				.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+				.filter((entry) => entry.kind === 'file' && !isPassedOver(entry.path))
 				.map((entry) => [entry.path, fake.contentAt(entry.path)])
 		);
 		expect(files).toEqual(
@@ -1314,6 +1326,7 @@ describe('a device used before connecting, then connected', () => {
 		await bindConnection(db, DROPBOX);
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
 		});

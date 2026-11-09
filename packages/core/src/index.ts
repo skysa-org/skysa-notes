@@ -16,7 +16,14 @@ export { AgeError } from './age/errors.js';
 export { encodeIdentity, generateIdentity } from './age/keys.js';
 export { type Cell, cell } from './cell.js';
 export { API_ERROR_CODES, type ApiErrorCode, AUTH_MODES, type AuthMode } from './api.js';
-export { isEncryptionFile, isScratchPath, isVaultPath } from './appFolder.js';
+export {
+	isEncryptionFile,
+	isScratchPath,
+	isVaultPath,
+	NOTES_WATCH,
+	syncsHidden,
+	isPassedOver,
+} from './appFolder.js';
 export type { DocumentFormat } from './documentFormat.js';
 export type { AppFolderSpec } from './folderSpec.js';
 export {
@@ -133,7 +140,6 @@ export {
 export {
 	ancestorPaths,
 	basename,
-	isHidden,
 	isWithin,
 	joinPath,
 	normalizePath,

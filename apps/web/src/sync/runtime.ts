@@ -1,4 +1,4 @@
-import { NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
+import { NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import { useSyncExternalStore } from 'react';
 
 import { api } from '../api/client.js';
@@ -28,6 +28,7 @@ export const syncScheduler: SyncScheduler = createSyncScheduler({
 	}),
 	lockName: SYNC_LOCK,
 	document: NOTE_FORMAT,
+	syncsHidden,
 	// Asks `/config` first, so an instance without a relay is never asked for
 	// a ticket (`sync/relay.ts`).
 	relay: createRelayFactory({ db, client: api }),

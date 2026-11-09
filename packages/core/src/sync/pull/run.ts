@@ -37,14 +37,12 @@ interface PullProgress {
 	pulled: number;
 	conflicts: readonly string[];
 	seen: ReadonlySet<string>;
-	/** Whether a page so far met the clipboard's folder. */
-	clipboard?: true;
-	/** Whether a page so far met the key file. */
-	encryption?: true;
+	/** What a page so far met of the engine's watch (`SyncOutcome.met`). */
+	met?: readonly string[];
 }
 
 export const createPullRun = (
-	{ provider, store, renew, meter }: EngineContext,
+	{ provider, store, renew, meter, watch }: EngineContext,
 	{
 		letGo,
 		decideAll,
@@ -99,7 +97,7 @@ export const createPullRun = (
 		return ok({
 			pulled: changes.length,
 			conflicts: conflictPathsIn(changes),
-			...metIn(round.entries),
+			...metIn(watch, round.entries),
 		});
 	};
 
@@ -184,8 +182,7 @@ export const createPullRun = (
 				pulled: progress.pulled + batch.length,
 				conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
 				seen,
-				...metOf(progress),
-				...metIn(set.entries),
+				...metOf(progress, metIn(watch, set.entries)),
 			},
 			upload
 		);

@@ -1,4 +1,3 @@
-import { isClipPath, isEncryptionFile } from '../appFolder.js';
 import { type ChangeEntry, isRateLimitError } from '../providers/types.js';
 
 /**
@@ -6,7 +5,7 @@ import { type ChangeEntry, isRateLimitError } from '../providers/types.js';
  * outcome is built from: the plain one (`ok`), the one for a failure the
  * scheduler comes back from (`transient`), the one for a token nothing could
  * renew (`paused`), the wait a provider asked for
- * (`waitFor`), and the flags for what a pull met and decides nothing about
+ * (`waitFor`), and the names of what a pull met and decides nothing about
  * (`metIn`, `metOf`).
  */
 
@@ -42,20 +41,15 @@ export interface SyncOutcome {
 	 */
 	waitingUploads?: number;
 	/**
-	 * The pull met something in the clipboard's folder, which it decides
-	 * nothing about, so whoever shows the clipboard can read it again
-	 * (docs/ARCHITECTURE.md §7, "The clipboard"). Also set for a deletion by id
-	 * alone, which may have been an item there. Absent otherwise.
+	 * The names of the engine's `watch` that something the pull met passed, in
+	 * the watch's order: in this app, `clipboard` for the clipboard's folder,
+	 * which whoever shows the clipboard then reads again (docs/ARCHITECTURE.md
+	 * §7, "The clipboard"), and `encryption` for the key file, which another
+	 * device may have set up or replaced (§7, "Secrets in a note"). A deletion
+	 * by id alone may have been any of them, so it meets every name. Absent
+	 * when it met none.
 	 */
-	clipboard?: true;
-	/**
-	 * The pull met the source's key file for secrets, `.encryption.json`, which
-	 * it decides nothing about either, so the device can read it again: another
-	 * device may have set the key up or replaced it (docs/ARCHITECTURE.md §7,
-	 * "Secrets in a note"). Set for a deletion by id alone as the clipboard's
-	 * flag is. Absent otherwise.
-	 */
-	encryption?: true;
+	met?: readonly string[];
 }
 
 export const ok = (partial: Partial<SyncOutcome> = {}): SyncOutcome => ({
@@ -102,32 +96,38 @@ export const transient = (error: unknown): SyncOutcome => ({
 	...waitFor(error),
 });
 
-/** What a pull met that it decides nothing about: the flags of `SyncOutcome` that say so. */
-export type Met = Pick<SyncOutcome, 'clipboard' | 'encryption'>;
+/**
+ * Named tests of a path whose passing a pull reports (`SyncEngineOptions.watch`):
+ * this app's are `NOTES_WATCH` in `appFolder.ts`.
+ */
+export type Watch = Readonly<Record<string, (path: string) => boolean>>;
+
+/** What a pull met that it decides nothing about: the part of `SyncOutcome` that says so. */
+export type Met = Pick<SyncOutcome, 'met'>;
 
 /**
- * The flags for an outcome whose pull met the clipboard's folder or the key
- * file, or may have, or none. A deletion by id alone may have: an id feed's
- * path comes from its tree, and an item this device pasted is not in the tree
- * until the feed reports it back. Let go of on another device before then, it
- * is an id and nothing else, and the folder would never be read again for it.
- * Counted, it costs one listing where the clipboard is shown, and one read of
- * the key file where the device keeps secrets.
+ * The names of a watch that these entries met, or may have, or none. A
+ * deletion by id alone may have: an id feed's path comes from its tree, and an
+ * item this device pasted is not in the tree until the feed reports it back.
+ * Let go of on another device before then, it is an id and nothing else, and
+ * the clipboard's folder would never be read again for it. Counted, it costs
+ * one listing where the clipboard is shown, and one read of the key file where
+ * the device keeps secrets.
  */
-export const metIn = (entries: readonly ChangeEntry[]): Met => ({
-	...(entries.some((entry) => entry.path === undefined || isClipPath(entry.path))
-		? { clipboard: true }
-		: {}),
-	...(entries.some((entry) => entry.path === undefined || isEncryptionFile(entry.path))
-		? { encryption: true }
-		: {}),
-});
+export const metIn = (watch: Watch, entries: readonly ChangeEntry[]): Met => {
+	const met = Object.entries(watch)
+		.filter(([, passes]) =>
+			entries.some((entry) => entry.path === undefined || passes(entry.path))
+		)
+		.map(([name]) => name);
+	return met.length === 0 ? {} : { met };
+};
 
-/** The flags of `metIn` that either of two outcomes carries. */
-export const metOf = (outcome: Met): Met => ({
-	...(outcome.clipboard === true ? { clipboard: true } : {}),
-	...(outcome.encryption === true ? { encryption: true } : {}),
-});
+/** Every name any of these outcomes met, each once, in the order first met. */
+export const metOf = (...outcomes: readonly Met[]): Met => {
+	const met = [...new Set(outcomes.flatMap((outcome) => outcome.met ?? []))];
+	return met.length === 0 ? {} : { met };
+};
 
 /** The message of an unknown throw, without letting a non-Error crash the log. */
 export const messageOf = (error: unknown): string =>

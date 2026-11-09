@@ -242,7 +242,7 @@ Rules:
 - **The scratchpad** (2026-10-07).
   `.scratchpad/` at the root holds a source's scratch notes (§7, "The scratchpad").
   Each is an ordinary note, named, written and synced as any note is; only the folder is the scratchpad's.
-  `isHidden` makes an exception for it, as it does for `.vault/` (below): a first segment that is exactly `.scratchpad` is not hidden, so the engine, export and import take its notes as notes.
+  It is hidden (`isHidden`), but this app syncs it all the same, as it does `.vault/` (below): `syncsHidden` (`appFolder.ts`) lets a first segment that is exactly `.scratchpad` through, so the engine, which is handed it, and export and import, which ask `isPassedOver`, take its notes as notes.
   A dot name inside it (`.scratchpad/.DS_Store`) is still hidden, and so is `.clipboard/`.
   `isScratchPath` (`appFolder.ts`) says whether a path is in it.
   A scratch note may carry two keys a notebook's does not: `pinned: true` and `color: <name>`, one of `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple` and `pink` (`SCRATCH_COLORS`).
@@ -252,7 +252,7 @@ Rules:
   In the scratchpad, where a note need not have a name, `untitled-2.md` is as unnamed as `untitled.md`; in a notebook it stays a name, as it always was.
   **A cursor read while the folder was hidden** (2026-10-08) had passed over every scratch note other devices had sent by then, and a feed names a file again only when it changes, so a device that updated after the notes were made never had them.
   Schema version 10 drops every source's cursor once, as "Re-scan" does (`rootId` kept), and the next sync is a scan, which reads nothing the device already holds at its version.
-  Any later change to what `isHidden` lets through needs the same.
+  Any later change to what `syncsHidden` lets through needs the same.
 - **Secrets** (2026-10-14, §7, "Secrets in a note").
   A secret in a note is an armored [age](https://age-encryption.org/v1) file in a fenced block whose info string is `age`, and after it, where the user has given one, the secret's label in plain text (2026-10-15):
 
@@ -277,7 +277,7 @@ Rules:
 
 - **Passwords** (2026-10-15, §7, "Passwords in the vault").
   `.vault/` at the root holds the vault's passwords, one note each, named as a note is from its title, which is the item's label: `.vault/github.md`.
-  `isHidden` makes the exception for it that it makes for `.scratchpad/`, so the engine, export and import take its notes as notes — a download of the source has them, and importing that download brings them back as passwords, still encrypted to the key they were made with — and a dot name inside it is still hidden.
+  `syncsHidden` lets it through as it does `.scratchpad/`, so the engine, export and import take its notes as notes — a download of the source has them, and importing that download brings them back as passwords, still encrypted to the key they were made with — and a dot name inside it is still hidden.
   `isVaultPath` (`appFolder.ts`) says whether a path is in it.
   The label is plain text, in the file's name and its `title`; the rest of the item is the note's body, one `age` fence with no label, as "Secrets" above sets one out, and nothing else, whose words are a JSON object:
 
@@ -399,7 +399,7 @@ Semantics the signatures do not carry:
   And the path may be missing where the id is not: an id feed asked about a file its tree never placed — one this device pushed after its cursor, deleted by another device before this one pulled again — has no path to give, and dropping the deletion leaves the note on this device for ever.
 - `list` is one level.
   `changes` covers the whole tree at every depth.
-  Neither filters hidden paths: `.notesapp.json` has to reach the engine, and the UI filters with `isHidden`.
+  Neither filters hidden paths: `.notesapp.json` has to reach the engine, and the UI filters with `isPassedOver`.
 - `rootId` is opaque, non-empty and stable.
   A provider whose root has no id of its own — a Dropbox app folder, where the root simply *is* `/` — returns a synthetic constant.
 - Content is UTF-8 text, and `read` says when it is not.
@@ -3457,10 +3457,11 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
-The first three seams are cut:
+The first four seams are cut:
 - the adapters are handed the app's folder (§3), and the scheduler its lock's name;
 - the engine and the adapters are handed what a document is (`NOTE_FORMAT`);
-- the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy").
+- the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy");
+- the engine is handed which hidden paths sync (`syncsHidden`) and which a pull is to say it met (`watch`, and `SyncOutcome.met`), and this app's are in `appFolder.ts`.
 
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 

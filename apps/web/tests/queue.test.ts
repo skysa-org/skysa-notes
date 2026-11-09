@@ -1,4 +1,10 @@
-import { createSyncEngine, isHidden, NOTE_FORMAT, type StorageProvider } from '@skysa/core';
+import {
+	createSyncEngine,
+	isPassedOver,
+	NOTE_FORMAT,
+	type StorageProvider,
+	syncsHidden,
+} from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -513,6 +519,7 @@ const connected = async () => {
 	const engineOver = (provider: StorageProvider) =>
 		createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider,
 			store,
 			now: () => new Date('2026-09-16T10:00:00Z'),
@@ -525,7 +532,7 @@ const remoteFiles = (fake: FakeProvider) =>
 	Object.fromEntries(
 		fake
 			.snapshot()
-			.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+			.filter((entry) => entry.kind === 'file' && !isPassedOver(entry.path))
 			.map((entry) => [entry.path, fake.contentAt(entry.path)])
 	);
 
@@ -1029,6 +1036,7 @@ describe('a note deleted before its write was ever sent, on two devices', () => 
 
 		const other = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: fake,
 			store: theirsStore,
 			now,
@@ -1037,6 +1045,7 @@ describe('a note deleted before its write was ever sent, on two devices', () => 
 		// one there — which is the whole question.
 		const engine = createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider: inFlight(fake, 'write', () => other.push()),
 			store: mineStore,
 			now,

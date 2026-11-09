@@ -5,11 +5,12 @@ import {
 	createOneDriveProvider,
 	type DocumentFormat,
 	type FetchLike,
-	isHidden,
+	isPassedOver,
 	NOTE_FORMAT,
 	NOTES_FOLDER,
 	parentPath,
 	type StorageProvider,
+	syncsHidden,
 } from '@skysa/core';
 import {
 	createDropboxStub,
@@ -282,6 +283,7 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 	const scheduler = createSyncScheduler({
 		lockName: SYNC_LOCK,
 		document: NOTE_FORMAT,
+		syncsHidden,
 		db,
 		client: tokenServer(),
 		// The install's own id, which is what the marker file reports and what
@@ -358,7 +360,7 @@ const remoteFiles = (remote: Remote): Record<string, string> =>
 	Object.fromEntries(
 		remote.backing
 			.snapshot()
-			.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+			.filter((entry) => entry.kind === 'file' && !isPassedOver(entry.path))
 			.map((entry) => [entry.path, remote.backing.contentAt(entry.path) ?? ''])
 	);
 
@@ -366,7 +368,9 @@ const remoteFiles = (remote: Remote): Record<string, string> =>
 const remoteFolders = (remote: Remote): string[] =>
 	remote.backing
 		.snapshot()
-		.filter((entry) => entry.kind === 'folder' && !isHidden(entry.path) && entry.path !== '')
+		.filter(
+			(entry) => entry.kind === 'folder' && !isPassedOver(entry.path) && entry.path !== ''
+		)
 		.map((entry) => entry.path)
 		.sort();
 
@@ -1148,6 +1152,7 @@ describe('one browser over two sources', () => {
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
+			syncsHidden,
 			db,
 			client: tokenServer(),
 			// Which storage a run reaches is decided by the connection it is for,

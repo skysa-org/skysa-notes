@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createSyncEngine, isHidden, NOTE_FORMAT } from '@skysa/core';
+import { createSyncEngine, isPassedOver, NOTE_FORMAT, syncsHidden } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -1047,10 +1047,11 @@ describe('a whole source', () => {
 		await provider.ensureRoot();
 		await createSyncEngine({
 			document: NOTE_FORMAT,
+			syncsHidden,
 			provider,
 			store: createDexieSyncStore(db, { connectionId: 'dropbox-1' }),
 		}).sync();
-		const pushed = provider.snapshot().filter((entry) => !isHidden(entry.path));
+		const pushed = provider.snapshot().filter((entry) => !isPassedOver(entry.path));
 		const files = pushed.filter((entry) => entry.kind === 'file');
 		const byPath = (a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path);
 

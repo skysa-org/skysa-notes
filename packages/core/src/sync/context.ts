@@ -1,13 +1,15 @@
 import type { DocumentFormat } from '../documentFormat.js';
 import type { DocumentNames } from '../names/conflicts.js';
 import type { EntryRef, RemoteEntry, StorageProvider } from '../providers/types.js';
+import type { Watch } from './outcome.js';
 import type { Meter } from './progress.js';
 import type { ConflictResolution, PullChange, SyncNote, SyncStore } from './store.js';
 
 /**
  * What every part of the engine is handed by `createSyncEngine`: the provider
  * and the store it syncs between, what a document is and what its names say,
- * the clock and ids injected for tests, its bounds, a way to renew the token,
+ * which paths it passes over and which it is to say it met, the clock and ids
+ * injected for tests, its bounds, a way to renew the token,
  * the meter that tells `onProgress` how far a run has got, and the two sides
  * of a file made one where the app can make them one (`mergedOf`). Built once
  * per engine, so the parts moved out of `engine.ts` (#446) share one rather
@@ -20,6 +22,13 @@ export interface EngineContext {
 	readonly document: DocumentFormat;
 	/** The names `document`'s extension makes: which are documents', and where a copy goes. */
 	readonly names: DocumentNames;
+	/**
+	 * A path the pull passes over: hidden (`isHidden`), and not one the app
+	 * syncs all the same (`SyncEngineOptions.syncsHidden`).
+	 */
+	readonly passesOver: (path: string) => boolean;
+	/** What a pull is to say it met, by name (`SyncEngineOptions.watch`). */
+	readonly watch: Watch;
 	readonly now: () => Date;
 	readonly newId: () => string;
 	/** Times an op may fail before the engine stops asking and surfaces it. */

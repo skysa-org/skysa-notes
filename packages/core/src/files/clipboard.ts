@@ -70,8 +70,9 @@ export const clipStamp = (now: number, newest: number | undefined): number =>
  * needs to read the name at all (`NAME`).
  *
  * A `.md` file keeps `.md`, which `attachmentName` refuses beside a note: in
- * the hidden folder it is no note to any device, since the engine asks
- * `isHidden` before it asks anything else.
+ * the hidden folder it is no note to any device, since the engine passes
+ * over a path this app does not sync (`isPassedOver`) before it asks anything
+ * else.
  */
 export const clipName = ({
 	at,
