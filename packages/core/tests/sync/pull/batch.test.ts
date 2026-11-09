@@ -9,7 +9,7 @@ import {
 	leavesFor,
 	listedAfter,
 	liveEntries,
-	unhidden,
+	syncedOnly,
 } from '../../../src/sync/pull/batch.js';
 
 /**
@@ -32,7 +32,7 @@ const gone = (remoteId: string, path?: string): ChangeEntry =>
 /** Dropbox's kind: a path and nothing else. */
 const goneAt = (path: string): ChangeEntry => ({ deleted: true, path });
 
-describe('liveEntries and unhidden', () => {
+describe('liveEntries and syncedOnly', () => {
 	it('lists each living thing where it is mentioned, and how far in', () => {
 		const live = liveEntries([file('a', 'a.md'), gone('b', 'b.md'), file('a', 'Work/a.md')]);
 		expect([...live]).toEqual([
@@ -46,9 +46,10 @@ describe('liveEntries and unhidden', () => {
 		]);
 	});
 
-	it('leaves out what is at a hidden path, and a thing only ever there', () => {
+	it('leaves out what is at a path passed over, and a thing only ever there', () => {
 		const live = liveEntries([file('a', '.trash/a.md'), file('a', 'a.md'), file('b', '.b.md')]);
-		expect([...unhidden(live)]).toEqual([['a', [{ path: 'a.md', at: 1 }]]]);
+		const passesOver = (path: string) => path.startsWith('.');
+		expect([...syncedOnly(live, passesOver)]).toEqual([['a', [{ path: 'a.md', at: 1 }]]]);
 	});
 });
 

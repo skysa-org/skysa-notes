@@ -1,4 +1,3 @@
-import { isHidden } from '../../paths.js';
 import type { ChangeEntry, RemoteEntry } from '../../providers/types.js';
 import type { EngineContext } from '../context.js';
 import type { PullChange, SyncOp, UnreadableFile } from '../store.js';
@@ -9,7 +8,7 @@ import {
 	doomedIn,
 	liveEntries,
 	type Step,
-	unhidden,
+	syncedOnly,
 	unreadMap,
 } from './batch.js';
 import type { Cascade } from './cascade.js';
@@ -26,7 +25,7 @@ import type { PullNotes } from './notes.js';
  */
 
 export const createPullDecide = (
-	{ store, names, meter }: EngineContext,
+	{ store, names, meter, passesOver }: EngineContext,
 	{
 		decideDeleted,
 		decideFile,
@@ -56,17 +55,18 @@ export const createPullDecide = (
 	const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
 		entry.deleted !== true &&
 		entry.kind === 'file' &&
-		!isHidden(entry.path) &&
+		!passesOver(entry.path) &&
 		names.isDocumentName(entry.path);
 
 	const decide: Decide = async (
 		entry: ChangeEntry,
 		{ batch, decided, at }: Step
 	): Promise<PullChange[]> => {
-		// The marker file and any provider bookkeeping. `isHidden` is the same
-		// rule the UI uses, so nothing the user cannot see becomes a note.
+		// The marker file and any provider bookkeeping. `passesOver` is, in this
+		// app, the rule the UI uses (`isPassedOver`), so nothing the user cannot
+		// see becomes a note.
 		if (entry.deleted === true) {
-			if (entry.path !== undefined && isHidden(entry.path)) return [];
+			if (entry.path !== undefined && passesOver(entry.path)) return [];
 			return decideDeleted(entry, { batch, decided, at });
 		}
 		// Nothing the app shows, and so nothing it lists as unreadable either: a
@@ -74,7 +74,7 @@ export const createPullDecide = (
 		// is no longer a note the user is missing.
 		const unlisted = (): PullChange[] =>
 			forgetUnread({ batch, decided }, (remoteId) => remoteId === entry.remoteId);
-		if (isHidden(entry.path)) return unlisted();
+		if (passesOver(entry.path)) return unlisted();
 		if (entry.kind === 'folder') return decideFolder(entry, { batch, decided, at });
 
 		// A file that is not a note: a picture added beside one, or a PDF the
@@ -166,7 +166,7 @@ export const createPullDecide = (
 			// Everything this batch says still exists, and where, so a deletion
 			// elsewhere in it can be recognised as the first half of a move.
 			live: liveEntries(entries),
-			listed: unhidden(liveEntries(entries)),
+			listed: syncedOnly(liveEntries(entries), passesOver),
 			claimed: new Set([...claimedPaths(entries), ...renaming.values()]),
 			doomed: doomedIn(entries),
 			renaming,

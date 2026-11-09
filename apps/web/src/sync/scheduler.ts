@@ -8,6 +8,7 @@ import {
 	isRateLimitError,
 	type MergeInput,
 	messageOf,
+	NOTES_WATCH,
 	type ProviderKind,
 	type StorageProvider,
 	type SyncEngine,
@@ -210,6 +211,13 @@ export interface SyncSchedulerOptions {
 	 * can, for the engine (`SyncEngineOptions.merge`). This app passes none.
 	 */
 	merge?: (file: MergeInput) => string | undefined;
+	/**
+	 * The hidden paths the app syncs all the same, for the engine
+	 * (`SyncEngineOptions.syncsHidden`). Required, where the engine's is not:
+	 * without it a scan here would forget every clean note in the scratchpad
+	 * and the vault, which are dot-named.
+	 */
+	syncsHidden: (path: string) => boolean;
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
 	debounceMs?: number;
@@ -399,7 +407,7 @@ const RELIST_MS = 3000;
 type Timer = 'next' | 'debounce' | 'notice' | 'relist' | 'keyFile';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
-	const { db, client, createProvider, lockName, document, merge } = options;
+	const { db, client, createProvider, lockName, document, merge, syncsHidden } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
 	const intervalMs = options.intervalMs ?? 60_000;
@@ -524,8 +532,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				...pushed,
 				pulled: pulled.pulled,
 				conflicts: [...pulled.conflicts, ...pushed.conflicts],
-				...(pulled.clipboard === true ? { clipboard: true } : {}),
-				...(pulled.encryption === true ? { encryption: true } : {}),
+				// What the pull met; a push meets nothing.
+				...(pulled.met === undefined ? {} : { met: pulled.met }),
 			},
 			pulledAt,
 		};
@@ -814,7 +822,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await synced(session, result.outcome);
 		// Not waited for: a refresh downloads, and a flush waits for this run to
 		// end before it sends anything (`sync/clipboard.ts`).
-		if (result.outcome.clipboard === true) {
+		if (result.outcome.met?.includes('clipboard') === true) {
 			void clipboard.refresh(session.connectionId);
 			arm('relist', relistMs, () => {
 				void clipboard.refresh(session.connectionId);
@@ -824,7 +832,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// Another device may have set the source up for secrets, or replaced its
 		// key. Read twice, as the clipboard is listed: a listing can trail the
 		// feed that reported a new file.
-		if (result.outcome.encryption === true) {
+		if (result.outcome.met?.includes('encryption') === true) {
 			void keyFile.heard(session.connectionId);
 			arm('keyFile', relistMs, () => {
 				void keyFile.heard(session.connectionId);
@@ -1144,6 +1152,11 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 							provider,
 							document,
 							...(merge === undefined ? {} : { merge }),
+							syncsHidden,
+							// What the clipboard's and the key file's syncs below
+							// read again, which is why it is set here and not by
+							// the app (`NOTES_WATCH`).
+							watch: NOTES_WATCH,
 							store: createDexieSyncStore(db, { connectionId }),
 							reauthorize: () => reauthorize(tokens),
 							maxAttempts,

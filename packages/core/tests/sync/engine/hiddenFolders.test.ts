@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { NOTE_FORMAT } from '../../../src/markdown/format.js';
+import { createFakeProvider } from '../../../src/providers/fake.js';
+import { createSyncEngine } from '../../../src/sync/engine.js';
+import { reporting } from '../kit/engine.js';
 import { syncWorld } from '../kit/world.js';
 
 /**
@@ -7,7 +11,7 @@ import { syncWorld } from '../kit/world.js';
  * the scratchpad's and the vault's — and what the engine makes of them
  * (`names`).
  */
-const { world, pullNow, remoteFile, noteAt } = syncWorld();
+const { world, engineWith, pullNow, remoteFile, noteAt } = syncWorld();
 
 describe("the clipboard's folder", () => {
 	// Items a connection's devices share through `.clipboard/` (§7, "The
@@ -23,7 +27,7 @@ describe("the clipboard's folder", () => {
 
 		const result = await world.engine.pull();
 
-		expect(result).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
+		expect(result).toMatchObject({ status: 'ok', pulled: 0, met: ['clipboard'] });
 		expect(world.store.notes()).toEqual([]);
 		expect(world.store.files()).toEqual([]);
 		expect(world.store.folders()).toEqual([]);
@@ -33,8 +37,23 @@ describe("the clipboard's folder", () => {
 		await world.provider.createFolder('.clipboard');
 		await clip('20261006T153012123Z-pasted-image-3f9a1c2b.png');
 
-		expect(await world.engine.pull()).toMatchObject({ status: 'ok', clipboard: true });
+		expect(await world.engine.pull()).toMatchObject({ status: 'ok', met: ['clipboard'] });
 		expect(world.store.files()).toEqual([]);
+	});
+
+	it('says a scan met it on a page before the last', async () => {
+		// A scan is read a page at a time and says what any page met.
+		world.provider = createFakeProvider({
+			startAt: new Date('2026-01-01T00:00:00Z'),
+			pageSize: 1,
+		});
+		await world.provider.ensureRoot();
+		await world.provider.createFolder('.clipboard');
+		await remoteFile('a.md', 'a\n');
+		await remoteFile('b.md', 'b\n');
+
+		expect(await engineWith().pull()).toMatchObject({ status: 'ok', met: ['clipboard'] });
+		expect(world.store.notes()).toHaveLength(2);
 	});
 
 	it('says an item went', async () => {
@@ -43,7 +62,7 @@ describe("the clipboard's folder", () => {
 		await world.engine.pull();
 		await world.provider.delete(item);
 
-		expect(await world.engine.pull()).toMatchObject({ pulled: 0, clipboard: true });
+		expect(await world.engine.pull()).toMatchObject({ pulled: 0, met: ['clipboard'] });
 	});
 
 	it('says it may have met it, for something gone by its id alone', async () => {
@@ -54,7 +73,8 @@ describe("the clipboard's folder", () => {
 
 		const result = await pullNow([{ deleted: true, remoteId: 'an-item-pasted-here' }]);
 
-		expect(result).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
+		// Every name: an id alone could have been the key file as well.
+		expect(result).toMatchObject({ status: 'ok', pulled: 0, met: ['clipboard', 'encryption'] });
 	});
 
 	it('says nothing of a round that did not meet it', async () => {
@@ -66,14 +86,14 @@ describe("the clipboard's folder", () => {
 		const result = await world.engine.pull();
 
 		expect(result.pulled).toBe(1);
-		expect(result.clipboard).toBeUndefined();
+		expect(result.met ?? []).not.toContain('clipboard');
 	});
 
 	it('carries it through a whole sync', async () => {
 		await world.engine.pull();
 		await world.provider.createFolder('.clipboard');
 
-		expect((await world.engine.sync()).clipboard).toBe(true);
+		expect((await world.engine.sync()).met).toEqual(['clipboard']);
 	});
 });
 
@@ -89,8 +109,8 @@ describe('the key file for secrets', () => {
 
 		const result = await world.engine.pull();
 
-		expect(result).toMatchObject({ status: 'ok', pulled: 0, encryption: true });
-		expect(result.clipboard).toBeUndefined();
+		expect(result).toMatchObject({ status: 'ok', pulled: 0, met: ['encryption'] });
+		expect(result.met ?? []).not.toContain('clipboard');
 		expect(world.store.notes()).toEqual([]);
 		expect(world.store.files()).toEqual([]);
 	});
@@ -98,7 +118,7 @@ describe('the key file for secrets', () => {
 	it('says a scan met it', async () => {
 		await world.provider.write('.encryption.json', keyFile, {});
 
-		expect(await world.engine.pull()).toMatchObject({ status: 'ok', encryption: true });
+		expect(await world.engine.pull()).toMatchObject({ status: 'ok', met: ['encryption'] });
 	});
 
 	it('says it may have met it, for something gone by its id alone', async () => {
@@ -106,7 +126,7 @@ describe('the key file for secrets', () => {
 
 		const result = await pullNow([{ deleted: true, remoteId: 'gone-by-id' }]);
 
-		expect(result).toMatchObject({ status: 'ok', clipboard: true, encryption: true });
+		expect(result).toMatchObject({ status: 'ok', met: ['clipboard', 'encryption'] });
 	});
 
 	it('says nothing of a round that did not meet it', async () => {
@@ -119,14 +139,14 @@ describe('the key file for secrets', () => {
 		const result = await world.engine.pull();
 
 		expect(result.pulled).toBeGreaterThan(0);
-		expect(result.encryption).toBeUndefined();
+		expect(result.met ?? []).not.toContain('encryption');
 	});
 
 	it('carries it through a whole sync', async () => {
 		await world.engine.pull();
 		await world.provider.write('.encryption.json', keyFile, {});
 
-		expect((await world.engine.sync()).encryption).toBe(true);
+		expect((await world.engine.sync()).met).toEqual(['encryption']);
 	});
 });
 
@@ -143,7 +163,7 @@ describe("the scratchpad's folder", () => {
 		expect(result.status).toBe('ok');
 		expect(noteAt('.scratchpad/untitled.md')?.content).toBe('milk, eggs\n');
 		expect(world.store.folders().map((folder) => folder.path)).toEqual(['.scratchpad']);
-		expect(result.clipboard).toBeUndefined();
+		expect(result.met ?? []).not.toContain('clipboard');
 	});
 
 	it('sends one written here', async () => {
@@ -198,5 +218,63 @@ describe("the vault's passwords' folder", () => {
 		await world.engine.pull();
 
 		expect(world.store.notes()).toEqual([]);
+	});
+});
+
+describe('an engine handed rules that are not this app’s', () => {
+	// The engine knows none of this app's folders
+	// (docs/decisions/0018-the-shared-kit.md): which hidden paths sync, and
+	// which it is to say it met, are handed to it. Every test above runs with
+	// this app's (`syncsHidden`, `NOTES_WATCH`); these run with others.
+	it('passes over every hidden path, and says it met none, when handed neither', async () => {
+		await world.provider.createFolder('.scratchpad');
+		await remoteFile('.scratchpad/untitled.md', 'milk\n');
+		await world.provider.createFolder('.vault');
+		await remoteFile('.vault/github.md', 'x\n');
+		await world.provider.createFolder('.clipboard');
+		await remoteFile('a.md', 'a\n');
+		const bare = createSyncEngine({
+			provider: world.provider,
+			store: world.store,
+			document: NOTE_FORMAT,
+		});
+
+		const result = await bare.pull();
+
+		expect(result.status).toBe('ok');
+		expect(world.store.notes().map((note) => note.path)).toEqual(['a.md']);
+		expect(world.store.folders()).toEqual([]);
+		expect(result.met).toBeUndefined();
+	});
+
+	it('syncs the hidden paths it is told to, and no others', async () => {
+		await world.provider.createFolder('.data');
+		await remoteFile('.data/x.md', 'x\n');
+		await world.provider.createFolder('.scratchpad');
+		await remoteFile('.scratchpad/y.md', 'y\n');
+		const syncsData = (path: string) => path === '.data' || path.startsWith('.data/');
+
+		expect((await engineWith({ syncsHidden: syncsData }).pull()).status).toBe('ok');
+
+		expect(world.store.notes().map((note) => note.path)).toEqual(['.data/x.md']);
+		expect(world.store.folders().map((folder) => folder.path)).toEqual(['.data']);
+	});
+
+	it('says by name what it met of a watch of its own, in the watch’s order', async () => {
+		const watch = {
+			settings: (path: string) => path === '.settings.json',
+			inbox: (path: string) => path.startsWith('.inbox/'),
+		};
+		await engineWith({ watch }).pull();
+		await world.provider.write('.settings.json', '{}\n', {});
+		await world.provider.createFolder('.clipboard');
+
+		expect((await engineWith({ watch }).pull()).met).toEqual(['settings']);
+
+		const gone = reporting(world.provider, [{ deleted: true, remoteId: 'gone-by-id' }]);
+		expect((await engineWith({ watch, provider: gone }).pull()).met).toEqual([
+			'settings',
+			'inbox',
+		]);
 	});
 });

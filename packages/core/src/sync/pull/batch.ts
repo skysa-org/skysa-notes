@@ -1,4 +1,4 @@
-import { isHidden, isWithin } from '../../paths.js';
+import { isWithin } from '../../paths.js';
 import type { ChangeEntry, RemoteEntry } from '../../providers/types.js';
 import type { PullChange, SyncNote, UnreadableFile } from '../store.js';
 import type { FileBase } from './files.js';
@@ -75,11 +75,14 @@ export const listedAfter = (
 	apartFrom?: string
 ): boolean => (live.get(id) ?? []).some((entry) => entry.at > at && entry.path !== apartFrom);
 
-/** The same, without what is at a hidden path (`Batch.listed`), each at its own `at`. */
-export const unhidden = (live: LiveEntries): LiveEntries =>
+/**
+ * The same, without what is at a path the pull passes over (`Batch.listed`,
+ * `EngineContext.passesOver`), each at its own `at`.
+ */
+export const syncedOnly = (live: LiveEntries, passesOver: (path: string) => boolean): LiveEntries =>
 	new Map(
 		[...live].flatMap(([id, entries]): [string, LiveEntry[]][] => {
-			const shown = entries.filter((entry) => !isHidden(entry.path));
+			const shown = entries.filter((entry) => !passesOver(entry.path));
 			return shown.length === 0 ? [] : [[id, shown]];
 		})
 	);

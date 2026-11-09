@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { NOTES_WATCH } from '../../src/appFolder.js';
 import { NOTES_FOLDER } from '../../src/config.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
 import { NOTE_FORMAT } from '../../src/markdown/format.js';
@@ -1392,7 +1393,13 @@ describe('changes', () => {
 		await provider.ensureRoot();
 		await provider.createFolder('.clipboard');
 		const store = createMemoryStore();
-		const engine = createSyncEngine({ document: NOTE_FORMAT, provider, store, now: () => AT });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			watch: NOTES_WATCH,
+			provider,
+			store,
+			now: () => AT,
+		});
 		await engine.pull();
 		const { cursor } = await drainChanges(provider);
 		const item = await provider.createFile(
@@ -1405,7 +1412,11 @@ describe('changes', () => {
 
 		const { entries } = await drainChanges(provider, cursor);
 		expect(entries).toEqual([{ deleted: true, remoteId: item.remoteId }]);
-		expect(await engine.pull()).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
+		expect(await engine.pull()).toMatchObject({
+			status: 'ok',
+			pulled: 0,
+			met: ['clipboard', 'encryption'],
+		});
 	});
 
 	it('reset on a page token Drive will not take', async () => {

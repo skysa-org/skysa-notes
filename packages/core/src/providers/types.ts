@@ -123,7 +123,8 @@ export interface CreateFileOptions {
  *   push writes the damage over the original. A probe takes it for "there".
  * - `list` is one level; `changes` covers the whole tree at every depth.
  * - Neither filters hidden paths: the marker has to reach the engine.
- *   Callers filter with `isHidden`.
+ *   Callers filter: the engine passes over a hidden path (`isHidden`) the
+ *   app does not sync all the same (`SyncEngineOptions.syncsHidden`).
  * - `rootId` is opaque, non-empty and stable. A provider whose root has no id
  *   of its own — a Dropbox app folder, where the root simply is `/` — returns a
  *   synthetic constant.

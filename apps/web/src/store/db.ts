@@ -542,7 +542,7 @@ export const refIn = (ref: string, connectionId: string): boolean =>
 /**
  * Every source's cursor dropped and `rootId` kept, as "Re-scan" does (`resync`
  * in `sync/scheduler.ts`), so the next sync of each is a scan: what a change to
- * what `isHidden` lets through needs, since a feed names a file again only when
+ * what `syncsHidden` lets through needs, since a feed names a file again only when
  * it changes. A scan reads nothing this device already holds at its version.
  */
 const dropCursors = async (tx: Transaction): Promise<void> => {

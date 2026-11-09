@@ -1,5 +1,6 @@
 import { beforeEach } from 'vitest';
 
+import { NOTES_WATCH, syncsHidden } from '../../../src/appFolder.js';
 import { NOTE_FORMAT } from '../../../src/markdown/format.js';
 import type { ChangeEntry, StorageProvider } from '../../../src/providers/types.js';
 import { createSyncEngine, type SyncEngineOptions } from '../../../src/sync/engine.js';
@@ -80,7 +81,14 @@ export const engineFixture = (world: () => World) => {
 
 	/** An engine over the file's provider and store at `AT`, with what a test changes. */
 	const engineWith = (overrides: Partial<SyncEngineOptions> = {}) =>
-		createSyncEngine({ document: NOTE_FORMAT, ...world(), now: () => AT, ...overrides });
+		createSyncEngine({
+			document: NOTE_FORMAT,
+			syncsHidden,
+			watch: NOTES_WATCH,
+			...world(),
+			now: () => AT,
+			...overrides,
+		});
 
 	/** Pulls exactly these entries, whatever the provider would have reported. */
 	const pullNow = (entries: readonly ChangeEntry[]) =>

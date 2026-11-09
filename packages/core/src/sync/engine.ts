@@ -1,9 +1,10 @@
 import type { DocumentFormat } from '../documentFormat.js';
 import { documentNames } from '../names/conflicts.js';
+import { isHidden } from '../paths.js';
 import type { ChangeEntry, RemoteEntry, StorageProvider } from '../providers/types.js';
 import type { EngineContext } from './context.js';
 import { readDocument } from './document.js';
-import { metOf, type SyncOutcome, transient } from './outcome.js';
+import { metOf, type SyncOutcome, transient, type Watch } from './outcome.js';
 import { createProgress, type SyncProgress } from './progress.js';
 import { createPullAttachments } from './pull/attachments.js';
 import { createCascade } from './pull/cascade.js';
@@ -70,6 +71,22 @@ export interface SyncEngineOptions {
 	 */
 	merge?: (file: MergeInput) => string | undefined;
 	/**
+	 * The hidden paths the app syncs all the same. A path under a dot-prefixed
+	 * segment (`isHidden`) is passed over — the marker file, the app's own
+	 * bookkeeping, another tool's — unless this says otherwise: this app's
+	 * scratchpad and vault are dot-named to stay out of other tools' lists of
+	 * folders, and are notes (`syncsHidden` in `appFolder.ts`). Absent, no
+	 * hidden path syncs.
+	 */
+	syncsHidden?: (path: string) => boolean;
+	/**
+	 * Named tests of a path. A pull says by name which ones an entry it met
+	 * passed (`SyncOutcome.met`), and decides nothing more about it for that:
+	 * this app reads its clipboard and its key file again (`NOTES_WATCH` in
+	 * `appFolder.ts`). Absent, a pull says it met nothing.
+	 */
+	watch?: Watch;
+	/**
 	 * Mint a fresh access token. Called once on an `AuthError`, after which the
 	 * failing operation is retried exactly once. `packages/core` cannot know how
 	 * a token is obtained, so the caller supplies it.
@@ -108,6 +125,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		maxAttempts = MAX_ATTEMPTS,
 		onProgress = () => undefined,
 		merge,
+		syncsHidden = () => false,
+		watch = {},
 	} = options;
 	const writesAtOnce = Math.max(1, provider.writesAtOnce ?? 1);
 
@@ -127,6 +146,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		store,
 		document,
 		names: documentNames(document.extension),
+		passesOver: (path) => isHidden(path) && !syncsHidden(path),
+		watch,
 		now,
 		newId,
 		maxAttempts,

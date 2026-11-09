@@ -99,24 +99,11 @@ describe('isHidden', () => {
 		expect(isHidden('work/standup.md')).toBe(false);
 	});
 
-	it('leaves the scratchpad at the root to sync, and nothing hidden inside it', () => {
-		expect(isHidden('.scratchpad')).toBe(false);
-		expect(isHidden('.scratchpad/untitled.md')).toBe(false);
-		expect(isHidden('.scratchpad/pasted-image-3f9a1c2b.png')).toBe(false);
-		expect(isHidden('.scratchpad/.DS_Store')).toBe(true);
-		expect(isHidden('work/.scratchpad/a.md')).toBe(true);
-		expect(isHidden('.Scratchpad/a.md')).toBe(true);
-		expect(isHidden('.clipboard/a.txt')).toBe(true);
-	});
-
-	it('leaves the vault’s passwords at the root to sync, and nothing hidden inside them', () => {
-		expect(isHidden('.vault')).toBe(false);
-		expect(isHidden('.vault/github.md')).toBe(false);
-		expect(isHidden('.vault/.DS_Store')).toBe(true);
-		expect(isHidden('work/.vault/a.md')).toBe(true);
-		expect(isHidden('.Vault/a.md')).toBe(true);
-		expect(isHidden('.vaults/a.md')).toBe(true);
-		expect(isHidden('.encryption.json')).toBe(true);
+	it('hides the dot-named folders this app syncs all the same, as any app’s rule', () => {
+		// This app's exception for them is `syncsHidden` (`appFolder.ts`),
+		// which the sync engine is handed.
+		expect(isHidden('.scratchpad/untitled.md')).toBe(true);
+		expect(isHidden('.vault/github.md')).toBe(true);
 	});
 });
 

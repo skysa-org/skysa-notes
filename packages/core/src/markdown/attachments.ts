@@ -1,8 +1,9 @@
 import type { Nodes, Root } from 'mdast';
 
+import { isPassedOver } from '../appFolder.js';
 import { NOTE_EXTENSION } from '../config.js';
 import { extensionOf, extensionPart } from '../names/extension.js';
-import { basename, isHidden, parentPath, pathSegments, SEPARATOR } from '../paths.js';
+import { basename, parentPath, pathSegments, SEPARATOR } from '../paths.js';
 import { parse, serialize } from './pipeline.js';
 
 /**
@@ -345,7 +346,7 @@ export const linkedFiles = (body: string, notePath: string): readonly string[] =
 			.map((href) => resolveRelative(notePath, href))
 			.filter(
 				(path): path is string =>
-					path !== undefined && attachmentNamed(basename(path)) && !isHidden(path)
+					path !== undefined && attachmentNamed(basename(path)) && !isPassedOver(path)
 			)
 	),
 ];

@@ -1,4 +1,4 @@
-import { NOTE_FORMAT } from '@skysa/core';
+import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, detachConnection } from '../src/store/connection.js';
@@ -86,6 +86,7 @@ describe('following the connection', () => {
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
+			syncsHidden,
 			db,
 			client: tokenServer(),
 			createProvider: first.remote.factory,
@@ -115,6 +116,7 @@ describe('following the connection', () => {
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
+			syncsHidden,
 			db,
 			client: tokenServer(),
 			createProvider: theRemote.factory,
@@ -321,6 +323,7 @@ describe('following the connection', () => {
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
+			syncsHidden,
 			db,
 			client: tokenServer(),
 			createProvider: first.remote.factory,
