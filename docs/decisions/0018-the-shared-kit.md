@@ -115,7 +115,12 @@ Each is a pull request of its own in this repository, released as usual, so that
      The scheduler builds none of it: the clipboard, the key file and the files beside notes are made by the app over the session the scheduler lends (`sessionFor`), and attached to it (`attach`), to be told when a session starts, syncs and ends.
      The app hands it the watch, `NOTES_WATCH`, beside the two that read it.
      This part is cut.
-  2. The scheduler and the provider factory answer with codes, and the app words them.
+  2. The scheduler and the provider factory say nothing in words of their own.
+     A failure the engine gives no reason for is published with none, and the app's status words say it.
+     A provider this build has no adapter for is `attention` with no error, which the app already words from the kinds it syncs.
+     A request given up on fails with a `TimeoutError` that says what the app hands the factory (`timedOut`), since that message goes through the engine and is kept on an op that fails with it.
+     The catalog's `scheduler` words, which nothing reached, are gone.
+     This part is cut.
   3. The stores take the format, and make a conflict copy with it.
   4. The credential, the token source and the relay reach the database through ports.
   5. The scheduler reaches the database through one port, and none of what moves imports the app's `store/`, Dexie or its words.

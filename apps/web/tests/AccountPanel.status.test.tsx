@@ -470,10 +470,8 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			clientWith({ connection: () => Promise.reject(new TypeError('offline')) }),
 			db,
 			'/',
-			fakeSync({
-				phase: 'attention',
-				error: 'This app cannot sync with this storage provider yet.',
-			})
+			// As the scheduler says it: attention, and no words of its own.
+			fakeSync({ phase: 'attention' })
 		);
 
 		expect(await screen.findByText('This app cannot sync with WebDAV yet.')).toBeTruthy();
