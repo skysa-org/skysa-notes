@@ -110,6 +110,55 @@ const NOT_ABOVE = (folders, message) => ({
 	message,
 });
 
+/** The web app's store: the data layer, below the sync layer and the UI. */
+const STORE_LAYER = NOT_ABOVE(
+	[
+		'components',
+		'editor',
+		'routes',
+		'sync',
+		'secrets',
+		'fill',
+		'share',
+		'install',
+		'pictures',
+		'commands',
+	],
+	'the store is the data layer: it does not import the sync layer, the UI or the editors.'
+);
+
+/** The web app's sync layer: it drives the store, below the UI. */
+const SYNC_LAYER = NOT_ABOVE(
+	[
+		'components',
+		'routes',
+		'editor',
+		'secrets',
+		'fill',
+		'share',
+		'install',
+		'pictures',
+		'commands',
+	],
+	'the sync layer drives the store; it does not import the UI.'
+);
+
+/**
+ * What the sync client bound for the shared kit reaches the device without:
+ * Dexie, the app's tables and stores, and the app's words. It has ports for
+ * the first and says nothing in the last (docs/decisions/0018-the-shared-kit.md).
+ */
+const CLIENT_MESSAGE =
+	'the sync client reaches the device through its ports and has no words of its own (docs/decisions/0018-the-shared-kit.md).';
+const CLIENT_PORTS = [
+	{ group: ['dexie', '**/i18n/**', '**/db.js'], message: CLIENT_MESSAGE },
+	{
+		group: ['**/store/*', '!**/store/credentials.js', '!**/store/connectCode.js'],
+		message: CLIENT_MESSAGE,
+	},
+	{ group: ['./store.js', './dexiePorts.js', './notesSync.js'], message: CLIENT_MESSAGE },
+];
+
 /** What nothing in packages/core/src may import. */
 const CORE_IMPORTS = [
 	{
@@ -651,56 +700,27 @@ export default tseslint.config(
 		// that store. Neither may import the UI or anything built on top of
 		// them, so each can be read, tested and changed without the screens.
 		files: ['apps/web/src/store/**/*.{ts,tsx}'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						NOT_ABOVE(
-							[
-								'components',
-								'editor',
-								'routes',
-								'sync',
-								'secrets',
-								'fill',
-								'share',
-								'install',
-								'pictures',
-								'commands',
-							],
-							'the store is the data layer: it does not import the sync layer, the UI or the editors.'
-						),
-					],
-				},
-			],
-		},
+		rules: { 'no-restricted-imports': ['error', { patterns: [STORE_LAYER] }] },
 	},
 	{
 		files: ['apps/web/src/sync/**/*.{ts,tsx}'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						NOT_ABOVE(
-							[
-								'components',
-								'routes',
-								'editor',
-								'secrets',
-								'fill',
-								'share',
-								'install',
-								'pictures',
-								'commands',
-							],
-							'the sync layer drives the store; it does not import the UI.'
-						),
-					],
-				},
-			],
-		},
+		rules: { 'no-restricted-imports': ['error', { patterns: [SYNC_LAYER] }] },
+	},
+	{
+		// The sync client goes to the shared kit (docs/decisions/0018-the-shared-kit.md).
+		// It reaches the device only through its ports and says nothing in words
+		// of its own, so none of it imports Dexie, the app's tables, its stores
+		// or the catalog. The credentials go with it. Repeats each layer's
+		// patterns, which a rule set here replaces rather than adds to.
+		files: [
+			'apps/web/src/api/**/*.ts',
+			'apps/web/src/sync/{tokens,providers,relay,scheduler,wakeLock,beforeUpdate}.ts',
+		],
+		rules: { 'no-restricted-imports': ['error', { patterns: [SYNC_LAYER, ...CLIENT_PORTS] }] },
+	},
+	{
+		files: ['apps/web/src/store/{credentials,connectCode}.ts'],
+		rules: { 'no-restricted-imports': ['error', { patterns: [STORE_LAYER, ...CLIENT_PORTS] }] },
 	},
 	{
 		// The bottom layer: plain browser helpers, for anything above to use.

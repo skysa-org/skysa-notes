@@ -9,6 +9,7 @@ import { TEST_FOLDER } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { clientStoreOf } from '../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../src/sync/lock.js';
 import { createSyncScheduler, type SchedulerEvent } from '../src/sync/scheduler.js';
 import { watchedDatabase } from './support/db.js';
@@ -113,7 +114,7 @@ describe('syncing a connection', () => {
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
 			syncsHidden,
-			db,
+			store: clientStoreOf(db),
 			client: tokenServer(),
 			createProvider: remote().factory,
 			environment: env.environment,
@@ -295,7 +296,7 @@ describe('offline', () => {
 			lockName: SYNC_LOCK,
 			document: NOTE_FORMAT,
 			syncsHidden,
-			db,
+			store: clientStoreOf(db),
 			client: server,
 			createProvider: theRemote.factory,
 			environment: env.environment,
@@ -357,7 +358,7 @@ describe('what the app syncs beside its documents', () => {
 			document: NOTE_FORMAT,
 			syncsHidden,
 			...(watch === undefined ? {} : { watch }),
-			db,
+			store: clientStoreOf(db),
 			client: tokenServer(),
 			createProvider: theRemote.factory,
 			environment: env.environment,
