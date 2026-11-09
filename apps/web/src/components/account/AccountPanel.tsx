@@ -155,6 +155,16 @@ export const AccountPanel = ({
 	const named = answered?.kind === 'connected' ? answered.connection.id : undefined;
 	const asking = useRef(false);
 	const askedAbout = useRef<string | null>(null);
+	// Whether the panel is still drawn. An answer that lands after it has gone
+	// has no one to tell, and React reads the window for any update, mounted or
+	// not, which in a test can be after the window itself has gone.
+	const drawn = useRef(true);
+	useEffect(() => {
+		drawn.current = true;
+		return () => {
+			drawn.current = false;
+		};
+	}, []);
 	useEffect(() => {
 		if (boundId === null || asking.current) return;
 		const before = askedAbout.current;
@@ -164,6 +174,7 @@ export const AccountPanel = ({
 		if (before !== null && (boundId === '' || named === boundId)) return;
 		asking.current = true;
 		const settle = (next: Asked<AccountState>) => {
+			if (!drawn.current) return;
 			// Before the state changes, so the render it causes can ask again.
 			asking.current = false;
 			setAccount(next);

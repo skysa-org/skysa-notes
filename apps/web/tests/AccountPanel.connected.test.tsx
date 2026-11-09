@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -152,6 +152,40 @@ describe('AccountPanel, downloading every note', () => {
 });
 
 describe('AccountPanel, with an account connected', () => {
+	it('tells no one of an answer that comes after it has gone', async () => {
+		// The panel is unmounted after each test, and the file's window is
+		// taken away after its last: an answer landing then must not reach
+		// React, which reads the window for any update, mounted or not. It
+		// failed a CI run in which every test passed (#696, 2026-11-09).
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		const answer = Promise.withResolvers<Awaited<ReturnType<ApiClient['connection']>>>();
+		const connection = vi.fn(() => answer.promise);
+		renderPanel(clientWith({ connection }), db);
+		await waitFor(() => {
+			expect(connection).toHaveBeenCalled();
+		});
+
+		cleanup();
+		const unhandled: unknown[] = [];
+		const keep = (reason: unknown) => {
+			unhandled.push(reason);
+		};
+		process.on('unhandledRejection', keep);
+		vi.stubGlobal('window', undefined);
+		try {
+			answer.resolve({ ok: false, refusal: 'reauthorize_required' });
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		} finally {
+			vi.unstubAllGlobals();
+			process.off('unhandledRejection', keep);
+		}
+
+		expect(unhandled).toEqual([]);
+	});
+
 	it('binds the device to the account it just consented to, and names it', async () => {
 		const db = freshDatabase();
 		await backFromConsent(db);
