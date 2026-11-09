@@ -29,6 +29,12 @@ import { isTombstone } from './rowStates.js';
  *   op, so one queued write covers every edit made before it runs, and a note
  *   edited again while its write is in flight is left dirty by the store and
  *   owed a fresh write (`settle` in `sync/store.ts`).
+ * - **A write may be lazy.** An app whose changes come every few seconds
+ *   queues them lazily, and the scheduler sends a lazy write with the next
+ *   sync rather than straight after (docs/ARCHITECTURE.md §7, "When a push
+ *   goes"). This app queues none. An edit that finds only a lazy write queued
+ *   replaces it with one that is not, at the back of the queue, which is how
+ *   the scheduler sees it.
  * - **A move says where the note is going, so a second rename replaces it.**
  *   Two moves queued for one note would move the file to the first name and
  *   back again, and a write addressed to the second name would find nothing
@@ -159,28 +165,44 @@ const atPath = (
 
 const nothing = (): Queued => Dexie.Promise.resolve();
 
-const add = (db: QueueDb, op: NewSyncOp & { connectionId: string }): Queued =>
+const add = (db: QueueDb, op: NewSyncOp & Pick<OpQueueRecord, 'connectionId' | 'lazy'>): Queued =>
 	db.opQueue.add({ attempts: 0, queuedAt: Date.now(), ...op }).then(() => undefined);
+
+/** When a write is to be sent: soon after it was made, or with the next sync. */
+export type Timing = 'soon' | 'lazy';
 
 /**
  * The note's contents have changed. One queued write is enough, however many
- * edits land before it runs. `except` is an op that is finishing, which does not
- * count as still queued.
+ * edits land before it runs, and it is lazy only while every one of them was.
+ * `except` is an op that is finishing, which does not count as still queued.
  */
-export const queueWrite = (db: QueueDb, note: NoteRecord, except?: number): Queued =>
+export const queueWrite = (
+	db: QueueDb,
+	note: NoteRecord,
+	except?: number,
+	timing: Timing = 'soon'
+): Queued => {
 	// A tombstone owes the remote its delete and nothing else.
-	isTombstone(note)
-		? nothing()
-		: opsFor(db, note).then((queued) =>
-				queued.some((op) => op.op === 'write' && op.seq !== except)
-					? undefined
-					: add(db, {
-							connectionId: note.connectionId,
-							op: 'write',
-							noteId: note.id,
-							path: note.path,
-						})
-			);
+	if (isTombstone(note)) return nothing();
+	return opsFor(db, note).then((ops) => {
+		const queued = ops.filter((op) => op.op === 'write' && op.seq !== except);
+		const lazy = timing === 'lazy';
+		if (queued.length > 0 && (lazy || queued.some((op) => op.lazy !== true))) {
+			return undefined;
+		}
+		// Withdrawn even while it is on its way: the store finds the note
+		// changed again when it lands, and this write is owed it.
+		return db.opQueue.bulkDelete(seqsOf(queued)).then(() =>
+			add(db, {
+				connectionId: note.connectionId,
+				op: 'write',
+				noteId: note.id,
+				path: note.path,
+				...(lazy ? { lazy: true as const } : {}),
+			})
+		);
+	});
+};
 
 /**
  * The note is now at `note.path`, having been at `from`. Replaces any move

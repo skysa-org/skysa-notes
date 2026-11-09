@@ -221,6 +221,14 @@ export interface SyncSchedulerOptions {
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
 	debounceMs?: number;
+	/**
+	 * How long a write queued lazily (`queueWrite`'s `timing`) may wait to be
+	 * sent, at most: it goes with the next sync — the poll while the page is in
+	 * sight, or as the page is hidden — and by then at the latest. Absent, as
+	 * in this app, no write waits beyond the debounce, and the queue is not read
+	 * to tell.
+	 */
+	lazyMs?: number;
 	/** How often to sync while the tab is visible. */
 	intervalMs?: number;
 	/** The first retry after a failure; each one after doubles, up to `maxBackoffMs`. */
@@ -401,15 +409,17 @@ const RELIST_MS = 3000;
 
 /**
  * `next`: the poll, or a backoff's retry. `debounce`: a local edit's sync.
- * `notice`: a look after the relay's last notice. `relist`: the clipboard's
- * second listing. `keyFile`: the key file's second read, for the same reason.
+ * `lazy`: the sync a lazy write waits for (`lazyMs`). `notice`: a look after
+ * the relay's last notice. `relist`: the clipboard's second listing.
+ * `keyFile`: the key file's second read, for the same reason.
  */
-type Timer = 'next' | 'debounce' | 'notice' | 'relist' | 'keyFile';
+type Timer = 'next' | 'debounce' | 'lazy' | 'notice' | 'relist' | 'keyFile';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
 	const { db, client, createProvider, lockName, document, merge, syncsHidden } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
+	const { lazyMs } = options;
 	const intervalMs = options.intervalMs ?? 60_000;
 	const backoffMs = options.backoffMs ?? 5000;
 	const maxBackoffMs = options.maxBackoffMs ?? 5 * 60_000;
@@ -872,6 +882,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		}
 		cancel('next');
 		cancel('debounce');
+		// The run sends what lazy writes are queued as well.
+		cancel('lazy');
 		// Whatever started this run, the backoff it was waiting on is over.
 		session.flags.delete('backingOff');
 		publish({
@@ -915,6 +927,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		sessionUnsubscribers.clear();
 		cancel('next');
 		cancel('debounce');
+		cancel('lazy');
 		cancel('notice');
 		cancel('relist');
 		cancel('keyFile');
@@ -1081,6 +1094,32 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	/** The row the app last showed, for `follow` to be asked again about. */
 	const shown = cell<SyncStateRecord | undefined>(undefined);
 
+	/** A local edit's sync, `debounceMs` after the last op it queued. */
+	const soon = (session: Session) => {
+		arm('debounce', debounceMs, () => {
+			void nudge(session);
+		});
+	};
+
+	/**
+	 * When to send what was just queued, for an app that queues writes lazily
+	 * (docs/ARCHITECTURE.md §7, "When a push goes"). An edit, shortly after
+	 * it. A lazy write waits for the next sync, and `wait` at the latest: the
+	 * first starts the wait and the rest join it, so changes made every few
+	 * seconds are still sent every `wait`.
+	 */
+	const owed = (session: Session, ops: readonly OpQueueRecord[], wait: number) => {
+		if (!isCurrent(session) || ops.length === 0) return;
+		if (ops.some((op) => op.lazy !== true)) {
+			soon(session);
+			return;
+		}
+		if (timers.has('lazy')) return;
+		arm('lazy', wait, () => {
+			void nudge(session);
+		});
+	};
+
 	/** A local edit queues an op, so a new highest seq is an edit to push. */
 	const watchEdits = (session: Session) => {
 		const subscription = liveQuery(() =>
@@ -1093,9 +1132,16 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				// The first answer is what was already queued; the run on open
 				// covers that.
 				if (seen === undefined || highest <= seen || !isCurrent(session)) return;
-				arm('debounce', debounceMs, () => {
-					void nudge(session);
-				});
+				if (lazyMs === undefined) {
+					soon(session);
+					return;
+				}
+				void rowsOf(db.opQueue, session.connectionId)
+					.filter((op) => (op.seq ?? 0) > seen)
+					.toArray()
+					.then((ops) => {
+						owed(session, ops, lazyMs);
+					});
 			},
 		});
 		sessionUnsubscribers.add(() => {
@@ -1254,6 +1300,18 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		sessionFor: besideNotes,
 	});
 
+	/**
+	 * The page is going out of sight: whatever is waiting to be sent goes now.
+	 * A phone may not run the page again for hours, and the next device opened
+	 * should find what was made here.
+	 */
+	const sendWaiting = (session: Session) => {
+		if (!timers.has('lazy') && !timers.has('debounce')) return;
+		cancel('lazy');
+		cancel('debounce');
+		void nudge(session);
+	};
+
 	const nudgeCurrent = (): Promise<void> => {
 		const session = bound.current;
 		return session === undefined ? Promise.resolve() : nudge(session);
@@ -1282,7 +1340,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			unsubscribers.add(environment.listen('focus', () => void nudgeCurrent()));
 			unsubscribers.add(
 				environment.listen('visibilitychange', () => {
-					if (environment.isVisible()) void nudgeCurrent();
+					const session = bound.current;
+					if (session === undefined) return;
+					if (environment.isVisible()) void nudge(session);
+					else sendWaiting(session);
 				})
 			);
 			// What failed while the network was going is no evidence against an op.

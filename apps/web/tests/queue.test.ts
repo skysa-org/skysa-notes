@@ -25,7 +25,7 @@ import {
 } from '../src/store/notes.js';
 import { queueByNotebook, queueWrite } from '../src/store/queue.js';
 import { createDexieSyncStore, type DexieSyncStoreOptions } from '../src/sync/store.js';
-import { noteById, updateNote } from './noteRows.js';
+import { lazily, noteById, updateNote } from './noteRows.js';
 import { freshDatabase } from './support/db.js';
 
 const CONNECTION = 'dropbox-1';
@@ -820,6 +820,90 @@ describe('local changes made while a push is in flight', () => {
 		expect(fake.callLog().filter((call) => call.op === 'write')).toHaveLength(1);
 		expect(remoteFiles(fake)).toEqual({});
 		expect(await getNote(db, note.id, scope)).toBeUndefined();
+	});
+});
+
+/** What is queued, as `op path`, with ` (lazy)` after a lazy write, in order. */
+const queuedOps = async (db: NotesDatabase): Promise<string[]> =>
+	(await db.opQueue.orderBy('seq').toArray()).map(
+		(op) => `${op.op} ${op.path}${op.lazy === true ? ' (lazy)' : ''}`
+	);
+
+describe('a lazy write, and an edit’s (§7, "When a push goes")', () => {
+	// This app queues no write lazily; an app whose changes come every few
+	// seconds does, and the queue keeps the rules for both (`queueWrite`).
+	it('queues a lazy change lazily, once however many there are', async () => {
+		const { db, engine } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
+		await engine.sync();
+
+		await lazily(db, note.id, '# Plan\n\none\n');
+		await lazily(db, note.id, '# Plan\n\ntwo\n');
+
+		expect(await queuedOps(db)).toEqual([`write ${note.path} (lazy)`]);
+	});
+
+	it('puts an edit’s write in place of a lazy one, at the back of the queue', async () => {
+		const { db, fake, engine } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
+		const other = await createNote(db, { ...scope, title: 'Other', body: '# Other\n' });
+		await engine.sync();
+		await lazily(db, note.id, '# Plan\n\none\n');
+		await lazily(db, other.id, '# Other\n\none\n');
+
+		await saveNoteBody(db, note.id, '# Plan\n\ntwo\n', undefined, scope);
+
+		expect(await queuedOps(db)).toEqual([`write ${other.path} (lazy)`, `write ${note.path}`]);
+		expect((await engine.sync()).status).toBe('ok');
+		await expectMirrored(db, fake);
+		expect(fake.contentAt(note.path)).toContain('two');
+	});
+
+	it('leaves an edit’s write as it is when a lazy change follows it', async () => {
+		const { db, engine } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
+		await engine.sync();
+		await saveNoteBody(db, note.id, '# Plan\n\none\n', undefined, scope);
+
+		await lazily(db, note.id, '# Plan\n\ntwo\n');
+
+		expect(await queuedOps(db)).toEqual([`write ${note.path}`]);
+	});
+
+	it('owes a lazy write for a lazy change made while the last one’s was on its way', async () => {
+		const { db, fake, engineOver } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
+		await engineOver(fake).sync();
+		await lazily(db, note.id, '# Plan\n\none\n');
+		const engine = engineOver(
+			inFlight(fake, 'write', () => lazily(db, note.id, '# Plan\n\ntwo\n'))
+		);
+
+		await engine.sync();
+
+		expect(await queuedOps(db)).toEqual([`write ${note.path} (lazy)`]);
+		expect((await engine.sync()).status).toBe('ok');
+		await expectMirrored(db, fake);
+		expect(fake.contentAt(note.path)).toContain('two');
+	});
+
+	it('sends an edit made while a lazy write was on its way, and not lazily', async () => {
+		const { db, fake, engineOver } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
+		await engineOver(fake).sync();
+		await lazily(db, note.id, '# Plan\n\none\n');
+		const engine = engineOver(
+			inFlight(fake, 'write', () =>
+				saveNoteBody(db, note.id, '# Plan\n\ntwo\n', undefined, scope)
+			)
+		);
+
+		await engine.sync();
+
+		expect(await queuedOps(db)).toEqual([`write ${note.path}`]);
+		expect((await engine.sync()).status).toBe('ok');
+		await expectMirrored(db, fake);
+		expect(fake.contentAt(note.path)).toContain('two');
 	});
 });
 

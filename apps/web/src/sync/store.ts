@@ -1247,18 +1247,20 @@ export const createDexieSyncStore = (
 	 * Record what an op achieved, against the note as it now stands.
 	 *
 	 * The engine held the op while it was at the network, and the user may have
-	 * gone on meanwhile — typed, renamed, restored. `withdrawn` says the op
-	 * itself is gone from the queue, which only a later change of the user's
-	 * does (`store/queue.ts`): a second rename replaces a queued move, a restore
-	 * withdraws a delete. Whatever the op did on the remote is recorded either
-	 * way, and anything the note has done since is owed an op of its own.
+	 * gone on meanwhile — typed, renamed, restored. `op` is the op as it is
+	 * queued now, and `undefined` if it is gone from the queue, which only a
+	 * later change of the user's does (`store/queue.ts`): a second rename
+	 * replaces a queued move, a restore withdraws a delete. Whatever the op did
+	 * on the remote is recorded either way, and anything the note has done
+	 * since is owed an op of its own.
 	 */
 	const settle = async (
 		scope: Scope,
 		seq: number,
 		outcome: OpOutcome,
-		withdrawn: boolean
+		op: OpQueueRecord | undefined
 	): Promise<void> => {
+		const withdrawn = op === undefined;
 		if (outcome.kind === 'done') return;
 		// The notebook's directory exists now, and the row records which one it
 		// is, so a later `rmdir` can name it. Only if the row is still at that
@@ -1323,7 +1325,10 @@ export const createDexieSyncStore = (
 			...(same ? { dirty: 0 as const, source: outcome.content } : {}),
 		};
 		await scope.notes.put(pushed);
-		if (!same) await queueWrite(scope, pushed, seq);
+		// As lazy as the write that is landing: a lazy change made while it was
+		// on its way waits for the next sync as the one before it did. An edit
+		// has queued a write that is not lazy already.
+		if (!same) await queueWrite(scope, pushed, seq, op?.lazy === true ? 'lazy' : 'soon');
 		// Renamed while its write was in flight — before it had a file to move,
 		// if this write is what created it. The file is where the write put it;
 		// the note stays where the user put it, and moves there.
@@ -1452,7 +1457,7 @@ export const createDexieSyncStore = (
 				// Gone is not an error: a change the user made while the op was
 				// in flight withdrew it. See `settle`.
 				const op = await queuedOp(db, seq);
-				await settle(db, seq, outcome, op === undefined);
+				await settle(db, seq, outcome, op);
 				if (op !== undefined) await db.opQueue.delete(seq);
 			}),
 

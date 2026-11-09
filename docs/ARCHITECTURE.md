@@ -1603,6 +1603,15 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
    Exponential backoff per op; give up after N attempts and surface.
 3. Triggers: app open, tab regains focus, `online` event, 60s interval while visible, Background Sync API when available (best effort), immediately after a local edit (debounced 2s), and — where the deployment runs the change relay (§6) — a notice that another device of the connection has pushed, and 3 and 10 s after the last such notice.
    The relay is one more trigger, never a replacement for the others: it hears nothing of edits made in the folder by other tools.
+   **When a push goes** (`sync/scheduler.ts`, record 0018):
+   - An edit's ops go 2 s after the last one queued (`debounceMs`), and every op this app queues is an edit's.
+   - Hiding the page sends whatever is waiting, at once (`sendWaiting`).
+     A phone may not run the page again for hours, and the next device opened should find the edit.
+     Until 2026-11-09 an edit made in the 2 s before the app went out of sight waited out its 2 s, in a page the phone could have frozen by then.
+   - An app whose changes come every few seconds queues their writes lazily (`queueWrite`'s `timing`) and passes `lazyMs`: memoriam, which records a pass of practice every few.
+     A lazy write goes with the next sync — the poll while the page is in sight, or as it is hidden — and `lazyMs` after the first at the latest; a later one joins that wait rather than putting it off.
+     An edit that finds only a lazy write queued for its note replaces it, at the back of the queue, and a write that lands after another lazy change is owed again as lazily as it was queued.
+     This app passes no `lazyMs` and queues nothing lazily, and without `lazyMs` the scheduler does not read the queue to tell.
 
 <a id="folder-renames-moves"></a>
 ### Folder renames/moves
@@ -3457,11 +3466,12 @@ The layers here that do not care what a file holds are to move to a repository o
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 Until this app depends on it, this repository is still the whole product, as above.
-The first four seams are cut:
+The first five seams are cut:
 - the adapters are handed the app's folder (§3), and the scheduler its lock's name;
 - the engine and the adapters are handed what a document is (`NOTE_FORMAT`);
 - the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy");
-- the engine is handed which hidden paths sync (`syncsHidden`) and which a pull is to say it met (`watch`, and `SyncOutcome.met`), and this app's are in `appFolder.ts`.
+- the engine is handed which hidden paths sync (`syncsHidden`) and which a pull is to say it met (`watch`, and `SyncOutcome.met`), and this app's are in `appFolder.ts`;
+- the queue and the scheduler say when a push goes: an app may queue writes lazily and give the scheduler `lazyMs`, and this app does neither (§7, "When a push goes").
 
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 

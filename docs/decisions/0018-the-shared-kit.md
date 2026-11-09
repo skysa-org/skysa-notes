@@ -104,6 +104,10 @@ Each is a pull request of its own in this repository, released as usual, so that
   A lint rule keeps `appFolder.ts` and those places' names out of `paths.ts`, `providers/` and `sync/`.
 - **When a push goes.**
   A scheduler option, with memoriam's lazy writes as one setting and this app's two seconds after the last edit as the default.
+  This one is cut: `queueWrite` takes a `timing`, and the scheduler sends a lazy write with the next sync, and `lazyMs` after it at the latest, where it is given one (§7, "When a push goes").
+  This app gives none and queues nothing lazily, so its edits still go two seconds after the last.
+  Hiding the page sends whatever is waiting, here as in memoriam, so an edit made just before the app goes out of sight no longer waits out its two seconds in a page a phone may have frozen.
+  A write the Dexie store owes again, because the note changed while it was on its way, is queued as lazily as the one that landed.
 - **The client's modules reach IndexedDB through ports**, with Dexie adapters over tables the app owns.
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has, memoriam's checks of the root in the contract suite among them.
 - **A lint rule fences what is to move** from what stays, and once it passes the move can be made.
