@@ -70,12 +70,17 @@ So a new storage option is a minor release of the kit, and an app has it once it
 **The seams, cut here before anything moves.**
 Each is a pull request of its own in this repository, released as usual, so that moving the code is a move and not a rewrite.
 
-- **The app's identity is passed in, not imported.**
-  The folder's name, the marker file and the app it names, Drive's two `appProperties` keys, a note's extension and media type, the IndexedDB name, the sync lock's prefix, the update channel and the flow cookie's name become one value that each app hands the adapters, the engine, the server and the client.
+- **The app's folder is described, not imported.**
+  Its name, the marker file with the app and the layout version the marker names, and the key Drive tags the folder with become one value, `AppFolderSpec`, that each app hands the adapters.
+  The scheduler is handed the name of its sync lock the same way.
   This app hands over exactly what it has now, and a test pins each one: renaming any of them leaves every library already connected unfound, as §8, "Brand", says of the brand.
+  Nothing else needs handing over.
+  The server's flow cookies are `__Host-` cookies, and the update channel and the key a connect code is kept under are the browser's: each belongs to one origin, and every app is served from an origin of its own.
+  The IndexedDB name stays with each app's database.
+  The type is not called an identity, a word this repository keeps for the sign-in it decided against (§6, "No sign-in separate from storage").
 - **A document format, not a note.**
-  This is skysa-draw's seam (`sync/document.ts` there): the id a file claims, a conflict copy's contents, and every read that holds a file as a document.
-  Here it is over `parseNoteFile` and `serializeNoteFile`, and nothing else in `sync/` imports `markdown/`.
+  This is skysa-draw's seam (`sync/document.ts` there): a document's extension and media type, the id a file claims, a conflict copy's contents, and every read that holds a file as a document.
+  Here it is over `NOTE_EXTENSION`, `text/markdown`, `parseNoteFile` and `serializeNoteFile`, and the layers that move take them from it rather than importing them.
 - **A merge before a conflict copy, where the app can make one.**
   This is memoriam's optional `merge({ path, local, remote })` and its `merge-note` change, with their store-contract cases.
   This app passes none, and its conflict rule (§7, "Conflict rule (concrete)") is unchanged.
