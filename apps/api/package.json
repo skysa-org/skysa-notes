@@ -23,13 +23,13 @@
 	"dependencies": {
 		"@skysa/core": "workspace:*",
 		"drizzle-orm": "^0.45.4",
-		"hono": "^4.13.13",
+		"hono": "^4.13.16",
 		"zod": "catalog:"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
 		"drizzle-kit": "^0.31.11",
 		"vitest": "catalog:",
-		"wrangler": "^4.149.0"
+		"wrangler": "^4.158.0"
 	}
 }
