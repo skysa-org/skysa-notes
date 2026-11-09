@@ -3,8 +3,10 @@ import {
 	createDropboxProvider,
 	createGDriveProvider,
 	createOneDriveProvider,
+	type DocumentFormat,
 	type FetchLike,
 	isHidden,
+	NOTE_FORMAT,
 	NOTES_FOLDER,
 	parentPath,
 	type StorageProvider,
@@ -110,6 +112,7 @@ interface Remote {
 const over = <T>(
 	create: (options: {
 		folder: AppFolderSpec;
+		document: DocumentFormat;
 		fetch: FetchLike;
 		getAccessToken: () => Promise<string>;
 		appVersion: string;
@@ -120,6 +123,7 @@ const over = <T>(
 ): T =>
 	create({
 		folder: NOTES_FOLDER,
+		document: NOTE_FORMAT,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -277,6 +281,7 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 	const env = fakeEnvironment();
 	const scheduler = createSyncScheduler({
 		lockName: SYNC_LOCK,
+		document: NOTE_FORMAT,
 		db,
 		client: tokenServer(),
 		// The install's own id, which is what the marker file reports and what
@@ -1142,6 +1147,7 @@ describe('one browser over two sources', () => {
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
 			lockName: SYNC_LOCK,
+			document: NOTE_FORMAT,
 			db,
 			client: tokenServer(),
 			// Which storage a run reaches is decided by the connection it is for,

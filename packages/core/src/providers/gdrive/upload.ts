@@ -11,7 +11,6 @@ import {
 	earliest,
 	FIELDS,
 	MULTIPART_LIMIT,
-	NOTE_TYPE,
 	toEntry,
 	UPLOADS,
 } from './wire.js';
@@ -82,7 +81,8 @@ const sessionUri = (location: string | null): string => {
 };
 
 export const createUploads = (client: DriveClient, appFolder: AppFolder) => {
-	const { send, attempt, call, failureOf, raise, fileUrl, named, settleCreate } = client;
+	const { send, attempt, call, failureOf, raise, fileUrl, named, settleCreate, document } =
+		client;
 	const { folderIdAt, itemAt } = appFolder;
 
 	/**
@@ -162,8 +162,8 @@ export const createUploads = (client: DriveClient, appFolder: AppFolder) => {
 			// A copy, for the one `BodyInit` takes in every runtime: bytes over an
 			// `ArrayBuffer`. A note is small; a file arrives as one already.
 			new Uint8Array(encoder.encode(content)),
-			NOTE_TYPE,
-			`${NOTE_TYPE}; charset=UTF-8`
+			document.mediaType,
+			`${document.mediaType}; charset=UTF-8`
 		);
 
 	/**
@@ -186,7 +186,7 @@ export const createUploads = (client: DriveClient, appFolder: AppFolder) => {
 		const result = await attempt<DriveFile>(
 			'PATCH',
 			`${UPLOADS}/${encodeURIComponent(entry.remoteId)}?uploadType=media&fields=${FIELDS}`,
-			{ headers: { 'content-type': NOTE_TYPE }, body: content }
+			{ headers: { 'content-type': document.mediaType }, body: content }
 		);
 		if (result.ok) return toEntry(result.value, path);
 		if (result.failure.status === 404) throw new NotFoundError(path);

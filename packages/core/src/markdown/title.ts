@@ -1,7 +1,7 @@
 import { toString as nodeToString } from 'mdast-util-to-string';
 
 import { NOTE_EXTENSION } from '../config.js';
-import { isNoteName } from '../names/fold.js';
+import { isNoteName } from '../names/notes.js';
 import { toLf } from './lineEndings.js';
 import { parse } from './pipeline.js';
 

@@ -1,4 +1,4 @@
-import { createSyncEngine, isHidden, type StorageProvider } from '@skysa/core';
+import { createSyncEngine, isHidden, NOTE_FORMAT, type StorageProvider } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -511,7 +511,12 @@ const connected = async () => {
 	const fake = createFakeProvider();
 	await fake.ensureRoot();
 	const engineOver = (provider: StorageProvider) =>
-		createSyncEngine({ provider, store, now: () => new Date('2026-09-16T10:00:00Z') });
+		createSyncEngine({
+			document: NOTE_FORMAT,
+			provider,
+			store,
+			now: () => new Date('2026-09-16T10:00:00Z'),
+		});
 	return { db, store, fake, engine: engineOver(fake), engineOver };
 };
 
@@ -1022,10 +1027,16 @@ describe('a note deleted before its write was ever sent, on two devices', () => 
 		});
 		await deleteNote(mine, dropped.id);
 
-		const other = createSyncEngine({ provider: fake, store: theirsStore, now });
+		const other = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: fake,
+			store: theirsStore,
+			now,
+		});
 		// Their push happens while my file is at the path, if mine ever puts
 		// one there — which is the whole question.
 		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
 			provider: inFlight(fake, 'write', () => other.push()),
 			store: mineStore,
 			now,

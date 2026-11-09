@@ -1,13 +1,12 @@
-import { NOTE_EXTENSION } from '../config.js';
 import { basename, replaceBasename } from '../paths.js';
 import { fitBytes, MAX_NAME_BYTES, utf8Length } from './bytes.js';
 import { extensionAt } from './extension.js';
-import { foldName, isNoteName } from './fold.js';
+import { foldName, hasExtension } from './fold.js';
 
 /**
  * A conflict copy's name and path (docs/ARCHITECTURE.md §7): beside the note it
  * came from, recognisably the same note, and never a name already taken. Its
- * contents are `sync/conflicts.ts`.
+ * contents are the document format's (`DocumentFormat.conflictContent`).
  */
 
 /**
@@ -64,23 +63,44 @@ const conflictName = (
 	return free(1);
 };
 
-export const conflictFilename = (
-	filename: string,
-	at: Date,
-	taken: Iterable<string> = []
-): string => {
-	// Folded, so `Report.MD` from a Windows tool loses its extension here rather
-	// than keeping it and taking a second one — the same question `deriveTitle`
-	// and `store/naming.ts` ask, answered the same way.
-	const stem = isNoteName(filename) ? filename.slice(0, -NOTE_EXTENSION.length) : filename;
-	return conflictName(stem, NOTE_EXTENSION, at, taken);
+/**
+ * What names say about the documents `extension` names (`DocumentFormat`):
+ * whether a name is one's, and where a copy of one goes. Made once for a
+ * format, so the engine and the providers are handed the extension rather
+ * than importing one (docs/decisions/0018-the-shared-kit.md). This app's are
+ * in `notes.ts`.
+ */
+export interface DocumentNames {
+	/** Whether a name or path is a document's (`hasExtension`). */
+	readonly isDocumentName: (name: string) => boolean;
+	/** The name for a document's copy, given the names already in the folder. */
+	readonly conflictFilename: (filename: string, at: Date, taken?: Iterable<string>) => string;
+	/** Where the copy of the document at `path` goes: beside it, in the same folder. */
+	readonly conflictPath: (path: string, at: Date, taken?: Iterable<string>) => string;
+}
+
+export const documentNames = (extension: string): DocumentNames => {
+	const isDocumentName = (name: string): boolean => hasExtension(name, extension);
+	const conflictFilename = (filename: string, at: Date, taken: Iterable<string> = []): string => {
+		// Folded, so `Report.MD` from a Windows tool loses its extension here
+		// rather than keeping it and taking a second one — the same question
+		// `deriveTitle` and `store/naming.ts` ask, answered the same way.
+		const stem = isDocumentName(filename) ? filename.slice(0, -extension.length) : filename;
+		return conflictName(stem, extension, at, taken);
+	};
+	return {
+		isDocumentName,
+		conflictFilename,
+		conflictPath: (path, at, taken = []) =>
+			replaceBasename(path, conflictFilename(basename(path), at, taken)),
+	};
 };
 
 /**
  * The same name for a file that is not a note, keeping its own extension.
  *
- * `conflictFilename` gives every copy `.md`, which is right for a note and
- * wrong for anything else: a `photo.png` renamed `photo.png (conflict …).md`
+ * `conflictFilename` gives every copy the document's extension, `.md` here,
+ * which is right for a note and wrong for anything else: a `photo.png` renamed `photo.png (conflict …).md`
  * is not a picture any more, and to the engine it is a note, which it then
  * tries to read as text. So the stamp goes before the extension, as it does
  * for a note: `photo (conflict 2026-09-15T14-32).png`.
@@ -115,10 +135,6 @@ export const conflictFolderName = (name: string, at: Date, taken: Iterable<strin
 
 export const conflictFolderPath = (path: string, at: Date, taken: Iterable<string> = []): string =>
 	replaceBasename(path, conflictFolderName(basename(path), at, taken));
-
-/** Where the copy of `path` goes: beside it, in the same folder. */
-export const conflictPath = (path: string, at: Date, taken: Iterable<string> = []): string =>
-	replaceBasename(path, conflictFilename(basename(path), at, taken));
 
 /** The same, for a file that is not a note: its own extension kept (#187). */
 export const conflictFilePath = (path: string, at: Date, taken: Iterable<string> = []): string =>

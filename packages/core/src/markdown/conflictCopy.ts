@@ -2,13 +2,14 @@ import {
 	frontmatterHasDeclinedId,
 	readFrontmatter,
 	splitFrontmatter,
-} from '../markdown/frontmatter/index.js';
-import { serializeNoteFile } from '../markdown/note.js';
+} from './frontmatter/index.js';
+import { serializeNoteFile } from './note.js';
 
 /**
  * What happens when both sides changed the same note (docs/ARCHITECTURE.md §7):
  * the copy is written beside the note, under a name from `names/conflicts.ts`,
- * holding the contents this builds.
+ * holding the contents this builds. The engine asks for them through the
+ * format it is handed (`NOTE_FORMAT`, `format.ts`).
  */
 
 /**

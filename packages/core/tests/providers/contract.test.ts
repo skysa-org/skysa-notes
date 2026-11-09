@@ -1,5 +1,7 @@
 import { NOTES_FOLDER } from '../../src/config.js';
+import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
+import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
@@ -67,6 +69,7 @@ const FOLDER = NOTES_FOLDER;
 /** What every adapter is made from: one shape, so one table registers them all. */
 type CreateAdapter = (options: {
 	folder: AppFolderSpec;
+	document: DocumentFormat;
 	fetch: FetchLike;
 	getAccessToken: () => Promise<string>;
 	appVersion: string;
@@ -154,6 +157,7 @@ for (const adapter of adapters) {
 				return {
 					provider: adapter.create({
 						folder: FOLDER,
+						document: NOTE_FORMAT,
 						fetch: stub.fetch,
 						getAccessToken: () => Promise.resolve('stub-token'),
 						appVersion: '0.1.0',
@@ -183,6 +187,7 @@ for (const adapter of adapters) {
 		() => {
 			const provider = adapter.create({
 				folder: FOLDER,
+				document: NOTE_FORMAT,
 				fetch: globalThis.fetch.bind(globalThis),
 				getAccessToken: () => Promise.resolve(token),
 				appVersion: '0.1.0',

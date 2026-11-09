@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { NOTES_FOLDER } from '../../src/config.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
-import {
-	conflictFilename,
-	conflictFolderName,
-	conflictNameKeepingExtension,
-} from '../../src/names/conflicts.js';
+import { NOTE_FORMAT } from '../../src/markdown/format.js';
+import { conflictFolderName, conflictNameKeepingExtension } from '../../src/names/conflicts.js';
+import { conflictFilename } from '../../src/names/notes.js';
+import type { HttpProviderOptions } from '../../src/providers/adapter.js';
 import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import {
@@ -40,9 +39,17 @@ const AT = new Date('2026-09-17T12:00:00Z');
 
 const MARKER_FILE = NOTES_FOLDER.marker.file;
 
-const over = (doFetch: FetchLike, folder: AppFolderSpec = NOTES_FOLDER): StorageProvider =>
+/** Another app's documents, for the cases that show the adapter goes by the format it is handed. */
+const SVG = { extension: '.svg', mediaType: 'image/svg+xml' };
+
+const over = (
+	doFetch: FetchLike,
+	folder: AppFolderSpec = NOTES_FOLDER,
+	document: HttpProviderOptions['document'] = NOTE_FORMAT
+): StorageProvider =>
 	createGDriveProvider({
 		folder,
+		document,
 		fetch: doFetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -914,7 +921,12 @@ describe('the app folder, from one sync to the next', () => {
 		const world = driveWorld();
 		world.add({ id: 'a', name: 'a.md', parent: world.root.id, content: 'A' });
 		const store = createMemoryStore();
-		const engine = createSyncEngine({ provider: world.provider, store, now: () => AT });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: world.provider,
+			store,
+			now: () => AT,
+		});
 		expect((await engine.sync()).status).toBe('ok');
 
 		// Into the trash; the next rounds make another folder and write there.
@@ -997,6 +1009,24 @@ describe('creating', () => {
 		const upload = world.seen.find((r) => r.url.pathname === '/upload/drive/v3/files');
 		expect(upload?.url.searchParams.get('uploadType')).toBe('multipart');
 		expect(upload?.body).toContain('"mimeType":"text/markdown"');
+	});
+
+	it('uploads and updates a document as the type of the format it was made with', async () => {
+		const { stub } = stubbed();
+		const provider = over(stub.fetch, NOTES_FOLDER, SVG);
+		await provider.ensureRoot();
+		const before = stub.requests.length;
+
+		const made = await provider.write('a.svg', '<svg/>', {});
+		await provider.write('a.svg', '<svg></svg>', { expectedVersion: made.version });
+
+		const sent = stub.requests
+			.slice(before)
+			.filter((r) => r.url.includes('/upload/drive/v3/files'));
+		expect(sent.map((r) => r.method)).toEqual(['POST', 'PATCH']);
+		expect(sent[0]?.body).toContain('"mimeType":"image/svg+xml"');
+		expect(sent[1]?.headers['content-type']).toBe('image/svg+xml');
+		expect(stub.requests.some((r) => (r.body ?? '').includes('text/markdown'))).toBe(false);
 	});
 
 	it('uploads a file that is not a note as its own type, every byte value intact', async () => {
@@ -1362,7 +1392,7 @@ describe('changes', () => {
 		await provider.ensureRoot();
 		await provider.createFolder('.clipboard');
 		const store = createMemoryStore();
-		const engine = createSyncEngine({ provider, store, now: () => AT });
+		const engine = createSyncEngine({ document: NOTE_FORMAT, provider, store, now: () => AT });
 		await engine.pull();
 		const { cursor } = await drainChanges(provider);
 		const item = await provider.createFile(
@@ -1523,7 +1553,12 @@ describe('changes', () => {
 	it('scan through the engine when the feed runs long, and find what it would have said', async () => {
 		const world = driveWorld();
 		const store = createMemoryStore();
-		const engine = createSyncEngine({ provider: world.provider, store, now: () => AT });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: world.provider,
+			store,
+			now: () => AT,
+		});
 		expect((await engine.sync()).status).toBe('ok');
 		// Made since, and on no page the feed will send.
 		world.add({ id: 'new', name: 'new.md', parent: world.root.id, content: 'N' });
@@ -1580,7 +1615,12 @@ describe('changes', () => {
 		world.add({ id: 'old', name: 'old.md', parent: 'out', content: 'O' });
 		world.hooks.pageSize = 1;
 		const store = createMemoryStore();
-		const engine = createSyncEngine({ provider: world.provider, store, now: () => AT });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: world.provider,
+			store,
+			now: () => AT,
+		});
 
 		expect((await engine.sync()).status).toBe('ok');
 		const renamed = conflictFilename('a.md', AT, [MARKER_FILE, 'a.md', 'a.md']);
@@ -1980,6 +2020,27 @@ describe('changes', () => {
 				name: conflictFilename('a.md', AT, [MARKER_FILE, 'a.md', 'a.md']),
 				trashed: false,
 			});
+		});
+
+		it('are told apart by the format the adapter was made with', async () => {
+			// Under a format whose documents are `.svg`, two drawings with the same
+			// bytes are two documents, renamed apart with their own extension, and
+			// two `.md` files are files like any other.
+			const world = driveWorld();
+			const drawings = over(world.doFetch, NOTES_FOLDER, SVG);
+			const same = { parent: world.root.id, size: '1', md5Checksum: 'same', content: 'x' };
+			world.add({ ...same, id: 'one', name: 'a.svg' });
+			world.add({ ...same, id: 'two', name: 'a.svg' });
+			world.add({ ...same, id: 'three', name: 'b.md' });
+			world.add({ ...same, id: 'four', name: 'b.md' });
+
+			await drainChanges(drawings);
+
+			expect(world.find('two')).toMatchObject({
+				name: 'a (conflict 2026-09-17T12-00).svg',
+				trashed: false,
+			});
+			expect(world.find('four')?.trashed).toBe(true);
 		});
 
 		it('are separated on a first scan too', async () => {

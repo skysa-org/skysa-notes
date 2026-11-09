@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createSyncEngine, isHidden } from '@skysa/core';
+import { createSyncEngine, isHidden, NOTE_FORMAT } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -1046,6 +1046,7 @@ describe('a whole source', () => {
 		const provider = createFakeProvider();
 		await provider.ensureRoot();
 		await createSyncEngine({
+			document: NOTE_FORMAT,
 			provider,
 			store: createDexieSyncStore(db, { connectionId: 'dropbox-1' }),
 		}).sync();

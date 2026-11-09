@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { NOTES_FOLDER } from '../../src/config.js';
+import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
+import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { foldName } from '../../src/names/fold.js';
 import { isHidden, isWithin, joinPath, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
@@ -39,6 +41,7 @@ const START = new Date('2026-01-01T00:00:00Z');
 const over = <T>(
 	create: (options: {
 		folder: AppFolderSpec;
+		document: DocumentFormat;
 		fetch: FetchLike;
 		getAccessToken: () => Promise<string>;
 		appVersion: string;
@@ -48,6 +51,7 @@ const over = <T>(
 ): T =>
 	create({
 		folder: NOTES_FOLDER,
+		document: NOTE_FORMAT,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -380,7 +384,12 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 					return set;
 				},
 			};
-			const engine = createSyncEngine({ provider: reporting, store, now: () => START });
+			const engine = createSyncEngine({
+				document: NOTE_FORMAT,
+				provider: reporting,
+				store,
+				now: () => START,
+			});
 
 			await Array.from({ length: 12 }).reduce<Promise<void>>(async (done) => {
 				await done;

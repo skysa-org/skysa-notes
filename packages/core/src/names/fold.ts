@@ -1,5 +1,3 @@
-import { NOTE_EXTENSION } from '../config.js';
-
 /**
  * Two names are the same name when the provider says they are: case-folded and
  * NFC-normalized, because Drive, Dropbox and macOS all treat them that way.
@@ -18,8 +16,10 @@ import { NOTE_EXTENSION } from '../config.js';
 export const foldName = (name: string): string => name.normalize('NFC').toLowerCase();
 
 /**
- * Whether a name or path is a note's: its extension folded as `foldName` folds,
- * so `Report.MD` from a Windows tool is one. The engine, the providers and the
- * app all ask this, and must answer it the same way.
+ * Whether a name or path ends with `extension` (lowercase, dot included), folded
+ * as `foldName` folds, so `Report.MD` from a Windows tool is a `.md` file. Asked
+ * of a document's name by the engine, the providers and the app, which must
+ * answer it the same way (`documentNames` in `conflicts.ts`).
  */
-export const isNoteName = (name: string): boolean => foldName(name).endsWith(NOTE_EXTENSION);
+export const hasExtension = (name: string, extension: string): boolean =>
+	foldName(name).endsWith(extension);

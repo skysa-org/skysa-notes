@@ -1,4 +1,4 @@
-import { isNoteName } from '../../src/names/fold.js';
+import { isNoteName } from '../../src/names/notes.js';
 import type { FakeProvider } from '../../src/providers/fake.js';
 import type { RemoteEntry } from '../../src/providers/types.js';
 

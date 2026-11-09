@@ -1,4 +1,4 @@
-import { createSyncEngine, isHidden, MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { createSyncEngine, isHidden, MAX_ATTACHMENT_BYTES, NOTE_FORMAT } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -329,7 +329,11 @@ describe('planScratchImport', () => {
 
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
-		const engine = createSyncEngine({ provider: fake, store: createDexieSyncStore(db, scope) });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: fake,
+			store: createDexieSyncStore(db, scope),
+		});
 		expect((await engine.sync()).status).toBe('ok');
 		expect(
 			fake
@@ -369,7 +373,11 @@ describe('importLibrary', () => {
 
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
-		const engine = createSyncEngine({ provider: fake, store: createDexieSyncStore(db, scope) });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: fake,
+			store: createDexieSyncStore(db, scope),
+		});
 		expect((await engine.sync()).status).toBe('ok');
 
 		expect(
@@ -441,7 +449,11 @@ describe('importLibrary', () => {
 		// And the strictest provider takes it in that order.
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
-		const engine = createSyncEngine({ provider: fake, store: createDexieSyncStore(db, scope) });
+		const engine = createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: fake,
+			store: createDexieSyncStore(db, scope),
+		});
 		expect((await engine.sync()).status).toBe('ok');
 		expect(await db.opQueue.where('connectionId').equals(CONNECTION).count()).toBe(0);
 		expect(

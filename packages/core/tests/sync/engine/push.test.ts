@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../../src/hash.js';
-import { conflictPath } from '../../../src/names/conflicts.js';
+import { conflictPath } from '../../../src/names/notes.js';
 import { basename, isHidden } from '../../../src/paths.js';
 import { createFakeProvider } from '../../../src/providers/fake.js';
 import {

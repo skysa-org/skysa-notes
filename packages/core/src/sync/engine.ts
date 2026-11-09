@@ -1,5 +1,8 @@
+import type { DocumentFormat } from '../documentFormat.js';
+import { documentNames } from '../names/conflicts.js';
 import type { ChangeEntry, RemoteEntry, StorageProvider } from '../providers/types.js';
 import type { EngineContext } from './context.js';
+import { readDocument } from './document.js';
 import { metOf, type SyncOutcome, transient } from './outcome.js';
 import { createProgress, type SyncProgress } from './progress.js';
 import { createPullAttachments } from './pull/attachments.js';
@@ -44,6 +47,11 @@ export interface SyncEngineOptions {
 	provider: StorageProvider;
 	store: SyncStore;
 	/**
+	 * What the app's documents are: their extension, the id one claims, a
+	 * conflict copy's contents (docs/decisions/0018-the-shared-kit.md).
+	 */
+	document: DocumentFormat;
+	/**
 	 * Mint a fresh access token. Called once on an `AuthError`, after which the
 	 * failing operation is retried exactly once. `packages/core` cannot know how
 	 * a token is obtained, so the caller supplies it.
@@ -75,6 +83,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const {
 		provider,
 		store,
+		document,
 		reauthorize,
 		now = () => new Date(),
 		newId = () => crypto.randomUUID(),
@@ -86,6 +95,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const context: EngineContext = {
 		provider,
 		store,
+		document,
+		names: documentNames(document.extension),
 		now,
 		newId,
 		maxAttempts,
@@ -117,7 +128,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const readNote = async (entry: RemoteEntry): Promise<{ content: string; version: string }> => {
 		const kept = held.get(entry.remoteId);
 		if (kept !== undefined && kept.version === entry.version) return kept;
-		const found = await provider.read(entry);
+		const found = await readDocument(provider, entry, document);
 		// Under the version the read says, not the one the feed did: a file
 		// written in between is not held as the version that was listed.
 		held.set(entry.remoteId, { version: found.version, content: found.content });
@@ -199,7 +210,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	});
 
 	// A batch decided, entry by entry (`pull/decide.ts`).
-	const { decide, deduped, decideAll } = createPullDecide(context, {
+	const { decide, deduped, decideAll, isNoteEntry } = createPullDecide(context, {
 		decideDeleted,
 		decideFile,
 		decideFolder,
@@ -218,6 +229,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		letGo,
 		decideAll,
 		deduped,
+		isNoteEntry,
 		fileBaseOf,
 		reconcile,
 		renamesQueued,

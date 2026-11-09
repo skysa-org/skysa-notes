@@ -135,6 +135,19 @@ const NO_APP_FOLDER = {
 };
 
 /**
+ * Notes' own document format, which the sync engine and the adapters are
+ * handed (`DocumentFormat`) rather than import, so that they read no file
+ * format of their own (docs/decisions/0018-the-shared-kit.md): the note's
+ * extension, markdown, and the names made from them.
+ */
+const NOTE_FORMAT_MESSAGE =
+	'what a document is comes from the DocumentFormat handed in, not from markdown (docs/decisions/0018-the-shared-kit.md).';
+const NO_NOTE_FORMAT = [
+	{ group: ['**/config.js'], importNames: ['NOTE_EXTENSION'], message: NOTE_FORMAT_MESSAGE },
+	{ group: ['**/markdown/**', '**/names/notes.js'], message: NOTE_FORMAT_MESSAGE },
+];
+
+/**
  * Words the user reads, written straight into JSX: a sentence there is one no
  * translation can reach. They come from the catalog, `t()` in
  * `apps/web/src/i18n/t.ts` (docs/ARCHITECTURE.md §7, "The app's words").
@@ -412,8 +425,9 @@ export default tseslint.config(
 		// A provider moves bytes and names for the sync engine; it knows nothing
 		// of the engine. What both need — a conflict copy's name, say — lives
 		// below them both, in names/ (#449). Nor does it know which app's folder
-		// it works in: it is handed that. Repeats core's patterns, since a rule
-		// set here replaces the one above rather than adding to it.
+		// it works in, or what the app's files hold: it is handed both. Repeats
+		// core's patterns, since a rule set here replaces the one above rather
+		// than adding to it.
 		files: ['packages/core/src/providers/**/*.ts'],
 		rules: {
 			'no-restricted-imports': [
@@ -422,6 +436,7 @@ export default tseslint.config(
 					patterns: [
 						...CORE_IMPORTS,
 						NO_APP_FOLDER,
+						...NO_NOTE_FORMAT,
 						NOT_ABOVE(['sync'], 'a provider does not import the sync engine.'),
 					],
 				},
@@ -429,11 +444,29 @@ export default tseslint.config(
 		},
 	},
 	{
-		// The marker, and what describes an app's folder, are any app's: the
-		// folder they are about is handed to them.
-		files: ['packages/core/src/marker.ts', 'packages/core/src/folderSpec.ts'],
+		// The sync engine, like the providers, is handed the app's folder and
+		// what its documents are, and reads neither for itself.
+		files: ['packages/core/src/sync/**/*.ts'],
 		rules: {
-			'no-restricted-imports': ['error', { patterns: [...CORE_IMPORTS, NO_APP_FOLDER] }],
+			'no-restricted-imports': [
+				'error',
+				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT] },
+			],
+		},
+	},
+	{
+		// The marker, and what describes an app's folder and its documents, are
+		// any app's: what they are about is handed to them.
+		files: [
+			'packages/core/src/marker.ts',
+			'packages/core/src/folderSpec.ts',
+			'packages/core/src/documentFormat.ts',
+		],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT] },
+			],
 		},
 	},
 	{
@@ -450,6 +483,28 @@ export default tseslint.config(
 							['sync', 'providers', 'markdown'],
 							'names/ sits below sync, providers and markdown.'
 						),
+					],
+				},
+			],
+		},
+	},
+	{
+		// The names the engine and the providers use are made from the format's
+		// extension (`documentNames`); notes' own, `notes.ts` and `slug.ts`, stay
+		// with the app. Repeats the block above, which this replaces for these.
+		files: ['packages/core/src/names/{fold,conflicts,bytes,extension}.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						...CORE_IMPORTS,
+						NOT_ABOVE(
+							['sync', 'providers', 'markdown'],
+							'names/ sits below sync, providers and markdown.'
+						),
+						...NO_NOTE_FORMAT,
+						{ group: ['./notes.js', './slug.js'], message: NOTE_FORMAT_MESSAGE },
 					],
 				},
 			],

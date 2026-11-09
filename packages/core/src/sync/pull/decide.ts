@@ -1,4 +1,3 @@
-import { isNoteName } from '../../names/fold.js';
 import { isHidden } from '../../paths.js';
 import type { ChangeEntry, RemoteEntry } from '../../providers/types.js';
 import type { EngineContext } from '../context.js';
@@ -26,15 +25,8 @@ import type { PullNotes } from './notes.js';
  * (`deduped`). Moved out of `engine.ts` as they were (#446).
  */
 
-/** A file the pull would make a note of, by the rule `decide` applies. */
-export const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
-	entry.deleted !== true &&
-	entry.kind === 'file' &&
-	!isHidden(entry.path) &&
-	isNoteName(entry.path);
-
 export const createPullDecide = (
-	{ store, meter }: EngineContext,
+	{ store, names, meter }: EngineContext,
 	{
 		decideDeleted,
 		decideFile,
@@ -60,6 +52,13 @@ export const createPullDecide = (
 		> &
 		Pick<Cascade, 'renamesQueued' | 'roofOver'>
 ) => {
+	/** A file the pull would make a note of, by the rule `decide` applies. */
+	const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
+		entry.deleted !== true &&
+		entry.kind === 'file' &&
+		!isHidden(entry.path) &&
+		names.isDocumentName(entry.path);
+
 	const decide: Decide = async (
 		entry: ChangeEntry,
 		{ batch, decided, at }: Step
@@ -88,7 +87,7 @@ export const createPullDecide = (
 		//
 		// It is a row of its own (docs/ARCHITECTURE.md §7, "Files beside
 		// notes"): mirrored, never read.
-		if (!isNoteName(entry.path)) {
+		if (!names.isDocumentName(entry.path)) {
 			return [
 				...unlisted(),
 				...(await noteNoLonger(entry, decided)),
@@ -198,7 +197,7 @@ export const createPullDecide = (
 		return [...settled, ...(await roofOver(settled, files))];
 	};
 
-	return { decide, deduped, decideAll };
+	return { decide, deduped, decideAll, isNoteEntry };
 };
 
 /** What the pull's other parts are handed of it. */

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { NOTES_FOLDER } from '../../src/config.js';
+import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
+import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { conflictFilePath } from '../../src/names/conflicts.js';
-import { isNoteName } from '../../src/names/fold.js';
+import { isNoteName } from '../../src/names/notes.js';
 import {
 	ancestorPaths,
 	basename,
@@ -51,6 +53,7 @@ interface Remote {
 const over = <T>(
 	create: (options: {
 		folder: AppFolderSpec;
+		document: DocumentFormat;
 		fetch: FetchLike;
 		getAccessToken: () => Promise<string>;
 		appVersion: string;
@@ -60,6 +63,7 @@ const over = <T>(
 ): T =>
 	create({
 		folder: NOTES_FOLDER,
+		document: NOTE_FORMAT,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -164,6 +168,7 @@ const device = async (
 	const store = createMemoryStore();
 	const counter = { next: 0 };
 	const engine = createSyncEngine({
+		document: NOTE_FORMAT,
 		provider,
 		store,
 		now: () => AT,

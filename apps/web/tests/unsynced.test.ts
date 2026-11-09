@@ -1,4 +1,4 @@
-import { createSyncEngine } from '@skysa/core';
+import { createSyncEngine, NOTE_FORMAT } from '@skysa/core';
 import { createFakeProvider } from '@skysa/core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -83,7 +83,11 @@ const remoteFor = async (db: NotesDatabase, connectionId: string) => {
 	const fake = createFakeProvider();
 	await fake.ensureRoot();
 	const engineFor = (id: string) =>
-		createSyncEngine({ provider: fake, store: createDexieSyncStore(db, { connectionId: id }) });
+		createSyncEngine({
+			document: NOTE_FORMAT,
+			provider: fake,
+			store: createDexieSyncStore(db, { connectionId: id }),
+		});
 	return { fake, engineFor, sync: () => engineFor(connectionId).sync() };
 };
 
@@ -554,6 +558,7 @@ describe('what a source holds that its remote has not been sent', () => {
 			expect((await unsyncedIn(db, CONNECTION)).blocked).toBe(false);
 
 			const outcome = await createSyncEngine({
+				document: NOTE_FORMAT,
 				provider: remote.fake,
 				store: createDexieSyncStore(db, scope),
 				maxAttempts: MAX_OP_ATTEMPTS,

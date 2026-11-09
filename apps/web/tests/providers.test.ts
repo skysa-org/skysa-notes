@@ -1,4 +1,4 @@
-import { type FetchLike, NOTES_FOLDER } from '@skysa/core';
+import { type FetchLike, NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';
@@ -22,6 +22,7 @@ describe('provider requests', () => {
 	it('are given up on when the network never answers', async () => {
 		const factory = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch: hanging,
 			timeoutMs: 20,
@@ -37,6 +38,7 @@ describe('provider requests', () => {
 		const session = new AbortController();
 		const factory = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch: hanging,
 			timeoutMs: 60_000,
@@ -245,6 +247,7 @@ describe('provider requests', () => {
 		);
 		const provider = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch,
 		})({
@@ -266,6 +269,7 @@ describe('provider requests', () => {
 		);
 		const provider = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch,
 		})({
@@ -291,6 +295,7 @@ describe('provider requests', () => {
 		);
 		const provider = createProviderFactory({
 			folder: NOTES_FOLDER,
+			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
 			fetch,
 		})({
@@ -308,7 +313,11 @@ describe('provider requests', () => {
 
 	it('have no adapter for webdav yet', () => {
 		expect(
-			createProviderFactory({ folder: NOTES_FOLDER, appVersion: '1.2.3' })({
+			createProviderFactory({
+				folder: NOTES_FOLDER,
+				document: NOTE_FORMAT,
+				appVersion: '1.2.3',
+			})({
 				...input,
 				provider: 'webdav',
 			})

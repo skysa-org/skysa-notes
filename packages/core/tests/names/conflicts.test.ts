@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-	conflictFilename,
 	conflictFilePath,
 	conflictFolderName,
 	conflictFolderPath,
 	conflictNameKeepingExtension,
-	conflictPath,
 	conflictStamp,
+	documentNames,
 } from '../../src/names/conflicts.js';
+import { conflictFilename, conflictPath } from '../../src/names/notes.js';
 import { noteFilename } from '../../src/names/slug.js';
 
 /**
@@ -94,6 +94,30 @@ describe('conflictFilename', () => {
 		// `Report.MD` comes from a Windows tool, and it is a markdown file: the
 		// name has one extension, not a stem ending in `.MD` waiting for one.
 		expect(conflictFilename('Report.MD', AT)).toBe('Report (conflict 2026-09-15T14-32).md');
+	});
+});
+
+describe('documentNames', () => {
+	// What the engine and the adapters are handed: a document's names made from
+	// its format's extension, not from this app's.
+	const drawings = documentNames('.svg');
+
+	it('names a copy with the extension it was made for', () => {
+		expect(drawings.conflictFilename('Plan.svg', AT)).toBe(
+			'Plan (conflict 2026-09-15T14-32).svg'
+		);
+		expect(drawings.conflictPath('Work/Plan.SVG', AT)).toBe(
+			'Work/Plan (conflict 2026-09-15T14-32).svg'
+		);
+	});
+
+	it('takes only names with that extension for documents', () => {
+		expect(drawings.isDocumentName('Plan.SVG')).toBe(true);
+		expect(drawings.isDocumentName('Plan.md')).toBe(false);
+	});
+
+	it('is what this app’s note names are made from', () => {
+		expect(documentNames('.md').conflictPath('a.md', AT)).toBe(conflictPath('a.md', AT));
 	});
 });
 

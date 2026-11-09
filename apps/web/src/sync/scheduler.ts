@@ -3,6 +3,7 @@ import {
 	type Cell,
 	cell,
 	createSyncEngine,
+	type DocumentFormat,
 	isAuthError,
 	isRateLimitError,
 	messageOf,
@@ -201,6 +202,8 @@ export interface SyncSchedulerOptions {
 	 * every tab of the app, whichever build it runs (`sync/lock.ts`).
 	 */
 	lockName: (connectionId: string) => string;
+	/** What the app's documents are, for the engine (`DocumentFormat`). */
+	document: DocumentFormat;
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
 	debounceMs?: number;
@@ -390,7 +393,7 @@ const RELIST_MS = 3000;
 type Timer = 'next' | 'debounce' | 'notice' | 'relist' | 'keyFile';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
-	const { db, client, createProvider, lockName } = options;
+	const { db, client, createProvider, lockName, document } = options;
 	const environment = options.environment ?? browserEnvironment();
 	const debounceMs = options.debounceMs ?? 2000;
 	const intervalMs = options.intervalMs ?? 60_000;
@@ -1133,6 +1136,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					? undefined
 					: createSyncEngine({
 							provider,
+							document,
 							store: createDexieSyncStore(db, { connectionId }),
 							reauthorize: () => reauthorize(tokens),
 							maxAttempts,

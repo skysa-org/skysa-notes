@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { conflictPath } from '../../../src/names/conflicts.js';
+import { conflictPath } from '../../../src/names/notes.js';
 import { basename } from '../../../src/paths.js';
 import { AT } from '../kit/engine.js';
 import { remoteAt } from '../kit/remote.js';

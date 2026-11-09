@@ -3,6 +3,7 @@ import {
 	createSyncEngine,
 	isHidden,
 	MAX_ATTACHMENT_BYTES,
+	NOTE_FORMAT,
 	type StorageProvider,
 } from '@skysa/core';
 import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
@@ -906,6 +907,7 @@ const connected = async () => {
 		},
 	};
 	const engine = createSyncEngine({
+		document: NOTE_FORMAT,
 		provider,
 		store,
 		now: () => new Date('2026-10-03T10:00:00Z'),
@@ -1118,7 +1120,9 @@ describe('a source let go with a file not uploaded', () => {
 		const fake = createFakeProvider();
 		await fake.ensureRoot();
 		const store = createDexieSyncStore(db, scope);
-		expect((await createSyncEngine({ provider: fake, store }).sync()).status).toBe('ok');
+		expect(
+			(await createSyncEngine({ document: NOTE_FORMAT, provider: fake, store }).sync()).status
+		).toBe('ok');
 		expect(await remoteAttachments(fake)).toEqual({ [added.path]: 'a' });
 		expect((await unsyncedIn(db, CONNECTION)).files).toEqual([]);
 	});

@@ -1,3 +1,4 @@
+import type { DocumentFormat } from '../documentFormat.js';
 import type { AppFolderSpec } from '../folderSpec.js';
 import { buildMarker, type MarkerCreatedBy, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
@@ -14,6 +15,11 @@ import { type EntryRef, isConflictError, NotFoundError, type RemoteEntry } from 
 export interface HttpProviderOptions {
 	/** The app's folder: its name, its marker, and Drive's tag for it. */
 	folder: AppFolderSpec;
+	/**
+	 * What the app's documents are, as far as a provider is told: the extension
+	 * that names one, and the media type one is uploaded as.
+	 */
+	document: Pick<DocumentFormat, 'extension' | 'mediaType'>;
 	fetch: FetchLike;
 	/** Called per request, so a refreshed token is picked up without rebuilding. */
 	getAccessToken: () => Promise<string>;

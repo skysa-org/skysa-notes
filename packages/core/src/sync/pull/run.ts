@@ -11,7 +11,7 @@ import type { PullChange } from '../store.js';
 import type { PullAttachments } from './attachments.js';
 import { unreadMap } from './batch.js';
 import type { Cascade } from './cascade.js';
-import { isNoteEntry, type PullDecide } from './decide.js';
+import type { PullDecide } from './decide.js';
 import type { PullReconcile } from './reconcile.js';
 
 /**
@@ -49,12 +49,13 @@ export const createPullRun = (
 		letGo,
 		decideAll,
 		deduped,
+		isNoteEntry,
 		fileBaseOf,
 		reconcile,
 		renamesQueued,
 	}: {
 		letGo: (entries: readonly ChangeEntry[]) => void;
-	} & Pick<PullDecide, 'decideAll' | 'deduped'> &
+	} & Pick<PullDecide, 'decideAll' | 'deduped' | 'isNoteEntry'> &
 		Pick<PullAttachments, 'fileBaseOf'> &
 		Pick<PullReconcile, 'reconcile'> &
 		Pick<Cascade, 'renamesQueued'>

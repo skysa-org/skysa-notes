@@ -1,6 +1,4 @@
 import { contentHash } from '../../hash.js';
-import { parseNoteFile } from '../../markdown/note.js';
-import { conflictPath } from '../../names/conflicts.js';
 import { parentPath } from '../../paths.js';
 import {
 	type EntryRef,
@@ -8,8 +6,8 @@ import {
 	isUnreadableError,
 	type RemoteEntry,
 } from '../../providers/types.js';
-import { conflictContent } from '../conflicts.js';
 import type { EngineContext } from '../context.js';
+import { readDocument } from '../document.js';
 import type { ConflictResolution, PullChange, SyncNote } from '../store.js';
 import { madeInBatch, type Step } from './batch.js';
 import { reestablished } from './decided.js';
@@ -36,7 +34,7 @@ export const createPullNotes = (
 		readNote: (entry: RemoteEntry) => Promise<{ content: string; version: string }>;
 	} & Pick<Occupancy, 'notesEndingIn' | 'takenIn'>
 ) => {
-	const { provider, store, now, newId, meter } = context;
+	const { provider, store, document, names, now, newId, meter } = context;
 
 	const resolutionFor = async (
 		local: SyncNote,
@@ -58,8 +56,8 @@ export const createPullNotes = (
 			remoteHash: await contentHash(remoteContent),
 			remote,
 			copyId,
-			copyPath: conflictPath(remote.path, now(), taken),
-			copyContent: conflictContent(local.content, copyId),
+			copyPath: names.conflictPath(remote.path, now(), taken),
+			copyContent: document.conflictContent(local.content, copyId),
 		};
 	};
 
@@ -72,7 +70,7 @@ export const createPullNotes = (
 	 * failing to say, and is the caller's failure too.
 	 */
 	const fileState = (ref: EntryRef): Promise<'there' | 'gone' | 'unreadable'> =>
-		provider.read(ref).then(
+		readDocument(provider, ref, document).then(
 			() => 'there' as const,
 			(error: unknown) => {
 				if (isNotFoundError(error)) return 'gone' as const;
@@ -202,7 +200,7 @@ export const createPullNotes = (
 		content: string,
 		{ batch, decided }: Pick<Step, 'batch' | 'decided'>
 	): Promise<string> => {
-		const claimed = parseNoteFile(content).id;
+		const claimed = document.claimedId(content);
 		if (claimed === undefined) return newId();
 
 		// Nor an id the user has a delete queued for. The op names its note by
@@ -361,7 +359,7 @@ export const createPullNotes = (
 				{
 					kind: 'displace-note',
 					id: entry.note.id,
-					path: conflictPath(path, now(), taken),
+					path: names.conflictPath(path, now(), taken),
 				},
 			];
 		}, Promise.resolve([]));
@@ -501,7 +499,7 @@ export const createPullNotes = (
 		!local.dirty &&
 		local.remoteId === undefined &&
 		content !== local.content &&
-		parseNoteFile(content).id !== local.id;
+		document.claimedId(content) !== local.id;
 
 	const decideFile = async (
 		entry: RemoteEntry,
