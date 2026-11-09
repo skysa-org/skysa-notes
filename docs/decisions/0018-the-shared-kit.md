@@ -127,6 +127,11 @@ Each is a pull request of its own in this repository, released as usual, so that
      A lint rule holds the two that move to what the engine is held to.
      This part is cut.
   4. The credential, the token source and the relay reach the database through ports.
+     The credential's functions are over a `CredentialTable` (`get`, `put`, `delete`), held by whatever is handed them, and the app's database fits as it is; the credential's row type is theirs now.
+     The token source is handed that and a `TokenStates`, which reads whether a connection is let go and the token kept for it, and keeps or forgets one onto a live row.
+     The relay is handed the credentials.
+     The app's adapter for the token's row is in `sync/dexiePorts.ts`, not `store/`, since the store layer may not import the sync layer's types.
+     This part is cut.
   5. The scheduler reaches the database through one port, and none of what moves imports the app's `store/`, Dexie or its words.
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has, memoriam's checks of the root in the contract suite among them.
 - **A lint rule fences what is to move** from what stays, and once it passes the move can be made.

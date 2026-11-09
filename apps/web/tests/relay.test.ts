@@ -505,7 +505,7 @@ describe('relay links over the API', () => {
 		const sockets = fakeSockets();
 		const env = fakeEnvironment();
 		const make = createRelayFactory({
-			db,
+			credentials: db,
 			client,
 			open: sockets.open,
 			url: (ticket) => `wss://x/api/relay?ticket=${ticket}`,

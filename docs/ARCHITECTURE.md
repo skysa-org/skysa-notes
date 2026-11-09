@@ -3474,7 +3474,8 @@ The first five seams are cut, and the sixth in part:
 - the queue and the scheduler say when a push goes: an app may queue writes lazily and give the scheduler `lazyMs`, and this app does neither (§7, "When a push goes");
 - the scheduler builds nothing of this app's own: the clipboard, the key file and the files beside notes are attached to it, with the watch they read (`sync/notesSync.ts`);
 - the scheduler and the provider factory say nothing in words of their own, and the factory is handed what a timeout says (`timedOut`);
-- the in-memory store and the store contract are handed the format, and make a conflict copy with it, while the Dexie store, which is notes', makes notes'; the rest of the client's ports are to follow.
+- the in-memory store and the store contract are handed the format, and make a conflict copy with it, while the Dexie store, which is notes', makes notes';
+- the credential, the token source and the relay reach the database through ports (`CredentialTable`, `TokenStates`), made over the app's database in `sync/dexiePorts.ts`; the scheduler's port is to follow.
 
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 

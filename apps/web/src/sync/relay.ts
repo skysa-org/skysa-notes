@@ -9,8 +9,7 @@ import {
 } from '@skysa/core';
 
 import { type ApiClient, ApiError } from '../api/client.js';
-import { credentialFor } from '../store/credentials.js';
-import type { NotesDatabase } from '../store/db.js';
+import { credentialFor, type CredentialStore } from '../store/credentials.js';
 
 /**
  * The change relay, from this side (docs/ARCHITECTURE.md §6, "Change relay"):
@@ -372,7 +371,8 @@ interface RelayInput {
 export type RelayFactory = (input: RelayInput) => RelayLink;
 
 export interface RelayFactoryOptions {
-	readonly db: NotesDatabase;
+	/** Where the device's credentials are held, for asking for a ticket. */
+	readonly credentials: CredentialStore;
 	readonly client: Pick<ApiClient, 'config' | 'withCredential'>;
 	readonly url?: (ticket: string) => string;
 	readonly open?: OpenRelaySocket;
@@ -388,7 +388,7 @@ const STOP: TicketAnswer = { kind: 'stop' };
  * for a ticket.
  */
 export const createRelayFactory = (options: RelayFactoryOptions): RelayFactory => {
-	const { db, client } = options;
+	const { credentials, client } = options;
 	const enabled = cell<Promise<boolean> | undefined>(undefined);
 
 	const runsRelay = (): Promise<boolean> => {
@@ -405,7 +405,7 @@ export const createRelayFactory = (options: RelayFactoryOptions): RelayFactory =
 		if (!(await runsRelay())) return STOP;
 		// Read fresh, as `sync/tokens.ts` reads it: a credential thrown away
 		// since is not presented.
-		const held = await credentialFor(db, connectionId);
+		const held = await credentialFor(credentials, connectionId);
 		if (held === undefined) return STOP;
 		const result = await client
 			.withCredential(held.credential)

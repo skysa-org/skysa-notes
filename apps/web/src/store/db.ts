@@ -1,6 +1,7 @@
 import type { PictureInfo, PictureVariant, ProviderKind, SyncOperation } from '@skysa/core';
 import Dexie, { type Table, type Transaction } from 'dexie';
 
+import type { CredentialRecord } from './credentials.js';
 import type { EditorMode } from './editorMode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
 import { watchForHeldUp } from './heldUp.js';
@@ -245,25 +246,9 @@ export interface Detached {
 	reason: 'disconnected' | 'revoked' | 'interrupted';
 }
 
-/**
- * A credential this device holds, keyed by the connection it reaches — or by
- * `PENDING_CREDENTIAL_ID` while a flow is out and there is no connection yet.
- *
- * The plaintext lives here and nowhere else on this device. See
- * `store/credentials.ts` for what that buys and what it costs.
- */
-export interface CredentialRecord {
-	/** A connection id, or `PENDING_CREDENTIAL_ID`. */
-	id: string;
-	/** `sk1_…`. Never logged, never rendered, never put in a URL. */
-	credential: string;
-	/** Which provider the flow was for, so a pending row can be shown for what it is. */
-	provider: ProviderKind;
-	createdAt: number;
-}
-
-/** The one flow that may be out at a time, matching the server's one flow cookie. */
-export const PENDING_CREDENTIAL_ID = 'pending';
+// A credential this device holds is a row of `credentials`, defined beside the
+// functions over it (`store/credentials.ts`), which go to the shared kit.
+export { type CredentialRecord, PENDING_CREDENTIAL_ID } from './credentials.js';
 
 /**
  * App-wide settings. A table rather than `localStorage` because the store is
