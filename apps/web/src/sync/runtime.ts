@@ -2,6 +2,7 @@ import { NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import { useSyncExternalStore } from 'react';
 
 import { api } from '../api/client.js';
+import { t } from '../i18n/t.js';
 import { db } from '../store/db.js';
 import { SYNC_LOCK } from './lock.js';
 import { createNotesSync, type NotesSync } from './notesSync.js';
@@ -27,6 +28,7 @@ export const syncScheduler: NotesSync = createNotesSync({
 		folder: NOTES_FOLDER,
 		document: NOTE_FORMAT,
 		appVersion: APP_VERSION,
+		timedOut: () => t('account.status.timedOut'),
 	}),
 	lockName: SYNC_LOCK,
 	document: NOTE_FORMAT,

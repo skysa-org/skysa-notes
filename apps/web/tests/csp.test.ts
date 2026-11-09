@@ -130,6 +130,7 @@ describe('Content-Security-Policy', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut: () => 'timed out',
 			fetch,
 		})({
 			connectionId: 'c1',
@@ -175,6 +176,7 @@ describe('Content-Security-Policy', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut: () => 'timed out',
 			fetch,
 		})({
 			connectionId: 'c1',
@@ -212,6 +214,7 @@ describe('Content-Security-Policy', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut: () => 'timed out',
 			fetch,
 		})({
 			connectionId: 'c1',

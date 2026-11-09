@@ -19,7 +19,6 @@ import {
 import { liveQuery } from 'dexie';
 
 import type { ApiClient, Denial, Refusal } from '../api/client.js';
-import { t } from '../i18n/t.js';
 import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -665,9 +664,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			: Math.max(backedOff, Math.min(retryAfterMs, RETRY_AFTER_CAP_MS));
 	};
 
+	/** `error` is what went wrong as it was said, and nothing where nothing said. */
 	const failed = (
 		session: Session,
-		error: string,
+		error: string | undefined,
 		conflicts: readonly string[] = [],
 		retryAfterMs?: number
 	) => {
@@ -763,12 +763,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	const synced = async (session: Session, outcome: SyncOutcome) => {
 		if (outcome.status === 'retry') {
-			failed(
-				session,
-				outcome.error ?? t('scheduler.failed'),
-				outcome.conflicts,
-				outcome.retryAfterMs
-			);
+			failed(session, outcome.error, outcome.conflicts, outcome.retryAfterMs);
 			return;
 		}
 		const conflicts = together(status().conflicts, outcome.conflicts);
@@ -858,11 +853,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const runOnce = async (session: Session): Promise<void> => {
 		const { provider, engine } = session;
 		if (provider === undefined || engine === undefined) {
-			publish({
-				...status(),
-				phase: 'attention',
-				error: t('scheduler.unsupported'),
-			});
+			// Nothing to say of it here: the app knows which providers it syncs,
+			// and says so in its own words.
+			publish({ ...status(), phase: 'attention', error: undefined });
 			return;
 		}
 		cancel('next');

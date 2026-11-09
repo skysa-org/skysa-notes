@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';
 
+/** What the app says of a request given up on, as it hands the factory its words. */
+const timedOut = () => 'the provider took too long';
+
 /** A request the network never answers, until it is aborted — or already was. */
 const hanging: FetchLike = (_url, init) =>
 	new Promise((_resolve, reject) => {
@@ -24,6 +27,7 @@ describe('provider requests', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut,
 			fetch: hanging,
 			timeoutMs: 20,
 		});
@@ -40,6 +44,7 @@ describe('provider requests', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut,
 			fetch: hanging,
 			timeoutMs: 60_000,
 		});
@@ -55,7 +60,11 @@ describe('provider requests', () => {
 		vi.useFakeTimers();
 		try {
 			const sent = vi.fn<FetchLike>(hanging);
-			const upload = timedFetch(sent, 1_000)('https://example.test', {
+			const upload = timedFetch(
+				sent,
+				1_000,
+				timedOut
+			)('https://example.test', {
 				method: 'PUT',
 				body: new Uint8Array(5 * SLOWEST_BYTES_PER_MS * 1_000),
 			}).catch((error: unknown) => error);
@@ -66,6 +75,8 @@ describe('provider requests', () => {
 			await vi.advanceTimersByTimeAsync(1);
 			expect(signal?.aborted).toBe(true);
 			expect((signal?.reason as DOMException).name).toBe('TimeoutError');
+			// In the app's words, which reach the storage panel as what went wrong.
+			expect((signal?.reason as DOMException).message).toBe('the provider took too long');
 			await expect(upload).resolves.toBeInstanceOf(Error);
 		} finally {
 			vi.useRealTimers();
@@ -84,7 +95,11 @@ describe('provider requests', () => {
 					headers: { 'content-length': String(SLOWEST_BYTES_PER_MS) },
 				});
 			});
-			const request = timedFetch(answered, 1_000)('https://example.test', {
+			const request = timedFetch(
+				answered,
+				1_000,
+				timedOut
+			)('https://example.test', {
 				method: 'PUT',
 				body: new Uint8Array(5 * SLOWEST_BYTES_PER_MS * 1_000),
 			});
@@ -111,7 +126,7 @@ describe('provider requests', () => {
 					headers: { 'content-length': String(10 * SLOWEST_BYTES_PER_MS * 1_000) },
 				});
 			});
-			const request = timedFetch(answered, 1_000)('https://example.test', {});
+			const request = timedFetch(answered, 1_000, timedOut)('https://example.test', {});
 			await vi.advanceTimersByTimeAsync(400);
 			await request;
 			const signal = answered.mock.calls[0]?.[1].signal;
@@ -135,7 +150,11 @@ describe('provider requests', () => {
 				},
 			});
 			const answered = vi.fn<FetchLike>(() => Promise.resolve(new Response(body)));
-			const response = await timedFetch(answered, 1_000)('https://example.test', {});
+			const response = await timedFetch(
+				answered,
+				1_000,
+				timedOut
+			)('https://example.test', {});
 			const signal = answered.mock.calls[0]?.[1].signal;
 			const reader = response.body?.getReader();
 			const arrives = async (ms: number) => {
@@ -166,7 +185,7 @@ describe('provider requests', () => {
 					headers: { 'content-length': String(SLOWEST_BYTES_PER_MS) },
 				});
 			});
-			const request = timedFetch(answered, 1_000)('https://example.test', {});
+			const request = timedFetch(answered, 1_000, timedOut)('https://example.test', {});
 			await vi.advanceTimersByTimeAsync(400);
 			await request;
 			const signal = answered.mock.calls[0]?.[1].signal;
@@ -186,18 +205,20 @@ describe('provider requests', () => {
 			const offline = vi.fn<FetchLike>(() =>
 				Promise.reject(new TypeError('Failed to fetch'))
 			);
-			await expect(timedFetch(offline, 1_000)('https://example.test', {})).rejects.toThrow();
+			await expect(
+				timedFetch(offline, 1_000, timedOut)('https://example.test', {})
+			).rejects.toThrow();
 			expect(vi.getTimerCount()).toBe(0);
 
 			const unsized = vi.fn<FetchLike>(() => Promise.resolve(new Response('{"entries":[]}')));
-			const response = await timedFetch(unsized, 1_000)('https://example.test', {});
+			const response = await timedFetch(unsized, 1_000, timedOut)('https://example.test', {});
 			expect(await response.json()).toEqual({ entries: [] });
 			expect(vi.getTimerCount()).toBe(0);
 
 			const empty = vi.fn<FetchLike>(() =>
 				Promise.resolve(new Response(null, { status: 204 }))
 			);
-			await timedFetch(empty, 1_000)('https://example.test', {});
+			await timedFetch(empty, 1_000, timedOut)('https://example.test', {});
 			expect(vi.getTimerCount()).toBe(0);
 		} finally {
 			vi.useRealTimers();
@@ -212,6 +233,7 @@ describe('provider requests', () => {
 			const request = timedFetch(
 				sent,
 				1_000,
+				timedOut,
 				session.signal
 			)('https://example.test', {}).catch((error: unknown) => error);
 			const signal = sent.mock.calls[0]?.[1].signal;
@@ -231,7 +253,11 @@ describe('provider requests', () => {
 		const fetch = vi.fn<FetchLike>(() => Promise.resolve(new Response('{}')));
 		const controller = new AbortController();
 
-		await timedFetch(fetch, 20)('https://example.test', { signal: controller.signal });
+		await timedFetch(
+			fetch,
+			20,
+			timedOut
+		)('https://example.test', { signal: controller.signal });
 
 		expect(fetch.mock.calls[0]?.[1].signal).toBe(controller.signal);
 	});
@@ -249,6 +275,7 @@ describe('provider requests', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut,
 			fetch,
 		})({
 			...input,
@@ -271,6 +298,7 @@ describe('provider requests', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut,
 			fetch,
 		})({
 			...input,
@@ -297,6 +325,7 @@ describe('provider requests', () => {
 			folder: NOTES_FOLDER,
 			document: NOTE_FORMAT,
 			appVersion: '1.2.3',
+			timedOut,
 			fetch,
 		})({
 			...input,
@@ -317,6 +346,7 @@ describe('provider requests', () => {
 				folder: NOTES_FOLDER,
 				document: NOTE_FORMAT,
 				appVersion: '1.2.3',
+				timedOut,
 			})({
 				...input,
 				provider: 'webdav',

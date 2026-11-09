@@ -15,7 +15,6 @@ import { notebooks } from './notebooks.js';
 import { notes } from './notes.js';
 import { passwords } from './passwords.js';
 import { rows } from './rows.js';
-import { scheduler } from './scheduler.js';
 import { scratchpad } from './scratchpad.js';
 import { search } from './search.js';
 import { secrets } from './secrets.js';
@@ -52,6 +51,5 @@ export const en = {
 	sources,
 	unsent,
 	firstImport,
-	scheduler,
 	editor,
 } as const satisfies Catalog;

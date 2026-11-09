@@ -972,5 +972,8 @@ describe('failures', () => {
 		await reaches(h.scheduler, 'attention');
 
 		expect(h.server.token).not.toHaveBeenCalled();
+		// In no words of its own: the app knows which providers it syncs, and
+		// says so (`statusWords.ts`).
+		expect(h.scheduler.status().error).toBeUndefined();
 	});
 });

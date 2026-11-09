@@ -8,7 +8,6 @@ import {
 	type FetchLike,
 } from '@skysa/core';
 
-import { t } from '../i18n/t.js';
 import type { ProviderFactory } from './scheduler.js';
 
 /**
@@ -80,7 +79,7 @@ const eitherSignal = (...signals: AbortSignal[]): AbortSignal => {
  * `TimeoutError`; `AbortSignal.timeout` itself cannot be moved.
  * https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static
  */
-const deadline = (ms: number, init: RequestInit) => {
+const deadline = (ms: number, init: RequestInit, timedOut: () => string) => {
 	const controller = new AbortController();
 	const credit = cell(0);
 	const timer = cell<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -89,7 +88,7 @@ const deadline = (ms: number, init: RequestInit) => {
 		credit.current = 0;
 		// The timeout's words reach the storage panel, as what went wrong.
 		if (earned > 0) timer.current = setTimeout(due, earned);
-		else controller.abort(new DOMException(t('account.status.timedOut'), 'TimeoutError'));
+		else controller.abort(new DOMException(timedOut(), 'TimeoutError'));
 	};
 	timer.current = setTimeout(due, ms + sending(init.body) / SLOWEST_BYTES_PER_MS);
 	return {
@@ -142,12 +141,13 @@ const answered = (response: Response, own: Deadline): Response => {
  * (`SLOWEST_BYTES_PER_MS`) — unless the caller brought a signal of its own,
  * and, either way, as soon as `session` is: the sync it was for has ended (a
  * cancel, a disconnect, another source in front), and a download nobody will
- * look at should not hold the connection's lock for a minute.
+ * look at should not hold the connection's lock for a minute. Given up on, it
+ * fails with a `TimeoutError` that says `timedOut()`.
  */
 export const timedFetch =
-	(fetch: FetchLike, ms: number, session?: AbortSignal): FetchLike =>
+	(fetch: FetchLike, ms: number, timedOut: () => string, session?: AbortSignal): FetchLike =>
 	async (url, init) => {
-		const own = init.signal ? undefined : deadline(ms, init);
+		const own = init.signal ? undefined : deadline(ms, init, timedOut);
 		const signal = init.signal ?? own?.signal;
 		const response = await fetch(url, {
 			...init,
@@ -166,6 +166,11 @@ export interface ProviderFactoryOptions {
 	document: Pick<DocumentFormat, 'extension' | 'mediaType'>;
 	/** Reported in the marker file. */
 	appVersion: string;
+	/**
+	 * What a request given up on says went wrong, in the app's words: it is
+	 * the error the storage panel shows, and an op that fails with it keeps it.
+	 */
+	timedOut: () => string;
 	/** Resolved per call by default, so a test can stub the global. */
 	fetch?: FetchLike;
 	timeoutMs?: number;
@@ -175,7 +180,7 @@ export const createProviderFactory = (options: ProviderFactoryOptions): Provider
 	const base = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
 	const ms = options.timeoutMs ?? PROVIDER_TIMEOUT_MS;
 	return ({ provider, clientId, getAccessToken, signal }) => {
-		const fetch = timedFetch(base, ms, signal);
+		const fetch = timedFetch(base, ms, options.timedOut, signal);
 		const adapter = {
 			folder: options.folder,
 			document: options.document,
