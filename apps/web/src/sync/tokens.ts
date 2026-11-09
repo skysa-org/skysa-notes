@@ -1,9 +1,7 @@
 import { AuthError, cell } from '@skysa/core';
 
 import type { AccessToken, ApiClient, Denial, Refusal } from '../api/client.js';
-import { credentialFor } from '../store/credentials.js';
-import type { NotesDatabase } from '../store/db.js';
-import { updateLive } from '../store/detached.js';
+import { credentialFor, type CredentialStore } from '../store/credentials.js';
 
 /**
  * Provider access tokens for one connection, minted by `apps/api` and held in
@@ -13,13 +11,39 @@ import { updateLive } from '../store/detached.js';
  * The provider adapter asks `get` before every request. A token about to expire
  * is replaced before it is used rather than after the provider refuses it,
  * and `refresh` is what the engine calls when the provider refuses one anyway.
+ *
+ * It goes to the shared kit (docs/decisions/0018-the-shared-kit.md), so the
+ * row is reached through a port (`TokenStates`), which the app makes over its
+ * database (`sync/dexiePorts.ts`).
  */
 
 /** A token this close to its expiry is treated as expired. */
 const EXPIRY_MARGIN_MS = 60_000;
 
+/**
+ * Where a connection's token is kept between loads, and whether it is still
+ * synced. IndexedDB or memory, never `localStorage` (CLAUDE.md).
+ */
+export interface TokenStates {
+	/**
+	 * Whether the device has let the connection go (`detached`), keeping it
+	 * for what it never sent, and the token kept for it, if any.
+	 */
+	readonly read: (
+		connectionId: string
+	) => Promise<Readonly<{ detached: boolean; token?: AccessToken | undefined }>>;
+	/**
+	 * Keep `token` for the connection, or forget the one kept. Onto a synced
+	 * connection only: one let go while a token was on its way must not get a
+	 * key to the account back.
+	 */
+	readonly keep: (connectionId: string, token: AccessToken | undefined) => Promise<void>;
+}
+
 export interface TokenSourceOptions {
-	db: NotesDatabase;
+	/** Where the device's credentials are held. */
+	credentials: CredentialStore;
+	states: TokenStates;
 	client: Pick<ApiClient, 'withCredential'>;
 	connectionId: string;
 	now?: () => number;
@@ -41,7 +65,7 @@ export interface TokenSource {
 }
 
 export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
-	const { db, client, connectionId } = options;
+	const { credentials, states, client, connectionId } = options;
 	const now = options.now ?? Date.now;
 	const cached = cell<AccessToken | undefined>(undefined);
 	const refused = cell<{ refusal: Refusal; denial?: Denial | undefined } | undefined>(undefined);
@@ -60,7 +84,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 		// Read fresh on every mint rather than held: a device revoked from
 		// somewhere else, or a source the user disconnected in another tab, must
 		// stop minting rather than go on presenting a credential that is gone.
-		const held = await credentialFor(db, connectionId);
+		const held = await credentialFor(credentials, connectionId);
 		if (held === undefined) {
 			refused.current = { refusal: 'credential_required' };
 			cached.current = undefined;
@@ -83,14 +107,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			throw new AuthError(`The server would not mint a token: ${result.refusal}`);
 		}
 		using(result.value);
-		// Only onto a live row: a connection let go while the token was on its
-		// way has no row, and must not get one back, or has a detached one,
-		// which must not hold a key to the account (`store/detached.ts`).
-		await updateLive(db, connectionId, (state) => ({
-			...state,
-			accessToken: result.value.accessToken,
-			accessTokenExpiresAt: result.value.expiresAt,
-		}));
+		await states.keep(connectionId, result.value);
 		return result.value.accessToken;
 	};
 
@@ -116,21 +133,17 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			const inMemory = cached.current;
 			if (usable(inMemory)) return using(inMemory);
 
-			const state = await db.syncState.get(connectionId);
+			const state = await states.read(connectionId);
 			// A detached source is never minted for. Nothing starts a session for
 			// one, so this is for a run that was already going when it was let go:
 			// it stops here rather than at the server.
-			if (state?.detached !== undefined) {
+			if (state.detached) {
 				refused.current = { refusal: 'credential_required' };
 				cached.current = undefined;
 				throw new AuthError('This device no longer syncs that connection');
 			}
-			const stored =
-				state?.accessToken === undefined || state.accessTokenExpiresAt === undefined
-					? undefined
-					: { accessToken: state.accessToken, expiresAt: state.accessTokenExpiresAt };
 			// Minted by another tab, perhaps after this one was refused.
-			if (usable(stored)) return using(stored);
+			if (usable(state.token)) return using(state.token);
 			return mintOnce();
 		},
 
@@ -138,11 +151,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			// Forgotten before the new one is asked for, row included: if it
 			// cannot be had, the refused one must not be handed out again.
 			cached.current = undefined;
-			await updateLive(
-				db,
-				connectionId,
-				({ accessToken: _token, accessTokenExpiresAt: _expiry, ...rest }) => rest
-			);
+			await states.keep(connectionId, undefined);
 			await mint();
 		},
 

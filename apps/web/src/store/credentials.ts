@@ -1,7 +1,4 @@
 import type { ProviderKind } from '@skysa/core';
-import type { PromiseExtended } from 'dexie';
-
-import { type CredentialRecord, type NotesDatabase, PENDING_CREDENTIAL_ID } from './db.js';
 
 /**
  * The credential that proves this device's right to a connection.
@@ -20,7 +17,49 @@ import { type CredentialRecord, type NotesDatabase, PENDING_CREDENTIAL_ID } from
  *
  * Nothing here is ever logged, put in a URL, or rendered. The device list in
  * `components/account/Devices.tsx` shows the server's view of the grants, which carries no hashes.
+ *
+ * It goes to the shared kit (docs/decisions/0018-the-shared-kit.md), so it
+ * reaches the table through a port (`CredentialTable`) rather than the app's
+ * database, which fits the port as it is.
  */
+
+/**
+ * A credential this device holds, keyed by the connection it reaches — or by
+ * `PENDING_CREDENTIAL_ID` while a flow is out and there is no connection yet.
+ *
+ * The plaintext lives here and nowhere else on this device.
+ */
+export interface CredentialRecord {
+	/** A connection id, or `PENDING_CREDENTIAL_ID`. */
+	id: string;
+	/** `sk1_…`. Never logged, never rendered, never put in a URL. */
+	credential: string;
+	/** Which provider the flow was for, so a pending row can be shown for what it is. */
+	provider: ProviderKind;
+	createdAt: number;
+}
+
+/** The one flow that may be out at a time, matching the server's one flow cookie. */
+export const PENDING_CREDENTIAL_ID = 'pending';
+
+/**
+ * Where the credentials are kept, by `id`: the app's is a Dexie table.
+ *
+ * Exported for an app without one, which writes its own: the port the shared
+ * kit names (docs/decisions/0018-the-shared-kit.md).
+ *
+ * @public
+ */
+export interface CredentialTable {
+	readonly get: (id: string) => Promise<CredentialRecord | undefined>;
+	readonly put: (record: CredentialRecord) => Promise<unknown>;
+	readonly delete: (id: string) => Promise<void>;
+}
+
+/** Whatever holds the table: the app's database, or a test's stand-in. */
+export interface CredentialStore {
+	readonly credentials: CredentialTable;
+}
 
 /** The `sk1_` version prefix, hashed along with the rest. See `apps/api/src/credentials.ts`. */
 const CREDENTIAL_PREFIX = 'sk1_';
@@ -67,7 +106,7 @@ export const hashCredential = async (credential: string): Promise<string> =>
  * no worse off than a flow the user abandoned.
  */
 export const beginConnect = async (
-	db: Pick<NotesDatabase, 'credentials'>,
+	db: CredentialStore,
 	provider: ProviderKind,
 	now: number = Date.now()
 ): Promise<{ credential: string; credentialHash: string }> => {
@@ -83,7 +122,7 @@ export const beginConnect = async (
 
 /** The credential a flow left behind, if one is still worth trying. */
 export const pendingCredential = async (
-	db: Pick<NotesDatabase, 'credentials'>,
+	db: CredentialStore,
 	now: number = Date.now()
 ): Promise<CredentialRecord | undefined> => {
 	const row = await db.credentials.get(PENDING_CREDENTIAL_ID);
@@ -105,7 +144,7 @@ export const pendingCredential = async (
  * nothing could ever find again.
  */
 export const keepCredential = async (
-	db: Pick<NotesDatabase, 'credentials'>,
+	db: CredentialStore,
 	connectionId: string,
 	record: CredentialRecord
 ): Promise<void> => {
@@ -115,9 +154,9 @@ export const keepCredential = async (
 
 /** The credential for a connection, if this device holds one. */
 export const credentialFor = (
-	db: Pick<NotesDatabase, 'credentials'>,
+	db: CredentialStore,
 	connectionId: string
-): PromiseExtended<CredentialRecord | undefined> => db.credentials.get(connectionId);
+): Promise<CredentialRecord | undefined> => db.credentials.get(connectionId);
 
 /**
  * Throw a credential away. Called when the server says it no longer reaches
@@ -129,7 +168,5 @@ export const credentialFor = (
  * credential taken before now can never be used to claim a connection of its
  * own (docs/ARCHITECTURE.md §6).
  */
-export const forgetCredential = (
-	db: Pick<NotesDatabase, 'credentials'>,
-	connectionId: string
-): PromiseExtended<void> => db.credentials.delete(connectionId);
+export const forgetCredential = (db: CredentialStore, connectionId: string): Promise<void> =>
+	db.credentials.delete(connectionId);

@@ -35,7 +35,7 @@ export const syncScheduler: NotesSync = createNotesSync({
 	syncsHidden,
 	// Asks `/config` first, so an instance without a relay is never asked for
 	// a ticket (`sync/relay.ts`).
-	relay: createRelayFactory({ db, client: api }),
+	relay: createRelayFactory({ credentials: db, client: api }),
 });
 
 /** What the scheduler says now, re-rendering whenever that changes. */

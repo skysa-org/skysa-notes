@@ -31,6 +31,7 @@ import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
+import { tokenStatesOf } from './dexiePorts.js';
 import type { RelayFactory, RelayLink } from './relay.js';
 import { createDexieSyncStore, toSyncOp } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
@@ -1155,7 +1156,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const generation = generations.current + 1;
 		generations.current = generation;
 		const { connectionId } = state;
-		const tokens = createTokenSource({ db, client, connectionId, now: environment.now });
+		const tokens = createTokenSource({
+			credentials: db,
+			states: tokenStatesOf(db),
+			client,
+			connectionId,
+			now: environment.now,
+		});
 		const abort = new AbortController();
 		const provider =
 			state.provider === undefined

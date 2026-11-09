@@ -1,14 +1,20 @@
 import { isAuthError } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient } from '../src/api/client.js';
+import type { AccessToken, ApiClient } from '../src/api/client.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
+import type { CredentialRecord } from '../src/store/credentials.js';
+import type { NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
-import { createTokenSource } from '../src/sync/tokens.js';
+import { tokenStatesOf } from '../src/sync/dexiePorts.js';
+import { createTokenSource, type TokenStates } from '../src/sync/tokens.js';
 import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
 
 const CREDENTIAL = 'sk1_the-credential-this-device-holds';
+
+/** The token source's ports over the app's database, as the scheduler hands them. */
+const over = (db: NotesDatabase) => ({ credentials: db, states: tokenStatesOf(db) });
 
 const bound = async () => {
 	const db = freshDatabase();
@@ -50,7 +56,12 @@ describe('provider access tokens', () => {
 		const db = await bound();
 		const clock = { now: 0 };
 		const client = minting(clock);
-		const tokens = createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now });
+		const tokens = createTokenSource({
+			...over(db),
+			client,
+			connectionId: 'c1',
+			now: () => clock.now,
+		});
 
 		expect(await tokens.get()).toBe('t1');
 		clock.now = HOUR / 2;
@@ -64,7 +75,12 @@ describe('provider access tokens', () => {
 		const db = await bound();
 		const clock = { now: 0 };
 		const client = minting(clock);
-		const tokens = createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now });
+		const tokens = createTokenSource({
+			...over(db),
+			client,
+			connectionId: 'c1',
+			now: () => clock.now,
+		});
 		await tokens.get();
 
 		clock.now = HOUR - 30_000;
@@ -78,7 +94,12 @@ describe('provider access tokens', () => {
 		const db = await bound();
 		const clock = { now: 0 };
 		const client = minting(clock);
-		const tokens = createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now });
+		const tokens = createTokenSource({
+			...over(db),
+			client,
+			connectionId: 'c1',
+			now: () => clock.now,
+		});
 
 		const got = await Promise.all([tokens.get(), tokens.get(), tokens.get(), tokens.get()]);
 
@@ -94,10 +115,15 @@ describe('provider access tokens', () => {
 		const db = await bound();
 		const clock = { now: 0 };
 		const client = minting(clock);
-		await createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now }).get();
+		await createTokenSource({
+			...over(db),
+			client,
+			connectionId: 'c1',
+			now: () => clock.now,
+		}).get();
 
 		const afterReload = createTokenSource({
-			db,
+			...over(db),
 			client,
 			connectionId: 'c1',
 			now: () => clock.now,
@@ -113,7 +139,12 @@ describe('provider access tokens', () => {
 		const db = await bound();
 		const clock = { now: 0 };
 		const client = minting(clock);
-		const tokens = createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now });
+		const tokens = createTokenSource({
+			...over(db),
+			client,
+			connectionId: 'c1',
+			now: () => clock.now,
+		});
 		await tokens.get();
 		await db.syncState.update('c1', { accessToken: 'tampered' });
 
@@ -131,7 +162,7 @@ describe('provider access tokens', () => {
 			.mockImplementation(ok.token);
 		const now = () => clock.now;
 		const tokens = createTokenSource({
-			db,
+			...over(db),
 			client: presenting(token),
 			connectionId: 'c1',
 			now,
@@ -142,7 +173,7 @@ describe('provider access tokens', () => {
 
 		// Not from memory, and not from the row after a reload either.
 		const reloaded = createTokenSource({
-			db,
+			...over(db),
 			client: presenting(token),
 			connectionId: 'c1',
 			now,
@@ -155,7 +186,12 @@ describe('provider access tokens', () => {
 		const db = await bound();
 		const clock = { now: 0 };
 		const client = minting(clock);
-		const tokens = createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now });
+		const tokens = createTokenSource({
+			...over(db),
+			client,
+			connectionId: 'c1',
+			now: () => clock.now,
+		});
 		await tokens.get();
 
 		await tokens.refresh();
@@ -171,7 +207,7 @@ describe('provider access tokens', () => {
 				Promise.resolve({ ok: false, refusal: 'reauthorize_required' })
 			)
 		);
-		const tokens = createTokenSource({ db, client, connectionId: 'c1' });
+		const tokens = createTokenSource({ ...over(db), client, connectionId: 'c1' });
 
 		const failure = await tokens.get().catch((error: unknown) => error);
 
@@ -189,7 +225,11 @@ describe('provider access tokens', () => {
 				denial: { code: 'lapsed', reason: 'Your plan ended.' },
 			})
 			.mockResolvedValue({ ok: false, refusal: 'reauthorize_required' });
-		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+		const tokens = createTokenSource({
+			...over(db),
+			client: presenting(token),
+			connectionId: 'c1',
+		});
 
 		await tokens.get().catch(() => undefined);
 		expect(tokens.refusal()).toBe('not_entitled');
@@ -206,7 +246,11 @@ describe('provider access tokens', () => {
 		const token = vi
 			.fn<ApiClient['token']>()
 			.mockResolvedValue({ ok: false, refusal: 'reauthorize_required' });
-		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+		const tokens = createTokenSource({
+			...over(db),
+			client: presenting(token),
+			connectionId: 'c1',
+		});
 		await tokens.get().catch(() => undefined);
 
 		await db.syncState.update('c1', {
@@ -224,7 +268,11 @@ describe('provider access tokens', () => {
 			.fn<ApiClient['token']>()
 			.mockResolvedValueOnce({ ok: false, refusal: 'reauthorize_required' })
 			.mockRejectedValue(new TypeError('Failed to fetch'));
-		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+		const tokens = createTokenSource({
+			...over(db),
+			client: presenting(token),
+			connectionId: 'c1',
+		});
 		await tokens.get().catch(() => undefined);
 
 		await expect(tokens.get()).rejects.toThrow('Failed to fetch');
@@ -240,7 +288,11 @@ describe('provider access tokens', () => {
 			.fn<ApiClient['token']>()
 			.mockResolvedValueOnce({ ok: false, refusal: 'credential_revoked' })
 			.mockImplementation(ok.token);
-		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+		const tokens = createTokenSource({
+			...over(db),
+			client: presenting(token),
+			connectionId: 'c1',
+		});
 		await tokens.get().catch(() => undefined);
 
 		await tokens.get();
@@ -255,7 +307,7 @@ describe('provider access tokens', () => {
 			return { ok: true, value: { accessToken: 't1', expiresAt: Date.now() + HOUR } };
 		});
 
-		await createTokenSource({ db, client, connectionId: 'c1' }).get();
+		await createTokenSource({ ...over(db), client, connectionId: 'c1' }).get();
 
 		expect(await db.syncState.count()).toBe(0);
 	});
@@ -269,7 +321,7 @@ describe('provider access tokens', () => {
 			return { ok: true, value: { accessToken: 't1', expiresAt: Date.now() + HOUR } };
 		});
 
-		await createTokenSource({ db, client, connectionId: 'c1' }).get();
+		await createTokenSource({ ...over(db), client, connectionId: 'c1' }).get();
 
 		const state = await db.syncState.get('c1');
 		expect(state?.detached).toBeDefined();
@@ -282,7 +334,11 @@ describe('provider access tokens', () => {
 		await createNote(db, { connectionId: 'c1', title: 'Unsent' });
 		await detachConnection(db, { connectionId: 'c1' });
 		const token = vi.fn<ApiClient['token']>();
-		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+		const tokens = createTokenSource({
+			...over(db),
+			client: presenting(token),
+			connectionId: 'c1',
+		});
 
 		await expect(tokens.get()).rejects.toThrow(/no longer syncs/);
 
@@ -293,7 +349,7 @@ describe('provider access tokens', () => {
 	it('will not mint once this device holds no credential for the connection', async () => {
 		const db = await bound();
 		const client = minting({ now: 0 });
-		const tokens = createTokenSource({ db, client, connectionId: 'c1' });
+		const tokens = createTokenSource({ ...over(db), client, connectionId: 'c1' });
 		expect(await tokens.get()).toBe('t1');
 
 		// Revoked from another device, or the source disconnected in another tab.
@@ -305,5 +361,51 @@ describe('provider access tokens', () => {
 		expect(isAuthError(failure)).toBe(true);
 		expect(tokens.refusal()).toBe('credential_required');
 		expect(client.withCredential).toHaveBeenCalledTimes(1);
+	});
+
+	it('needs nothing of the app’s database but its ports', async () => {
+		// The token source goes to the shared kit (docs/decisions/0018-the-shared-kit.md):
+		// an app with no Dexie at all hands it a table of credentials and a
+		// place to keep a token, and a reload finds the token there.
+		const rows = new Map<string, CredentialRecord>([
+			['c1', { id: 'c1', credential: CREDENTIAL, provider: 'dropbox', createdAt: 0 }],
+		]);
+		const credentials = {
+			credentials: {
+				get: (id: string) => Promise.resolve(rows.get(id)),
+				put: (record: CredentialRecord) => Promise.resolve(rows.set(record.id, record)),
+				delete: (id: string) => Promise.resolve(void rows.delete(id)),
+			},
+		};
+		const kept = new Map<string, AccessToken>();
+		const states: TokenStates = {
+			read: (connectionId) =>
+				Promise.resolve({ detached: false, token: kept.get(connectionId) }),
+			keep: (connectionId, token) => {
+				if (token === undefined) kept.delete(connectionId);
+				else kept.set(connectionId, token);
+				return Promise.resolve();
+			},
+		};
+		const clock = { now: 0 };
+		const client = minting(clock);
+		const source = () =>
+			createTokenSource({
+				credentials,
+				states,
+				client,
+				connectionId: 'c1',
+				now: () => clock.now,
+			});
+
+		expect(await source().get()).toBe('t1');
+		expect(kept.get('c1')?.accessToken).toBe('t1');
+		expect(await source().get()).toBe('t1');
+		expect(client.token).toHaveBeenCalledTimes(1);
+		expect(client.withCredential).toHaveBeenCalledWith(CREDENTIAL);
+
+		const reloaded = source();
+		await reloaded.refresh();
+		expect(kept.get('c1')?.accessToken).toBe('t2');
 	});
 });
