@@ -1,4 +1,4 @@
-import type { FetchLike } from '@skysa/core';
+import { type FetchLike, NOTES_FOLDER } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';
@@ -21,6 +21,7 @@ const input = {
 describe('provider requests', () => {
 	it('are given up on when the network never answers', async () => {
 		const factory = createProviderFactory({
+			folder: NOTES_FOLDER,
 			appVersion: '1.2.3',
 			fetch: hanging,
 			timeoutMs: 20,
@@ -35,6 +36,7 @@ describe('provider requests', () => {
 		// deadline is a minute the connection's lock is held for nothing.
 		const session = new AbortController();
 		const factory = createProviderFactory({
+			folder: NOTES_FOLDER,
 			appVersion: '1.2.3',
 			fetch: hanging,
 			timeoutMs: 60_000,
@@ -241,7 +243,11 @@ describe('provider requests', () => {
 				})
 			)
 		);
-		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+		const provider = createProviderFactory({
+			folder: NOTES_FOLDER,
+			appVersion: '1.2.3',
+			fetch,
+		})({
 			...input,
 			provider: 'dropbox',
 		});
@@ -258,7 +264,11 @@ describe('provider requests', () => {
 		const fetch = vi.fn<FetchLike>(() =>
 			Promise.resolve(Response.json({ value: [] }, { status: 200 }))
 		);
-		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+		const provider = createProviderFactory({
+			folder: NOTES_FOLDER,
+			appVersion: '1.2.3',
+			fetch,
+		})({
 			...input,
 			provider: 'onedrive',
 		});
@@ -279,7 +289,11 @@ describe('provider requests', () => {
 					: Response.json({ id: 'f1', name: 'a.md', headRevisionId: 'r1' })
 			)
 		);
-		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+		const provider = createProviderFactory({
+			folder: NOTES_FOLDER,
+			appVersion: '1.2.3',
+			fetch,
+		})({
 			...input,
 			provider: 'gdrive',
 		});
@@ -294,7 +308,10 @@ describe('provider requests', () => {
 
 	it('have no adapter for webdav yet', () => {
 		expect(
-			createProviderFactory({ appVersion: '1.2.3' })({ ...input, provider: 'webdav' })
+			createProviderFactory({ folder: NOTES_FOLDER, appVersion: '1.2.3' })({
+				...input,
+				provider: 'webdav',
+			})
 		).toBeUndefined();
 	});
 });

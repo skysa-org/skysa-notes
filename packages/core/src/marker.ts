@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-import { APP_NAME, MARKER_SCHEMA_VERSION, PROVIDER_KINDS } from './config.js';
+import { PROVIDER_KINDS } from './config.js';
+import type { MarkerSpec } from './folderSpec.js';
 import { parseJson } from './json.js';
 
 /**
@@ -26,6 +27,8 @@ export type MarkerCreatedBy = z.infer<typeof createdBySchema>;
 export type Marker = z.infer<typeof markerSchema>;
 
 export interface BuildMarkerInput {
+	/** The app it names, and the layout version it was written at. */
+	marker: MarkerSpec;
 	appVersion: string;
 	provider: MarkerCreatedBy['provider'];
 	clientId: string;
@@ -40,8 +43,8 @@ export interface BuildMarkerInput {
  * device's provenance.
  */
 export const buildMarker = (input: BuildMarkerInput): Marker => ({
-	schemaVersion: MARKER_SCHEMA_VERSION,
-	app: APP_NAME,
+	schemaVersion: input.marker.version,
+	app: input.marker.app,
 	createdAt: (input.now ?? new Date()).toISOString(),
 	createdBy: {
 		appVersion: input.appVersion,
@@ -65,10 +68,10 @@ export type MarkerParseResult =
 	| { status: 'invalid'; reason: string };
 
 /**
- * Parse `.notesapp.json`. Applies the read-only-on-newer-version rule from
- * docs/ARCHITECTURE.md §3.
+ * Parse a marker against `spec`, the reading app's: one naming another app is not its.
+ * Applies the read-only-on-newer-version rule from docs/ARCHITECTURE.md §3.
  */
-export const parseMarker = (text: string): MarkerParseResult => {
+export const parseMarker = (text: string, spec: MarkerSpec): MarkerParseResult => {
 	const json = parseJson(text);
 	if (json === undefined) return { status: 'invalid', reason: 'not valid JSON' };
 
@@ -81,10 +84,10 @@ export const parseMarker = (text: string): MarkerParseResult => {
 	}
 
 	const marker = parsed.data;
-	if (marker.app !== APP_NAME) {
+	if (marker.app !== spec.app) {
 		return { status: 'invalid', reason: `marker belongs to a different app: ${marker.app}` };
 	}
-	if (marker.schemaVersion > MARKER_SCHEMA_VERSION) {
+	if (marker.schemaVersion > spec.version) {
 		return { status: 'read-only', marker, reason: 'newer-schema' };
 	}
 	return { status: 'ok', marker };

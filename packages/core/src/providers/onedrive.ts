@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import { cell } from '../cell.js';
-import { MARKER_FILE } from '../config.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import {
 	type HttpProviderOptions,
@@ -439,7 +438,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const id = await rootId();
 		await writeMarkerOnce(
 			{ ...options, provider: 'onedrive' },
-			async () => (await metadataAt(MARKER_FILE)) !== undefined,
+			async () => (await metadataAt(options.folder.marker.file)) !== undefined,
 			(path, content) => create(path, content)
 		);
 		return { rootId: id };

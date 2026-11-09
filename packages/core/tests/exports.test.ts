@@ -24,6 +24,7 @@ const SURFACE = [
 	'MAX_CODE_HOLD_SECONDS',
 	'MAX_CODE_REASON',
 	'MAX_CONNECT_CODE',
+	'NOTES_FOLDER',
 	'NOTE_EXTENSION',
 	'NotFoundError',
 	'PASSWORD_LENGTH',
@@ -163,6 +164,7 @@ const SURFACE = [
 /** Every type the entry offers; see the last test. */
 type Types = [
 	Core.ApiErrorCode,
+	Core.AppFolderSpec,
 	Core.AttachmentKind,
 	Core.AuthMode,
 	Core.Cell<unknown>,

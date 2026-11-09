@@ -28,6 +28,7 @@ import {
 	type DriveClient,
 	type DriveFailure,
 	type DriveFile,
+	type DriveTags,
 	FIELDS,
 	type FileList,
 	FILES,
@@ -50,13 +51,13 @@ const LISTS_AT_ONCE = WRITES_AT_ONCE;
  * `drive` changes are about shared drives, which `drive.file` never reaches.
  * A `removed` change is "deletion or loss of access", and carries no file.
  */
-const changeItem = (change: DriveChange): TreeItem[] => {
+const changeItem = (change: DriveChange, tags: DriveTags): TreeItem[] => {
 	if (change.changeType === 'drive') return [];
 	const id = change.fileId ?? change.file?.id;
 	if (id === undefined || id === '')
 		throw new ProviderResponseError('gdrive sent a change with no file id');
 	if (change.removed === true || change.file === undefined) return [{ id, gone: true }];
-	return [treeItemOf({ ...change.file, id })];
+	return [treeItemOf({ ...change.file, id }, tags)];
 };
 
 // ---------------------------------------------------------------------------
@@ -136,7 +137,7 @@ interface Fetched {
 
 /** `StorageProvider.changes`: a page of a scan or of the feed, read against the tree. */
 export const createChanges = (client: DriveClient, appFolder: AppFolder, now: () => Date) => {
-	const { attempt, call, raise, childrenOf } = client;
+	const { attempt, call, raise, childrenOf, tags } = client;
 	const { establishRoot, confirmRoot, foundId, forget } = appFolder;
 	const separate = createSeparate(client, now);
 
@@ -175,7 +176,7 @@ export const createChanges = (client: DriveClient, appFolder: AppFolder, now: ()
 		if (!result.ok) return raise(result.failure);
 		const next = result.value.nextPageToken;
 		return {
-			items: (result.value.files ?? []).map(treeItemOf),
+			items: (result.value.files ?? []).map((file) => treeItemOf(file, tags)),
 			roundEnds: next === undefined,
 			next: next ?? from.start,
 			// A scan lists only what is not in the trash; a folder trashed
@@ -205,7 +206,7 @@ export const createChanges = (client: DriveClient, appFolder: AppFolder, now: ()
 		}
 		const changes = result.value.changes ?? [];
 		return {
-			items: changes.flatMap(changeItem),
+			items: changes.flatMap((change) => changeItem(change, tags)),
 			roundEnds: result.value.nextPageToken === undefined,
 			next,
 			// From what Drive sent, not from the tree's reading of it, which also
@@ -259,7 +260,7 @@ export const createChanges = (client: DriveClient, appFolder: AppFolder, now: ()
 			if (depth > MAX_DEPTH) return;
 			const children = listed.get(folderId) ?? [];
 			children.forEach((child) => {
-				applyItem(page, treeItemOf(child));
+				applyItem(page, treeItemOf(child, tags));
 			});
 			children.filter(isFolder).forEach((child) => {
 				applyUnder(child.id ?? '', depth + 1);

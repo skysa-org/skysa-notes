@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { MARKER_FILE } from '../../src/config.js';
 import { parseMarker } from '../../src/marker.js';
 import {
 	isSelf,
@@ -9,6 +8,7 @@ import {
 	rootFolderEntry,
 	writeMarkerOnce,
 } from '../../src/providers/adapter.js';
+import { TEST_FOLDER } from '../../src/providers/fake.js';
 import {
 	ConflictError,
 	NotFoundError,
@@ -31,7 +31,13 @@ const entry = (fields: Partial<RemoteEntry>): RemoteEntry => ({
 	...fields,
 });
 
-const options = { provider: 'onedrive' as const, appVersion: '1.2.3', clientId: 'install-1' };
+/** Any app's folder: the marker's name and what it says come from it. */
+const options = {
+	folder: TEST_FOLDER,
+	provider: 'onedrive' as const,
+	appVersion: '1.2.3',
+	clientId: 'install-1',
+};
 
 describe('writeMarkerOnce', () => {
 	it('writes nothing where the marker is already there', async () => {
@@ -40,7 +46,7 @@ describe('writeMarkerOnce', () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it('writes a marker naming the provider and install where there is none', async () => {
+	it('writes the app’s marker, naming the provider and install, where there is none', async () => {
 		const create = vi.fn((_path: string, _content: string) => Promise.resolve());
 		await writeMarkerOnce(
 			{ ...options, userAgent: 'agent' },
@@ -50,8 +56,8 @@ describe('writeMarkerOnce', () => {
 
 		expect(create).toHaveBeenCalledTimes(1);
 		const [path, content] = create.mock.calls[0] ?? [];
-		expect(path).toBe(MARKER_FILE);
-		const parsed = parseMarker(content ?? '');
+		expect(path).toBe('.testapp.json');
+		const parsed = parseMarker(content ?? '', TEST_FOLDER.marker);
 		expect(parsed.status).toBe('ok');
 		if (parsed.status !== 'ok') return;
 		expect(parsed.marker.createdBy).toEqual({
@@ -63,7 +69,7 @@ describe('writeMarkerOnce', () => {
 	});
 
 	it('lets a marker another device wrote meanwhile stand', async () => {
-		const create = () => Promise.reject(new ConflictError(entry({ path: MARKER_FILE })));
+		const create = () => Promise.reject(new ConflictError(entry({ path: '.testapp.json' })));
 		await expect(
 			writeMarkerOnce(options, () => Promise.resolve(false), create)
 		).resolves.toBeUndefined();

@@ -1,4 +1,4 @@
-import { MARKER_FILE } from '../config.js';
+import type { AppFolderSpec } from '../folderSpec.js';
 import { buildMarker, type MarkerCreatedBy, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
 import type { FetchLike } from './http.js';
@@ -12,6 +12,8 @@ import { type EntryRef, isConflictError, NotFoundError, type RemoteEntry } from 
  */
 
 export interface HttpProviderOptions {
+	/** The app's folder: its name, its marker, and Drive's tag for it. */
+	folder: AppFolderSpec;
 	fetch: FetchLike;
 	/** Called per request, so a refreshed token is picked up without rebuilding. */
 	getAccessToken: () => Promise<string>;
@@ -27,7 +29,7 @@ export interface HttpProviderOptions {
  * no-op rather than an overwrite of its provenance.
  */
 export const writeMarkerOnce = async (
-	options: Pick<HttpProviderOptions, 'appVersion' | 'clientId' | 'userAgent'> & {
+	options: Pick<HttpProviderOptions, 'folder' | 'appVersion' | 'clientId' | 'userAgent'> & {
 		provider: MarkerCreatedBy['provider'];
 	},
 	exists: () => Promise<boolean>,
@@ -35,12 +37,13 @@ export const writeMarkerOnce = async (
 ): Promise<void> => {
 	if (await exists()) return;
 	const marker = buildMarker({
+		marker: options.folder.marker,
 		appVersion: options.appVersion,
 		provider: options.provider,
 		clientId: options.clientId,
 		...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
 	});
-	await create(MARKER_FILE, serializeMarker(marker)).catch((error: unknown) => {
+	await create(options.folder.marker.file, serializeMarker(marker)).catch((error: unknown) => {
 		if (isConflictError(error)) return;
 		throw error;
 	});

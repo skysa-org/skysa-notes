@@ -122,7 +122,7 @@ export interface CreateFileOptions {
  *   text with U+FFFD where the bytes were: that looks like a note, and the next
  *   push writes the damage over the original. A probe takes it for "there".
  * - `list` is one level; `changes` covers the whole tree at every depth.
- * - Neither filters hidden paths: `.notesapp.json` has to reach the engine.
+ * - Neither filters hidden paths: the marker has to reach the engine.
  *   Callers filter with `isHidden`.
  * - `rootId` is opaque, non-empty and stable. A provider whose root has no id
  *   of its own — a Dropbox app folder, where the root simply is `/` — returns a

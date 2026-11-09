@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { NOTES_FOLDER } from '../../src/config.js';
+import type { AppFolderSpec } from '../../src/folderSpec.js';
 import { foldName } from '../../src/names/fold.js';
 import { isHidden, isWithin, joinPath, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
@@ -36,6 +38,7 @@ const START = new Date('2026-01-01T00:00:00Z');
 
 const over = <T>(
 	create: (options: {
+		folder: AppFolderSpec;
 		fetch: FetchLike;
 		getAccessToken: () => Promise<string>;
 		appVersion: string;
@@ -44,6 +47,7 @@ const over = <T>(
 	fetch: FetchLike
 ): T =>
 	create({
+		folder: NOTES_FOLDER,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',

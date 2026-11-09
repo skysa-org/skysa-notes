@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { MARKER_FILE } from '../../src/config.js';
+import type { AppFolderSpec } from '../../src/folderSpec.js';
 import { parseMarker } from '../../src/marker.js';
 import { isHidden } from '../../src/paths.js';
+import { TEST_FOLDER } from '../../src/providers/fake.js';
 import {
 	type ChangeEntry,
 	ConflictError,
@@ -47,6 +48,11 @@ export interface ProviderHarness {
 }
 
 export interface ProviderContractOptions {
+	/**
+	 * The app folder the adapter was made with: its marker is the file the
+	 * scenarios look for and read. The fake's `TEST_FOLDER` unless given.
+	 */
+	folder?: AppFolderSpec;
 	/**
 	 * False for path-based providers, where `remoteId` *is* the path and so
 	 * cannot survive a move. WebDAV re-links renames through frontmatter `id`
@@ -126,7 +132,14 @@ export const describeProviderContract = (
 	createHarness: () => ProviderHarness | Promise<ProviderHarness>,
 	options: ProviderContractOptions = {}
 ): void => {
-	const { stableIds = true, staleVersion = 'zzzz-9999', changesLagMs = 0, timeout } = options;
+	const {
+		folder: spec = TEST_FOLDER,
+		stableIds = true,
+		staleVersion = 'zzzz-9999',
+		changesLagMs = 0,
+		timeout,
+	} = options;
+	const MARKER_FILE = spec.marker.file;
 	const config = timeout === undefined ? undefined : { timeout };
 
 	describe(`StorageProvider contract: ${name}`, () => {
@@ -223,7 +236,7 @@ export const describeProviderContract = (
 				expect(marker).toBeDefined();
 
 				const read = await provider.read(marker!);
-				expect(parseMarker(read.content).status).toBe('ok');
+				expect(parseMarker(read.content, spec.marker).status).toBe('ok');
 			});
 
 			it('is idempotent and never rewrites the marker', config, async () => {
@@ -383,7 +396,7 @@ export const describeProviderContract = (
 			});
 
 			it('does not hide the marker file', config, async () => {
-				// Providers never filter; the engine needs to see `.notesapp.json`,
+				// Providers never filter; the engine needs to see the marker,
 				// and the UI filters with `isHidden`.
 				const provider = await open();
 				const entries = await provider.list('');

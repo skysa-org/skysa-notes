@@ -1,3 +1,4 @@
+import { NOTES_FOLDER } from '../../src/config.js';
 import { basename, joinPath, parentPath } from '../../src/paths.js';
 import {
 	createFakeProvider,
@@ -36,7 +37,7 @@ export const STUB_ROOT_ID = 'folder-skysa-notes';
 const MY_DRIVE = 'my-drive';
 const BASE_TIME = Date.parse('2026-01-01T00:00:00Z');
 
-export type GDriveStubOptions = Omit<FakeProviderOptions, 'folderChanges' | 'kind'> & {
+export type GDriveStubOptions = Omit<FakeProviderOptions, 'folder' | 'folderChanges' | 'kind'> & {
 	/**
 	 * What the `PUT` that finishes a resumable upload answers with: the fields
 	 * the session asked for, as Drive is expected to, or only Drive's defaults
@@ -123,8 +124,13 @@ const driveError = (status: number, reason: string) =>
 const LITERAL = String.raw`'((?:[^'\\]|\\.)*)'`;
 const unescape = (literal: string): string => literal.replace(/\\(.)/g, '$1');
 
+/**
+ * The app folder the stub holds is notes' (`NOTES_FOLDER`), found by its tag:
+ * the adapter in front of it is made with the same spec.
+ */
+const { name: ROOT_NAME, driveTag: ROOT_TAG } = NOTES_FOLDER;
 const ROOT_QUERY = new RegExp(
-	String.raw`^appProperties has \{ key='notesapp' and value='root' \} and mimeType = '${FOLDER}' and trashed = false$`
+	String.raw`^appProperties has \{ key='${ROOT_TAG}' and value='root' \} and mimeType = '${FOLDER}' and trashed = false$`
 );
 const NAMED_QUERY = new RegExp(`^name = ${LITERAL} and ${LITERAL} in parents and trashed = false$`);
 const CHILDREN_QUERY = new RegExp(`^${LITERAL} in parents and trashed = false$`);
@@ -177,7 +183,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 
 	const rootFile = (): DriveFile => ({
 		id: STUB_ROOT_ID,
-		name: 'skysa-notes',
+		name: ROOT_NAME,
 		mimeType: FOLDER,
 		parents: [MY_DRIVE],
 		modifiedTime: new Date(BASE_TIME).toISOString(),
@@ -319,7 +325,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 			parents?: string[];
 			appProperties?: Record<string, string>;
 		};
-		if (request.appProperties?.notesapp === 'root') {
+		if (request.appProperties?.[ROOT_TAG] === 'root') {
 			if (rootMade) return driveError(500, 'stubCannotHoldTwoRoots');
 			rootMade = true;
 			return json(rootFile());

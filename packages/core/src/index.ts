@@ -17,12 +17,14 @@ export { encodeIdentity, generateIdentity } from './age/keys.js';
 export { type Cell, cell } from './cell.js';
 export { API_ERROR_CODES, type ApiErrorCode, AUTH_MODES, type AuthMode } from './api.js';
 export { isEncryptionFile, isScratchPath, isVaultPath } from './appFolder.js';
+export type { AppFolderSpec } from './folderSpec.js';
 export {
 	APP_FOLDER_NAME,
 	CLIPBOARD_FOLDER,
 	CLIPBOARD_ITEMS,
 	ENCRYPTION_FILE,
 	NOTE_EXTENSION,
+	NOTES_FOLDER,
 	PROVIDER_KINDS,
 	type ProviderKind,
 	SCRATCHPAD_FOLDER,

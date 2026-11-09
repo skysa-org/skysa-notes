@@ -52,7 +52,7 @@ describe('pull', () => {
 	});
 
 	it('ignores the marker file', async () => {
-		// `ensureRoot` already wrote `.notesapp.json`. Importing it as a note
+		// `ensureRoot` already wrote the marker. Importing it as a note
 		// would put the app's own bookkeeping in the user's note list, and push
 		// it back mangled.
 		await world.engine.pull();
@@ -60,7 +60,7 @@ describe('pull', () => {
 	});
 
 	it('ignores a hidden note, extension or not', async () => {
-		// Not the same check as the one above: `.notesapp.json` is also not
+		// Not the same check as the one above: the marker is also not
 		// markdown, so the extension alone would have turned that test green
 		// with nothing watching hidden paths at all. Anything under a dot
 		// segment is somebody's bookkeeping — a provider's, another tool's —

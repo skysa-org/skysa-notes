@@ -1,3 +1,5 @@
+import type { AppFolderSpec } from './folderSpec.js';
+
 /**
  * Values that must agree with the operator's provider app registrations.
  *
@@ -9,17 +11,23 @@
  */
 export const APP_FOLDER_NAME = 'skysa-notes';
 
-/** Name the app reports as its own in the marker file. */
-export const APP_NAME = 'skysa-notes';
-
-/** Marker file written at the root of the app folder on first connect. */
-export const MARKER_FILE = '.notesapp.json';
-
 /**
- * Layout version of the remote folder. A client that finds a marker with a
- * higher version than this opens the connection read-only — see `parseMarker`.
+ * This app's folder, as the adapters are handed it (docs/decisions/0018-the-shared-kit.md).
+ * Every value is in the user's storage already, in every library ever
+ * connected, so none of them changes: renamed, the app no longer finds them.
+ *
+ * - `driveTag`: Google Drive finds the folder by `notesapp: root` in its
+ *   `appProperties`, and marks one the app has left `notesappLeft: 1`
+ *   (docs/ARCHITECTURE.md §5.1).
+ * - `marker`: written at the folder's root on first connect, naming this app.
+ *   Its `version` is the folder's layout version: a client that finds a marker
+ *   with a higher one opens the connection read-only — see `parseMarker`.
  */
-export const MARKER_SCHEMA_VERSION = 1;
+export const NOTES_FOLDER: AppFolderSpec = {
+	name: APP_FOLDER_NAME,
+	driveTag: 'notesapp',
+	marker: { file: '.notesapp.json', app: 'skysa-notes', version: 1 },
+};
 
 /** Storage providers this codebase knows. `dropbox`, `onedrive` and `gdrive`
  * have adapters; `webdav` is deferred indefinitely (docs/ARCHITECTURE.md §5.4). */

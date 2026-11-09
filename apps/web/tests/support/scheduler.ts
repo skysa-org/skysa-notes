@@ -9,6 +9,7 @@ import { expect, vi } from 'vitest';
 import type { ApiClient } from '../../src/api/client.js';
 import { bindConnection } from '../../src/store/connection.js';
 import type { NotesDatabase } from '../../src/store/db.js';
+import { SYNC_LOCK } from '../../src/sync/lock.js';
 import {
 	createSyncScheduler,
 	type ProviderFactory,
@@ -191,6 +192,7 @@ export const started = (
 	const server = tokenServer();
 	const theRemote = remote();
 	const scheduler = createSyncScheduler({
+		lockName: SYNC_LOCK,
 		db,
 		client: server,
 		createProvider: theRemote.factory,

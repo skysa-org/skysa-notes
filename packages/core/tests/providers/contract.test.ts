@@ -1,3 +1,5 @@
+import { NOTES_FOLDER } from '../../src/config.js';
+import type { AppFolderSpec } from '../../src/folderSpec.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import {
 	createFakeProvider,
@@ -56,8 +58,15 @@ describeProviderContract('in-memory fake, provider reports whole subtrees', () =
  */
 const DROPBOX_STALE_REV = 'ffffffffffffffff';
 
+/**
+ * The folder every adapter below is made with, and the suite told of: notes'
+ * own, which the Drive stub answers to and the live accounts hold.
+ */
+const FOLDER = NOTES_FOLDER;
+
 /** What every adapter is made from: one shape, so one table registers them all. */
 type CreateAdapter = (options: {
+	folder: AppFolderSpec;
 	fetch: FetchLike;
 	getAccessToken: () => Promise<string>;
 	appVersion: string;
@@ -144,6 +153,7 @@ for (const adapter of adapters) {
 				const stub = adapter.stub(stubOptions);
 				return {
 					provider: adapter.create({
+						folder: FOLDER,
 						fetch: stub.fetch,
 						getAccessToken: () => Promise.resolve('stub-token'),
 						appVersion: '0.1.0',
@@ -152,7 +162,7 @@ for (const adapter of adapters) {
 					...beneath(stub.backing),
 				};
 			},
-			adapter.options
+			{ ...adapter.options, folder: FOLDER }
 		);
 	}
 }
@@ -172,6 +182,7 @@ for (const adapter of adapters) {
 		`${adapter.name} (live account)`,
 		() => {
 			const provider = adapter.create({
+				folder: FOLDER,
 				fetch: globalThis.fetch.bind(globalThis),
 				getAccessToken: () => Promise.resolve(token),
 				appVersion: '0.1.0',
@@ -186,6 +197,6 @@ for (const adapter of adapters) {
 				},
 			};
 		},
-		adapter.live
+		{ ...adapter.live, folder: FOLDER }
 	);
 }

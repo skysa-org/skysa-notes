@@ -72,7 +72,7 @@ export const clashes = (page: Page): Clash[] => {
 };
 
 export const createSeparate = (client: DriveClient, now: () => Date) => {
-	const { attempt, call, raise, fileUrl, named, childrenOf, trash } = client;
+	const { attempt, call, raise, fileUrl, named, childrenOf, trash, tags } = client;
 
 	/**
 	 * Two items at one path, made one again under §7's rule for a conflict: the
@@ -136,7 +136,7 @@ export const createSeparate = (client: DriveClient, now: () => Date) => {
 				fileUrl(other.id ?? ''),
 				jsonBody({ name: renamed })
 			);
-			applyItem(page, treeItemOf(result));
+			applyItem(page, treeItemOf(result, tags));
 			return [...names, renamed];
 		}, Promise.resolve([]));
 	};

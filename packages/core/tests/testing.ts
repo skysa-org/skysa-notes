@@ -5,6 +5,7 @@
  */
 export {
 	createFakeProvider,
+	TEST_FOLDER,
 	type FakeCall,
 	type FakeFault,
 	type FakeOperation,

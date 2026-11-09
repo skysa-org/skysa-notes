@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { MARKER_FILE } from '../../src/config.js';
+import { NOTES_FOLDER } from '../../src/config.js';
+import type { AppFolderSpec } from '../../src/folderSpec.js';
 import {
 	conflictFilename,
 	conflictFolderName,
@@ -37,8 +38,11 @@ const API = 'https://www.googleapis.com';
 const FOLDER = 'application/vnd.google-apps.folder';
 const AT = new Date('2026-09-17T12:00:00Z');
 
-const over = (doFetch: FetchLike): StorageProvider =>
+const MARKER_FILE = NOTES_FOLDER.marker.file;
+
+const over = (doFetch: FetchLike, folder: AppFolderSpec = NOTES_FOLDER): StorageProvider =>
 	createGDriveProvider({
+		folder,
 		fetch: doFetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -94,6 +98,7 @@ interface Seen {
 
 const LITERAL = String.raw`'((?:[^'\\]|\\.)*)'`;
 const unescape = (literal: string): string => literal.replace(/\\(.)/g, '$1');
+const TAGGED = new RegExp(String.raw`^appProperties has \{ key=${LITERAL} and value='root' \}`);
 const NAMED = new RegExp(`^name = ${LITERAL} and ${LITERAL} in parents and trashed = false$`);
 const CHILDREN = new RegExp(`^${LITERAL} in parents and trashed = false$`);
 
@@ -174,8 +179,11 @@ const driveWorld = () => {
 
 	const search = (q: string) => {
 		const live = files.filter((file) => !trashedOrUnder(file));
-		if (q.startsWith('appProperties has')) {
-			return live.filter((file) => file.appProperties?.notesapp === 'root');
+		const tagged = TAGGED.exec(q);
+		if (tagged !== null) {
+			return live.filter(
+				(file) => file.appProperties?.[unescape(tagged[1] ?? '')] === 'root'
+			);
 		}
 		const named = NAMED.exec(q);
 		if (named !== null) {
@@ -555,6 +563,39 @@ describe('the app folder', () => {
 			appProperties: { notesapp: 'root' },
 		});
 		expect(posts[1]?.url).toContain('/upload/drive/v3/files?uploadType=multipart');
+	});
+
+	it('is the one the app describes, beside another app’s on the same Drive', async () => {
+		// Its name, its tag, its marker and the mark on a folder it has left all
+		// come from the app's `AppFolderSpec`, so this app's folder is not taken
+		// for that one's, nor that one's touched.
+		const other: AppFolderSpec = {
+			name: 'other-app',
+			driveTag: 'otherapp',
+			marker: { file: '.otherapp.json', app: 'other-app', version: 1 },
+		};
+		const world = driveWorld();
+		const provider = over(world.doFetch, other);
+
+		const { rootId } = await provider.ensureRoot();
+
+		expect(rootId).not.toBe(world.root.id);
+		expect(
+			world.seen.some((r) => r.url.searchParams.get('q')?.includes("key='otherapp'"))
+		).toBe(true);
+		expect(world.find(rootId)).toMatchObject({
+			name: 'other-app',
+			appProperties: { otherapp: 'root' },
+		});
+		expect(world.files.filter((file) => file.parents[0] === rootId).map((f) => f.name)).toEqual(
+			['.otherapp.json']
+		);
+
+		world.add({ id: 'work', name: 'Work', parent: rootId, mimeType: FOLDER });
+		await provider.leaveFolder?.({ remoteId: 'work', path: 'Work' });
+
+		expect(world.find('work')?.appProperties).toEqual({ otherappLeft: '1' });
+		expect(world.find(world.root.id)?.appProperties).toEqual({ notesapp: 'root' });
 	});
 
 	it('made by two devices at once is settled on the earlier, and ours is trashed', async () => {

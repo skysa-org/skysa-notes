@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { FetchLike } from '@skysa/core';
+import { type FetchLike, NOTES_FOLDER } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -126,7 +126,11 @@ describe('Content-Security-Policy', () => {
 			urls.add(url);
 			return Promise.resolve(new Response('{}', { status: 500 }));
 		};
-		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+		const provider = createProviderFactory({
+			folder: NOTES_FOLDER,
+			appVersion: '1.2.3',
+			fetch,
+		})({
 			connectionId: 'c1',
 			provider: 'dropbox',
 			clientId: 'install-1',
@@ -166,7 +170,11 @@ describe('Content-Security-Policy', () => {
 			}
 			return Promise.resolve(new Response('', { status: 500 }));
 		};
-		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+		const provider = createProviderFactory({
+			folder: NOTES_FOLDER,
+			appVersion: '1.2.3',
+			fetch,
+		})({
 			connectionId: 'c1',
 			provider: 'onedrive',
 			clientId: 'install-1',
@@ -198,7 +206,11 @@ describe('Content-Security-Policy', () => {
 			if (url.includes('q=')) return Promise.resolve(Response.json({ files: [note] }));
 			return Promise.resolve(Response.json(note));
 		};
-		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+		const provider = createProviderFactory({
+			folder: NOTES_FOLDER,
+			appVersion: '1.2.3',
+			fetch,
+		})({
 			connectionId: 'c1',
 			provider: 'gdrive',
 			clientId: 'install-1',

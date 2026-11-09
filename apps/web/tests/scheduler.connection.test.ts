@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import type { NotesDatabase } from '../src/store/db.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { SYNC_LOCK } from '../src/sync/lock.js';
 import {
 	createSyncScheduler,
 	type ProviderFactory,
@@ -82,6 +83,7 @@ describe('following the connection', () => {
 		expect((await db.syncState.get('c1'))?.resumeUnverified).toBe(true);
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
 			db,
 			client: tokenServer(),
 			createProvider: first.remote.factory,
@@ -109,6 +111,7 @@ describe('following the connection', () => {
 		const theRemote = remote();
 		theRemote.fake.setFault((call) => (call.op === 'read' ? new Error('502') : undefined));
 		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
 			db,
 			client: tokenServer(),
 			createProvider: theRemote.factory,
@@ -313,6 +316,7 @@ describe('following the connection', () => {
 		);
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
+			lockName: SYNC_LOCK,
 			db,
 			client: tokenServer(),
 			createProvider: first.remote.factory,
