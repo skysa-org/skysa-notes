@@ -1,6 +1,7 @@
 import { isWithin, rebasePath } from '../../paths.js';
 import {
 	isNoteChange,
+	type NoteChange,
 	noteIdOf,
 	pathOf,
 	type PullChange,
@@ -93,26 +94,36 @@ const placedBy =
 				: state;
 		}
 		if (!isNoteChange(change) || change.id !== note.id) return state;
-		// Cut loose from the remote: it points at no file at all now. Both
-		// kinds that forget it, or the rest of the batch reads a note as
-		// still bound to a file it no longer has. No test reaches the
-		// `reupload-note` half — `reconcile` returns its upload branch
-		// before anything asks where a note is — so it is here for the
-		// invariant, not for a caller that has it today.
-		if (change.kind === 'detach-note' || change.kind === 'reupload-note') {
-			return { ...state, remoteId: undefined };
-		}
-		// `upsert-note`, `move-note` and `displace-note` carry a path;
-		// `adopt-version`, `detach-note` and `reupload-note` carry an id and
-		// move nothing.
-		// None of them changes `dirty`: the only kind that overwrites a
-		// note's bytes is `upsert-note`, and the engine never emits one
-		// for a note with unpushed edits — that is what `conflict` is.
-		const bound = remoteOf(change);
-		const remoteId = bound === undefined ? state.remoteId : bound.remoteId;
-		const at = pathOf(change);
-		return at === undefined ? { ...state, remoteId } : { ...state, at, remoteId };
+		return ownPlacement(state, change);
 	};
+
+/** Where a change naming the note leaves it. */
+const ownPlacement = (state: Placement, change: NoteChange): Placement => {
+	// The one change but a conflict that can leave a dirty note clean.
+	if (change.kind === 'merge-note') {
+		return { at: change.path, dirty: !change.clean, remoteId: change.remote.remoteId };
+	}
+	// Cut loose from the remote: it points at no file at all now. Both
+	// kinds that forget it, or the rest of the batch reads a note as
+	// still bound to a file it no longer has. No test reaches the
+	// `reupload-note` half — `reconcile` returns its upload branch
+	// before anything asks where a note is — so it is here for the
+	// invariant, not for a caller that has it today.
+	if (change.kind === 'detach-note' || change.kind === 'reupload-note') {
+		return { ...state, remoteId: undefined };
+	}
+	// `upsert-note`, `move-note` and `displace-note` carry a path;
+	// `adopt-version`, `detach-note` and `reupload-note` carry an id and
+	// move nothing.
+	// None of them changes `dirty`: the only kinds that overwrite a
+	// note's bytes are `upsert-note`, which the engine never emits for a
+	// note with unpushed edits — that is what `conflict` is — and
+	// `merge-note`, above.
+	const bound = remoteOf(change);
+	const remoteId = bound === undefined ? state.remoteId : bound.remoteId;
+	const at = pathOf(change);
+	return at === undefined ? { ...state, remoteId } : { ...state, at, remoteId };
+};
 
 const placedAt = (note: SyncNote): Placement => ({
 	at: note.path,

@@ -1,4 +1,4 @@
-import { RateLimitError } from '@skysa/core';
+import { type MergeInput, RateLimitError } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApiClient } from '../src/api/client.js';
@@ -876,6 +876,35 @@ describe('failures', () => {
 		h.remote.fake.setFault(undefined);
 		await h.scheduler.syncNow();
 		expect(h.scheduler.status()).toMatchObject({ phase: 'idle', conflicts: copies });
+	});
+
+	it('makes one note of edits here and elsewhere when it is handed a merge', async () => {
+		const db = await bound();
+		const note = await createNote(db, { title: 'Plan', body: 'one\n' });
+		// The remote's text, then the last line written here. This app passes
+		// no merge (`SyncSchedulerOptions.merge`); memoriam's does.
+		const merge = ({ local, remote }: MergeInput) =>
+			`${remote}${local.trimEnd().split('\n').at(-1) ?? ''}\n`;
+		const h = started(db, { merge });
+		await vi.waitFor(async () => {
+			expect((await noteById(db, note.id))?.dirty).toBe(0);
+		});
+		await reaches(h.scheduler, 'idle');
+		const synced = h.remote.fake.contentAt(note.path) ?? '';
+		const version = h.remote.fake.snapshot().find((entry) => entry.path === note.path)?.version;
+
+		// Edited elsewhere, and here, before either syncs.
+		await h.remote.fake.write(note.path, `${synced}theirs\n`, { expectedVersion: version });
+		await saveNoteBody(db, note.id, 'one\nmine\n');
+		await h.scheduler.syncNow();
+
+		expect(h.scheduler.status()).toMatchObject({ phase: 'idle', conflicts: [] });
+		expect(h.remote.fake.contentAt(note.path)).toBe(`${synced}theirs\nmine\n`);
+		expect(await noteById(db, note.id)).toMatchObject({
+			source: `${synced}theirs\nmine\n`,
+			dirty: 0,
+		});
+		expect(await db.notes.count()).toBe(1);
 	});
 
 	it('retries a token server that cannot be reached after it refused', async () => {

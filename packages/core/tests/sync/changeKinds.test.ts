@@ -30,6 +30,16 @@ const ONE_OF_EACH: { readonly [Kind in PullChange['kind']]: Extract<PullChange, 
 			syncedHash: 'h',
 		},
 		'adopt-version': { kind: 'adopt-version', id: 'n1', remote },
+		'merge-note': {
+			kind: 'merge-note',
+			id: 'n1',
+			path: 'a.md',
+			base: '',
+			content: '',
+			clean: true,
+			remote,
+			syncedHash: 'h',
+		},
 		'move-note': { kind: 'move-note', id: 'n1', path: 'b.md', remote },
 		'delete-note': { kind: 'delete-note', id: 'n1' },
 		'detach-note': { kind: 'detach-note', id: 'n1' },
@@ -78,6 +88,7 @@ describe('what a change is about, by its kind (#447)', () => {
 			changes.filter((change) => pathOf(change) !== undefined).map((change) => change.kind)
 		).toEqual([
 			'upsert-note',
+			'merge-note',
 			'move-note',
 			'displace-note',
 			'ensure-folder',
@@ -88,13 +99,14 @@ describe('what a change is about, by its kind (#447)', () => {
 		]);
 		expect(
 			changes.filter((change) => remoteOf(change) !== undefined).map((change) => change.kind)
-		).toEqual(['upsert-note', 'adopt-version', 'move-note', 'upsert-file']);
+		).toEqual(['upsert-note', 'adopt-version', 'merge-note', 'move-note', 'upsert-file']);
 	});
 
 	it('names the kinds about one note, and those about a file', () => {
 		expect(changes.filter(isNoteChange).map((change) => change.kind)).toEqual([
 			'upsert-note',
 			'adopt-version',
+			'merge-note',
 			'move-note',
 			'delete-note',
 			'detach-note',

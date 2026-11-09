@@ -298,6 +298,33 @@ export type PullChange =
 	  }>
 	| Readonly<{
 			/**
+			 * Both sides changed the note, and the app's merge made the two one
+			 * (`SyncEngineOptions.merge`, docs/ARCHITECTURE.md §7, "Merge before
+			 * the copy"). This app has none; memoriam's merges a passage
+			 * practised on two devices. The note takes `content`, is bound to
+			 * `remote` with `syncedHash` as its bytes, and goes to `path`, its
+			 * queued ops with it. Clean when `content` is the remote's own bytes,
+			 * its queued writes then dropped as a conflict drops them; dirty
+			 * otherwise, with a write queued if none is.
+			 *
+			 * Refused, as `upsert-note` is, when the note no longer holds `base`,
+			 * the content the merge was made from: the user wrote while the
+			 * engine was at the network, and what the merge left out is the
+			 * newest edit. The next pull merges again from the note as it is.
+			 */
+			kind: 'merge-note';
+			id: string;
+			path: string;
+			base: string;
+			content: string;
+			/** Whether `content` is the remote's own bytes. */
+			clean: boolean;
+			remote: RemoteEntry;
+			/** `contentHash` of the remote's bytes, as `upsert-note`'s is. */
+			syncedHash: string;
+	  }>
+	| Readonly<{
+			/**
 			 * Renamed or moved remotely, contents unchanged. The note's queued
 			 * ops follow it, as they do for `move-folder` and `displace-note`:
 			 * anything that changes where a note is changes where its queued
@@ -640,6 +667,7 @@ export type PullChange =
 const CHANGE_KINDS = {
 	'upsert-note': { about: 'note', placed: true, bound: true },
 	'adopt-version': { about: 'note', placed: false, bound: true },
+	'merge-note': { about: 'note', placed: true, bound: true },
 	'move-note': { about: 'note', placed: true, bound: true },
 	'delete-note': { about: 'note', placed: false, bound: false },
 	'detach-note': { about: 'note', placed: false, bound: false },

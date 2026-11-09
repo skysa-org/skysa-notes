@@ -18,10 +18,11 @@ import { type Placement, remoteNow, removedInBatch, unreadNow, whereNow } from '
 /**
  * The notes, as a pull decides them: a listed note matched to the row it is
  * (`noteForEntry`) or given an id (`idForNewNote`), read and reconciled with
- * an edit here by the conflict rule (`decideFile`, `decideKnown`), the note in
- * its way moved aside (`displaceOccupant`), and what a note the remote no
- * longer has becomes (`forgetNote`, `keepNote`, `noteNoLonger`). Moved out of
- * `engine.ts` as they were (#446).
+ * an edit here, merged where the app's merge can and otherwise by the conflict
+ * rule (`decideFile`, `decideKnown`), the note in its way moved aside
+ * (`displaceOccupant`), and what a note the remote no longer has becomes
+ * (`forgetNote`, `keepNote`, `noteNoLonger`). Moved out of `engine.ts` as they
+ * were (#446).
  */
 
 export const createPullNotes = (
@@ -34,7 +35,7 @@ export const createPullNotes = (
 		readNote: (entry: RemoteEntry) => Promise<{ content: string; version: string }>;
 	} & Pick<Occupancy, 'notesEndingIn' | 'takenIn'>
 ) => {
-	const { provider, store, document, names, now, newId, meter } = context;
+	const { provider, store, document, names, now, newId, meter, mergedOf } = context;
 
 	const resolutionFor = async (
 		local: SyncNote,
@@ -309,6 +310,25 @@ export const createPullNotes = (
 		// file written again since) would adopt a version whose bytes nobody
 		// looked at — and the push would replace them without a copy.
 		if (found.version === entry.version && local.syncedHash === syncedHash) return unchanged();
+		// Both sides changed it, and the app may make them one file yet
+		// (`SyncEngineOptions.merge`). Where the note goes is where `unchanged`
+		// would put it: a rename the user queued is kept.
+		const merged = mergedOf(entry.path, local.content, content);
+		if (merged !== undefined) {
+			const kept = renaming.has(local.id) ? whereNow(local, decided) : undefined;
+			return [
+				{
+					kind: 'merge-note',
+					id: local.id,
+					path: kept ?? entry.path,
+					base: local.content,
+					content: merged,
+					clean: merged === content,
+					remote: entry,
+					syncedHash,
+				},
+			];
+		}
 		const resolution = await resolutionFor(local, content, entry, claimed, decided);
 		return [{ kind: 'conflict', resolution }];
 	};

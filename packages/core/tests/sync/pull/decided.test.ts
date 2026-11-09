@@ -11,7 +11,8 @@ import type { PullChange } from '../../../src/sync/store.js';
 /**
  * What a batch has spoken for, read off its decisions (`pull/decided.ts`).
  * The engine's tests (`engine/*.test.ts`) reach these through whole pulls;
- * this says what each answers for one change of every kind.
+ * this says what each answers for one change of every kind, `merge-note`
+ * among them, which this app's engine never makes: it passes no merge.
  */
 
 const entry = (remoteId: string, path: string): RemoteEntry => ({
@@ -26,6 +27,7 @@ const entry = (remoteId: string, path: string): RemoteEntry => ({
 const KINDS: Readonly<Record<PullChange['kind'], true>> = {
 	'upsert-note': true,
 	'adopt-version': true,
+	'merge-note': true,
 	'move-note': true,
 	'delete-note': true,
 	'detach-note': true,
@@ -78,6 +80,23 @@ const rowsAbout = (n: string, work: string): readonly Row[] => {
 		},
 		{
 			change: { kind: 'adopt-version', id: n, remote: entry('r', 'a.md') },
+			notes: [n],
+			folders: [],
+			decided: [n],
+			apart: [n],
+		},
+		// A merge writes the note back at its path, as an upsert does.
+		{
+			change: {
+				kind: 'merge-note',
+				id: n,
+				path: 'a.md',
+				base: '',
+				content: 'merged',
+				clean: false,
+				remote: entry('r', 'a.md'),
+				syncedHash: '',
+			},
 			notes: [n],
 			folders: [],
 			decided: [n],

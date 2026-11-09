@@ -7,10 +7,11 @@ import type { ConflictResolution, PullChange, SyncNote, SyncStore } from './stor
 /**
  * What every part of the engine is handed by `createSyncEngine`: the provider
  * and the store it syncs between, what a document is and what its names say,
- * the clock and ids injected for tests, its
- * bounds, a way to renew the token, and the meter that tells `onProgress` how
- * far a run has got. Built once per engine, so the parts moved out of
- * `engine.ts` (#446) share one rather than each closing over its own.
+ * the clock and ids injected for tests, its bounds, a way to renew the token,
+ * the meter that tells `onProgress` how far a run has got, and the two sides
+ * of a file made one where the app can make them one (`mergedOf`). Built once
+ * per engine, so the parts moved out of `engine.ts` (#446) share one rather
+ * than each closing over its own.
  */
 export interface EngineContext {
 	readonly provider: StorageProvider;
@@ -34,6 +35,13 @@ export interface EngineContext {
 	 */
 	readonly renew: () => Promise<boolean>;
 	readonly meter: Meter;
+	/**
+	 * The two sides made one, or none: none without the engine's `merge`, and
+	 * none where it throws, since a merge that cannot be made is a conflict
+	 * copy, which keeps both, and never a sync that stops
+	 * (docs/ARCHITECTURE.md §7, "Merge before the copy").
+	 */
+	readonly mergedOf: (path: string, local: string, remote: string) => string | undefined;
 }
 
 /**

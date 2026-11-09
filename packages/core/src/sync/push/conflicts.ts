@@ -11,8 +11,9 @@ import type { NotePush } from './notes.js';
  * A write the remote would not simply take, settled instead: the note set
  * aside under a conflict name where the file in its way is not its own or
  * cannot be read (`setAside`, `setAsideForOp`), or reconciled with the file's
- * newer version by the conflict rule (`resolvePushConflict`). Moved out of
- * `engine.ts` as they were (#446).
+ * newer version by the conflict rule (`resolvePushConflict`), or made one with
+ * it where the app's merge can (`pushMerged`). Moved out of `engine.ts` as they
+ * were (#446).
  */
 
 /**
@@ -26,7 +27,7 @@ export interface Settled {
 }
 
 export const createConflictPush = (
-	{ provider, store, document, names, now }: EngineContext,
+	{ provider, store, document, names, now, mergedOf }: EngineContext,
 	{ write, fileState, resolutionFor }: Pick<NotePush, 'write'> & FromPull
 ) => {
 	/**
@@ -179,6 +180,49 @@ export const createConflictPush = (
 	const setAsideForOp = async (op: SyncOp): Promise<Settled | undefined> => {
 		const note = op.op === 'write' ? await store.noteById(op.noteId) : undefined;
 		return note === undefined ? undefined : setAside(op, note);
+	};
+
+	/**
+	 * A write the remote refused, its file and ours made one by the app's merge
+	 * (docs/ARCHITECTURE.md §7, "Merge before the copy"): the note takes the
+	 * merge, bound to the version just read, and the merge goes up against
+	 * that version now. A merge that is the remote's own bytes has nothing to
+	 * send, and the store drops the write. Should the remote move again in
+	 * between, the write conflicts and comes back through here.
+	 */
+	const pushMerged = async (
+		op: SyncOp,
+		note: SyncNote,
+		merged: string,
+		read: Readonly<{ content: string; version: string; remote: RemoteEntry }>
+	): Promise<Settled> => {
+		const remote = { ...read.remote, version: read.version };
+		const clean = merged === read.content;
+		await store.applyChanges({
+			changes: [
+				{
+					kind: 'merge-note',
+					id: note.id,
+					path: note.path,
+					base: note.content,
+					content: merged,
+					clean,
+					remote,
+					syncedHash: await contentHash(read.content),
+				},
+			],
+		});
+		if (clean) return { pushed: false };
+		const bound = { ...note, content: merged, remoteId: remote.remoteId };
+		const entry = await write(bound, read.version);
+		await store.completeOp(op.seq, {
+			kind: 'pushed',
+			noteId: note.id,
+			remote: entry,
+			content: merged,
+			syncedHash: await contentHash(merged),
+		});
+		return { pushed: true };
 	};
 
 	/**
@@ -357,6 +401,10 @@ export const createConflictPush = (
 		const own = await ownFile();
 		if (held && own === 'gone') return setAside(op, note);
 		if (held || own !== 'gone') return stepAside(own);
+
+		// Both sides changed it, and the app may make them one file yet.
+		const merged = mergedOf(remote.path, note.content, content);
+		if (merged !== undefined) return pushMerged(op, note, merged, { ...read, remote });
 
 		const resolution = await resolutionFor(note, content, remote, new Set(), []);
 		await store.resolveConflict(op.seq, resolution);

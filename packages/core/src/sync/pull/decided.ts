@@ -39,7 +39,8 @@ export const reestablished = (
 			// devices then disagreeing for ever about which note it is.
 			return change.kind === 'upsert-note' ||
 				change.kind === 'adopt-version' ||
-				change.kind === 'move-note'
+				change.kind === 'move-note' ||
+				change.kind === 'merge-note'
 				? [change.id]
 				: [];
 		})

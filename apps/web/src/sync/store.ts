@@ -240,7 +240,7 @@ const listed = (file: UnreadableFile): ListedFile => ({
 /** Every file a batch or a resolution will write, so each is digested once, up front. */
 const contentsOf = (changes: readonly PullChange[]): string[] =>
 	changes.flatMap((change) => {
-		if (change.kind === 'upsert-note') return [change.content];
+		if (change.kind === 'upsert-note' || change.kind === 'merge-note') return [change.content];
 		if (change.kind === 'conflict') {
 			return [change.resolution.remoteContent, change.resolution.copyContent];
 		}
@@ -298,7 +298,7 @@ export const createDexieSyncStore = (
 	): Promise<ReadonlyMap<PullChange, ParsedNoteFile>> => {
 		const read = new Map<PullChange, ParsedNoteFile>();
 		await eachInSlices(changes, (change) => {
-			if (change.kind !== 'upsert-note') return;
+			if (change.kind !== 'upsert-note' && change.kind !== 'merge-note') return;
 			read.set(change, parseNoteFile(change.content, { filename: basename(change.path) }));
 		});
 		return read;
@@ -1028,6 +1028,56 @@ export const createDexieSyncStore = (
 		await originIsNow(scope, change.id, change.path);
 	};
 
+	/**
+	 * A note both sides changed, which the app's merge made one: it takes the
+	 * merged text and is bound to the remote's file. Refused where the note no
+	 * longer holds what the merge was made from — an edit saved while the
+	 * engine was at the network — so the batch rolls back with its cursor and
+	 * the next pull merges again from the note as it is. An edit is never
+	 * written over. This app passes no merge, so only a test makes one here.
+	 */
+	const mergeNote = async (
+		scope: Scope,
+		change: Extract<PullChange, { kind: 'merge-note' }>,
+		{ hashes, read }: Prepared
+	): Promise<void> => {
+		const note = await requireNote(scope, change.id);
+		if (noteFile(note) !== change.base) {
+			throw new Error(`Note ${change.id} changed after its merge was made`);
+		}
+		await ensureFolderChain(scope, parentPath(change.path));
+		await scope.notes.put({
+			...noteRecordFromFile({
+				id: note.id,
+				connectionId,
+				path: change.path,
+				source: change.content,
+				hash: hashFor(hashes, change.content),
+				existing: note,
+				now: now(),
+				parsed: readFor(read, change),
+			}),
+			remoteId: change.remote.remoteId,
+			remoteVersion: change.remote.version,
+			syncedHash: change.syncedHash,
+			// What the remote has not got yet is still owed.
+			dirty: change.clean ? 0 : 1,
+		});
+		await rebaseOwnOps(scope, note.id, note.path, change.path);
+		await originIsNow(scope, note.id, change.remote.path);
+		const ops = await opsFor(scope, { connectionId, id: note.id });
+		const writes = ops.filter((op) => op.op === 'write');
+		// The remote holds all of it: a queued write would send its own bytes
+		// back under a new version, as one a conflict leaves would.
+		if (change.clean) {
+			await withdraw(scope, writes);
+			return;
+		}
+		if (writes.length === 0) {
+			await queue(scope, { op: 'write', noteId: note.id, path: change.path });
+		}
+	};
+
 	const deleteNote = async (scope: Scope, id: string): Promise<void> => {
 		const note = await ownNote(scope, id);
 		// An id that is not here is a no-op: a rejected batch is retried for
@@ -1108,6 +1158,9 @@ export const createDexieSyncStore = (
 		switch (change.kind) {
 			case 'upsert-note':
 				await upsertNote(scope, change, prepared);
+				return;
+			case 'merge-note':
+				await mergeNote(scope, change, prepared);
 				return;
 			case 'adopt-version': {
 				const note = await requireNote(scope, change.id);

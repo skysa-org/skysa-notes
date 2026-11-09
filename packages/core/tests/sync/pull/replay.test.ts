@@ -61,6 +61,16 @@ const CHANGES: readonly PullChange[] = [
 	},
 	{ kind: 'forget-unreadable', remoteId: 'r-z' },
 	{
+		kind: 'merge-note',
+		id: 'b',
+		path: 'Work/b.md',
+		base: '',
+		content: 'merged',
+		clean: false,
+		remote: entry('r-b', 'Work/b.md'),
+		syncedHash: '',
+	},
+	{
 		kind: 'upsert-note',
 		id: 'c',
 		path: 'Work/c.md',
@@ -116,6 +126,27 @@ describe('placement', () => {
 			dirty: false,
 			remoteId: 'r-x',
 		});
+	});
+
+	const merged = (clean: boolean): PullChange => ({
+		kind: 'merge-note',
+		id: 'b',
+		path: 'Work/m.md',
+		base: '',
+		content: 'merged',
+		clean,
+		remote: entry('r-m', 'Work/b.md'),
+		syncedHash: '',
+	});
+
+	it('leaves a merged note dirty unless the merge is the remote’s own bytes', () => {
+		const dirty = note('b', 'Work/b.md', true);
+		expect(placement(dirty, [merged(false)])).toEqual({
+			at: 'Work/m.md',
+			dirty: true,
+			remoteId: 'r-m',
+		});
+		expect(placement(dirty, [merged(true)]).dirty).toBe(false);
 	});
 });
 
