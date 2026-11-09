@@ -3,7 +3,7 @@ import type { EntitlementCode, SyncProgress } from '@skysa/core';
 import type { Refusal } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { type MessageKey, t } from '../../i18n/t.js';
-import { isLongRun, runBar, type RunCount, runCount, runSentence } from '../../sync/progress.js';
+import { isLongRun, runBar, type RunCount, runCount } from '../../sync/progress.js';
 import type { SchedulerStatus, StuckOp } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 
@@ -106,6 +106,38 @@ const lineCount = (count: RunCount): string => {
 			return t('account.line.sending', { done: count.done, total: count.total });
 		case 'receiving':
 			return t('account.line.receiving', { done: count.done, total: count.total });
+	}
+};
+
+/**
+ * Whose words a run's count is said in: a sync's, in the storage panel, or a
+ * first import's, which uploads and downloads notes rather than sending and
+ * receiving changes. Both say the listing alike.
+ */
+const MOVING = {
+	sync: { sending: 'account.status.sending', receiving: 'account.status.receiving' },
+	import: { sending: 'firstImport.uploading', receiving: 'firstImport.downloading' },
+} as const satisfies Record<string, Record<'sending' | 'receiving', MessageKey>>;
+
+/** How far a run has got, in a sentence that names the source. */
+export const runSentence = (
+	progress: SyncProgress,
+	label: string,
+	as: keyof typeof MOVING
+): string => {
+	const count = runCount(progress);
+	switch (count.kind) {
+		case 'looking':
+			return t('account.status.looking', { provider: label, count: count.count });
+		case 'checking':
+			return t('account.status.checkingFound', { provider: label, count: count.count });
+		case 'sending':
+		case 'receiving':
+			return t(MOVING[as][count.kind], {
+				provider: label,
+				done: count.done,
+				total: count.total,
+			});
 	}
 };
 

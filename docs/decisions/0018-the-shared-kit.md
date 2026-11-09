@@ -20,11 +20,11 @@ Seven packages, with one version between them:
 
 | Package | What it holds | From here |
 |---|---|---|
-| `@skysa/protocol` | What the server, the client and a deployment all speak: the API's error codes, the entitlement, gate and rate-limit seams, the relay's frames, `PROVIDER_KINDS` | `packages/core/src/{api,entitlements,relay}.ts`, and `PROVIDER_KINDS` from `config.ts` |
-| `@skysa/storage` | The adapter interface and its errors, one folder per provider, and below them names, paths, the marker and hashing; `/testing` has the fake, the wire stubs and `describeProviderContract` | `providers/`, `names/`, `paths.ts`, `marker.ts`, `hash.ts`, `json.ts`, `cell.ts`, `files/mediaTypes.ts` |
+| `@skysa/protocol` | What the server, the client and a deployment all speak: the API's error codes, the entitlement, gate and rate-limit seams, the relay's frames, `PROVIDER_KINDS` | `packages/core/src/{api,entitlements,relay,providerKinds}.ts` |
+| `@skysa/storage` | The adapter interface and its errors, one folder per provider, and below them names, paths, the marker and hashing; `/testing` has the fake, the wire stubs and `describeProviderContract` | `providers/`, `names/` but `notes.ts` and `slug.ts`, `paths.ts`, `marker.ts`, `folderSpec.ts`, `documentFormat.ts`, `hash.ts`, `json.ts`, `cell.ts`, `bytes.ts`, `files/mediaTypes.ts` |
 | `@skysa/sync` | The engine and its store port, over a document format the app supplies; `/testing` has the in-memory store, `describeSyncStoreContract` and the simulation kit | `sync/` |
 | `@skysa/server` | The Worker as a library, one connect flow per provider, and the D1 migrations | `apps/api/src` but `worker.ts`, and `apps/api/migrations` |
-| `@skysa/client` | The API client, the token source, the provider factory and its request deadlines, the scheduler, the relay client, and the connect code a device holds | `apps/web/src/api/`, `sync/{tokens,providers,relay,scheduler,wakeLock,beforeUpdate}.ts`, `store/{credentials,connectCode}.ts` |
+| `@skysa/client` | The API client, the token source, the provider factory and its request deadlines, the scheduler, the relay client, the connect code a device holds, a long run's count, and the stores a screen listens to | `apps/web/src/api/`, `sync/{tokens,providers,relay,scheduler,wakeLock,beforeUpdate,progress}.ts`, `store/{credentials,connectCode,emitter}.ts` |
 | `@skysa/pwa` | The brand's Vite plugin, the manifest, the bundle budget, and a check of `_headers` | `apps/web/{brand,pwa}.ts`, `apps/web/scripts/` |
 | `@skysa/eslint-config` | The lint rules the apps share, `tsconfig.base.json`, and Prettier's settings | the root |
 
@@ -144,7 +144,18 @@ Each is a pull request of its own in this repository, released as usual, so that
   They are here now, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
   This part is done.
 - **A lint rule fences what is to move** from what stays, and once it passes the move can be made.
-  `names/slug.ts` is one thing it will find: it takes `.md` from `config.ts` for `noteFilename`, `uniqueFilename` and `attachmentName`, and its byte cap leaves room for those three bytes, where skysa-draw's leaves room for `.svg`'s four, so the cap is to follow the extension.
+  It is `kit/fence` in `eslint.config.js`, over `KIT`, which is the table above in code.
+  A module bound for one package imports only what goes to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
+  What it takes from `@skysa/core` it takes by name, and the module each name comes from is held to the same.
+  The deny-lists each seam added stay, since they say why a thing is handed in rather than imported, and the fence is the floor under them.
+  It is cut in two parts, each a pull request of its own.
+  1. The source.
+     Six imports crossed it, and each moved to where it goes: `PROVIDER_KINDS` to `providerKinds.ts`, `HIDDEN_PREFIX` to `paths.ts`, `concatBytes` to `bytes.ts` (where skysa-draw keeps it), and `contentTypeOf` to `files/mediaTypes.ts`.
+     The two helpers the client imported, which all three apps have, join it: `sync/progress.ts`, once its one sentence went to the status's other words, and `store/emitter.ts`.
+     `names/notes.ts` and `names/slug.ts` stay with the app, since they name notes and nothing that moves imports them; so `slug.ts`'s byte cap, which leaves room for `.md`, is each app's own, and skysa-draw's leaves room for `.svg`.
+     This part is cut.
+  2. The tests that go with the kit.
+     The engine's and the adapters' own, and the sync kit they run in, hand notes' format, its folder and its hidden paths today, and are to run on the kit's own before the fence takes them in.
 
 The operator's seams do not change: `EntitlementProvider` with its gate, `checkCode` and `hold`, `RateLimiter`, `RelayHub`, `ENABLED_PROVIDERS` and `RELAY`.
 

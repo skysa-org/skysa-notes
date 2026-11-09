@@ -1,5 +1,5 @@
-import type { ProviderKind } from '../config.js';
 import { asObject, isJsonObject, parseJson } from '../json.js';
+import type { ProviderKind } from '../providerKinds.js';
 import { ProviderResponseError, RateLimitError } from './types.js';
 
 /**

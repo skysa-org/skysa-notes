@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-import { PROVIDER_KINDS } from './config.js';
 import type { MarkerSpec } from './folderSpec.js';
 import { parseJson } from './json.js';
+import { PROVIDER_KINDS } from './providerKinds.js';
 
 /**
  * Debug-only provenance: which install created this folder, with what version.

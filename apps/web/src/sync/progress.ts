@@ -1,7 +1,5 @@
 import type { SyncProgress } from '@skysa/core';
 
-import { type MessageKey, t } from '../i18n/t.js';
-
 /**
  * From how many a run's count is said. A run of a few — an edit sent, a
  * notebook made — is over before a count could be read, and a bar for each
@@ -59,37 +57,5 @@ export const runBar = (
 		case 'sending':
 		case 'receiving':
 			return count.total === 0 ? null : { value: count.done, max: count.total };
-	}
-};
-
-/**
- * Whose words a run's count is said in: a sync's, in the storage panel, or a
- * first import's, which uploads and downloads notes rather than sending and
- * receiving changes. Both say the listing alike.
- */
-const MOVING = {
-	sync: { sending: 'account.status.sending', receiving: 'account.status.receiving' },
-	import: { sending: 'firstImport.uploading', receiving: 'firstImport.downloading' },
-} as const satisfies Record<string, Record<'sending' | 'receiving', MessageKey>>;
-
-/** How far a run has got, in a sentence that names the source. */
-export const runSentence = (
-	progress: SyncProgress,
-	label: string,
-	as: keyof typeof MOVING
-): string => {
-	const count = runCount(progress);
-	switch (count.kind) {
-		case 'looking':
-			return t('account.status.looking', { provider: label, count: count.count });
-		case 'checking':
-			return t('account.status.checkingFound', { provider: label, count: count.count });
-		case 'sending':
-		case 'receiving':
-			return t(MOVING[as][count.kind], {
-				provider: label,
-				done: count.done,
-				total: count.total,
-			});
 	}
 };

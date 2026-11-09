@@ -1,5 +1,3 @@
-import { HIDDEN_PREFIX } from './config.js';
-
 /**
  * Paths are POSIX, relative to the app-owned root folder, and never begin or end
  * with a separator. The root itself is the empty string. Every provider adapter
@@ -11,6 +9,9 @@ export const SEPARATOR = '/';
 
 /** Root of the app folder. */
 export const ROOT = '';
+
+/** Anything at a path segment starting with this is invisible to the UI. */
+export const HIDDEN_PREFIX = '.';
 
 /**
  * A path with no empty, `.` or `..` segment, which is nearly every path the app

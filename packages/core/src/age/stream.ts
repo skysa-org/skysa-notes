@@ -1,6 +1,6 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 
-import { concatBytes } from './bytes.js';
+import { concatBytes } from '../bytes.js';
 import { AgeError } from './errors.js';
 
 /**

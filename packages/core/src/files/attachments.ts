@@ -57,17 +57,6 @@ const OPENS_AS: ReadonlyMap<string, string> = new Map(
 );
 
 /**
- * The type to tell a provider a file is, as it is uploaded, by its name (the
- * table's `upload`). Anything else goes up as bytes. This is what the provider
- * records and nothing more — the app reads the extension, never this — so it is
- * not the allowlist below, which is about what this origin will show.
- */
-export const contentTypeOf = (name: string): string | undefined => {
-	const media = mediaOf(extensionOf(name));
-	return media?.upload === true ? media.type : undefined;
-};
-
-/**
  * The type to give a file's bytes before a tab is opened on them, and the
  * reason the answer is an allowlist. A `blob:` URL belongs to the page that
  * made it, so a file opened as `text/html` — or as `image/svg+xml`, which is a

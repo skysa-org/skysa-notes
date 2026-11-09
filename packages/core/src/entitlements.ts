@@ -1,4 +1,4 @@
-import type { ProviderKind } from './config.js';
+import type { ProviderKind } from './providerKinds.js';
 
 /**
  * The seam through which an operator restricts who may mint provider tokens or

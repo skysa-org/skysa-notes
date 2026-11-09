@@ -371,7 +371,7 @@ export class UnreadableError extends Error {}    // the file is there and is not
 
 Three shapes differ from the sketch this section used to carry.
 Members are property signatures rather than methods, which is both the house style (`EntitlementProvider`) and what `functional/prefer-property-signatures` requires.
-`kind` reuses `ProviderKind` from `config.ts` so `PROVIDER_KINDS` stays single-sourced with the marker schema.
+`kind` reuses `ProviderKind` from `providerKinds.ts` so `PROVIDER_KINDS` stays single-sourced with the marker schema.
 And `read`/`move`/`delete` take an `EntryRef`, not a whole `RemoteEntry`: a note record persists only `remoteId`, `remoteVersion` and `path`, so passing the full entry would have every caller inventing a `kind` and a `modifiedAt` — and let an adapter come to depend on the invented value.
 
 `NotFoundError` and `CursorResetError` are additions.
@@ -1529,7 +1529,7 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
      A round now reports `receiving` with `listing` before its first page, and after each page that names more notes, how many it has named so far (`total`, `done` 0), then `listing: false` with the whole count — even when that is none, so the words never outlive the reading.
      A scan reports before its first page as well.
      The line says "Checking…" (a scan, "Looking for notes…") from the first, and the count with a bar that does not know of how many once it has found twenty; on Drive a round of up to a thousand changes is one page, whose folder listing is still read before there is any count to give, so there it says the words alone.
-     The storage panel shows the count (`syncCount` in `components/account/statusWords.ts`, which reads it as a run's details and a first import's dialog do, with `runCount`, `runBar` and `runSentence` in `sync/progress.ts`): in a wide window, in a few words in the status line at the sidebar's foot ("120 of 1,000 sent"), with the sentence and the file it is on in the line's tooltip and a bar in the panel's padding under it; in a compact window, as the panel's sentence over the bar.
+     The storage panel shows the count (`syncCount` in `components/account/statusWords.ts`, which reads it as a run's details and a first import's dialog do, with `runCount` and `runBar` in `sync/progress.ts`, and `runSentence` beside it): in a wide window, in a few words in the status line at the sidebar's foot ("120 of 1,000 sent"), with the sentence and the file it is on in the line's tooltip and a bar in the panel's padding under it; in a compact window, as the panel's sentence over the bar.
      A round or a push of a few notes is not shown as a count: the panel says how many only from twenty up (`PROGRESS_FROM`), so an edit's sync does not flash a bar.
    - **A pull keeps what it has read until its batch commits (2026-10-05).**
      A batch is all or nothing — a round always, and a scan a page at a time, which on Google Drive is a thousand notes (`PAGE_SIZE` in `providers/gdrive/wire.ts`) — so a pull that failed at the last note threw away every note it had read, and the retry read them all again.
@@ -3479,6 +3479,7 @@ The first six seams are cut:
 - the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule keeps Dexie, the app's tables and its words out of everything that moves.
 
 Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked are here.
+A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, holds every source module that moves to what goes with it; the tests that move are to follow.
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

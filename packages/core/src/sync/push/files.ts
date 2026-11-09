@@ -1,4 +1,4 @@
-import { contentTypeOf } from '../../files/attachments.js';
+import { contentTypeOf } from '../../files/mediaTypes.js';
 import { conflictFilePath } from '../../names/conflicts.js';
 import { basename, normalizePath, parentPath } from '../../paths.js';
 import {

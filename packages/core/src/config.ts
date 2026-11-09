@@ -29,17 +29,8 @@ export const NOTES_FOLDER: AppFolderSpec = {
 	marker: { file: '.notesapp.json', app: 'skysa-notes', version: 1 },
 };
 
-/** Storage providers this codebase knows. `dropbox`, `onedrive` and `gdrive`
- * have adapters; `webdav` is deferred indefinitely (docs/ARCHITECTURE.md §5.4). */
-export const PROVIDER_KINDS = ['gdrive', 'onedrive', 'dropbox', 'webdav'] as const;
-
-export type ProviderKind = (typeof PROVIDER_KINDS)[number];
-
 /** Extension of a note file on every provider. */
 export const NOTE_EXTENSION = '.md';
-
-/** Anything at a path segment starting with this is invisible to the UI. */
-export const HIDDEN_PREFIX = '.';
 
 /**
  * The clipboard's folder at the root of the app folder (docs/ARCHITECTURE.md
