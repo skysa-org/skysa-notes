@@ -7,7 +7,7 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "vite build",
-		"size": "node scripts/bundleBudget.mjs",
+		"size": "node scripts/size.mjs",
 		"preview": "vite preview",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"test": "vitest run"

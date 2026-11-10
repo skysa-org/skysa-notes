@@ -1,5 +1,5 @@
 {
-	"$schema": "../../../brand/brand.schema.json",
+	"$schema": "../../../brand.schema.json",
 	"name": "Field & Notes",
 	"shortName": "Field",
 	"description": "A fixture brand for tests/brand.test.ts.",
@@ -8,7 +8,7 @@
 		"dark": { "brand": "#5EEAD4", "onBrand": "#042F2E", "theme": "#042F2E" },
 		"background": "#F0FDFA"
 	},
-	"icons": "../../../brand/icons",
+	"icons": "icons",
 	"fonts": {
 		"sans": {
 			"family": "Fixture Sans",

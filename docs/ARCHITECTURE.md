@@ -3082,6 +3082,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
 - **Brand (2026-10-01).**
   What the app is called and how it looks is a build input, `NOTES_BRAND`: the path to a `brand.json` that names the app (`name`, and a `shortName` of at most 12 characters for under a home-screen icon), describes it, gives the brand colour, the text on it and the title-bar colour for each of the light and dark themes plus the splash background, points at a folder of the six icons, and optionally gives woff2 files for a sans and a mono family.
   Without it the build uses `apps/web/brand/brand.json`: "Notes", in gray (`#4B5563` light, `#9CA3AF` dark), the curled-page icons on that gray, and the system fonts, so the default build carries no deployment's name, colour or mark.
+  That default is the app's, handed to the build (`DEFAULT_BRAND` in `pwaApp.ts`), and the brand file's JSON Schema is the build's (`apps/web/brand.schema.json`).
   `apps/web/brand.ts` reads and checks it and stops the build on anything wrong — a missing field, a colour that is not `#RRGGBB`, a long `shortName`, an icon missing or at the wrong size (read from its PNG header, as `tests/pwa.test.ts` always did), a font file missing or not woff2 — since a build that went ahead would only install without an icon, or not offer to install, and say nothing.
   The installed app's navigation bar on Android is one colour for both themes, since a manifest has one value and no dark variant (Chrome's dark fields are an experiment it no longer reads), and which colour it is depends on the phone.
   On Android 14 and older Chrome paints it with `theme_color`, which is the light theme's `brand` (2026-10-11).
@@ -3220,11 +3221,12 @@ apps/
   web/                        # Vite + React SPA
     vite.config.ts            # vite-plugin-pwa, the brand, /api proxy
     brand.ts                  # NOTES_BRAND: load and check a brand, write it into the build (§8)
-    brand/                    # the default brand: brand.json, its schema, the six icons, recolour.mjs
+    brand.schema.json         # a brand file's JSON Schema, for an editor
+    brand/                    # the default brand: brand.json, the six icons, recolour.mjs
     pwa.ts                    # manifest (from the brand) and Workbox options
-    pwaApp.ts                 # this app's route and share target, handed to pwa.ts
+    pwaApp.ts                 # this app's route, share target and default brand, handed to the build
     public/_headers           # the CSP: nothing may be added to script-src (§9)
-    scripts/                  # bundleBudget.mjs: the size budget CI holds the build to
+    scripts/                  # size.mjs: the size budget CI holds the build to, measured by bundleBudget.mjs
     fill.html                 # the fill window's page, which the bookmarklet opens (§7, §8)
     src/
       main.tsx jitless.ts routes/

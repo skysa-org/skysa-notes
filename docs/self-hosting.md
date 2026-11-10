@@ -215,7 +215,7 @@ NOTES_BRAND="$PWD/../my-brand/brand.json" pnpm run deploy
 
 ```jsonc
 {
-	"$schema": "<path to this repo>/apps/web/brand/brand.schema.json",
+	"$schema": "<path to this repo>/apps/web/brand.schema.json",
 	"name": "Acme Notes",
 	"shortName": "Acme Notes", // under a home-screen icon: 12 characters at most
 	"description": "Acme's notes, in your own storage.",

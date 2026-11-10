@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -16,7 +18,8 @@ import { APP, workerOf } from './support/serviceWorker.js';
  * See docs/ARCHITECTURE.md §8.
  */
 
-const brand = loadBrand();
+/** A brand of its own: the build is held to whatever brand it is handed. */
+const brand = loadBrand(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/brand/brand.json'));
 
 /** Width and height out of a PNG's IHDR chunk, which is always the first one. */
 const pngSize = (file: string): { width: number; height: number } => {
@@ -53,8 +56,8 @@ const { shellAnswers, ruleFor } = workerOf(workbox);
 
 describe('the web app manifest', () => {
 	it('names the app, for the install prompt and the home screen', () => {
-		// The default brand's: a deployment names it in its own (brand.ts).
-		expect(manifest.name).toBe('Notes');
+		// The brand's: a deployment names it in its own (brand.ts).
+		expect(manifest.name).toBe('Field & Notes');
 		expect(options.manifest).toEqual(manifest);
 		// Truncated under an icon, so it has to be short enough to survive.
 		expect(manifest.short_name).toBeDefined();

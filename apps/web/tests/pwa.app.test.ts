@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { loadBrand } from '../brand.js';
 import { pwaManifest, pwaWorkbox } from '../pwa.js';
-import { NOTES_PWA, receiveShare } from '../pwaApp.js';
+import { DEFAULT_BRAND, NOTES_PWA, receiveShare } from '../pwaApp.js';
 import { routeTree } from '../src/routeTree.gen';
 import { APP, workerOf } from './support/serviceWorker.js';
 
@@ -13,11 +13,15 @@ import { APP, workerOf } from './support/serviceWorker.js';
  * `pwa.test.ts`.
  */
 
-const manifest = pwaManifest(loadBrand(), NOTES_PWA);
+const manifest = pwaManifest(loadBrand(DEFAULT_BRAND), NOTES_PWA);
 const workbox = pwaWorkbox(NOTES_PWA);
 const { shellAnswers, ruleFor } = workerOf(workbox);
 
 describe('the web app manifest, in this app', () => {
+	it('names the app as its default brand does', () => {
+		expect(manifest.name).toBe('Notes');
+	});
+
 	it('is a share target, posting what is shared to its own worker', () => {
 		// docs/ARCHITECTURE.md §8, "Shared to the app". POST, so what is shared
 		// never sits in a URL, which a log keeps; multipart, so files come too.

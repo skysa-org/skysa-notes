@@ -163,7 +163,7 @@ Each is a pull request of its own in this repository, released as usual, so that
      What notes keeps of its own is pinned by notes: `folderSpec.test.ts` holds a marker as 1.0 wrote it, byte for byte, which this app reads and writes the same, since the marker's code moves.
      `KIT` names each package's tests beside its source, and the fence reads `@skysa/core/testing` by name as it reads `@skysa/core`.
      This part is cut.
-  3. The client's tests over this app's database, and the build's share target.
+  3. The client's tests over this app's database, and what the build is handed.
      The scheduler's and the token source's tests ran over notes' Dexie database, and one of the relay's describes did.
      Each follows as a suite over a device (`tests/client/device.ts`), as core's store contract is a suite over a store.
      A device is the ports the client is handed and what a test does to the device around them.
@@ -203,6 +203,13 @@ Each is a pull request of its own in this repository, released as usual, so that
         An app hands both in (`PwaApp`): the navigations its shell answers, and its share target if it has one, with the worker's rule for it whole, since Workbox writes the rule's function into `sw.js` as its source.
         Notes' are `pwaApp.ts`, and the built manifest and service worker are byte for byte what they were.
         The build's own checklist (`pwa.test.ts`) runs over an app of its own, and notes' route and share target are checked in `pwa.app.test.ts`.
+        This step is cut.
+     5. The build's default brand and its budget.
+        Without a brand named, `brand.ts` read notes' "Notes" in gray from beside itself, and the bundle budget held notes' figures and its two pages and read the build from beside itself; skysa-draw's copies differ in exactly those.
+        An app hands both in: the brand file it builds with when a deployment names none (`DEFAULT_BRAND` in `pwaApp.ts`), and its budget, which `scripts/bundleBudget.mjs` measures a build against (`checkBudget`, called by `scripts/size.mjs`).
+        A brand file's JSON Schema describes the build's format, so it is the build's, beside `brand.ts`.
+        The build's tests run over a fixture brand with icons of its own, and that the default is "Notes" is checked in `brand.app.test.ts` and `pwa.app.test.ts`.
+        The build is byte for byte what it was, and `pnpm size` says what it said.
         This step is cut.
      This part is cut.
 

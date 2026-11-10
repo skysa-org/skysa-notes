@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { HtmlTagDescriptor, Plugin } from 'vite';
 import { z } from 'zod';
@@ -12,8 +11,8 @@ import { z } from 'zod';
  *
  * A deployment points `NOTES_BRAND` at its own `brand.json` and gets its own
  * name, colours, icons and fonts without changing anything in this repo.
- * Without it, the build uses `brand/brand.json`: "Notes", in gray, on the
- * system fonts. It is a build input and not something `/api/config` answers,
+ * Without it, the build uses the app's own, whose file the app hands to
+ * `loadBrand`. It is a build input and not something `/api/config` answers,
  * because the manifest, the home-screen title and icon, the precache and the
  * first paint are all settled before the app could ask.
  *
@@ -33,9 +32,6 @@ export const BRAND_ICONS = [
 ] as const;
 
 type BrandIconFile = (typeof BRAND_ICONS)[number]['file'];
-
-// Not `new URL(…, import.meta.url)`, which Vite would read as an asset to serve.
-export const DEFAULT_BRAND = join(dirname(fileURLToPath(import.meta.url)), 'brand/brand.json');
 
 /** The stacks the app used before it had a brand, and still uses without fonts. */
 const SANS_STACK = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
@@ -164,12 +160,12 @@ const parseJson = (text: string): unknown => {
 };
 
 /**
- * Reads and checks a brand file, by default the one in `brand/`. Anything
+ * Reads and checks a brand file: a deployment's, or the app's own. Anything
  * wrong stops the build with what and where: a build that went ahead would
  * install without an icon, or not offer to install at all, and say nothing.
  */
-export const loadBrand = (path?: string): Brand => {
-	const file = resolve(path ?? DEFAULT_BRAND);
+export const loadBrand = (path: string): Brand => {
+	const file = resolve(path);
 	const fail = (problem: string): never => {
 		throw new Error(`Brand file ${file}: ${problem}`);
 	};
