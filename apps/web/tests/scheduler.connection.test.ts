@@ -12,24 +12,22 @@ import {
 	type SchedulerStatus,
 	type SyncPhase,
 } from '../src/sync/scheduler.js';
-import { noteById, updateNote } from './noteRows.js';
-import { holdCredential } from './support/connection.js';
-import { watchedDatabase } from './support/db.js';
-import { fakeEnvironment } from './support/fakes/environment.js';
 import {
-	ACCOUNT,
 	BACKOFF,
-	bound,
 	cleanups,
 	deferred,
 	INTERVAL,
 	quiet,
 	reaches,
 	remote,
-	started,
 	stopSchedulers,
 	tokenServer,
-} from './support/scheduler.js';
+} from './client/schedulerHarness.js';
+import { noteById, updateNote } from './noteRows.js';
+import { holdCredential } from './support/connection.js';
+import { watchedDatabase } from './support/db.js';
+import { fakeEnvironment } from './support/fakes/environment.js';
+import { ACCOUNT, bound, started } from './support/scheduler.js';
 
 afterEach(stopSchedulers);
 

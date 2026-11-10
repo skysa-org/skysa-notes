@@ -4,20 +4,16 @@ import { setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createNote } from '../src/store/notes.js';
 import type { RelayFactory } from '../src/sync/relay.js';
-import { holdCredential } from './support/connection.js';
 import {
-	ACCOUNT,
-	bound,
 	focused,
 	INTERVAL,
 	nextTimer,
-	pastedElsewhere,
-	previews,
 	quiet,
 	reaches,
-	started,
 	stopSchedulers,
-} from './support/scheduler.js';
+} from './client/schedulerHarness.js';
+import { holdCredential } from './support/connection.js';
+import { ACCOUNT, bound, pastedElsewhere, previews, started } from './support/scheduler.js';
 
 afterEach(stopSchedulers);
 

@@ -182,6 +182,11 @@ Each is a pull request of its own in this repository, released as usual, so that
         The rule for an op out of attempts, `outOfAttempts`, was notes' and follows the engine's exception for an `rmdir`, so it is the engine's now, in `sync/attempts.ts`: the memory port and notes read the one statement of it.
         This step is cut.
      3. The scheduler's tests, a few files at a time, with the device growing as each needs it.
+        The device makes the scheduler as its app does (`schedule`): the kit's over the ports in memory, with its own format and no hidden path synced, and notes' as `createNotesSync` makes it, with its companions attached, so notes' run covers what it covered.
+        Its documents are made, changed and queued by the app's rule (`create`, `edit`, `queued`), and the harness that is not notes' moved to `tests/client/schedulerHarness.ts`.
+        It is four pull requests: `scheduler.test.ts` and `scheduler.timing.test.ts`; pausing and the relay; the connection; the failures.
+        `scheduler.sources.test.ts` stays notes': it is the companions.
+        The first is cut: `describeScheduling` and `describePushTiming`, run over memory in `scheduler.test.ts` and `scheduler.timing.test.ts` and over notes' database in their `.dexie.test.ts` partners, with the scratchpad's case, which is notes' hidden-path rule, left in notes' own.
      4. The build's seam.
         `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumes notes' one route.
         Both are to be handed in before the build's own tests can follow.

@@ -6,11 +6,8 @@ import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
 import type { SchedulerStatus, SyncPhase, SyncSchedulerOptions } from '../src/sync/scheduler.js';
-import { noteById } from './noteRows.js';
-import { watchedDatabase } from './support/db.js';
 import {
 	BACKOFF,
-	bound,
 	DEBOUNCE,
 	deferred,
 	focused,
@@ -20,9 +17,11 @@ import {
 	presenting,
 	quiet,
 	reaches,
-	started,
 	stopSchedulers,
-} from './support/scheduler.js';
+} from './client/schedulerHarness.js';
+import { noteById } from './noteRows.js';
+import { watchedDatabase } from './support/db.js';
+import { bound, started } from './support/scheduler.js';
 
 afterEach(stopSchedulers);
 

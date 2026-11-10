@@ -3,8 +3,8 @@ import { createMemoryStore, type MemoryStore, TEST_FORMAT } from '@skysa/core/te
 
 import type { AccessToken } from '../../src/api/client.js';
 import type { CredentialRecord } from '../../src/store/credentials.js';
-import type { ClientStore } from '../../src/sync/scheduler.js';
-import type { ClientDevice } from './device.js';
+import { type ClientStore, createSyncScheduler } from '../../src/sync/scheduler.js';
+import type { AppSchedulerOptions, ClientDevice } from './device.js';
 
 type Shown = Parameters<Parameters<ClientStore['watchShown']>[0]>[0];
 
@@ -27,6 +27,16 @@ interface Watcher<T> {
 
 /** The engine's own, where nothing hands it one (`createSyncEngine`). */
 const MAX_ATTEMPTS = 5;
+
+/**
+ * What the kit's own scheduler is handed: its format, no hidden path synced,
+ * and a lock of its own.
+ */
+const APP: AppSchedulerOptions = {
+	lockName: (connectionId) => `kit-test:sync:${connectionId}`,
+	document: TEST_FORMAT,
+	syncsHidden: () => false,
+};
 
 /** The store's writes, refused for a source the device no longer syncs. */
 const WRITES = new Set<string>(['applyChanges', 'completeOp', 'failOp', 'resolveConflict']);
@@ -51,6 +61,7 @@ export const memoryDevice = (): ClientDevice => {
 	const kept = new Map<string, AccessToken>();
 	const chosen = cell<string | undefined>(undefined);
 	const bindings = cell(0);
+	const made = cell(0);
 	const clientId = crypto.randomUUID();
 	const shownWatchers = new Set<Watcher<Shown>>();
 	const queueWatchers = new Map<string, Set<Watcher<readonly number[]>>>();
@@ -237,8 +248,61 @@ export const memoryDevice = (): ClientDevice => {
 		maxAttempts: MAX_ATTEMPTS,
 	};
 
+	/** The connection's row, or a refusal for one the device does not hold. */
+	const rowOf = (connectionId: string): Row => {
+		const row = rows.get(connectionId);
+		if (row === undefined) throw new Error(`no connection ${connectionId}`);
+		return row;
+	};
+
+	/**
+	 * The write a change owes, by the app's rule (`queueWrite` in this app's
+	 * `store/queue.ts`): a write already waiting carries it, unless every one
+	 * waiting is lazy and this change is not, which puts one that is not lazy in
+	 * their place, at the back of the queue.
+	 */
+	const queueWrite = (connectionId: string, id: string, path: string, lazy: boolean): void => {
+		const row = rowOf(connectionId);
+		const waiting = row.documents.ops().filter((op) => op.op === 'write' && op.noteId === id);
+		const carried = lazy || waiting.some((op) => !row.lazy.has(op.seq));
+		if (waiting.length === 0 || !carried) {
+			for (const op of waiting) row.documents.unqueue(op.seq);
+			const { seq } = row.documents.queue({ op: 'write', noteId: id, path });
+			if (lazy) row.lazy.add(seq);
+		}
+		tellQueue(connectionId);
+	};
+
 	return {
 		store,
+		app: APP,
+		schedule: (options) => createSyncScheduler({ ...APP, ...options, store }),
+		create: (connectionId, name, body) => {
+			made.current += 1;
+			const id = `doc-${String(made.current)}`;
+			const path = `${name}${TEST_FORMAT.extension}`;
+			rowOf(connectionId).documents.put({ id, path, content: body, dirty: true });
+			queueWrite(connectionId, id, path, false);
+			return Promise.resolve({ id, path });
+		},
+		edit: (connectionId, id, body, { lazy = false } = {}) => {
+			const { documents } = rowOf(connectionId);
+			const document = documents.notes().find((each) => each.id === id);
+			if (document === undefined) return Promise.reject(new Error(`no document ${id}`));
+			documents.put({ ...document, content: body, dirty: true });
+			queueWrite(connectionId, id, document.path, lazy);
+			return Promise.resolve();
+		},
+		queued: (connectionId) => {
+			const row = rows.get(connectionId);
+			return Promise.resolve(
+				(row?.documents.ops() ?? []).map((op) => ({
+					seq: op.seq,
+					lazy: row?.lazy.has(op.seq) === true,
+				}))
+			);
+		},
+		lastSyncAt: (connectionId) => Promise.resolve(rows.get(connectionId)?.lastSyncAt),
 		bind: (connectionId, credential = `sk1_${connectionId}`) => {
 			bindings.current += 1;
 			rows.set(connectionId, {

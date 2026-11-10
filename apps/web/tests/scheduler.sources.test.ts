@@ -12,17 +12,8 @@ import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import type { NotesDatabase } from '../src/store/db.js';
 import type { FileRead } from '../src/sync/fileReads.js';
 import type { RelayFactory } from '../src/sync/relay.js';
-import {
-	bound,
-	focused,
-	pastedElsewhere,
-	previews,
-	quiet,
-	reaches,
-	remote,
-	started,
-	stopSchedulers,
-} from './support/scheduler.js';
+import { focused, quiet, reaches, remote, stopSchedulers } from './client/schedulerHarness.js';
+import { bound, pastedElsewhere, previews, started } from './support/scheduler.js';
 
 afterEach(stopSchedulers);
 
