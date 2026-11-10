@@ -3016,7 +3016,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
 - **Shared to the app (2026-10-06).**
   The manifest's `share_target` makes the installed app a destination in the system's share sheet where the platform offers one: Android and ChromeOS. iOS and desktop Chrome on macOS and Windows do not.
   It is a `multipart/form-data` POST to `/share` carrying `title`, `text`, `url` and `files`, and never a GET, which would put what was shared in a URL that logs keep.
-  - **The service worker answers it** (`receiveShare` in `apps/web/pwa.ts`, a `runtimeCaching` route for a same-origin `POST /share`).
+  - **The service worker answers it** (`receiveShare` in `apps/web/pwaApp.ts`, which `pwa.ts` makes a `runtimeCaching` route for a same-origin `POST /share`).
     It keeps the words, joined a line each, and each file in Cache Storage (`skysa-share`, `/share/<id>` and `/share/<id>/<n>`, the listing written last), and answers `303` to `/?share=<id>`.
     A file over 25 MB is listed by name and not kept.
     Workbox writes the handler into `sw.js` from its own source (`toString()`), so it imports nothing and calls no helper of the module's.
@@ -3054,6 +3054,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
   Never in localStorage.
 - Installability is a checklist the browser applies silently — a missing 192px icon or a bad `start_url` and the install option simply never appears, with nothing in the build to say why.
   The manifest and Workbox options live in `apps/web/pwa.ts` rather than inline in `vite.config.ts` so that checklist can be a test (`tests/pwa.test.ts`), down to reading each icon's real dimensions out of its PNG header.
+  What is this app's own is handed in (`PwaApp`, made in `pwaApp.ts`): the one route its shell answers, and its share target, checked in `tests/pwa.app.test.ts`.
 - With `registerType: 'prompt'` the worker does not claim the first page load, by design: the page that registered it keeps running the build it was served, and the next navigation is the first one the worker controls.
   So "works offline" means from the second visit onwards, which is the only thing it could mean — the first visit is the one that downloads the app.
 - **Reload stops the app's requests first (2026-10-13).**
@@ -3221,6 +3222,7 @@ apps/
     brand.ts                  # NOTES_BRAND: load and check a brand, write it into the build (§8)
     brand/                    # the default brand: brand.json, its schema, the six icons, recolour.mjs
     pwa.ts                    # manifest (from the brand) and Workbox options
+    pwaApp.ts                 # this app's route and share target, handed to pwa.ts
     public/_headers           # the CSP: nothing may be added to script-src (§9)
     scripts/                  # bundleBudget.mjs: the size budget CI holds the build to
     fill.html                 # the fill window's page, which the bookmarklet opens (§7, §8)

@@ -8,6 +8,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 import { brandPlugin, loadBrand } from './brand.js';
 import { pwaOptions } from './pwa.js';
+import { NOTES_PWA } from './pwaApp.js';
 
 const API_DEV_ORIGIN = 'http://localhost:8787';
 
@@ -31,7 +32,7 @@ export default defineConfig({
 		tanstackRouter({ target: 'react', autoCodeSplitting: true }),
 		react(),
 		brandPlugin(brand),
-		VitePWA(pwaOptions(brand)),
+		VitePWA(pwaOptions(brand, NOTES_PWA)),
 	],
 	server: {
 		port: 5173,

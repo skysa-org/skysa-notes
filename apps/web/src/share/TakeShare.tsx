@@ -17,7 +17,7 @@ import { forgetShare, readShare, type Received } from './received.js';
 /**
  * Something shared to the app from the system's share sheet
  * (docs/ARCHITECTURE.md §8, "Shared to the app"), arriving as `?share=<id>`
- * once the service worker has kept it (`receiveShare` in `pwa.ts`).
+ * once the service worker has kept it (`receiveShare` in `pwaApp.ts`).
  *
  * **The user is always asked**, the clipboard shown or not. The worker cannot
  * tell the share sheet's POST from a form another site submits to `/share`:

@@ -199,8 +199,12 @@ Each is a pull request of its own in this repository, released as usual, so that
         Left in notes' own are its eight tries, the account's name on its row, a row of a kind from a later version (#447), and a transaction of its database failing.
         This step is cut.
      4. The build's seam.
-        `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumes notes' one route.
-        Both are to be handed in before the build's own tests can follow.
+        `pwa.ts` carried notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumed notes' one route.
+        An app hands both in (`PwaApp`): the navigations its shell answers, and its share target if it has one, with the worker's rule for it whole, since Workbox writes the rule's function into `sw.js` as its source.
+        Notes' are `pwaApp.ts`, and the built manifest and service worker are byte for byte what they were.
+        The build's own checklist (`pwa.test.ts`) runs over an app of its own, and notes' route and share target are checked in `pwa.app.test.ts`.
+        This step is cut.
+     This part is cut.
 
 The operator's seams do not change: `EntitlementProvider` with its gate, `checkCode` and `hold`, `RateLimiter`, `RelayHub`, `ENABLED_PROVIDERS` and `RELAY`.
 

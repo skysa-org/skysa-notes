@@ -322,7 +322,11 @@ const KIT = {
 	pwa: {
 		uses: [],
 		paths: ['apps/web/brand.ts', 'apps/web/pwa.ts', 'apps/web/scripts/'],
-		tests: ['apps/web/tests/brand.test.ts'],
+		tests: [
+			'apps/web/tests/brand.test.ts',
+			'apps/web/tests/pwa.test.ts',
+			'apps/web/tests/support/serviceWorker.ts',
+		],
 	},
 };
 
