@@ -148,7 +148,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   A module bound for one package imports only what goes to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
   What it takes from `@skysa/core` it takes by name, and the module each name comes from is held to the same.
   The deny-lists each seam added stay, since they say why a thing is handed in rather than imported, and the fence is the floor under them.
-  It is cut in three parts, each a pull request of its own.
+  It is cut in three parts: the first two a pull request each, and the third one for each of its steps.
   1. The source.
      Six imports crossed it, and each moved to where it goes: `PROVIDER_KINDS` to `providerKinds.ts`, `HIDDEN_PREFIX` to `paths.ts`, `concatBytes` to `bytes.ts` (where skysa-draw keeps it), and `contentTypeOf` to `files/mediaTypes.ts`.
      The two helpers the client imported, which all three apps have, join it: `sync/progress.ts`, once its one sentence went to the status's other words, and `store/emitter.ts`.
@@ -164,8 +164,22 @@ Each is a pull request of its own in this repository, released as usual, so that
      `KIT` names each package's tests beside its source, and the fence reads `@skysa/core/testing` by name as it reads `@skysa/core`.
      This part is cut.
   3. The client's tests over this app's database, and the build's share target.
-     The scheduler's, the token source's and the relay's tests run over notes' Dexie database, and follow once the client has in-memory ports to run them on.
-     `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, so it is handed in or left behind before the build's own tests can follow.
+     The scheduler's and the token source's tests ran over notes' Dexie database, and one of the relay's describes did.
+     Each follows as a suite over a device (`tests/client/device.ts`), as core's store contract is a suite over a store.
+     A device is the ports the client is handed and what a test does to the device around them.
+     The kit runs each suite over in-memory ports of its own (`tests/client/memoryDevice.ts`), and notes runs the same suite over its database through `sync/dexiePorts.ts` (`tests/support/dexieDevice.ts`), so there is one copy of each test and neither side loses one.
+     Notes' own wiring stays notes' test: the files beside notes, the clipboard and the key file (`scheduler.sources.test.ts`, and the companions in `scheduler.test.ts`).
+     It is cut in steps.
+     1. The token source and the relay.
+        The device holds credentials and a kept token, and its in-memory token states keep a token on a synced connection only, as `tokenStatesOf` does.
+        The token source's cases are `describeTokenSource` (`tests/client/tokenSource.ts`), run over memory in `tokens.test.ts` and over notes' database in `tokens.dexie.test.ts`.
+        The relay reads only a credential, so its tests take the memory device's and move whole.
+        This step is cut.
+     2. The scheduler's port: an in-memory `ClientStore` over core's memory store, and a contract for the port, run over it and over `clientStoreOf`.
+     3. The scheduler's tests, a few files at a time, with the device growing as each needs it.
+     4. The build's seam.
+        `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumes notes' one route.
+        Both are to be handed in before the build's own tests can follow.
 
 The operator's seams do not change: `EntitlementProvider` with its gate, `checkCode` and `hold`, `RateLimiter`, `RelayHub`, `ENABLED_PROVIDERS` and `RELAY`.
 
