@@ -1,4 +1,10 @@
-import { cell, outOfAttempts, type ProviderKind, type SyncStore } from '@skysa/core';
+import {
+	cell,
+	isNotFoundError,
+	outOfAttempts,
+	type ProviderKind,
+	type SyncStore,
+} from '@skysa/core';
 import { createMemoryStore, type MemoryStore, TEST_FORMAT } from '@skysa/core/testing';
 
 import type { AccessToken } from '../../src/api/client.js';
@@ -11,6 +17,10 @@ type Shown = Parameters<Parameters<ClientStore['watchShown']>[0]>[0];
 /** What the device holds of a connection: its row, and its documents and queue. */
 interface Row {
 	readonly state: 'live' | 'detached';
+	/** Resumed, and its remote not yet checked (`ClientStore.verifyResume`). */
+	readonly unverified?: boolean;
+	/** Its first import still going (`ClientStore.finishImport`). */
+	readonly importing?: boolean;
 	readonly provider: ProviderKind;
 	readonly rootId?: string;
 	readonly lastSyncAt?: number;
@@ -38,7 +48,7 @@ const APP: AppSchedulerOptions = {
 	syncsHidden: () => false,
 };
 
-/** The store's writes, refused for a source the device no longer syncs. */
+/** The store's writes, refused for a source the device does not sync, or not yet. */
 const WRITES = new Set<string>(['applyChanges', 'completeOp', 'failOp', 'resolveConflict']);
 
 /** Told now if `value` differs from what the watcher was last told. */
@@ -72,6 +82,10 @@ export const memoryDevice = (): ClientDevice => {
 	const waitListeners = new Set<() => void>();
 
 	const isLive = (connectionId: string) => rows.get(connectionId)?.state === 'live';
+
+	/** Synced, and not a resume waiting to be checked: the engine may write. */
+	const writable = (connectionId: string) =>
+		isLive(connectionId) && rows.get(connectionId)?.unverified !== true;
 
 	/**
 	 * Behind another tab's hold (`ClientDevice.holdUp`), if there is one: one
@@ -162,8 +176,9 @@ export const memoryDevice = (): ClientDevice => {
 	/**
 	 * The engine's store for a connection, read from whatever the device holds of
 	 * it when each call is made: nothing, once it is let go. Its writes are
-	 * refused unless the device still syncs it, as the app's are, and the queue's
-	 * watchers are told after each call if it moved.
+	 * refused unless the device syncs it, and has checked it if it was resumed,
+	 * as the app's are, and the queue's watchers are told after each call if it
+	 * moved.
 	 */
 	const syncStore = (connectionId: string): SyncStore => {
 		const documents = (): MemoryStore =>
@@ -171,7 +186,7 @@ export const memoryDevice = (): ClientDevice => {
 		const through =
 			(key: string) =>
 			async (...args: unknown[]): Promise<unknown> => {
-				if (WRITES.has(key) && !isLive(connectionId)) {
+				if (WRITES.has(key) && !writable(connectionId)) {
 					throw new Error(`This device no longer syncs connection ${connectionId}`);
 				}
 				await behindHold();
@@ -192,8 +207,26 @@ export const memoryDevice = (): ClientDevice => {
 	const store: ClientStore = {
 		watchShown: (next) => watching(shownWatchers, next, shown),
 		bindings: () => Promise.resolve(bindings.current),
-		// Nothing here is a resumed source, whose remote has to be checked first.
-		verifyResume: () => Promise.resolve({ superseded: false }),
+		// Of the app's check (`verifyResume` in its `store/connection.ts`), what
+		// the scheduler meets: a file read, a failure thrown to be asked again,
+		// and a binding meanwhile overtaking it. A file gone is not copied here.
+		verifyResume: async (connectionId, provider) => {
+			const row = rows.get(connectionId);
+			if (row?.unverified !== true) return { superseded: false };
+			const since = bindings.current;
+			const synced = row.documents.notes().find((each) => each.remoteId !== undefined);
+			if (synced?.remoteId !== undefined) {
+				await provider
+					.read({ remoteId: synced.remoteId, path: synced.path })
+					.catch((error: unknown) => {
+						if (!isNotFoundError(error)) throw error;
+					});
+			}
+			const now = rows.get(connectionId);
+			if (bindings.current !== since || now === undefined) return { superseded: true };
+			rows.set(connectionId, { ...now, unverified: false });
+			return { superseded: false };
+		},
 		needsRoot: (connectionId) => {
 			const row = rows.get(connectionId);
 			return Promise.resolve(row !== undefined && row.rootId === undefined);
@@ -206,8 +239,11 @@ export const memoryDevice = (): ClientDevice => {
 			updateLive(connectionId, (row) => ({ ...row, lastSyncAt: at }));
 			return Promise.resolve();
 		},
-		// There is no pile here for a first import to carry.
-		finishImport: () => Promise.resolve(),
+		// There is no pile here for a first import to carry: it is only over.
+		finishImport: (connectionId) => {
+			updateLive(connectionId, (row) => ({ ...row, importing: false }));
+			return Promise.resolve();
+		},
 		rescan: (connectionId) => {
 			const row = rows.get(connectionId);
 			if (row?.state === 'live') {
@@ -291,6 +327,47 @@ export const memoryDevice = (): ClientDevice => {
 	};
 
 	/**
+	 * Bound as the app binds (`bindConnection`): a connection never held is a
+	 * first import; one held keeps its documents and queue, and one a detach
+	 * kept is resumed, to be checked first where any of it names a file.
+	 */
+	const bindRow = (connectionId: string, credential: string): void => {
+		bindings.current += 1;
+		const row = rows.get(connectionId);
+		const linked =
+			row?.state === 'detached' &&
+			row.documents.notes().some((each) => each.remoteId !== undefined);
+		rows.set(
+			connectionId,
+			row === undefined
+				? {
+						state: 'live',
+						provider: 'dropbox',
+						documents: createMemoryStore(TEST_FORMAT),
+						lazy: new Set(),
+						importing: true,
+					}
+				: { ...row, state: 'live', unverified: row.unverified === true || linked }
+		);
+		held.set(connectionId, { id: connectionId, credential, provider: 'dropbox', createdAt: 0 });
+		chosen.current = connectionId;
+	};
+
+	/**
+	 * Let go as the app lets go: kept, detached, only to hold what it never
+	 * sent, and no longer importing.
+	 */
+	const letGoRow = (connectionId: string, unsent: boolean): void => {
+		bindings.current += 1;
+		held.delete(connectionId);
+		kept.delete(connectionId);
+		const row = rows.get(connectionId);
+		if (unsent && row !== undefined) {
+			rows.set(connectionId, { ...row, state: 'detached', importing: false });
+		} else rows.delete(connectionId);
+	};
+
+	/**
 	 * The write a change owes, by the app's rule (`queueWrite` in this app's
 	 * `store/queue.ts`): a write already waiting carries it, unless every one
 	 * waiting is lazy and this change is not, which puts one that is not lazy in
@@ -339,20 +416,7 @@ export const memoryDevice = (): ClientDevice => {
 		},
 		lastSyncAt: (connectionId) => Promise.resolve(rows.get(connectionId)?.lastSyncAt),
 		bind: (connectionId, credential = `sk1_${connectionId}`) => {
-			bindings.current += 1;
-			rows.set(connectionId, {
-				state: 'live',
-				provider: 'dropbox',
-				documents: createMemoryStore(TEST_FORMAT),
-				lazy: new Set(),
-			});
-			held.set(connectionId, {
-				id: connectionId,
-				credential,
-				provider: 'dropbox',
-				createdAt: 0,
-			});
-			chosen.current = connectionId;
+			bindRow(connectionId, credential);
 			tellShown();
 			tellQueue(connectionId);
 			return Promise.resolve();
@@ -377,17 +441,26 @@ export const memoryDevice = (): ClientDevice => {
 			return Promise.resolve();
 		},
 		letGo: (connectionId, { unsent = false } = {}) => {
-			bindings.current += 1;
-			held.delete(connectionId);
-			kept.delete(connectionId);
-			const row = rows.get(connectionId);
-			if (unsent && row !== undefined) rows.set(connectionId, { ...row, state: 'detached' });
-			else rows.delete(connectionId);
+			letGoRow(connectionId, unsent);
 			tellShown();
 			tellQueue(connectionId);
 			return Promise.resolve();
 		},
-		connection: (connectionId) => Promise.resolve(rows.get(connectionId)?.state),
+		reconnect: (connectionId) => {
+			// Both before anyone is told, and kept through it only for what it never sent.
+			letGoRow(connectionId, seqsOf(connectionId).length > 0);
+			bindRow(connectionId, `sk1_${connectionId}`);
+			tellShown();
+			tellQueue(connectionId);
+			return Promise.resolve();
+		},
+		connection: (connectionId) => {
+			const row = rows.get(connectionId);
+			if (row === undefined) return Promise.resolve(undefined);
+			if (row.state === 'detached') return Promise.resolve('detached');
+			return Promise.resolve(row.unverified === true ? 'resumed' : 'live');
+		},
+		importing: (connectionId) => Promise.resolve(rows.get(connectionId)?.importing === true),
 		holdUp: () => {
 			const open = cell<() => void>(() => undefined);
 			hold.current = new Promise<void>((resolve) => {

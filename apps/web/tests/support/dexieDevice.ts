@@ -74,15 +74,27 @@ export const dexieDevice = (): ClientDevice => {
 			});
 		},
 		letGo: async (connectionId, { unsent = false } = {}) => {
-			// What keeps a source detached rather than forgotten is a note it never sent.
-			if (unsent) await createNote(db, { connectionId, title: 'Unsent' });
+			// What keeps a source detached rather than forgotten is a note it never
+			// sent: one is made here unless the test has queued something already.
+			const queued = await db.opQueue.where('connectionId').equals(connectionId).count();
+			if (unsent && queued === 0) await createNote(db, { connectionId, title: 'Unsent' });
 			await detachConnection(db, { connectionId });
 		},
+		reconnect: (connectionId) =>
+			// One transaction, which a live query may never show the middle of.
+			db.transaction('rw', db.tables, async () => {
+				await detachConnection(db, { connectionId });
+				await bindConnection(db, { connectionId, provider: 'dropbox' });
+				await holdCredential(db, connectionId);
+			}),
 		connection: async (connectionId) => {
 			const state = await db.syncState.get(connectionId);
 			if (state === undefined) return undefined;
-			return state.detached === undefined ? 'live' : 'detached';
+			if (state.detached !== undefined) return 'detached';
+			return state.resumeUnverified === true ? 'resumed' : 'live';
 		},
+		importing: async (connectionId) =>
+			(await db.syncState.get(connectionId))?.importing !== undefined,
 		holdUp: async () => {
 			const other = await otherTab(db);
 			return holding(other, [...other.objectStoreNames], 'readwrite');
