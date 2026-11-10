@@ -1,6 +1,7 @@
 import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
 
 import { bindConnection, detachConnection, showConnection } from '../../src/store/connection.js';
+import { addAttachment } from '../../src/store/files.js';
 import { createNote, saveNoteBody } from '../../src/store/notes.js';
 import { clientStoreOf } from '../../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../../src/sync/lock.js';
@@ -37,6 +38,14 @@ export const dexieDevice = (): ClientDevice => {
 			// This app queues no write lazily; memoriam's way of doing it stands in.
 			if (lazy) await lazily(db, id, body);
 			else await saveNoteBody(db, id, body, undefined, { connectionId });
+		},
+		attach: async (connectionId, documentId, name, bytes) => {
+			await addAttachment(db, {
+				connectionId,
+				noteId: documentId,
+				name,
+				bytes: bytes.buffer,
+			});
 		},
 		queued: async (connectionId) =>
 			(await db.opQueue.where('connectionId').equals(connectionId).sortBy('seq')).map(
