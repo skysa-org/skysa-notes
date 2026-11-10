@@ -176,6 +176,11 @@ Each is a pull request of its own in this repository, released as usual, so that
         The relay reads only a credential, so its tests take the memory device's and move whole.
         This step is cut.
      2. The scheduler's port: an in-memory `ClientStore` over core's memory store, and a contract for the port, run over it and over `clientStoreOf`.
+        The device carries the port (`store`), whose credentials and token states the token source and the relay take, and grows `show` and `queue`.
+        The contract is `describeClientStore` (`tests/client/clientStore.ts`), run over memory in `clientStore.test.ts` and over notes' database in `clientStore.dexie.test.ts`.
+        Core's memory store gives every op its attempts back and forgets its cursor, as the port asks, and is exported from `@skysa/core/testing`.
+        The rule for an op out of attempts, `outOfAttempts`, was notes' and follows the engine's exception for an `rmdir`, so it is the engine's now, in `sync/attempts.ts`: the memory port and notes read the one statement of it.
+        This step is cut.
      3. The scheduler's tests, a few files at a time, with the device growing as each needs it.
      4. The build's seam.
         `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumes notes' one route.

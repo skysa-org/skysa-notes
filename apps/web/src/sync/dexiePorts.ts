@@ -1,10 +1,11 @@
+import { outOfAttempts } from '@skysa/core';
 import { liveQuery } from 'dexie';
 
 import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
 import { activeConnectionId, type NotesDatabase } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
 import { heldUpOf } from '../store/heldUp.js';
-import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
+import { MAX_OP_ATTEMPTS } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
 import type { ClientStore } from './scheduler.js';
@@ -27,7 +28,7 @@ import type { TokenStates } from './tokens.js';
  * or has a detached one, which must not hold a key to the account
  * (`store/detached.ts`).
  */
-export const tokenStatesOf = (db: NotesDatabase): TokenStates => ({
+const tokenStatesOf = (db: NotesDatabase): TokenStates => ({
 	read: async (connectionId) => {
 		const state = await db.syncState.get(connectionId);
 		const token =

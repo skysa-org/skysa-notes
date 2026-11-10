@@ -23,6 +23,7 @@ export {
 	type OneDriveStub,
 	type OneDriveStubOptions,
 } from './providers/onedriveStub.js';
+export { createMemoryStore, type MemoryStore } from './sync/memoryStore.js';
 export { describeSyncStoreContract, type StoreHarness } from './sync/storeContract.js';
 export { mulberry32 } from './support/random.js';
 export { TEST_FORMAT } from './support/testFormat.js';

@@ -93,6 +93,13 @@ export interface MemoryStore extends SyncStore {
 	 */
 	readonly anomalies: () => string[];
 	readonly lastError: (seq: number) => string | undefined;
+	/**
+	 * Every op's attempts back, all at once, as a device's scheduler gives them
+	 * back (`ClientStore.releaseOps` in the web app's `sync/scheduler.ts`).
+	 */
+	readonly releaseOps: () => void;
+	/** The cursor forgotten, so the next pull is a scan (`ClientStore.rescan`). */
+	readonly forgetCursor: () => void;
 }
 
 /**
@@ -1046,6 +1053,12 @@ export const createMemoryStore = (document: DocumentFormat): MemoryStore => {
 			flags.set('break', true);
 		},
 		lastError: (seq) => ops.get(seq)?.lastError,
+		releaseOps: () => {
+			for (const [seq, op] of ops) ops.set(seq, { ...op, attempts: 0 });
+		},
+		forgetCursor: () => {
+			state.delete('cursor');
+		},
 		anomalies: () => [...anomalies],
 	};
 };

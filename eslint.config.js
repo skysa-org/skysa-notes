@@ -300,6 +300,7 @@ const KIT = {
 			'apps/web/tests/client/',
 			'apps/web/tests/apiClient.test.ts',
 			'apps/web/tests/beforeUpdate.test.ts',
+			'apps/web/tests/clientStore.test.ts',
 			'apps/web/tests/connectCode.test.ts',
 			'apps/web/tests/emitter.test.ts',
 			'apps/web/tests/instanceConfig.test.tsx',

@@ -1,17 +1,209 @@
+import { cell, outOfAttempts, type ProviderKind, type SyncStore } from '@skysa/core';
+import { createMemoryStore, type MemoryStore, TEST_FORMAT } from '@skysa/core/testing';
+
 import type { AccessToken } from '../../src/api/client.js';
 import type { CredentialRecord } from '../../src/store/credentials.js';
+import type { ClientStore } from '../../src/sync/scheduler.js';
 import type { ClientDevice } from './device.js';
+
+type Shown = Parameters<Parameters<ClientStore['watchShown']>[0]>[0];
+
+/** What the device holds of a connection: its row, and its documents and queue. */
+interface Row {
+	readonly state: 'live' | 'detached';
+	readonly provider: ProviderKind;
+	readonly rootId?: string;
+	readonly lastSyncAt?: number;
+	readonly documents: MemoryStore;
+	/** The seqs queued lazily (`ClientDevice.queue`). */
+	readonly lazy: Set<number>;
+}
+
+/** A watcher, and what it was last told, so it is told only of a change. */
+interface Watcher<T> {
+	readonly next: (value: T) => void;
+	readonly told: { current: string | undefined };
+}
+
+/** The engine's own, where nothing hands it one (`createSyncEngine`). */
+const MAX_ATTEMPTS = 5;
+
+/** The store's writes, refused for a source the device no longer syncs. */
+const WRITES = new Set<string>(['applyChanges', 'completeOp', 'failOp', 'resolveConflict']);
+
+/** Told now if `value` differs from what the watcher was last told. */
+const tell = <T>(watcher: Watcher<T>, value: T): void => {
+	// Wrapped, so that nothing at all is told apart from a value.
+	const said = JSON.stringify({ value });
+	if (watcher.told.current === said) return;
+	watcher.told.current = said;
+	watcher.next(value);
+};
 
 /**
  * A device whose ports are maps: the kit's own, for running the client's
- * suites with no app's database (`device.ts`).
+ * suites with no app's database (`device.ts`). Each connection's documents and
+ * queue are core's memory store, over the kit's own format.
  */
 export const memoryDevice = (): ClientDevice => {
 	const held = new Map<string, CredentialRecord>();
-	const connections = new Map<string, 'live' | 'detached'>();
+	const rows = new Map<string, Row>();
 	const kept = new Map<string, AccessToken>();
+	const chosen = cell<string | undefined>(undefined);
+	const bindings = cell(0);
+	const clientId = crypto.randomUUID();
+	const shownWatchers = new Set<Watcher<Shown>>();
+	const queueWatchers = new Map<string, Set<Watcher<readonly number[]>>>();
 
-	return {
+	const isLive = (connectionId: string) => rows.get(connectionId)?.state === 'live';
+
+	/**
+	 * The source chosen while it has a row; else the first live one, else the
+	 * first kept detached, as the app's database answers (`activeConnectionId`).
+	 */
+	const shownId = (): string | undefined => {
+		if (chosen.current !== undefined && rows.has(chosen.current)) return chosen.current;
+		const ids = [...rows.keys()];
+		return ids.find(isLive) ?? ids[0];
+	};
+
+	const shown = (): Shown => {
+		const id = shownId();
+		const row = id === undefined ? undefined : rows.get(id);
+		if (id === undefined || row === undefined) return undefined;
+		return {
+			connectionId: id,
+			provider: row.provider,
+			clientId,
+			lastSyncAt: row.lastSyncAt,
+			detached: row.state === 'detached',
+		};
+	};
+
+	const seqsOf = (connectionId: string): readonly number[] =>
+		rows
+			.get(connectionId)
+			?.documents.ops()
+			.map((op) => op.seq) ?? [];
+
+	const tellShown = (): void => {
+		for (const watcher of shownWatchers) tell(watcher, shown());
+	};
+
+	const tellQueue = (connectionId: string): void => {
+		for (const watcher of queueWatchers.get(connectionId) ?? []) {
+			tell(watcher, seqsOf(connectionId));
+		}
+	};
+
+	/** Onto a synced connection only, as the port says: one let go keeps no row. */
+	const updateLive = (connectionId: string, change: (row: Row) => Row): void => {
+		const row = rows.get(connectionId);
+		if (row?.state === 'live') rows.set(connectionId, change(row));
+		tellShown();
+	};
+
+	/**
+	 * Told what is so now on a microtask, as a live query would be, so that a
+	 * caller's `const stop = watch(…)` is assigned before the first call.
+	 */
+	const watching = <T>(
+		watchers: Set<Watcher<T>>,
+		next: (value: T) => void,
+		now: () => T
+	): (() => void) => {
+		const watcher: Watcher<T> = { next, told: { current: undefined } };
+		watchers.add(watcher);
+		queueMicrotask(() => {
+			if (watchers.has(watcher)) tell(watcher, now());
+		});
+		return () => {
+			watchers.delete(watcher);
+		};
+	};
+
+	/**
+	 * The engine's store for a connection, read from whatever the device holds of
+	 * it when each call is made: nothing, once it is let go. Its writes are
+	 * refused unless the device still syncs it, as the app's are, and the queue's
+	 * watchers are told after each call if it moved.
+	 */
+	const syncStore = (connectionId: string): SyncStore => {
+		const documents = (): MemoryStore =>
+			rows.get(connectionId)?.documents ?? createMemoryStore(TEST_FORMAT);
+		const through =
+			(key: string) =>
+			async (...args: unknown[]): Promise<unknown> => {
+				if (WRITES.has(key) && !isLive(connectionId)) {
+					throw new Error(`This device no longer syncs connection ${connectionId}`);
+				}
+				const member = documents()[key as keyof SyncStore] as (
+					...given: unknown[]
+				) => Promise<unknown>;
+				try {
+					return await member(...args);
+				} finally {
+					tellQueue(connectionId);
+				}
+			};
+		return Object.fromEntries(
+			Object.keys(createMemoryStore(TEST_FORMAT)).map((key) => [key, through(key)])
+		) as unknown as SyncStore;
+	};
+
+	const store: ClientStore = {
+		watchShown: (next) => watching(shownWatchers, next, shown),
+		bindings: () => Promise.resolve(bindings.current),
+		// Nothing here is a resumed source, whose remote has to be checked first.
+		verifyResume: () => Promise.resolve({ superseded: false }),
+		needsRoot: (connectionId) => {
+			const row = rows.get(connectionId);
+			return Promise.resolve(row !== undefined && row.rootId === undefined);
+		},
+		keepRoot: (connectionId, rootId) => {
+			updateLive(connectionId, (row) => ({ ...row, rootId }));
+			return Promise.resolve();
+		},
+		pulled: (connectionId, at) => {
+			updateLive(connectionId, (row) => ({ ...row, lastSyncAt: at }));
+			return Promise.resolve();
+		},
+		// There is no pile here for a first import to carry.
+		finishImport: () => Promise.resolve(),
+		rescan: (connectionId) => {
+			const row = rows.get(connectionId);
+			if (row?.state === 'live') {
+				row.documents.forgetCursor();
+				row.documents.releaseOps();
+			}
+			return Promise.resolve();
+		},
+		releaseOps: (connectionId) => {
+			rows.get(connectionId)?.documents.releaseOps();
+			return Promise.resolve();
+		},
+		failingOps: (connectionId, maxAttempts) => {
+			const documents = rows.get(connectionId)?.documents;
+			return Promise.resolve(
+				(documents?.ops() ?? [])
+					.filter((op) => outOfAttempts(op, maxAttempts))
+					.map((op) => ({ op, lastError: documents?.lastError(op.seq) }))
+			);
+		},
+		watchQueue: (connectionId, next) => {
+			const watchers = queueWatchers.get(connectionId) ?? new Set();
+			queueWatchers.set(connectionId, watchers);
+			return watching(watchers, next, () => seqsOf(connectionId));
+		},
+		queuedAfter: (connectionId, seq) => {
+			const row = rows.get(connectionId);
+			return Promise.resolve(
+				(row?.documents.ops() ?? [])
+					.filter((op) => op.seq > seq)
+					.map((op) => (row?.lazy.has(op.seq) === true ? { lazy: true } : {}))
+			);
+		},
+		syncStore,
 		credentials: {
 			credentials: {
 				get: (id) => Promise.resolve(held.get(id)),
@@ -28,27 +220,57 @@ export const memoryDevice = (): ClientDevice => {
 		tokens: {
 			read: (connectionId) =>
 				Promise.resolve({
-					detached: connections.get(connectionId) === 'detached',
+					detached: rows.get(connectionId)?.state === 'detached',
 					token: kept.get(connectionId),
 				}),
 			// Onto a synced connection only, as the port says: one let go while
 			// its token was on the way must not get a key to the account back.
 			keep: (connectionId, token) => {
-				if (connections.get(connectionId) !== 'live') return Promise.resolve();
+				if (!isLive(connectionId)) return Promise.resolve();
 				if (token === undefined) kept.delete(connectionId);
 				else kept.set(connectionId, token);
 				return Promise.resolve();
 			},
 		},
+		// One tab, which waits on nobody.
+		heldUp: () => undefined,
+		maxAttempts: MAX_ATTEMPTS,
+	};
+
+	return {
+		store,
 		bind: (connectionId, credential = `sk1_${connectionId}`) => {
-			connections.set(connectionId, 'live');
+			bindings.current += 1;
+			rows.set(connectionId, {
+				state: 'live',
+				provider: 'dropbox',
+				documents: createMemoryStore(TEST_FORMAT),
+				lazy: new Set(),
+			});
 			held.set(connectionId, {
 				id: connectionId,
 				credential,
 				provider: 'dropbox',
 				createdAt: 0,
 			});
+			chosen.current = connectionId;
+			tellShown();
+			tellQueue(connectionId);
 			return Promise.resolve();
+		},
+		show: (connectionId) => {
+			chosen.current = connectionId;
+			tellShown();
+			return Promise.resolve();
+		},
+		queue: (connectionId, op, { lazy = false } = {}) => {
+			const row = rows.get(connectionId);
+			if (row === undefined)
+				return Promise.reject(new Error(`no connection ${connectionId}`));
+			const { seq } = row.documents.queue(op);
+			if (lazy) row.lazy.add(seq);
+			tellQueue(connectionId);
+			return Promise.resolve(seq);
 		},
 		keptToken: (connectionId) => Promise.resolve(kept.get(connectionId)),
 		keepElsewhere: (connectionId, token) => {
@@ -56,13 +278,17 @@ export const memoryDevice = (): ClientDevice => {
 			return Promise.resolve();
 		},
 		letGo: (connectionId, { unsent = false } = {}) => {
+			bindings.current += 1;
 			held.delete(connectionId);
 			kept.delete(connectionId);
-			if (unsent) connections.set(connectionId, 'detached');
-			else connections.delete(connectionId);
+			const row = rows.get(connectionId);
+			if (unsent && row !== undefined) rows.set(connectionId, { ...row, state: 'detached' });
+			else rows.delete(connectionId);
+			tellShown();
+			tellQueue(connectionId);
 			return Promise.resolve();
 		},
-		connection: (connectionId) => Promise.resolve(connections.get(connectionId)),
+		connection: (connectionId) => Promise.resolve(rows.get(connectionId)?.state),
 		dropCredential: (connectionId) => {
 			held.delete(connectionId);
 			return Promise.resolve();
