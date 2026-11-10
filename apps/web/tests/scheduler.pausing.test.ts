@@ -6,21 +6,18 @@ import type { NotesDatabase } from '../src/store/db.js';
 import { heldUpOf } from '../src/store/heldUp.js';
 import { createNote } from '../src/store/notes.js';
 import { SYNC_WAIT_MS } from '../src/sync/scheduler.js';
-import { holdCredential } from './support/connection.js';
 import {
-	ACCOUNT,
-	bound,
 	cleanups,
 	DEBOUNCE,
 	deferred,
-	type Harness,
 	INTERVAL,
 	quiet,
 	reaches,
 	remote,
-	started,
 	stopSchedulers,
-} from './support/scheduler.js';
+} from './client/schedulerHarness.js';
+import { holdCredential } from './support/connection.js';
+import { ACCOUNT, bound, type Harness, started } from './support/scheduler.js';
 
 afterEach(stopSchedulers);
 
