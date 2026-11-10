@@ -8,13 +8,13 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 import { brandPlugin, loadBrand } from './brand.js';
 import { pwaOptions } from './pwa.js';
-import { NOTES_PWA } from './pwaApp.js';
+import { DEFAULT_BRAND, NOTES_PWA } from './pwaApp.js';
 
 const API_DEV_ORIGIN = 'http://localhost:8787';
 
 // What the app is called and how it looks (docs/ARCHITECTURE.md §8, "Brand"): a
 // deployment's own `brand.json` when `NOTES_BRAND` names one, else `brand/`'s.
-const brand = loadBrand(process.env.NOTES_BRAND);
+const brand = loadBrand(process.env.NOTES_BRAND ?? DEFAULT_BRAND);
 
 const { version } = JSON.parse(
 	readFileSync(new URL('./package.json', import.meta.url), 'utf8')

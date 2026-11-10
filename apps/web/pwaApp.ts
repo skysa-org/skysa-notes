@@ -1,9 +1,20 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import type { PwaApp } from './pwa.js';
 
 /**
- * What this app hands the build of its own (`PwaApp` in `pwa.ts`): its one
- * route, and its share target, which is its clipboard's.
+ * What this app hands the build of its own: its one route, and its share
+ * target, which is its clipboard's (`PwaApp` in `pwa.ts`); and the brand it
+ * builds with when a deployment names none (`loadBrand` in `brand.ts`).
  */
+
+/**
+ * The brand the app is built with when `NOTES_BRAND` names none: `brand/`'s,
+ * "Notes", in gray, on the system fonts (docs/ARCHITECTURE.md §8, "Brand").
+ */
+// Not `new URL(…, import.meta.url)`, which Vite would read as an asset to serve.
+export const DEFAULT_BRAND = join(dirname(fileURLToPath(import.meta.url)), 'brand/brand.json');
 
 /**
  * The share target's answer to a share, in the service worker

@@ -321,9 +321,17 @@ const KIT = {
 	},
 	pwa: {
 		uses: [],
-		paths: ['apps/web/brand.ts', 'apps/web/pwa.ts', 'apps/web/scripts/'],
+		// The app hands in its default brand, its routes and share target
+		// (`pwaApp.ts`), and its budget's figures (`scripts/size.mjs`).
+		paths: [
+			'apps/web/brand.ts',
+			'apps/web/brand.schema.json',
+			'apps/web/pwa.ts',
+			'apps/web/scripts/bundleBudget.mjs',
+		],
 		tests: [
 			'apps/web/tests/brand.test.ts',
+			'apps/web/tests/fixtures/brand/',
 			'apps/web/tests/pwa.test.ts',
 			'apps/web/tests/support/serviceWorker.ts',
 		],
@@ -972,9 +980,12 @@ export default tseslint.config(
 	{
 		// Everything bound for the shared kit imports only what goes with it
 		// (`KIT`). A rule of its own, so it adds to each layer's
-		// `no-restricted-imports` rather than replacing it.
+		// `no-restricted-imports` rather than replacing it. Of the files `KIT`
+		// names, the modules: a pattern naming a JSON file would have it linted.
 		files: Object.values(KIT).flatMap((kit) =>
-			kitPaths(kit).map((path) => (path.endsWith('/') ? `${path}**` : path))
+			kitPaths(kit)
+				.filter((path) => path.endsWith('/') || /\.(?:[cm]?js|tsx?)$/.test(path))
+				.map((path) => (path.endsWith('/') ? `${path}**` : path))
 		),
 		ignores: Object.values(KIT).flatMap(({ except }) => except ?? []),
 		plugins: { kit: { rules: { fence: KIT_FENCE } } },

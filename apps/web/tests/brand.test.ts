@@ -14,7 +14,6 @@ import {
 	brandJsonSchema,
 	brandPlugin,
 	brandTags,
-	DEFAULT_BRAND,
 	loadBrand,
 } from '../brand.js';
 
@@ -26,16 +25,21 @@ import {
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** A brand of its own, with icons and fonts: `fixtures/brand/`. */
 const FIXTURE = join(here, 'fixtures/brand/brand.json');
-const defaults = JSON.parse(readFileSync(DEFAULT_BRAND, 'utf8')) as Record<string, unknown>;
+/** The fixture without its fonts, which a fresh folder does not have. */
+const plain: Record<string, unknown> = {
+	...(JSON.parse(readFileSync(FIXTURE, 'utf8')) as Record<string, unknown>),
+	fonts: undefined,
+};
 
-/** A brand file in a fresh folder, beside a copy of the default icons. */
+/** A brand file in a fresh folder, beside a copy of the fixture's icons. */
 const brandFile = (content: unknown, change?: (icons: string) => void): string => {
 	const folder = mkdtempSync(join(tmpdir(), 'brand-'));
 	const icons = join(folder, 'icons');
 	mkdirSync(icons);
 	BRAND_ICONS.forEach(({ file }) => {
-		copyFileSync(join(dirname(DEFAULT_BRAND), 'icons', file), join(icons, file));
+		copyFileSync(join(dirname(FIXTURE), 'icons', file), join(icons, file));
 	});
 	change?.(icons);
 	const file = join(folder, 'brand.json');
@@ -53,34 +57,12 @@ const refusal = (file: string): string => {
 	return 'loaded';
 };
 
-describe('the default brand', () => {
-	const brand = loadBrand();
-
-	it('is "Notes", in gray, carrying no one’s name', () => {
-		expect(brand.name).toBe('Notes');
-		expect(brand.shortName).toBe('Notes');
-		expect(brand.colors.light.brand).toBe('#4B5563');
-		expect(brand.colors.dark.brand).toBe('#9CA3AF');
-		expect(JSON.stringify(defaults).toLowerCase()).not.toContain('skysa');
-	});
-
-	it('keeps the system fonts', () => {
-		expect(brand.fonts).toEqual({});
-		const css = brandCss(brand);
-		expect(css).not.toContain('@font-face');
-		expect(css).toContain('--font-sans: ui-sans-serif, system-ui');
-		expect(css).toContain('--font-mono: ui-monospace, SFMono-Regular');
-	});
-
-	it('has all six icons', () => {
-		expect(brand.icons.map((icon) => icon.file)).toEqual(BRAND_ICONS.map((icon) => icon.file));
-	});
-
-	it('is described by the committed JSON Schema', () => {
+describe("a brand file's JSON Schema", () => {
+	it('is the committed one, for an editor', () => {
 		const committed: unknown = JSON.parse(
-			readFileSync(join(dirname(DEFAULT_BRAND), 'brand.schema.json'), 'utf8')
+			readFileSync(join(here, '../brand.schema.json'), 'utf8')
 		);
-		// Regenerate with `brandJsonSchema()` (brand/README.md) when the schema changes.
+		// Regenerate with `brandJsonSchema()` when the schema changes.
 		expect(committed).toEqual(brandJsonSchema());
 	});
 });
@@ -88,26 +70,26 @@ describe('the default brand', () => {
 describe('a brand file the build refuses', () => {
 	it.each<[string, unknown, RegExp]>([
 		['is not JSON', '{ "name": ', /the file: /],
-		['leaves out the name', { ...defaults, name: undefined }, /name: /],
+		['leaves out the name', { ...plain, name: undefined }, /name: /],
 		[
 			'has a colour that is not #RRGGBB',
-			{ ...defaults, colors: { ...(defaults.colors as object), background: 'white' } },
+			{ ...plain, colors: { ...(plain.colors as object), background: 'white' } },
 			/colors\.background: a colour is #RRGGBB/,
 		],
 		[
 			'has a short name a home screen would cut off',
-			{ ...defaults, shortName: 'Thirteen char' },
+			{ ...plain, shortName: 'Thirteen char' },
 			/shortName is cut off/,
 		],
-		['has a key it does not know', { ...defaults, colour: '#000000' }, /colour/],
+		['has a key it does not know', { ...plain, colour: '#000000' }, /colour/],
 		[
 			'names a font that is not woff2',
-			{ ...defaults, fonts: { sans: { family: 'X', files: [{ src: 'x.ttf' }] } } },
+			{ ...plain, fonts: { sans: { family: 'X', files: [{ src: 'x.ttf' }] } } },
 			/a font file is \.woff2/,
 		],
 		[
 			'names a font family with quotes in it',
-			{ ...defaults, fonts: { sans: { family: "X'; }", files: [{ src: 'x.woff2' }] } } },
+			{ ...plain, fonts: { sans: { family: "X'; }", files: [{ src: 'x.woff2' }] } } },
 			/a family name is letters/,
 		],
 	])('%s', (_, content, problem) => {
@@ -121,27 +103,27 @@ describe('a brand file the build refuses', () => {
 	});
 
 	it('has an icon at the wrong size', () => {
-		const file = brandFile(defaults, (icons) => {
+		const file = brandFile(plain, (icons) => {
 			copyFileSync(join(icons, 'pwa-192x192.png'), join(icons, 'pwa-512x512.png'));
 		});
 		expect(refusal(file)).toMatch(/pwa-512x512\.png is 192x192, not 512x512/);
 	});
 
 	it('has an icon that is not a PNG', () => {
-		const file = brandFile(defaults, (icons) => {
+		const file = brandFile(plain, (icons) => {
 			writeFileSync(join(icons, 'apple-touch-icon.png'), 'GIF89a');
 		});
 		expect(refusal(file)).toMatch(/apple-touch-icon\.png is not a PNG/);
 	});
 
 	it('points at an icon folder without them', () => {
-		const file = brandFile({ ...defaults, icons: 'elsewhere' });
+		const file = brandFile({ ...plain, icons: 'elsewhere' });
 		expect(refusal(file)).toMatch(/favicon-16x16\.png is missing/);
 	});
 
 	it('names a font file that is not there', () => {
 		const file = brandFile({
-			...defaults,
+			...plain,
 			fonts: { mono: { family: 'Mono', files: [{ src: 'gone.woff2' }] } },
 		});
 		expect(refusal(file)).toMatch(/fonts\.mono: gone\.woff2 is missing/);
@@ -182,7 +164,7 @@ describe('a brand of its own', () => {
 		const [regular] = brand.fonts.sans?.faces ?? [];
 		expect(regular?.url).toMatch(/^\/brand\/[0-9a-f]{12}\.woff2$/);
 		expect(brandCssUrl(brand)).toMatch(/^\/brand\/brand-[0-9a-f]{12}\.css$/);
-		expect(brandCssUrl(brand)).not.toBe(brandCssUrl(loadBrand()));
+		expect(brandCssUrl(brand)).not.toBe(brandCssUrl(loadBrand(brandFile(plain))));
 	});
 
 	it('gives the page its title, theme colours, icons and stylesheet, and no script', () => {
