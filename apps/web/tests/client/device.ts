@@ -96,6 +96,12 @@ export interface ClientDevice {
 	readonly letGo: (connectionId: string, options?: { unsent?: boolean }) => Promise<void>;
 	/** What the device has of the connection: synced, kept detached, or nothing. */
 	readonly connection: (connectionId: string) => Promise<'live' | 'detached' | undefined>;
+	/**
+	 * Another tab holding the device's storage, as a frozen one can: what the
+	 * device does waits until it lets go, and `store.heldUp()` says so. Answers
+	 * the way to let go.
+	 */
+	readonly holdUp: () => Promise<() => void>;
 	/** The credential gone from under the client: revoked from another device. */
 	readonly dropCredential: (connectionId: string) => Promise<void>;
 }

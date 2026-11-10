@@ -66,7 +66,33 @@ export const memoryDevice = (): ClientDevice => {
 	const shownWatchers = new Set<Watcher<Shown>>();
 	const queueWatchers = new Map<string, Set<Watcher<readonly number[]>>>();
 
+	const hold = cell<Promise<void> | undefined>(undefined);
+	const blocked = cell(0);
+	const wait = cell<object | undefined>(undefined);
+	const waitListeners = new Set<() => void>();
+
 	const isLive = (connectionId: string) => rows.get(connectionId)?.state === 'live';
+
+	/**
+	 * Behind another tab's hold (`ClientDevice.holdUp`), if there is one: one
+	 * wait, the same object, for as long as anything here is waiting on it, and
+	 * whoever follows told as it begins and as it ends.
+	 */
+	const behindHold = async (): Promise<void> => {
+		const holding = hold.current;
+		if (holding === undefined) return;
+		blocked.current += 1;
+		if (wait.current === undefined) {
+			wait.current = {};
+			for (const listener of waitListeners) listener();
+		}
+		await holding;
+		blocked.current -= 1;
+		if (blocked.current === 0) {
+			wait.current = undefined;
+			for (const listener of waitListeners) listener();
+		}
+	};
 
 	/**
 	 * The source chosen while it has a row; else the first live one, else the
@@ -148,6 +174,7 @@ export const memoryDevice = (): ClientDevice => {
 				if (WRITES.has(key) && !isLive(connectionId)) {
 					throw new Error(`This device no longer syncs connection ${connectionId}`);
 				}
+				await behindHold();
 				const member = documents()[key as keyof SyncStore] as (
 					...given: unknown[]
 				) => Promise<unknown>;
@@ -243,8 +270,16 @@ export const memoryDevice = (): ClientDevice => {
 				return Promise.resolve();
 			},
 		},
-		// One tab, which waits on nobody.
-		heldUp: () => undefined,
+		// Waiting on another tab only while one holds the device up.
+		heldUp: () => ({
+			waiting: () => wait.current,
+			subscribe: (listener) => {
+				waitListeners.add(listener);
+				return () => {
+					waitListeners.delete(listener);
+				};
+			},
+		}),
 		maxAttempts: MAX_ATTEMPTS,
 	};
 
@@ -353,6 +388,16 @@ export const memoryDevice = (): ClientDevice => {
 			return Promise.resolve();
 		},
 		connection: (connectionId) => Promise.resolve(rows.get(connectionId)?.state),
+		holdUp: () => {
+			const open = cell<() => void>(() => undefined);
+			hold.current = new Promise<void>((resolve) => {
+				open.current = resolve;
+			});
+			return Promise.resolve(() => {
+				hold.current = undefined;
+				open.current();
+			});
+		},
 		dropCredential: (connectionId) => {
 			held.delete(connectionId);
 			return Promise.resolve();

@@ -9,6 +9,7 @@ import type { AppSchedulerOptions, ClientDevice } from '../client/device.js';
 import { lazily } from '../noteRows.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';
+import { holding, otherTab } from './otherTab.js';
 
 /** What this app hands its scheduler of its own. */
 const APP: AppSchedulerOptions = { lockName: SYNC_LOCK, document: NOTE_FORMAT, syncsHidden };
@@ -81,6 +82,10 @@ export const dexieDevice = (): ClientDevice => {
 			const state = await db.syncState.get(connectionId);
 			if (state === undefined) return undefined;
 			return state.detached === undefined ? 'live' : 'detached';
+		},
+		holdUp: async () => {
+			const other = await otherTab(db);
+			return holding(other, [...other.objectStoreNames], 'readwrite');
 		},
 		dropCredential: async (connectionId) => {
 			await db.credentials.delete(connectionId);

@@ -187,6 +187,9 @@ Each is a pull request of its own in this repository, released as usual, so that
         It is four pull requests: `scheduler.test.ts` and `scheduler.timing.test.ts`; pausing and the relay; the connection; the failures.
         `scheduler.sources.test.ts` stays notes': it is the companions.
         The first is cut: `describeScheduling` and `describePushTiming`, run over memory in `scheduler.test.ts` and `scheduler.timing.test.ts` and over notes' database in their `.dexie.test.ts` partners, with the scratchpad's case, which is notes' hidden-path rule, left in notes' own.
+        The second is cut: `describePausing` and `describeChangeRelay`, run over memory in `scheduler.pausing.test.ts` and `scheduler.relay.test.ts` and over notes' database in their `.dexie.test.ts` partners.
+        For them the device can be held up by another tab (`holdUp`), and the port's contract says what it waits on until the tab lets go.
+        Left in notes' own are the three cases that only IndexedDB can show, of which transactions hold up which, and the relay's case about a paste, which is notes' clipboard.
      4. The build's seam.
         `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumes notes' one route.
         Both are to be handed in before the build's own tests can follow.
