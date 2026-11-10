@@ -294,8 +294,9 @@ const KIT = {
 		],
 		// Those over the device's database are suites over a device
 		// (`tests/client/device.ts`), run here over the ports in memory and by
-		// this app over its own (`tokens.dexie.test.ts`). The scheduler's run
-		// over this app's database still, and follow as they become suites.
+		// this app over its own (`tokens.dexie.test.ts`). The scheduler's
+		// companions are this app's, and their tests stay with it
+		// (`scheduler.sources.test.ts`).
 		tests: [
 			'apps/web/tests/client/',
 			'apps/web/tests/apiClient.test.ts',
@@ -308,6 +309,7 @@ const KIT = {
 			'apps/web/tests/relay.test.ts',
 			'apps/web/tests/runBar.test.ts',
 			'apps/web/tests/scheduler.connection.test.ts',
+			'apps/web/tests/scheduler.failures.test.ts',
 			'apps/web/tests/scheduler.pausing.test.ts',
 			'apps/web/tests/scheduler.relay.test.ts',
 			'apps/web/tests/scheduler.test.ts',

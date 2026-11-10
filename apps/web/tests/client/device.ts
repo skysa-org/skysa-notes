@@ -80,6 +80,16 @@ export interface ClientDevice {
 		body: string,
 		options?: { lazy?: boolean }
 	) => Promise<void>;
+	/**
+	 * A file added beside a document, named after `name`, its upload queued as
+	 * the app queues one: ahead of the document's next write.
+	 */
+	readonly attach: (
+		connectionId: string,
+		documentId: string,
+		name: string,
+		bytes: Uint8Array<ArrayBuffer>
+	) => Promise<void>;
 	/** The ops queued for the connection, in order, and which of them are lazy. */
 	readonly queued: (
 		connectionId: string

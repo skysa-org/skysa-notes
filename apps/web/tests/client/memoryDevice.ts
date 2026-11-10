@@ -405,6 +405,19 @@ export const memoryDevice = (): ClientDevice => {
 			queueWrite(connectionId, id, document.path, lazy);
 			return Promise.resolve();
 		},
+		attach: (connectionId, documentId, name, bytes) => {
+			const { documents } = rowOf(connectionId);
+			const document = documents.notes().find((each) => each.id === documentId);
+			if (document === undefined)
+				return Promise.reject(new Error(`no document ${documentId}`));
+			made.current += 1;
+			const id = `file-${String(made.current)}`;
+			const path = `${document.path.slice(0, document.path.lastIndexOf('/') + 1)}${name}`;
+			documents.putFile({ id, path, size: bytes.byteLength }, { bytes, pinned: true });
+			documents.queue({ op: 'upload', fileId: id, path });
+			tellQueue(connectionId);
+			return Promise.resolve();
+		},
 		queued: (connectionId) => {
 			const row = rows.get(connectionId);
 			return Promise.resolve(
