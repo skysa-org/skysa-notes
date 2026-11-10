@@ -15,7 +15,7 @@ import {
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
-import { MAX_OP_ATTEMPTS, outOfAttempts, queueUpload, queueWrite } from '../src/store/queue.js';
+import { MAX_OP_ATTEMPTS, queueUpload, queueWrite } from '../src/store/queue.js';
 import {
 	countOf,
 	isEmpty,
@@ -539,8 +539,6 @@ describe('what a source holds that its remote has not been sent', () => {
 
 			expect(unsynced.rmdirs.map((op) => op.attempts)).toEqual([MAX_OP_ATTEMPTS]);
 			expect(unsynced.blocked).toBe(false);
-			expect(outOfAttempts({ op: 'rmdir', attempts: MAX_OP_ATTEMPTS })).toBe(false);
-			expect(outOfAttempts({ op: 'mkdir', attempts: MAX_OP_ATTEMPTS })).toBe(true);
 		});
 
 		it('agrees with the engine, which sends the note queued behind such an rmdir', async () => {

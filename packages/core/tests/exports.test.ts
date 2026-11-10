@@ -112,6 +112,7 @@ const SURFACE = [
 	'openSecret',
 	'opensInTab',
 	'opensSecret',
+	'outOfAttempts',
 	'pageSite',
 	'parentPath',
 	'parseEncryptionFile',

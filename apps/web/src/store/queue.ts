@@ -96,33 +96,10 @@ type QueueDb = Pick<NotesDatabase, 'opQueue'>;
  *
  * Here rather than in the scheduler because it is a fact about the queue, and
  * more than the scheduler asks it: `store/unsynced.ts` has to say "these cannot
- * be sent right now" by the same rule the status line does, or the two disagree
- * about the same op.
+ * be sent right now" by the same rule the status line does (`outOfAttempts`,
+ * the engine's), or the two disagree about the same op.
  */
 export const MAX_OP_ATTEMPTS = 8;
-
-/**
- * Whether an op has been given up on for now, and is holding up everything
- * queued behind it. The one statement of the rule: the engine stops a batch at
- * `attempts >= maxAttempts` (`drainOps` in
- * `packages/core/src/sync/push/drain.ts`), the scheduler names the op by it,
- * and what is unsynced is called blocked by it.
- *
- * Never an `rmdir`, because the engine makes the same exception: one that is
- * out of attempts is completed as done and stepped over — it tidies an empty
- * directory away, nothing behind it depends on that, and it is not the user's
- * work. Calling it blocked here would tell the user their notes cannot be sent
- * while the engine is about to send them.
- *
- * An `upload` is the other exception, and only half of one. The engine steps
- * over it too, so it holds nothing up — but it is the only copy of the file,
- * so it is kept, and the run ends `blocked` on its account (`drained` in the
- * engine). So it counts here: the status line and this rule must agree.
- */
-export const outOfAttempts = (
-	op: Pick<OpQueueRecord, 'op' | 'attempts'>,
-	maxAttempts: number = MAX_OP_ATTEMPTS
-): boolean => op.op !== 'rmdir' && op.attempts >= maxAttempts;
 
 // Every helper here returns the promise Dexie made rather than being an `async`
 // function. They run inside the writers' transactions, often straight after a

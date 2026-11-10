@@ -483,7 +483,7 @@ describe('relay links over the API', () => {
 	const holding = async (connectionId: string) => {
 		const device = memoryDevice();
 		await device.bind(connectionId);
-		return device.credentials;
+		return device.store.credentials;
 	};
 
 	const CONFIG: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
@@ -573,7 +573,7 @@ describe('relay links over the API', () => {
 	});
 
 	it('stops where this device holds no credential for the connection', async () => {
-		const held = memoryDevice().credentials;
+		const held = memoryDevice().store.credentials;
 		const client = api(() => Promise.resolve({ ...CONFIG, relay: true }));
 		const { linkFor, sockets, env } = factoryFor(held, client);
 

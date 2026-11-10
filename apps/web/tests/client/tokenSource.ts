@@ -9,8 +9,8 @@ const CREDENTIAL = 'sk1_the-credential-this-device-holds';
 
 /** The token source's ports on the device, as the scheduler hands them. */
 const over = (device: ClientDevice) => ({
-	credentials: device.credentials,
-	states: device.tokens,
+	credentials: device.store.credentials,
+	states: device.store.tokens,
 });
 
 /**
