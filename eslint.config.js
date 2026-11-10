@@ -307,6 +307,8 @@ const KIT = {
 			'apps/web/tests/providers.test.ts',
 			'apps/web/tests/relay.test.ts',
 			'apps/web/tests/runBar.test.ts',
+			'apps/web/tests/scheduler.pausing.test.ts',
+			'apps/web/tests/scheduler.relay.test.ts',
 			'apps/web/tests/scheduler.test.ts',
 			'apps/web/tests/scheduler.timing.test.ts',
 			'apps/web/tests/tokens.test.ts',

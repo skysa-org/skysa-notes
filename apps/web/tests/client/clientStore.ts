@@ -331,6 +331,30 @@ export const describeClientStore = (
 			expect(await device.connection('c1')).toBeUndefined();
 		});
 
+		it('says what it waits on while another tab holds the device, until it lets go', async () => {
+			const device = await bound('c1');
+			const held = device.store.heldUp();
+			const told = vi.fn();
+			const stop = held?.subscribe(told);
+			const release = await device.holdUp();
+
+			const read = device.store.syncStore('c1').cursor();
+			await vi.waitFor(() => {
+				expect(held?.waiting()).toBeDefined();
+			});
+			const wait = held?.waiting();
+			await quiet();
+			expect(held?.waiting()).toBe(wait);
+			release();
+			await read;
+
+			await vi.waitFor(() => {
+				expect(held?.waiting()).toBeUndefined();
+			});
+			expect(told).toHaveBeenCalled();
+			stop?.();
+		});
+
 		it('waits on nothing at rest, and gives an op up after a count of failures', async () => {
 			const device = await bound('c1');
 
