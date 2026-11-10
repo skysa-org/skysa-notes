@@ -190,6 +190,10 @@ Each is a pull request of its own in this repository, released as usual, so that
         The second is cut: `describePausing` and `describeChangeRelay`, run over memory in `scheduler.pausing.test.ts` and `scheduler.relay.test.ts` and over notes' database in their `.dexie.test.ts` partners.
         For them the device can be held up by another tab (`holdUp`), and the port's contract says what it waits on until the tab lets go.
         Left in notes' own are the three cases that only IndexedDB can show, of which transactions hold up which, and the relay's case about a paste, which is notes' clipboard.
+        The third is cut: `describeConnection`, run over memory in `scheduler.connection.test.ts` and over notes' database in its `.dexie.test.ts` partner.
+        For it the device resumes a source a detach kept, to be checked first where any of it names a file, and imports one it has never held, as the app binds; it can be reconnected in one step, as another tab does it (`reconnect`).
+        The memory device's check is only what the scheduler meets of the app's: a file read, a failure thrown, and a binding meanwhile overtaking it; copying a source whose files are gone is the app's, and tested with its store.
+        Left in notes' own is the import's case about the pile, which is the device's own notes, carried into the source.
      4. The build's seam.
         `pwa.ts` carries notes' share target (`receiveShare`, and `share_target` in the manifest), which is this app's clipboard's, and its fallback assumes notes' one route.
         Both are to be handed in before the build's own tests can follow.

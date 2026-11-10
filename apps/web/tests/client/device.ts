@@ -49,7 +49,8 @@ export interface ClientDevice {
 	/**
 	 * Bound to the connection and holding its credential, and showing it: what
 	 * a connect leaves. The credential is `sk1_` and the connection's id unless
-	 * given.
+	 * given. One the device has never held starts its first import
+	 * (`importing`); one a detach kept is resumed (`connection`).
 	 */
 	readonly bind: (connectionId: string, credential?: string) => Promise<void>;
 	/** The source the app shows, as the user choosing it makes it. */
@@ -94,8 +95,22 @@ export interface ClientDevice {
 	 * `unsent`, it had work it never sent, and is kept, detached, to hold it.
 	 */
 	readonly letGo: (connectionId: string, options?: { unsent?: boolean }) => Promise<void>;
-	/** What the device has of the connection: synced, kept detached, or nothing. */
-	readonly connection: (connectionId: string) => Promise<'live' | 'detached' | undefined>;
+	/**
+	 * Let go and bound again, to the same account, in one step, as another tab
+	 * can do it: the client may never see it let go. What it never sent is kept
+	 * through it, and it is resumed.
+	 */
+	readonly reconnect: (connectionId: string) => Promise<void>;
+	/**
+	 * What the device has of the connection: synced; resumed, bound again over
+	 * what a detach kept, its remote not checked yet (`ClientStore.verifyResume`),
+	 * where any of that names a file; kept detached; or nothing.
+	 */
+	readonly connection: (
+		connectionId: string
+	) => Promise<'live' | 'resumed' | 'detached' | undefined>;
+	/** Whether the connection's first import is still going (`ClientStore.finishImport`). */
+	readonly importing: (connectionId: string) => Promise<boolean>;
 	/**
 	 * Another tab holding the device's storage, as a frozen one can: what the
 	 * device does waits until it lets go, and `store.heldUp()` says so. Answers

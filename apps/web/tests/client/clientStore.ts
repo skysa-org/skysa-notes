@@ -331,6 +331,27 @@ export const describeClientStore = (
 			expect(await device.connection('c1')).toBeUndefined();
 		});
 
+		it('ends a first import once it is finished', async () => {
+			const device = await bound('c1');
+			expect(await device.importing('c1')).toBe(true);
+
+			await device.store.finishImport('c1');
+
+			expect(await device.importing('c1')).toBe(false);
+		});
+
+		it('resumes a source a detach kept with what it never sent, with nothing to check where none of it names a file', async () => {
+			const device = await bound('c1');
+			await device.create('c1', 'Unsent', 'unsent\n');
+			await device.letGo('c1', { unsent: true });
+
+			await device.bind('c1');
+
+			expect(await device.connection('c1')).toBe('live');
+			expect(await device.importing('c1')).toBe(false);
+			expect(await device.queued('c1')).not.toEqual([]);
+		});
+
 		it('says what it waits on while another tab holds the device, until it lets go', async () => {
 			const device = await bound('c1');
 			const held = device.store.heldUp();
