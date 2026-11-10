@@ -8,8 +8,6 @@ import {
 	conflictStamp,
 	documentNames,
 } from '../../src/names/conflicts.js';
-import { conflictFilename, conflictPath } from '../../src/names/notes.js';
-import { noteFilename } from '../../src/names/slug.js';
 
 /**
  * The names of a conflict copy. Every rule here exists because getting it
@@ -18,6 +16,9 @@ import { noteFilename } from '../../src/names/slug.js';
  */
 
 const AT = new Date('2026-09-15T14:32:10.500Z');
+
+/** Markdown's names, as an app whose documents are `.md` is handed them. */
+const { conflictFilename, conflictPath } = documentNames('.md');
 
 describe('conflictStamp', () => {
 	it('is the minute, in a form a filename can hold', () => {
@@ -115,10 +116,6 @@ describe('documentNames', () => {
 		expect(drawings.isDocumentName('Plan.SVG')).toBe(true);
 		expect(drawings.isDocumentName('Plan.md')).toBe(false);
 	});
-
-	it('is what this app’s note names are made from', () => {
-		expect(documentNames('.md').conflictPath('a.md', AT)).toBe(conflictPath('a.md', AT));
-	});
 });
 
 describe('a conflict name that would not fit in a filename', () => {
@@ -130,16 +127,18 @@ describe('a conflict name that would not fit in a filename', () => {
 		expect(() => encodeURIComponent(name)).not.toThrow();
 	};
 
+	/** 219 bytes, which leaves the suffix room under 255. */
+	const ROOMY = `${'\u6f22'.repeat(72)}.md`;
+
 	it('leaves a name with room for the suffix exactly as it was', () => {
-		const slug = noteFilename('\u6f22'.repeat(200));
-		expect(bytes(slug)).toBe(219);
-		const copy = conflictFilename(slug, AT);
-		expect(copy).toBe(`${slug.slice(0, -3)}${SUFFIX}.md`);
+		expect(bytes(ROOMY)).toBe(219);
+		const copy = conflictFilename(ROOMY, AT);
+		expect(copy).toBe(`${ROOMY.slice(0, -3)}${SUFFIX}.md`);
 		expect(bytes(copy)).toBe(247);
 	});
 
 	it('cuts the stem of a copy of a copy, from its end, and keeps both suffixes whole', () => {
-		const copy = conflictFilename(noteFilename('\u6f22'.repeat(200)), AT);
+		const copy = conflictFilename(ROOMY, AT);
 		const later = new Date('2026-09-16T09:05:00Z');
 		const again = conflictFilename(copy, later);
 		expectStorable(again);

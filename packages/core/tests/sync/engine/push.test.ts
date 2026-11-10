@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../../src/hash.js';
-import { conflictPath } from '../../../src/names/notes.js';
 import { basename, isHidden } from '../../../src/paths.js';
 import { createFakeProvider } from '../../../src/providers/fake.js';
 import {
@@ -11,6 +10,7 @@ import {
 	RateLimitError,
 	type StorageProvider,
 } from '../../../src/providers/types.js';
+import { conflictPath } from '../../support/testFormat.js';
 import { AT, reporting } from '../kit/engine.js';
 import { remoteAt } from '../kit/remote.js';
 import { boundTo } from '../kit/seed.js';

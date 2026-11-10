@@ -133,6 +133,8 @@ const over = <T>(
 	});
 
 /**
+ * Each stub holds the folder its adapter is made with (`over`): notes'.
+ *
  * The fake first, because a failure there is the app's and not a wire format's,
  * then the two providers whose feeds carry no paths — where a rename arrives as
  * a version change and the adapter has to say where the file now is.
@@ -150,7 +152,7 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 	[
 		'dropbox over its stub',
 		() => {
-			const stub = createDropboxStub({ startAt: START });
+			const stub = createDropboxStub({ folder: NOTES_FOLDER, startAt: START });
 			return {
 				backing: stub.backing,
 				adapter: (clientId) => over(createDropboxProvider, stub.fetch, clientId),
@@ -161,7 +163,7 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 	[
 		'onedrive over its stub',
 		() => {
-			const stub = createOneDriveStub({ startAt: START });
+			const stub = createOneDriveStub({ folder: NOTES_FOLDER, startAt: START });
 			return {
 				backing: stub.backing,
 				adapter: (clientId) => over(createOneDriveProvider, stub.fetch, clientId),
@@ -172,7 +174,7 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 	[
 		'google drive over its stub',
 		() => {
-			const stub = createGDriveStub({ startAt: START });
+			const stub = createGDriveStub({ folder: NOTES_FOLDER, startAt: START });
 			return {
 				backing: stub.backing,
 				adapter: (clientId) => over(createGDriveProvider, stub.fetch, clientId),

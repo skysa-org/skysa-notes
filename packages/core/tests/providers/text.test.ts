@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTES_FOLDER } from '../../src/config.js';
-import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
-import type { FakeProvider } from '../../src/providers/fake.js';
+import { type FakeProvider, TEST_FOLDER } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
@@ -13,6 +11,7 @@ import {
 	type StorageProvider,
 	UnreadableError,
 } from '../../src/providers/types.js';
+import { TEST_FORMAT } from '../support/testFormat.js';
 import { createDropboxStub } from './dropboxStub.js';
 import { createGDriveStub } from './gdriveStub.js';
 import { createOneDriveStub } from './onedriveStub.js';
@@ -106,8 +105,8 @@ interface Wired {
 }
 
 const options = (fetch: FetchLike) => ({
-	folder: NOTES_FOLDER,
-	document: NOTE_FORMAT,
+	folder: TEST_FOLDER,
+	document: TEST_FORMAT,
 	fetch,
 	getAccessToken: () => Promise.resolve('stub-token'),
 	appVersion: '0.1.0',

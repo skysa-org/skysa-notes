@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTES_FOLDER } from '../../src/config.js';
 import type { DocumentFormat } from '../../src/documentFormat.js';
 import type { AppFolderSpec } from '../../src/folderSpec.js';
-import { NOTE_FORMAT } from '../../src/markdown/format.js';
 import { foldName } from '../../src/names/fold.js';
 import { isHidden, isWithin, joinPath, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
-import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
+import { createFakeProvider, type FakeProvider, TEST_FOLDER } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive/index.js';
 import type { FetchLike } from '../../src/providers/http.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
@@ -17,6 +15,7 @@ import { createDropboxStub } from '../providers/dropboxStub.js';
 import { createGDriveStub } from '../providers/gdriveStub.js';
 import { createOneDriveStub } from '../providers/onedriveStub.js';
 import { mulberry32 } from '../support/random.js';
+import { TEST_FORMAT } from '../support/testFormat.js';
 import { createMemoryStore } from './memoryStore.js';
 
 /**
@@ -50,8 +49,8 @@ const over = <T>(
 	fetch: FetchLike
 ): T =>
 	create({
-		folder: NOTES_FOLDER,
-		document: NOTE_FORMAT,
+		folder: TEST_FOLDER,
+		document: TEST_FORMAT,
 		fetch,
 		getAccessToken: () => Promise.resolve('stub-token'),
 		appVersion: '0.1.0',
@@ -365,7 +364,7 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 		it.each(Array.from({ length: seeds }, (__, seed) => seed + 1))('seed %i', async (seed) => {
 			const { backing, adapter } = make();
 			await adapter.ensureRoot();
-			const store = createMemoryStore(NOTE_FORMAT);
+			const store = createMemoryStore(TEST_FORMAT);
 			const remote = createRemote(seed, backing, encodings, attached);
 			// What each page said, for the trace a failure prints.
 			const reporting: StorageProvider = {
@@ -385,7 +384,7 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 				},
 			};
 			const engine = createSyncEngine({
-				document: NOTE_FORMAT,
+				document: TEST_FORMAT,
 				provider: reporting,
 				store,
 				now: () => START,

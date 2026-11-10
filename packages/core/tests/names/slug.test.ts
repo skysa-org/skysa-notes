@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveTitle, titleFromFilename } from '../../src/markdown/title.js';
-import { isNoteName } from '../../src/names/notes.js';
+import { documentNames } from '../../src/names/conflicts.js';
+import { conflictFilename, conflictPath, isNoteName } from '../../src/names/notes.js';
 import { noteFilename, sanitizeFolderName, slugify, uniqueFilename } from '../../src/names/slug.js';
 
 /** Both caps in `slug.ts`, and the property a provider adapter needs of a name. */
@@ -294,5 +295,23 @@ describe('isNoteName', () => {
 		['md', false],
 	])('%s is a note: %s', (name, note) => {
 		expect(isNoteName(name)).toBe(note);
+	});
+});
+
+describe('a note’s conflict names', () => {
+	const AT = new Date('2026-09-15T14:32:10.500Z');
+
+	it('are made from a note’s extension', () => {
+		expect(documentNames('.md').conflictPath('a.md', AT)).toBe(conflictPath('a.md', AT));
+	});
+
+	it('leave a note’s name, at the slug’s cap, exactly as it was', () => {
+		// The cap leaves room for the suffix a conflict copy adds, so the copy of
+		// a note this app named is named in full (`names/conflicts.ts`).
+		const slug = noteFilename('\u6f22'.repeat(200));
+		expect(utf8Bytes(slug)).toBe(219);
+		const copy = conflictFilename(slug, AT);
+		expect(copy).toBe(`${slug.slice(0, -3)} (conflict 2026-09-15T14-32).md`);
+		expect(utf8Bytes(copy)).toBe(247);
 	});
 });

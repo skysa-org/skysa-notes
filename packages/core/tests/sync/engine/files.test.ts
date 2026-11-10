@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { conflictFilePath } from '../../../src/names/conflicts.js';
-import { conflictPath } from '../../../src/names/notes.js';
 import { basename } from '../../../src/paths.js';
 import { createFakeProvider } from '../../../src/providers/fake.js';
 import {
@@ -15,6 +14,7 @@ import {
 	type StorageProvider,
 } from '../../../src/providers/types.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../../src/sync/store.js';
+import { conflictPath } from '../../support/testFormat.js';
 import { AT, reporting } from '../kit/engine.js';
 import { entryAt, remoteAt } from '../kit/remote.js';
 import { boundTo } from '../kit/seed.js';
