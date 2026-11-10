@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
 
-import { createRouter } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 
 import { loadBrand } from '../brand.js';
-import { PWA_WORKBOX, pwaManifest, pwaOptions, receiveShare } from '../pwa.js';
-import { routeTree } from '../src/routeTree.gen';
+import { type PwaApp, pwaManifest, pwaOptions, pwaWorkbox } from '../pwa.js';
+import { APP, workerOf } from './support/serviceWorker.js';
 
 /**
  * The installability checklist.
@@ -28,42 +27,29 @@ const pngSize = (file: string): { width: number; height: number } => {
 	return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 };
 
-const manifest = pwaManifest(brand);
-const options = pwaOptions(brand);
-const workbox = PWA_WORKBOX;
-
 /**
- * Whether the worker answers a navigation to `pathAndSearch` with the shell,
- * decided as Workbox's `NavigationRoute` decides it: the denylist first, then
- * the allowlist.
+ * An app with a second route and a share target of its own: the build is held
+ * to what an app hands it (`PwaApp`), and this app's are checked against its
+ * own in `pwa.app.test.ts`.
  */
-const shellAnswers = (pathAndSearch: string): boolean =>
-	!(workbox.navigateFallbackDenylist ?? []).some((pattern) => pattern.test(pathAndSearch)) &&
-	(workbox.navigateFallbackAllowlist ?? []).some((pattern) => pattern.test(pathAndSearch));
-
-/** The page the worker serves from, for a same-origin request. */
-const APP = 'https://notes.example';
-
-/**
- * The runtime rule the worker answers a request with, decided as Workbox's
- * router decides it: the first whose method is the request's and whose pattern
- * matches.
- */
-const ruleFor = (href: string, method = 'GET') => {
-	const url = new URL(href);
-	return (workbox.runtimeCaching ?? []).find((rule) => {
-		if ((rule.method ?? 'GET') !== method) return false;
-		const pattern = rule.urlPattern;
-		if (pattern instanceof RegExp) return pattern.test(href);
-		if (typeof pattern === 'function') {
-			const asked = { url, sameOrigin: url.origin === APP } as unknown as Parameters<
-				typeof pattern
-			>[0];
-			return Boolean(pattern(asked));
-		}
-		return pattern === href;
-	});
+const TEST_APP: PwaApp = {
+	routes: [/^\/(?:\?|$)/, /^\/board(?:\?|$)/],
+	share: {
+		target: {
+			action: '/inbox',
+			method: 'POST',
+			enctype: 'multipart/form-data',
+			params: { text: 'text' },
+		},
+		matches: ({ url, sameOrigin }) => sameOrigin && url.pathname === '/inbox',
+		receive: () => Promise.resolve(new Response(null, { status: 204 })),
+	},
 };
+
+const manifest = pwaManifest(brand, TEST_APP);
+const options = pwaOptions(brand, TEST_APP);
+const workbox = pwaWorkbox(TEST_APP);
+const { shellAnswers, ruleFor } = workerOf(workbox);
 
 describe('the web app manifest', () => {
 	it('names the app, for the install prompt and the home screen', () => {
@@ -104,16 +90,9 @@ describe('the web app manifest', () => {
 		});
 	});
 
-	it('is a share target, posting what is shared to its own worker', () => {
-		// docs/ARCHITECTURE.md §8, "Shared to the app". POST, so what is shared
-		// never sits in a URL, which a log keeps; multipart, so files come too.
-		const target = manifest.share_target;
-		expect(target?.action).toBe('/share');
-		expect(target?.method).toBe('POST');
-		expect(target?.enctype).toBe('multipart/form-data');
-		expect(target?.action.startsWith(manifest.scope ?? '')).toBe(true);
-		expect(target?.params).toMatchObject({ title: 'title', text: 'text', url: 'url' });
-		expect(target?.params.files).toEqual([{ name: 'files', accept: ['*/*'] }]);
+	it('is a share target only where the app is one, as the app says', () => {
+		expect(manifest.share_target).toEqual(TEST_APP.share?.target);
+		expect(pwaManifest(brand, { routes: TEST_APP.routes }).share_target).toBeUndefined();
 	});
 
 	it("opens on the brand's background, so it does not start as a white window", () => {
@@ -147,35 +126,13 @@ describe('the service worker', () => {
 		expect(shellAnswers('/api/token')).toBe(false);
 	});
 
-	it('answers a deep link into the app with the shell', () => {
-		// A link to a note is `/#/Work/plan`, and a fragment is never part of
-		// the request; what another page leaves for the app is in the query.
+	it("answers the app's own routes with the shell, query and all, and no other page", () => {
 		expect(shellAnswers('/')).toBe(true);
 		expect(shellAnswers('/?connect=ok')).toBe(true);
-	});
-
-	it("leaves any other page on the origin to the network, such as an operator's", () => {
-		// A gate's action may link a page served beside the app. Answered with
-		// the shell, it would open as the app's "Not found".
+		expect(shellAnswers('/board')).toBe(true);
+		expect(shellAnswers('/board?week=2')).toBe(true);
 		expect(shellAnswers('/subscribe')).toBe(false);
-		expect(shellAnswers('/about?x=1')).toBe(false);
-	});
-
-	it('leaves the fill window to its own page, which the precache answers', () => {
-		// `fill.html` is precached as every page is (`**/*.html`), and Workbox
-		// answers `/fill` with it before any navigation route (`cleanURLs`).
-		// Answered with the shell, the bookmarklet would open the whole app.
-		expect(shellAnswers('/fill')).toBe(false);
-		expect(workbox.globPatterns?.some((pattern) => pattern.includes('html'))).toBe(true);
-	});
-
-	it('answers every route the router has with the shell', () => {
-		// So a route added under `src/routes` cannot be left out of the allowlist.
-		const paths = Object.keys(createRouter({ routeTree }).routesByPath);
-		expect(paths).not.toHaveLength(0);
-		paths.forEach((path) => {
-			expect(shellAnswers(path), path).toBe(true);
-		});
+		expect(shellAnswers('/inbox')).toBe(false);
 	});
 
 	it.each([
@@ -204,16 +161,14 @@ describe('the service worker', () => {
 		});
 	});
 
-	it('answers a share itself, and nothing else with the share handler', () => {
-		// The share sheet's POST never reaches the network (docs/ARCHITECTURE.md §8).
-		expect(ruleFor(`${APP}/share`, 'POST')?.handler).toBe(receiveShare);
-		// Not a GET to the same path, which is no share, nor a POST anywhere else.
-		expect(ruleFor(`${APP}/share`, 'GET')).toBeUndefined();
-		expect(ruleFor(`${APP}/share/x`, 'POST')).toBeUndefined();
-		expect(ruleFor(`${APP}/api/share`, 'POST')).toBeUndefined();
-		expect(ruleFor('https://elsewhere.example/share', 'POST')).toBeUndefined();
-		// And the shell does not answer a navigation to it either.
-		expect(shellAnswers('/share')).toBe(false);
+	it("answers the app's share with the app's own handler, by POST only", () => {
+		const action = TEST_APP.share?.target.action ?? '';
+		expect(ruleFor(`${APP}${action}`, 'POST')?.handler).toBe(TEST_APP.share?.receive);
+		expect(ruleFor(`${APP}${action}`, 'GET')).toBeUndefined();
+		expect(ruleFor(`https://elsewhere.example${action}`, 'POST')).toBeUndefined();
+		// An app that is no share target has nothing answer a share.
+		const none = workerOf(pwaWorkbox({ routes: TEST_APP.routes }));
+		expect(none.ruleFor(`${APP}${action}`, 'POST')).toBeUndefined();
 	});
 
 	it('waits to be told before taking over a page', () => {

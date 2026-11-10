@@ -4,7 +4,7 @@ import type { ClipInput } from '../store/clipboard.js';
 
 /**
  * What the share target kept for the page (docs/ARCHITECTURE.md §8, "Shared to
- * the app"): written by the service worker's `receiveShare` (`pwa.ts`), which
+ * the app"): written by the service worker's `receiveShare` (`pwaApp.ts`), which
  * goes into `sw.js` as its own source and so cannot import this. The two agree
  * by `tests/share.test.ts`, which runs the one into the other.
  *

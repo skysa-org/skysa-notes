@@ -18,65 +18,38 @@ import type { Brand } from './brand.js';
 const PROVIDER_ORIGINS =
 	/^https:\/\/(www\.googleapis\.com|graph\.microsoft\.com|[a-z]+\.dropboxapi\.com|(?:[a-z0-9-]+\.)+files\.1drv\.com|my\.microsoftpersonalcontent\.com|(?:[a-z0-9-]+\.)+sharepoint\.com)\//;
 
-/**
- * The share target's answer to a share, in the service worker
- * (docs/ARCHITECTURE.md §8, "Shared to the app"). The system's share sheet
- * POSTs what was shared to `/share` as a form; this keeps it in Cache Storage
- * and sends the page to `/?share=<id>`, which asks the user before anything
- * goes on the clipboard (`src/share/`). Nothing of it reaches the API.
- *
- * **Written into `sw.js` as its own source** (`handler.toString()` in
- * workbox-build's `runtimeCachingConverter`), so it uses nothing from outside
- * itself: no import, no constant of this module's, no helper. The cache's name,
- * the keys and the shape of the listing are written out here and in
- * `src/share/received.ts` both, and `tests/share.test.ts` runs the one into the
- * other.
- *
- * A file larger than the clipboard takes (`MAX_ATTACHMENT_BYTES`, 25 MiB) is
- * listed by its name and not kept, so the page can say so.
- */
-export const receiveShare = async ({ request }: { request: Request }): Promise<Response> => {
-	const form = await request.formData();
-	const id = crypto.randomUUID();
-	const cache = await caches.open('skysa-share');
-	const largest = 25 * 1024 * 1024;
-	const text = ['title', 'text', 'url']
-		.map((field) => form.get(field))
-		.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
-		.join('\n');
-	const files = form
-		.getAll('files')
-		.filter((value): value is File => typeof value !== 'string' && value.name !== '');
-	const listed = files.map((file, part) => ({
-		name: file.name,
-		type: file.type,
-		size: file.size,
-		part: file.size > largest ? null : part,
-	}));
-	await Promise.all(
-		files.flatMap((file, part) =>
-			file.size > largest
-				? []
-				: [
-						cache.put(
-							new URL(`/share/${id}/${String(part)}`, request.url),
-							new Response(file)
-						),
-					]
-		)
-	);
-	// The listing last: the page takes a share only once it is all there.
-	await cache.put(
-		new URL(`/share/${id}`, request.url),
-		new Response(JSON.stringify({ text, files: listed }), {
-			headers: { 'Content-Type': 'application/json' },
-		})
-	);
-	return Response.redirect(new URL(`/?share=${id}`, request.url).href, 303);
-};
+/** A manifest's share target, as the app declares it. */
+type ShareTarget = NonNullable<ManifestOptions['share_target']>;
 
-/** The manifest, named and coloured by the brand (`brand.ts`). */
-export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
+/**
+ * What an app hands the build of its own (docs/decisions/0018-the-shared-kit.md):
+ * the navigations its shell answers, and its share target if it has one.
+ *
+ * Workbox writes a runtime rule's functions into `sw.js` as their source
+ * (`toString()` in workbox-build's `runtimeCachingConverter`), so `matches`
+ * and `receive` each use nothing from outside themselves, and the app hands
+ * in the one as well as the other rather than the build making it from
+ * `target.action`.
+ */
+export interface PwaApp {
+	/**
+	 * The navigations the worker answers with the shell: the app's own routes,
+	 * matched against the path and query, and no other page on the origin.
+	 */
+	readonly routes: readonly RegExp[];
+	/**
+	 * Where the app is a share target: the manifest's entry, and the worker's
+	 * rule and answer for the share sheet's `POST`.
+	 */
+	readonly share?: Readonly<{
+		target: ShareTarget;
+		matches: (asked: { url: URL; sameOrigin: boolean }) => boolean;
+		receive: (asked: { request: Request }) => Promise<Response>;
+	}>;
+}
+
+/** The manifest, named and coloured by the brand (`brand.ts`), with the app's share target. */
+export const pwaManifest = (brand: Brand, app: PwaApp): Partial<ManifestOptions> => ({
 	name: brand.name,
 	short_name: brand.shortName,
 	description: brand.description,
@@ -102,20 +75,8 @@ export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
 	start_url: '/',
 	scope: '/',
 	// The system's share sheet offers the app, installed, where the platform
-	// supports it: Android and ChromeOS. What is shared goes to the source's
-	// clipboard, once the user says so (docs/ARCHITECTURE.md §8).
-	// https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/share_target
-	share_target: {
-		action: '/share',
-		method: 'POST',
-		enctype: 'multipart/form-data',
-		params: {
-			title: 'title',
-			text: 'text',
-			url: 'url',
-			files: [{ name: 'files', accept: ['*/*'] }],
-		},
-	},
+	// supports it, and the app is one.
+	...(app.share === undefined ? {} : { share_target: app.share.target }),
 	icons: [
 		{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
 		{ src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
@@ -128,17 +89,15 @@ export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
 	],
 });
 
-export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
+export const pwaWorkbox = (app: PwaApp): VitePWAOptions['workbox'] => ({
 	globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
 	// Every route is the SPA shell, so a deep link opens offline too.
 	navigateFallback: 'index.html',
-	// Only the app's own routes, though. It has one, `/`, and what it opens is
-	// in the hash, which no request carries, and the query. Any other path on
+	// Only the app's own routes, though (`PwaApp.routes`). Any other path on
 	// the origin belongs to whoever serves it, such as an operator's page a
 	// gate's action links to (docs/ARCHITECTURE.md §8), and answered with the
-	// shell it is the app's "Not found". A route added under `src/routes` is
-	// added here too; `tests/pwa.test.ts` checks.
-	navigateFallbackAllowlist: [/^\/(?:\?|$)/],
+	// shell it is the app's "Not found".
+	navigateFallbackAllowlist: [...app.routes],
 	// /api/* is the Worker, never the shell.
 	navigateFallbackDenylist: [/^\/api\//],
 	runtimeCaching: [
@@ -157,17 +116,21 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 			urlPattern: PROVIDER_ORIGINS,
 			handler: 'NetworkOnly',
 		},
-		{
-			// A share, from the system's share sheet (`receiveShare`). Answered
-			// here and never sent on: what was shared is note content's kind.
-			urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname === '/share',
-			handler: receiveShare,
-			method: 'POST',
-		},
+		// A share, from the system's share sheet, answered here as the app
+		// says (`PwaApp.share`) and never sent on: what was shared is content.
+		...(app.share === undefined
+			? []
+			: [
+					{
+						urlPattern: app.share.matches,
+						handler: app.share.receive,
+						method: 'POST' as const,
+					},
+				]),
 	],
-};
+});
 
-export const pwaOptions = (brand: Brand): Partial<VitePWAOptions> => ({
+export const pwaOptions = (brand: Brand, app: PwaApp): Partial<VitePWAOptions> => ({
 	// A new build never swaps itself in underneath a half-written note.
 	registerType: 'prompt',
 	// Registered by `UpdatePrompt` through `virtual:pwa-register/react`, never
@@ -181,6 +144,6 @@ export const pwaOptions = (brand: Brand): Partial<VitePWAOptions> => ({
 	// `brand.ts` writes into the build beside the app. (The plugin
 	// still injects the manifest's own icons, so the build's entry count reads a
 	// little higher than the number of distinct files; Workbox caches each once.)
-	manifest: pwaManifest(brand),
-	workbox: PWA_WORKBOX,
+	manifest: pwaManifest(brand, app),
+	workbox: pwaWorkbox(app),
 });

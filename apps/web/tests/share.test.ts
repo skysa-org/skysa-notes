@@ -3,7 +3,7 @@ import { runInNewContext } from 'node:vm';
 import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
-import { receiveShare } from '../pwa.js';
+import { receiveShare } from '../pwaApp.js';
 import { forgetShare, readShare, SHARE_CACHE } from '../src/share/received.js';
 import { fakeCaches } from './fakeCaches.js';
 
