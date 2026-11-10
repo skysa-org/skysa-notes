@@ -292,16 +292,21 @@ const KIT = {
 			'apps/web/src/store/connectCode.ts',
 			'apps/web/src/store/emitter.ts',
 		],
-		// The scheduler's, the token source's and the relay's run over this
-		// app's database, and follow once they have ports of their own.
+		// Those over the device's database are suites over a device
+		// (`tests/client/device.ts`), run here over the ports in memory and by
+		// this app over its own (`tokens.dexie.test.ts`). The scheduler's run
+		// over this app's database still, and follow as they become suites.
 		tests: [
+			'apps/web/tests/client/',
 			'apps/web/tests/apiClient.test.ts',
 			'apps/web/tests/beforeUpdate.test.ts',
 			'apps/web/tests/connectCode.test.ts',
 			'apps/web/tests/emitter.test.ts',
 			'apps/web/tests/instanceConfig.test.tsx',
 			'apps/web/tests/providers.test.ts',
+			'apps/web/tests/relay.test.ts',
 			'apps/web/tests/runBar.test.ts',
+			'apps/web/tests/tokens.test.ts',
 			'apps/web/tests/wakeLock.test.ts',
 			'apps/web/tests/support/fakes/environment.ts',
 		],

@@ -2,7 +2,7 @@ import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PING, RELAY_PONG, RELAY_PUSHED } from
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import type { NotesDatabase } from '../src/store/db.js';
+import type { CredentialStore } from '../src/store/credentials.js';
 import {
 	createRelayFactory,
 	createRelayLink,
@@ -17,8 +17,7 @@ import {
 	relayUrl,
 	type TicketAnswer,
 } from '../src/sync/relay.js';
-import { holdCredential } from './support/connection.js';
-import { freshDatabase } from './support/db.js';
+import { memoryDevice } from './client/memoryDevice.js';
 import { fakeEnvironment } from './support/fakes/environment.js';
 
 /**
@@ -480,10 +479,11 @@ describe('the relay URL', () => {
 });
 
 describe('relay links over the API', () => {
+	/** Credentials holding `sk1_` and the connection's id for it. */
 	const holding = async (connectionId: string) => {
-		const db = freshDatabase();
-		await holdCredential(db, connectionId);
-		return db;
+		const device = memoryDevice();
+		await device.bind(connectionId);
+		return device.credentials;
 	};
 
 	const CONFIG: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
@@ -501,11 +501,11 @@ describe('relay links over the API', () => {
 		return { config: vi.fn(config), withCredential, relayTicket: ticketCalls };
 	};
 
-	const factoryFor = (db: NotesDatabase, client: ReturnType<typeof api>) => {
+	const factoryFor = (credentials: CredentialStore, client: ReturnType<typeof api>) => {
 		const sockets = fakeSockets();
 		const env = fakeEnvironment();
 		const make = createRelayFactory({
-			credentials: db,
+			credentials,
 			client,
 			open: sockets.open,
 			url: (ticket) => `wss://x/api/relay?ticket=${ticket}`,
@@ -522,9 +522,9 @@ describe('relay links over the API', () => {
 	};
 
 	it('asks for a ticket with the credential held for the connection', async () => {
-		const db = await holding('c1');
+		const held = await holding('c1');
 		const client = api(() => Promise.resolve({ ...CONFIG, relay: true }));
-		const { linkFor, sockets } = factoryFor(db, client);
+		const { linkFor, sockets } = factoryFor(held, client);
 
 		linkFor('c1');
 		await vi.waitFor(() => {
@@ -536,9 +536,9 @@ describe('relay links over the API', () => {
 	});
 
 	it('asks for no ticket at all on an instance without a relay, and asks that once', async () => {
-		const db = await holding('c1');
+		const held = await holding('c1');
 		const client = api(() => Promise.resolve(CONFIG));
-		const { linkFor, sockets, env } = factoryFor(db, client);
+		const { linkFor, sockets, env } = factoryFor(held, client);
 
 		linkFor('c1');
 		await settled();
@@ -552,14 +552,14 @@ describe('relay links over the API', () => {
 	});
 
 	it('asks whether there is a relay again when it could not find out', async () => {
-		const db = await holding('c1');
+		const held = await holding('c1');
 		const client = api(
 			vi
 				.fn<() => Promise<InstanceConfig>>()
 				.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 				.mockResolvedValue({ ...CONFIG, relay: true })
 		);
-		const { linkFor, sockets, env } = factoryFor(db, client);
+		const { linkFor, sockets, env } = factoryFor(held, client);
 
 		linkFor('c1');
 		await settled();
@@ -573,9 +573,9 @@ describe('relay links over the API', () => {
 	});
 
 	it('stops where this device holds no credential for the connection', async () => {
-		const db = freshDatabase();
+		const held = memoryDevice().credentials;
 		const client = api(() => Promise.resolve({ ...CONFIG, relay: true }));
-		const { linkFor, sockets, env } = factoryFor(db, client);
+		const { linkFor, sockets, env } = factoryFor(held, client);
 
 		linkFor('c1');
 		await quiet();
@@ -595,9 +595,9 @@ describe('relay links over the API', () => {
 	];
 
 	it.each(stopping)('stops where the server %s', async (_case, relayTicket) => {
-		const db = await holding('c1');
+		const held = await holding('c1');
 		const client = api(() => Promise.resolve({ ...CONFIG, relay: true }), relayTicket);
-		const { linkFor, sockets, env } = factoryFor(db, client);
+		const { linkFor, sockets, env } = factoryFor(held, client);
 
 		linkFor('c1');
 		await vi.waitFor(() => {
@@ -610,12 +610,12 @@ describe('relay links over the API', () => {
 	});
 
 	it('tries again where the server could not answer', async () => {
-		const db = await holding('c1');
+		const held = await holding('c1');
 		const client = api(
 			() => Promise.resolve({ ...CONFIG, relay: true }),
 			() => Promise.reject(new ApiError('busy', 503))
 		);
-		const { linkFor, env } = factoryFor(db, client);
+		const { linkFor, env } = factoryFor(held, client);
 
 		linkFor('c1');
 		await vi.waitFor(() => {
