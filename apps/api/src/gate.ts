@@ -54,9 +54,9 @@ const gateSchema = z.object({
 
 /**
  * The gate as it will be served, or nothing when there is none. Throws when
- * there is one and it is wrong, which `createApp` lets through: the default
- * `src/worker.ts` turns that into a logged `server_misconfigured`, and an
- * operator's own entry would copy it. A gate half set is a deployment that
+ * there is one and it is wrong, which `createApp` lets through: an entry turns
+ * that into a logged `server_misconfigured` (`misconfigured` in `src/http.ts`),
+ * as the default `src/worker.ts` does. A gate half set is a deployment that
  * does not do what its operator thinks, and saying so at the first request
  * beats rendering a link to nowhere for months.
  *

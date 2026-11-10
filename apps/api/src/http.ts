@@ -7,6 +7,7 @@ import type { z } from 'zod';
 import type { AppEnv, AuthedEnv } from './context.js';
 import { bearerFrom, grantHolder } from './credentials.js';
 import { parseJson } from './json.js';
+import { logMisconfiguration } from './log.js';
 
 /**
  * Was this request made by a page on this deployment's own origin?
@@ -38,6 +39,21 @@ export const fail = <E extends AppEnv>(
 	status: ContentfulStatusCode,
 	beside: Readonly<Record<string, unknown> & { error?: never }> = {}
 ): Response => c.json({ ...beside, error: code }, status);
+
+/**
+ * The answer to every request while the deployment's configuration is wrong,
+ * which is an operator's problem and not a user's: the detail is logged
+ * (`logMisconfiguration`), and the answer is a generic `server_misconfigured`.
+ * A Worker's entry answers with it when `parseEnv` or `createApp` threw
+ * (`src/worker.ts`), and an operator's own entry does the same.
+ */
+export const misconfigured = (error: Error): Response => {
+	logMisconfiguration(error);
+	return new Response(JSON.stringify({ error: 'server_misconfigured' satisfies ApiErrorCode }), {
+		status: 500,
+		headers: { 'content-type': 'application/json' },
+	});
+};
 
 /** The rate limiter said no: 429, with its `Retry-After` when it gave one. */
 export const tooMany = <E extends AppEnv>(

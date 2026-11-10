@@ -14,3 +14,12 @@ export const logFailure = (context: string, error: unknown): void => {
 			: 'non-error thrown';
 	console.error(`${context}: ${detail}`);
 };
+
+/**
+ * A deployment's configuration refused (`parseEnv`, or `createApp` on a bad
+ * gate): the whole message, every line of it, since what is wrong is the
+ * operator's to put right and this is the only place it is said.
+ */
+export const logMisconfiguration = (error: Error): void => {
+	console.error(error.message);
+};
