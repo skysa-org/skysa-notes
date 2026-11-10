@@ -739,6 +739,7 @@ Keep it boring.
 - Static SPA served from the same Worker via `[assets]` in `wrangler.toml` (SPA fallback to `index.html`), so `/api/*` and the app share an origin and cookies are first-party.
 - **Composition root:** `apps/api` exports `createApp({ entitlements, rateLimiter, relay, fetch, providerTimeoutMs, config })` as a library; its own `src/worker.ts` calls it with the defaults.
   An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking.
+  While the configuration is wrong, an entry answers every request with `misconfigured`, also exported: a generic `server_misconfigured`, with what is wrong in the log.
   Nothing in `apps/api` reads env directly except `worker.ts`.
 - Cookies with `hono/cookie` — two, the short-lived OAuth flow cookie and the callback's answer to it (see "Storage OAuth, as built"); there are no sessions (see "Per-connection credentials").
   Request validation with `zod`.

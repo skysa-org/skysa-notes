@@ -275,7 +275,11 @@ const KIT = {
 		paths: ['apps/api/src/'],
 		tests: ['apps/api/tests/'],
 		// The deployment's: it reads the environment and hands the rest in.
-		except: ['apps/api/src/worker.ts', 'apps/api/tests/worker.test.ts'],
+		except: [
+			'apps/api/src/worker.ts',
+			'apps/api/tests/worker.test.ts',
+			'apps/api/tests/worker.misconfigured.test.ts',
+		],
 	},
 	client: {
 		uses: ['protocol', 'storage', 'sync'],

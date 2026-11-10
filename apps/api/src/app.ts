@@ -18,11 +18,13 @@ import { fail } from './http.js';
 
 /**
  * Re-exported so a second Worker entry can build its config through the same
- * validation `src/worker.ts` uses, rather than reading env by hand, and log
- * what `envWarnings` says of it at boot. Together with `createApp` this is
- * the whole of what another deployment needs.
+ * validation `src/worker.ts` uses, rather than reading env by hand, log what
+ * `envWarnings` says of it at boot, and answer as it does while the config is
+ * wrong (`misconfigured`). Together with `createApp` this is the whole of what
+ * another deployment needs.
  */
 export { type AppConfig, envWarnings, parseEnv } from './env.js';
+export { misconfigured } from './http.js';
 import type { FetchLike } from './oauth/types.js';
 import type { RelayHub } from './relay/hub.js';
 import { connectRoutes } from './routes/connect.js';

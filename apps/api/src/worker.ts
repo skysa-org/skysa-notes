@@ -1,7 +1,8 @@
-import { type ApiErrorCode, cell } from '@skysa/core';
+import { cell } from '@skysa/core';
 
 import { createApp } from './app.js';
 import { envWarnings, parseEnv } from './env.js';
+import { misconfigured } from './http.js';
 import { durableObjectRelay } from './relay/durableObject.js';
 
 /** The change relay's Durable Object, which the runtime finds by this export. */
@@ -72,19 +73,7 @@ export default {
 	): Response | Promise<Response> => {
 		const app = appFor(env);
 
-		if (app instanceof Error) {
-			// Misconfiguration is an operator problem, not a user one: log the detail
-			// and return something generic.
-			console.error(app.message);
-			return new Response(
-				JSON.stringify({ error: 'server_misconfigured' satisfies ApiErrorCode }),
-				{
-					status: 500,
-					headers: { 'content-type': 'application/json' },
-				}
-			);
-		}
-
+		if (app instanceof Error) return misconfigured(app);
 		return app.fetch(request, env, ctx);
 	},
 } satisfies ExportedHandler<WorkerEnv>;

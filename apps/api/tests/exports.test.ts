@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createApp, envWarnings, parseEnv } from '../src/app.js';
+import { createApp, envWarnings, misconfigured, parseEnv } from '../src/app.js';
 
 /**
  * `@skysa/api` resolves to `src/app.ts` and nothing else, so what a second
@@ -13,5 +13,9 @@ describe('the package entry', () => {
 		expect(typeof createApp).toBe('function');
 		expect(typeof parseEnv).toBe('function');
 		expect(typeof envWarnings).toBe('function');
+	});
+
+	it('exports misconfigured, the answer while that config is wrong', () => {
+		expect(typeof misconfigured).toBe('function');
 	});
 });

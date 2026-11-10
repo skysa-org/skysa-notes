@@ -148,7 +148,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   A module bound for one package imports only what goes to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
   What it takes from `@skysa/core` it takes by name, and the module each name comes from is held to the same.
   The deny-lists each seam added stay, since they say why a thing is handed in rather than imported, and the fence is the floor under them.
-  It is cut in three parts: the first two a pull request each, and the third one for each of its steps.
+  It is cut in four parts: the first two a pull request each, the third one for each of its steps, and the fourth, which the kit's own tests found, one.
   1. The source.
      Six imports crossed it, and each moved to where it goes: `PROVIDER_KINDS` to `providerKinds.ts`, `HIDDEN_PREFIX` to `paths.ts`, `concatBytes` to `bytes.ts` (where skysa-draw keeps it), and `contentTypeOf` to `files/mediaTypes.ts`.
      The two helpers the client imported, which all three apps have, join it: `sync/progress.ts`, once its one sentence went to the status's other words, and `store/emitter.ts`.
@@ -211,6 +211,11 @@ Each is a pull request of its own in this repository, released as usual, so that
         The build's tests run over a fixture brand with icons of its own, and that the default is "Notes" is checked in `brand.app.test.ts` and `pwa.app.test.ts`.
         The build is byte for byte what it was, and `pnpm size` says what it said.
         This step is cut.
+     This part is cut.
+  4. The Worker's answer while its configuration is wrong.
+     The kit's own tests found it, run in its repository for the first time: every code in the API's list is answered somewhere in the server's source, and `server_misconfigured` was answered only in `src/worker.ts`, which stays the deployment's.
+     Every entry needs that answer, and the gate's comment said an operator's own entry would copy it, so it is the server's: `misconfigured` in `src/http.ts`, exported beside `createApp`, which logs every line of what is wrong (`logMisconfiguration`) and answers a generic 500.
+     Notes' entry answers with it, and `worker.misconfigured.test.ts`, which stays with the entry, covers that path, which no test did.
      This part is cut.
 
 The operator's seams do not change: `EntitlementProvider` with its gate, `checkCode` and `hold`, `RateLimiter`, `RelayHub`, `ENABLED_PROVIDERS` and `RELAY`.
