@@ -148,8 +148,6 @@ export {
 	alwaysAllowed,
 	API_ERROR_CODES,
 	type ApiErrorCode,
-	AUTH_MODES,
-	type AuthMode,
 	type ConnectCodeCheck,
 	type ConnectGate,
 	ENTITLEMENT_CODES,

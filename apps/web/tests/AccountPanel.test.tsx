@@ -222,19 +222,6 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(went).toEqual([]);
 	});
 
-	it('offers nothing it cannot sign the user in for', async () => {
-		renderPanel(
-			clientWith({
-				config: () =>
-					Promise.resolve({ authMode: 'account-first', providers: ['dropbox'] }),
-			}),
-			freshDatabase()
-		);
-
-		expect(await screen.findByText(/needs a sign-in this server does not offer/)).toBeTruthy();
-		expect(screen.queryByRole('button', { name: /^Connect / })).toBeNull();
-	});
-
 	it('offers only providers the server has enabled and this build can sync', async () => {
 		const offering = (providers: InstanceConfig['providers']) =>
 			clientWith({

@@ -48,8 +48,7 @@ export const Detached = ({
 	const reconnectable =
 		provider !== undefined &&
 		CONNECTABLE.includes(provider) &&
-		settings?.authMode === 'storage-first' &&
-		settings.providers.includes(provider);
+		settings?.providers.includes(provider) === true;
 	return (
 		<>
 			{/*

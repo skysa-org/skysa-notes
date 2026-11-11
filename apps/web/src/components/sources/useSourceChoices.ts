@@ -22,9 +22,7 @@ export const useSourceChoices = (
 
 	const settings = answer(config);
 	const offerable =
-		settings?.authMode === 'storage-first'
-			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
-			: [];
+		settings?.providers.filter((provider) => CONNECTABLE.includes(provider)) ?? [];
 
 	const ordered = inOrder(sources ?? []);
 

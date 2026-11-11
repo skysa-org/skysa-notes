@@ -1,4 +1,4 @@
-import { type ApiClient, type InstanceConfig, PROGRESS_FROM } from '@skysa/client';
+import { type ApiClient, PROGRESS_FROM } from '@skysa/client';
 import {
 	createMemoryHistory,
 	createRootRoute,
@@ -438,29 +438,16 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(screen.getAllByRole('button', { name: 'Connect again' })).toHaveLength(1);
 	});
 
-	it.each([
-		[
-			'does not let it',
-			() =>
-				Promise.resolve<InstanceConfig>({
-					authMode: 'account-first',
-					providers: ['dropbox'],
-				}),
-		],
-		['cannot be reached to say', () => Promise.reject(new TypeError('offline'))],
-	])(
-		'says the account needs connecting again where the server %s, without the link',
-		async (_, config) => {
-			const user = userEvent.setup();
-			await connected(fakeSync({ phase: 'attention', refusal: 'reauthorize_required' }), {
-				config,
-			});
-			await offered(user, 'Disconnect');
+	it('says the account needs connecting again where the server cannot be reached, without the link', async () => {
+		const user = userEvent.setup();
+		await connected(fakeSync({ phase: 'attention', refusal: 'reauthorize_required' }), {
+			config: () => Promise.reject(new TypeError('offline')),
+		});
+		await offered(user, 'Disconnect');
 
-			expect(screen.getByText('Dropbox needs to be connected again.')).toBeTruthy();
-			expect(screen.queryByRole('button', { name: 'Connect again' })).toBeNull();
-		}
-	);
+		expect(screen.getByText('Dropbox needs to be connected again.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Connect again' })).toBeNull();
+	});
 
 	it('does not promise to try again with a provider this build cannot sync', async () => {
 		const db = freshDatabase();

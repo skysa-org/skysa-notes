@@ -127,10 +127,12 @@ w secret put DROPBOX_CLIENT_SECRET
 deliberate: every OAuth redirect URI is derived from it, and a wrong guess sends
 users' consent to somewhere that is not you.
 
-`AUTH_MODE` and `ENABLED_PROVIDERS` are not secrets and live in `[vars]` in
-`wrangler.toml`. Edit them there. `WEBDAV_ALLOW_PRIVATE` is deprecated and does
-nothing — WebDAV is not built — so remove it if you have it; the Worker logs a
-warning at boot while it is set, and likewise for `webdav` in
+`ENABLED_PROVIDERS` is not a secret and lives in `[vars]` in `wrangler.toml`.
+Edit it there. Two settings are no longer read, so remove them if you have
+them: `AUTH_MODE`, which only ever had one value that ran, and
+`WEBDAV_ALLOW_PRIVATE`, since WebDAV is not built
+([#118](https://github.com/skysa-org/skysa-notes/issues/118)). The Worker logs a
+warning at boot while either is set, and likewise for `webdav` in
 `ENABLED_PROVIDERS`, which is accepted but not offered.
 
 `SECRETS_KEY_ID` defaults to `k1` and only needs setting when you rotate
@@ -495,5 +497,6 @@ them, not just the first. The three that catch people:
 implemented and will not be"*. Sign-in separate from storage was dropped in
 September 2026: on this instance a person **is** their storage account, and
 accepting the setting would leave you believing connections were gated behind a
-sign-in when they were not. `storage-first` is the only value, and the variable
-itself will go ([#118](https://github.com/skysa-org/skysa-notes/issues/118)).
+sign-in when they were not. Any other value boots, and the Worker asks at boot
+for the variable to be removed: it is no longer read
+([#118](https://github.com/skysa-org/skysa-notes/issues/118)).

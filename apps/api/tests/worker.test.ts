@@ -5,7 +5,6 @@ import worker from '../src/worker.js';
 const env = {
 	APP_ORIGIN: 'https://notes.example.com',
 	SECRETS_KEY: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
-	AUTH_MODE: 'storage-first',
 	ENABLED_PROVIDERS: 'webdav',
 	WEBDAV_ALLOW_PRIVATE: 'false',
 	RELAY: 'false',

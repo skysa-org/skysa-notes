@@ -60,7 +60,6 @@ export const account = {
 	local: {
 		/** `+` is the button that connects storage, drawn as a plus sign. */
 		useAdd: 'Use + above to connect storage.',
-		signInMissing: 'Connecting storage needs a sign-in this server does not offer yet.',
 		unreachable: 'Connecting storage needs the server, which cannot be reached.',
 		mayClear:
 			'This browser may clear them without warning. To keep them, connect storage or download them.',

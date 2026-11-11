@@ -234,7 +234,6 @@ cat > "$target" <<VARS
 # Every key is documented in .dev.vars.example.
 
 APP_ORIGIN="$(escaped "$app_origin")"
-AUTH_MODE="storage-first"
 ENABLED_PROVIDERS="$providers"
 
 SECRETS_KEY="$(escaped "$secrets_key")"

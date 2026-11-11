@@ -35,7 +35,6 @@ tag = "v1"
 new_sqlite_classes = ["ConnectionRelay"]
 
 [vars]
-AUTH_MODE = "storage-first"
 # Only what this deployment can actually do. Dropbox, OneDrive and Google
 # Drive are implemented; WebDAV is deferred (docs/ARCHITECTURE.md §5.4).
 #
