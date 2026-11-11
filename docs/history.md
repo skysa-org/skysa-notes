@@ -620,3 +620,14 @@ Kept from that phase because neither was ever about identity:
   Not scheduled here — a personal instance does not need it, and what a shared one needs depends on who is running it
 - Account deletion is **done**, and was done per silo rather than per user: `DELETE /api/connection` revokes at the provider where supported and deletes the row.
   The Phase 9 item asked for the version that spanned a user's several connections, which is not a thing that exists any more
+
+## The shared kit (2026-11-11)
+The layers that do not care what a file holds moved to [`skysa-org/skysa-kit`](https://github.com/skysa-org/skysa-kit), published to npm as `@skysa/*`, and this app depends on them ([record 0018](decisions/0018-the-shared-kit.md); §13, "The shared kit").
+- **Seams first**, each a pull request here (#689–#712): the app's folder, its document format, its merge, its hidden paths, when a push goes, and the client's ports; then a lint fence over everything bound to move, and the client's tests as suites over a device, so that one copy of each test runs over the kit's memory and this app's database.
+- **The kit's repository** was made from this one's history with `git filter-repo`, so blame goes with the code, and 0.1.0 was published from its tag, with provenance.
+- **Then this app took it**, a layer at a time (#714–#719), and 249 of the 1,172 files under `apps/` and `packages/` went, with every test either still here or in the kit, by file and title.
+
+Learned on the way:
+- The kit's tests, run in a repository of their own for the first time, found what none here had: `server_misconfigured` was answered only in this app's Worker entry, which an operator's own would have had to copy (#712).
+- Laying out the packages found two seams the fence had passed: the build read this app's default brand and budget from beside itself (#711).
+- A module the fence passed still had to typecheck in its new package: the client needs ES2024's `Promise` types, which this app had only by accident, through a dependency's.
