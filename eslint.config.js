@@ -171,16 +171,24 @@ const CORE_IMPORTS = [
 		group: ['@skysa/web', '@skysa/api', '**/apps/**'],
 		message: 'packages/core must not import from apps/*.',
 	},
+	{
+		// The kit's engine and what is above it are handed this app's folder and
+		// format (record 0018); core, which is this app's, sits beside storage.
+		group: ['sync', 'client', 'server', 'pwa'].flatMap((kit) => [
+			`@skysa/${kit}`,
+			`@skysa/${kit}/*`,
+		]),
+		message: 'packages/core uses of the kit only @skysa/protocol and @skysa/storage.',
+	},
 ];
 
 /**
  * Where each module bound for the shared kit goes, and the packages each may
  * use: the table in docs/decisions/0018-the-shared-kit.md, in code, with the
  * tests that go with each package's code. A path ending in `/` is a folder and
- * everything in it. The deny-lists above say why
- * a thing is handed in rather than imported; `kit/fence` below is the floor
- * under them, that a module bound for one package imports only what goes to
- * it or to a package beneath it, so that moving the code is a move.
+ * everything in it. `kit/fence` below holds a module bound for one package to
+ * importing only what goes to it or to a package beneath it, so that moving
+ * the code is a move.
  */
 const KIT = {
 	client: {
