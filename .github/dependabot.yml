@@ -26,6 +26,13 @@ updates:
           interval: weekly
           day: monday
       open-pull-requests-limit: 5
+      # The kit's packages are pinned exactly and bumped on purpose, with a
+      # changeset, since a version of the kit can carry the server's code and
+      # a D1 migration (record 0018). Grouped with the week's patches, one
+      # would merge with no line in the changelog to say so. Here `ignore`
+      # is what is meant: never raise them at all.
+      ignore:
+          - dependency-name: '@skysa/*'
       groups:
           patch-and-minor:
               update-types:

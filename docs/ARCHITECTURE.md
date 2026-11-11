@@ -640,7 +640,7 @@ Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's
   So `CursorResetError` carries `uploadDifferences`, and the rescan it starts deletes nothing (§7, "A rescan that uploads").
   The code is read from `code`, from `innerError` and `innererror` alike, and from the `details` list, since the page says only "an error response containing one of the error codes below" and missing it is the direction that costs notes; anything unrecognised, `resyncRequired` included, falls back to today's reset and never to uploading.
   A folder moved *into* the app folder from elsewhere is reported alone; whether Graph lists what is inside it is one of the live checks.
-- OAuth (`apps/api/src/oauth/onedrive.ts`): Authorization Code + PKCE against `login.microsoftonline.com/{MICROSOFT_TENANT}/oauth2/v2.0/{authorize,token}` as a confidential Web client, `response_mode=query`, `prompt=select_account` — without it Microsoft silently uses whatever account the browser is signed in to, which on a shared machine may be someone else's, and in storage-first that account then signs in as the user it is connected to.
+- OAuth (the kit's `packages/server/src/oauth/onedrive.ts`): Authorization Code + PKCE against `login.microsoftonline.com/{MICROSOFT_TENANT}/oauth2/v2.0/{authorize,token}` as a confidential Web client, `response_mode=query`, `prompt=select_account` — without it Microsoft silently uses whatever account the browser is signed in to, which on a shared machine may be someone else's, and in storage-first that account then signs in as the user it is connected to.
 - Account id: the ID token's **`sub`**, read from the token endpoint's response without a signature check (OIDC Core §3.1.3.7 allows it for a token received directly over TLS), and refused unless its `aud` is this client.
   Not `oid`, which needs the `profile` scope and is the same across every app a user signs in to; `sub` is pairwise — derived from the app, the user and the tenant they signed in through — which is all a connection needs, though an operator who changes `MICROSOFT_TENANT` to a tenant where their users are guests makes every returning user look new.
   Display name: the `email` claim, else "OneDrive"; it is unverified and a tenant admin can set it to anything, so it is stored with `email_verified = false` and must never link accounts (§6).
@@ -727,141 +727,20 @@ What follows is the design as planned, kept so it need not be worked out again i
 <a id="backend"></a><a id="s6"></a>
 ## 6. Backend
 
-Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`.
-Keep it boring.
+The backend is the kit's: `@skysa/server`, a Hono app on Cloudflare Workers, built as a library ([skysa-kit's §6, "Backend"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#backend)).
+The design that was here is there: the composition root and its seams (entitlements, connect codes, rate limits, the relay), provider enablement, the storage OAuth flows, the server's half of the per-connection credential, the data model, the endpoints and the change relay.
+This app's part is its deployment, in `apps/api`:
+- `src/worker.ts` is the default Worker entry, and the only module here that reads the environment.
+  It builds the config through the server's own `parseEnv`, logs what `envWarnings` says of it, hands it to `createApp` with the relay's Durable Object when `RELAY` is on, and answers with `misconfigured` while the config is wrong.
+- `@skysa/api` and `@skysa/api/relay` (`src/index.ts`, `src/relay.ts`) are the server's names as this package has always offered them: the stock entry imports them, and so does a deployment's own, so an operator who needs different behavior still writes an entry rather than a fork (`docs/self-hosting.md`).
+- `wrangler.toml` binds D1, whose migrations are the kit's (`migrations_dir = "node_modules/@skysa/server/migrations"`), and serves the SPA from the same Worker through `[assets]`, so `/api/*` and the app share an origin.
 
-- Runtime: Workers only.
-  Use Web Crypto (`crypto.subtle`) for AES-GCM, `fetch` for provider calls, no Node built-ins.
-  `wrangler dev` locally (Miniflare) with a local D1.
-- Database: D1 via `drizzle-orm/d1`, migrations with `drizzle-kit generate` + `wrangler d1 migrations apply`.
-  Same SQLite dialect locally and in prod.
-- Secrets: provider client ids/secrets and `SECRETS_KEY` via `wrangler secret put`; never in `wrangler.toml`.
-- Static SPA served from the same Worker via `[assets]` in `wrangler.toml` (SPA fallback to `index.html`), so `/api/*` and the app share an origin and cookies are first-party.
-- **Composition root:** `apps/api` exports `createApp({ entitlements, rateLimiter, relay, fetch, providerTimeoutMs, config })` as a library; its own `src/worker.ts` calls it with the defaults.
-  An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking.
-  While the configuration is wrong, an entry answers every request with `misconfigured`, also exported: a generic `server_misconfigured`, with what is wrong in the log.
-  Nothing in `apps/api` reads env directly except `worker.ts`.
-- Cookies with `hono/cookie` — two, the short-lived OAuth flow cookie and the callback's answer to it (see "Storage OAuth, as built"); there are no sessions (see "Per-connection credentials").
-  Request validation with `zod`.
-  (`@hono/zod-validator` was declared up front and never used — the routes validate with `zod` directly — so it was removed.
-  Re-add it when a route actually wants the middleware; the removal is not a decision against it.)
-- **Entitlement seam:** every route that mints a token or proxies WebDAV calls `entitlements.check({ connectionId, provider, accountId, displayName })` from an `EntitlementProvider` interface in `core`.
-  The repo ships `AlwaysAllowed`.
-  Operators of a shared instance can substitute their own (an allowlist of accounts, for example) through `createApp`; no such policy logic lives in the repo.
-  *Revised in Phase 7:* it took a `userId` until connections stopped aggregating under a user, and an account is what an operator's rule can actually be written about.
-  **The OAuth callback asks as well**, once it knows which account it is and before it stores anything: asked only at `/token`, a refused account still left its refresh token sealed in D1, unusable and unreachable, and its owner learned of the refusal when sync failed.
-  `connectionId` is absent from the subject when the account has no row yet.
-  A refusal stores nothing — no connection, and no grant, whose hash would otherwise be spent — withdraws the consent just given where the provider has a revoke call, and sends the user back with `?connect=refused`; the operator's `reason` is not carried, since free text in a URL is text anyone can put in a link (its `code` is, below).
-  An account that already has a connection keeps it as it was, and `/token` goes on refusing it — and for that account nothing is revoked, because Google's revoke takes every token the user has granted the app, the one sealed in its row included, and a refusal can be a lapse the operator lifts later.
-  A seam that throws has not said yes: `?connect=failed`, nothing stored.
-  `/token` still asks, because what is allowed today can lapse.
+What the kit's section decides that this app is built around, each named here because this app's documents cite it by name:
+- **Entitlement seam:** an operator restricts who may connect, and mint tokens, through an `EntitlementProvider` handed to `createApp`; the repository ships one that allows everyone ([kit §6](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#backend)).
 - **Refusal codes and the connect gate (2026-09-24, issue #131).**
-  A refusal met only after the provider's consent screen, worded the same whatever the reason and offering nothing to do next, was the whole of what a restricted instance could say.
-  Two additions change that, and both come through the entitlement seam.
-  - **Codes.**
-    `EntitlementDecision` gains an optional `code` from a fixed list, `ENTITLEMENT_CODES` in `core`: `not_allowed`, `lapsed` and `limit_reached`.
-    The callback carries it as `?connect=refused&code=…`, and `/token` returns it beside `reason`.
-    A code outside the list is dropped on the way out (`knownCode`), and the refusal then reads as one with no code.
-    A value from a closed set says nothing a link-maker can choose, which is what kept `reason` out of the URL.
-    The app words the refused toast and the storage panel's `not_entitled` line by the code, and puts the operator's `reason` under the panel's line.
-  - **The gate.**
-    `EntitlementProvider` gains an optional `gate`: a plain-text message and one `https:` link.
-    `/api/config` serves it as `connectGate`, and the app shows it where the provider buttons are.
-    It lives on the seam and not in env, because a gate means nothing without a policy of the operator's, and that policy already needs its own Worker entry.
-    A gate on an instance that lets everyone in would turn people away from an open door.
-    `createApp` checks it with zod when the app is built and throws on anything else, so a bad gate is a boot failure (`server_misconfigured`), as a bad env is, rather than a broken link.
-    The client checks it again and drops a gate that does not parse, keeping the rest of the config.
-    Its URL becomes a link on the page, and only `https:` is followed, which is the check #89 asks for on the connect flow's URL.
-    Both sides serve the URL normalized: with a custom protocol rule zod accepts `https:example.com`, which an `href` would resolve into a path inside the app, and normalized it is `https://example.com/`.
-    The refused toast waits for the config to answer or fail before it appears, so its link is part of the alert from the start and not added a moment later.
-  - **Who sees the gate.**
-    A device holding a live connection on the instance sees the provider buttons, with the gate as a line above them: its account was let in at least once.
-    Any other device, including one holding only a detached source, sees the gate plus "Already have access?
-    Connect storage", which shows the buttons.
-    Showing them grants nothing, because the policy still decides at the callback.
-    A gate whose code is `required` is the exception to both: every device sees its code field until a code is accepted ("Connect codes", below).
-  - **The issue's two open questions.**
-    The live-connection rule above answers the first.
-    For the second, the gate is a `createApp` option and not env, and it is static: a gate that varies per request, for example by locale, would be a later change to a function-valued field.
-    Reconnecting an account the device already holds is not gated.
+  A refusal carries a code from a fixed list, and the seam may offer a gate, a message and one link, which the app shows where the provider buttons are ([kit §6](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#backend)).
 - **Connect codes (2026-09-28, issue #139).**
-  Issue #131 left one thing out: passing anything from the gate back into the connect flow, "such as a claim code", was to be its own issue if anyone needed it.
-  An operator whose policy turns on something other than the storage account needs it: a code their own page sends to someone who has paid, or an invite.
-  Before a connect the server knows nothing about who is connecting, and after it the server knows only the account.
-  - **The seam.**
-    `ConnectGate` gains an optional `connectCode: { label, required? }`, checked with the rest of the gate (a label of 1 to 40 characters).
-    Whatever is typed goes with `/start` as `connectCode`: trimmed, at most `MAX_CONNECT_CODE` (64, in `core`; 256 since the held value below) characters, and printable.
-    A blank one counts as none, and anything else is `invalid_request`.
-    The code rides to the callback in the signed flow cookie beside the verifier, and the policy is handed it as a second argument: `check(subject, { connectCode })`.
-  - **Checked as it is used (2026-09-29, issue #146).**
-    Until then the code was checked only at the callback.
-    "Use code" asked the server nothing, so any code at all looked accepted until the provider sent the person back past a consent screen.
-    A gate that asks for a code now needs `EntitlementProvider.checkCode(code)`, which `createApp` insists on, and the app asks it through `POST /api/connect-code` as the code is used.
-    The answer is `{ accepted: true, expiresIn }`, the seconds the app should keep the code (at most a day, `MAX_CODE_HOLD_SECONDS`; a year since the held value below), or `{ accepted: false, reason? }`, plain text of at most `MAX_CODE_REASON` (200) characters, shown under the field.
-    Seconds from now rather than a time, so a device whose clock is wrong keeps it as long as was meant.
-    The server holds the answer to that shape: a reason that is not plain text is dropped and the refusal kept, a hold longer than the most is cut to it, and anything else, or a throw, is a 500 that passes nothing on.
-    It is advice, not the decision: the callback still asks `check` with the code, so a code that runs out between the two is refused there.
-    An answer to "is this a code" is worth guessing at, so the route is same-origin like `/start` and goes through the rate limiter (`connect-code:<ip>`) before the policy is asked.
-    How many guesses that leaves is the operator's to size against how many codes it has live and for how long.
-  - **Two steps.**
-    The gate and the buttons are two steps, one open at a time.
-    An accepted code opens the buttons and folds the gate to a line naming the code (or, for a value held in its place, saying it was accepted; below) and when it stops being good, and its "Change" opens the gate again and closes the buttons, so only the next thing to do is on screen.
-    When the hold ends, with the menu open or while the app was closed, the gate asks again with the field empty.
-    With `required`, a code is the only way to the buttons, for every device, one already syncing here included.
-    Without it, "Already have access?" shows them to someone the policy knows already, and a device with an account syncing here starts on the buttons, with "Have a code?
-    Enter it" as the line, since it may be adding an account the operator has not seen.
-    A blank code cannot be used.
-  - **Decided only at the callback.**
-    `/token` and the WebDAV proxy ask with no second argument.
-    A policy that accepts a code decides as the account connects and remembers the answer itself, keyed on the account, which remains the only subject there is.
-    The code is not a credential.
-    The device sends it only to be checked and with a connect, never with `/token`, and the server keeps it only for the life of the flow cookie.
-    That is why it does not reopen "No sign-in separate from storage" below: it is said to connect, and after that the storage account is the identity, as before.
-  - **Kept for as long as the policy says.**
-    The app holds an accepted code in `localStorage` beside the time the policy said it stops being good, so it survives the round trip through the consent screen and a closed tab or installed app, and one code can connect several accounts.
-    A read after that time finds nothing and clears it.
-    It was `sessionStorage` until the policy could say how long: a code kept for later visits would have outlived what it meant, and the end the policy gives is what keeps that from happening now.
-    It is none of the three kinds of secret: the operator issued it to the person typing it, and it is worth only what their policy decides.
-    Where storage is refused, the app holds it in memory, which is enough for the connect it was accepted for.
-  - **A value held in place of the code (2026-10-05, issue #218).**
-    A code good for minutes, typed once per sitting, made an operator who sells access email a new one each time anyone connected anything: a second provider a week later, a new browser, the same account again after the last device let it go.
-    The operator wanted a code to prove the address once per device, and then not again.
-    So an accepted answer may carry `hold`, a value the app keeps and sends in place of what was typed — with the connect, and to `checkCode` — for `expiresIn`, which may now run to a year.
-    What it is, and what it proves, is the policy's: a pass it sealed for this device, say, good while a subscription lasts.
-    The server holds `hold` to what a code is, since it travels as one: trimmed, printable, at most `MAX_CONNECT_CODE`, which went from 64 to 256 characters to make room for something sealed (the flow cookie is about 2.1 KB at worst, measured with the longest return path, against the 4 KB a browser keeps).
-    One that is not fails the answer with a 500, rather than being dropped, since dropping it would keep the typed code the policy chose not to have kept.
-    The gate never shows a held value: its folded line says the code was accepted on this device and until when, and "Change" opens an empty field.
-    And the app asks about a held value again as it loads, where the gate asks for a code: the answer replaces what is held, which is how a policy that answers with a fresh `hold` keeps a pass alive for as long as the device is used; a refusal lets it go, so a pass the policy stopped taking — the subscription ended — closes the gate before any consent screen rather than after one; no answer, or a limit reached, keeps it, and the callback decides as it always did.
-    It asks at most once an hour since the policy last answered, because each asking spends one of the guesses `connect-code:<ip>` allows, which everyone behind one carrier's or office's address shares, and someone typing a fresh code must not find them spent; and it does not ask about a typed code at all, which is good for minutes and gains nothing from it.
-    A refused connect does not drop a held value, as it drops a typed code: nothing was typed, and the no may be about the account.
-    The app asks about it at once instead, and lets it go only if the policy says so.
-    A fresh `hold` must not end the one it replaces, since two tabs loading together, or an answer lost on the way, can leave the earlier one held.
-    An app still on a version before this one refuses any answer that keeps a code longer than a day, so an operator should give long holds only once its app has been updated.
-    A held value is a bearer to the operator's policy: whoever copies it out of the browser can connect what the policy would let this device connect, until the policy stops taking it.
-    It is still none of the three kinds of secret, since it reaches no storage and no credential, but it shares the third kind's exposure in `localStorage`, and what keeps it is the same `script-src 'self'`.
-    It is still said only to connect, and never with `/token`, so it does not reopen "No sign-in separate from storage" any more than the code did.
-  - **The gate's link opens in this window, and the way back is `?enter=code` (2026-10-02).**
-    It opened a new tab, so the app would still be there to come back to.
-    In an app installed on a phone a new tab is a second window, and the only way back from it to the code field was to close the app and open it again.
-    All three places the link appears — the `+` menu's gate, the storage panel's not-entitled line and the refused toast — now open it in the same window, as the provider buttons go to the provider.
-    The operator's page links back to the app with `?enter=code`, which opens the way to connect at the gate's code field: the `+` menu in a wide window, or the sources dropdown and its `+` in a compact one, with focus in the field, even with a code already held.
-    It is read once and removed, as `connect` is (`routes/search.ts`), and waits for the config to say there is anything to offer.
-    An operator's page that does not link back loses nothing that was there: Back returns to the app, and the code is typed into the `+` menu as before.
-  - **A refused code.**
-    A plain no (`not_allowed`, or no code) to a connect made while a code was held reads "The code you entered was not accepted or has expired", and the code is dropped, so the gate is back on an empty field.
-    `lapsed` and `limit_reached` are about the account or the instance, not the code, and are worded as before, with the code kept.
-  - **A yes is not a stored connection.**
-    The callback can still fail after the policy says yes, and then nothing is stored.
-    A policy that records something on a yes, such as linking the account to the code, must let the same account connect again and be asked again.
-- **Rate-limit seam:** `createApp({ rateLimiter })`, defaulting to `neverLimited`, consulted by `POST /api/auth/connect/:provider/start`, the callback, and `POST /api/token` — the three endpoints that spend an outbound provider call — and by `POST /api/connect-code`, which spends none but answers a question worth guessing at.
-  Also by the change relay's ticket and upgrade (`relay-ticket:<connectionId>`, `relay:<connectionId>`), which spend none either but would otherwise let one device open sockets without limit.
-  A seam and not a Cloudflare binding, for the same reason as the entitlement one: a binding would be deployment-specific code in a repo that forbids it.
-- **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each OAuth provider listed must have its credentials or the app refuses to boot).
-  Which settings those are is said once, in `OAUTH_ENV` in `apps/api/src/env.ts`, keyed by the flows in `oauth/providers.ts`, so a provider added to one and not the other does not compile; the schema, the boot check and the credentials `createApp` is handed all read it (#450).
-  `webdav` is accepted and needs no credentials, but WebDAV is deferred (§5.4): nothing is mounted for it, `/api/config` does not offer it, and the Worker logs a warning at boot while it is listed.
-  `WEBDAV_ALLOW_PRIVATE` is likewise read, does nothing, and warns.
-  Refusing either would break a deployment that has it set, so both stay until #118's breaking change (decided 2026-10-25, #450).
-  If it is ever built, its routes and proxy are mounted only when `webdav` is listed.
+  The gate may ask for a code, which the policy checks as it is used and again at the callback, and may answer with a value the app holds in its place ([kit §6](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#backend)).
 - **No sign-in separate from storage.**
   Decided 2026-09-18, and it closes what used to be two modes behind an `AUTH_MODE` env.
   Identity and data are coupled: a connection is reached by the credential the device that made it holds, and nothing anywhere aggregates connections under a subject.
@@ -873,179 +752,20 @@ Keep it boring.
   The gain is that a whole class of question stops needing an answer here: which of two identities a grant belongs to, what a verified email is worth, what happens when a linked provider is unlinked, and who may see a connection someone else made.
   A shared instance is still possible — that is what the entitlement seam is for — it just gates on the storage account rather than on a user the server invented.
 
-  **Still in the tree, and going:** `AUTH_MODE` (an env var with one legal value), the `users` and `identities` tables (`apps/api/src/db/schema.ts`, unread by any code), and the client's `account-first` branch in the storage panel (`components/account/NotConnected.tsx`).
+  **Still in the tree, and going:** `AUTH_MODE` (an env var with one legal value), the `users` and `identities` tables (the kit's `packages/server/src/db/schema.ts`, unread by any code), and the client's `account-first` branch in the storage panel (`components/account/NotConnected.tsx`).
   They are left standing in the change that made this decision because dropping the two tables is a hand-written D1 migration and this is a documentation change; issue #118 tracks them.
-
-- **One OAuth flow per provider, and it is for storage.**
-  `/auth/connect/:provider` requests storage scopes only.
-  There is no `/auth/login/:provider` and none is coming.
-  *From Phase 4:* the storage request does **not** pass `include_granted_scopes` (see "Storage OAuth, as built").
-  One consequence of Google's model is worth keeping written down even now that only one flow exists: Google revokes every grant to a project at once, so disconnecting storage revokes the whole project's access for that user — there is simply nothing else left for it to take down.
-- WebDAV proxy: stream request/response bodies straight through (`c.req.raw.body` → upstream `fetch` → return `Response`); enforce a 30 s upstream timeout with `AbortSignal.timeout` and a 20 MB cap regardless of Cloudflare plan limits.
 
 <a id="storage-oauth-as-built"></a>
 ### Storage OAuth, as built (Phase 2)
 
-Dropbox is the first storage flow and the shape the others follow.
-
-- **Hand-rolled.**
-  The storage flows are Authorization Code + PKCE and about forty lines each, so they install no OAuth dependency at all.
-  (`arctic` was once planned for sign-in, was deprecated by its author in July 2026, and is moot now that there is no sign-in — see "No sign-in separate from storage".)
-- **The PKCE verifier and `state` ride in a short-lived signed cookie** (`skysa_flow`, 10 minutes, `httpOnly`, `sameSite=lax`), not a table.
-  §9 wants `state` bound to the browser that started the flow, which is what a cookie *is*; a table would need a sweep job and a KV binding neither of which exists.
-  The payload is signed because an attacker who could rewrite it could otherwise substitute their own `state` and complete a flow the user never began.
-- **A callback asked for again is answered the same way (2026-09-30, issue #149).**
-  The callback can be answered only once: reading it clears the flow cookie, and the provider's authorization code is spent.
-  But a browser can ask for it twice.
-  Chrome's Safe Browsing check runs beside the request, not before it, so its warning page can cover a callback the server has already answered, and going on past the warning asks again; so do a reload and the back button.
-  The second asking found no flow and was told `flow_expired` in raw JSON, over a connection the first had stored.
-  Found on the hosted service, where Chrome put its warning over a OneDrive callback.
-  Now every answer the callback gives after checking `state` is also written to a second signed cookie, `skysa_flow_answer` (five minutes, `httpOnly`, `sameSite=lax`): the flow's `state` and the path it sent the browser to, `?connect=` outcome and all.
-  A callback carrying that `state` is sent to the same path, exchanges nothing and touches no cookie, so a third asking is answered too and a flow started since is left to finish.
-  Nothing in it is secret; it is signed because a redirect read from a cookie anyone could write would be an open one, and only a path in this app is taken from it.
-  There is one answer at a time, as there is one flow.
-- **A callback with no flow goes back to the app.**
-  No flow cookie, a `state` that does not match, a flow older than its ten minutes, or an answer older than its five: the server cannot tell these from a forged link, and exchanges nothing.
-  It is still a page a browser is on, so it redirects to `/?connect=expired`, and the app says that connecting did not finish and to connect again if the storage is not connected.
-  It does not guess which: the storage tabs show what is connected.
-- **No failure on the callback answers in JSON (2026-10-26, issue #451).**
-  Three still did, to a browser that was navigating: a provider the deployment does not offer, or has turned off since the flow started (`unsupported_provider`, `provider_not_configured`); a callback carrying neither a `code` nor an `error`; and the callback's rate limit.
-  Each now redirects to the flow's `returnTo` with `?connect=failed`, and is logged, as a failed exchange is, since to the user it looks like any failure.
-  All are checked after the `state` check, so a callback with no flow is still `expired`, nothing reaches the log without a flow this browser started, and asking again is told the same.
-  `/start` is a fetch from the app and still answers these in JSON.
-- **`sameSite=lax`, not `strict`**, on both cookies: the callback is a top-level navigation arriving from the provider, and `strict` would drop the cookie exactly when it is needed.
-  `secure` is derived from `APP_ORIGIN` so plain-HTTP local development still works.
-- **The HMAC key is derived from `SECRETS_KEY` through HKDF**, not imported from the same bytes that do AES-GCM.
-  One key, two algorithms, is how key-separation bugs start.
-- **`token_access_type=offline`**, and a grant that comes back without a refresh token is a 502 rather than a stored connection that would stop working in four hours with no way to recover.
-- **A unique index on `connections(user_id, provider)`** (migration `0001_connection_per_provider`) turns reconnecting into an `ON CONFLICT DO UPDATE` instead of a read-then-write race between two tabs.
-  It also makes §12.3 a constraint rather than a UI convention.
-  Reconnecting clears `root_id`: a new grant can point at a different account.
-- **`SECRETS_KEY` must decode to exactly 32 bytes**, checked at boot.
-  It was `.min(1)`, which meant an operator mistake surfaced the first time somebody tried to connect an account.
-  (The existing test fixture turned out to decode to 30 bytes.)
-- **`returnTo` is confined to this app.**
-  Anything not starting with a single `/` becomes `/`.
-- **`/api/token` decrypts the refresh token and returns only the access token.**
-  It is the first `entitlements.check(…)` call site (§6, "Entitlement seam"), and it re-seals a rotated refresh token so the connection survives a rotation Dropbox is allowed to do.
-- **Disconnecting revokes best-effort and deletes regardless.**
-  A user who asked to disconnect must not be left connected because the provider was down.
-  `revoked: false` says only that the grant may still be live — the revoke failed, or the provider (Microsoft) has none.
-- **One provider per user (§12.3), enforced once a second provider exists (Phase 3).**
-  A signed-in user whose storage is connected at one provider is sent back with `connect=occupied` when they start or finish connecting another, and has to disconnect first.
-  In storage-first any connected account signs in as its user, so a Dropbox and a OneDrive connection side by side would make whoever holds the OneDrive account able to mint the Dropbox tokens.
-  Reconnecting at the same provider replaces, as before.
-  Two consent flows for the same user that overlap — in two tabs, or on two devices, one of which stays signed in after the other disconnected the last connection — can both pass the check; Phase 7's multiple connections have to answer that properly (a unique index, or connections that do not sign anyone in).
-- **Only a refused grant asks the user to reconnect.**
-  `invalid_grant` and `interaction_required` from a token endpoint are `reauthorize_required`; anything else — `invalid_client` once a client secret expires, `temporarily_unavailable`, a 5xx, a timeout — is logged by its code alone (`apps/api/src/log.ts`) and answered `502 provider_unavailable`, which the client retries.
-  Told to reconnect over an expired secret, every user would go through a flow that fails the same way, and nothing would tell the operator.
-  A failed code exchange is logged the same way.
-- **Google (Phase 4, `apps/api/src/oauth/gdrive.ts`)** follows the Microsoft shape, with Google's differences:
-  - The request carries `access_type=offline` (no refresh token otherwise) and `prompt=consent select_account`.
-    Consent is asked for again because a reconnect gets no refresh token without it; `select_account` is there for the shared-machine reason §5.2 gives.
-    There is no `include_granted_scopes`, so the consent screen lists exactly the storage scopes.
-    Revocation is per project either way (§6's two-flows bullet).
-  - **Granular consent:** Google lets the user untick Drive and still completes the grant.
-    The exchange checks the response's `scope` for `drive.file`.
-    If it is missing, nothing is stored and the user is sent back with `connect=partial` (a `ScopeNotGrantedError`, which no token endpoint's error code can imitate), which the web app answers with "leave that permission ticked".
-    This is not logged, since it is the user's choice.
-    Nothing is revoked either: Google revokes per project, so a revoke here would also end the same user's working connection on another device.
-  - The account id is the ID token's `sub`, read and `aud`-checked as for Microsoft.
-    Unlike Microsoft's, Google's `sub` is the same for every app the account signs in to.
-    The display name is `email`, else "Google Drive", and is stored unverified whatever `email_verified` says (§6).
-  - A refresh returns no refresh token, so `/api/token` keeps the stored one.
-  - Disconnecting revokes: `POST oauth2.googleapis.com/revoke` with the freshly refreshed access token.
-    That revokes every grant the user gave the Cloud project, which is why `docs/google-oauth.md` asks for a project per deployment.
-  - A Workspace admin restricting Drive answers `admin_policy_enforced`, which is `provider_unavailable`, not `reauthorize_required`: reconnecting would be refused the same way.
-  - While the Cloud project is in Testing, refresh tokens expire after 7 days.
-    That arrives as `invalid_grant` → `reauthorize_required`, so users reconnect weekly.
-    `docs/google-oauth.md` walks an operator through the project, the client and leaving Testing.
-
-**Test harness.**
-`@cloudflare/vitest-pool-workers` — which would give the tests Miniflare's real D1 — still peers on `vitest ^4.1.0` against this workspace's 5, so it cannot be installed.
-The fallback is a ~120-line D1 shim over Node 22's built-in `node:sqlite` (`apps/api/tests/d1.ts`), which keeps the real `drizzle-orm/d1` driver, the real schema and the real migration files; only the process hosting SQLite differs.
-No new dependency.
-Swap it for the pool once that supports Vitest 5.
-
-**Deliberately not done:** AES-GCM is used without additional authenticated data.
-Binding the connection id as AAD would stop a ciphertext copied between rows from decrypting, but an attacker who can write to `connections` has already lost the user the game.
-Recorded here rather than done, because the seal/open signature is cheaper to change now than after WebDAV credentials use it too.
+The kit's ([§6, "Storage OAuth, as built"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#storage-oauth-as-built)).
+Disconnecting Google Drive revokes every grant the user gave the Cloud project at once, which is why `docs/google-oauth.md` asks for a project per deployment.
 
 <a id="per-connection-credentials"></a>
 ### Per-connection credentials (Phase 7)
 
-Until Phase 7 a user held **at most one connection**, because in `storage-first` any connected account signed you in as that user: two connections under one user would cross-authorise, and whoever held the OneDrive account would get tokens for the Dropbox one.
-Phase 7 removes the premise rather than the guard.
-**There is no shared user.**
-Each connected storage account is its own silo — auth and data coupled — and the device switches between the ones it holds.
-
-What proves a device's right to a connection is a credential it generated, not a session cookie:
-
-1. The PWA generates 32 random bytes, **awaits** an IndexedDB write of them, and sends `SHA-256` of `sk1_<bytes>` to `POST /api/auth/connect/:provider/start` with `returnTo`.
-   The hash rides in the existing signed `__Host-skysa_flow` cookie beside `state` and the PKCE verifier.
-2. The callback commits the connection **and** its grant in one `db.batch`, then redirects as before.
-   The batch being one transaction is load-bearing for the racing-callback recovery, and that in turn assumes D1 enforces foreign keys within it — documented, but proven here only against the `node:sqlite` shim.
-   If it did not, the loser of a race would commit a grant pointing at an id that does not exist, the user would see `connect=ok`, and the device would be 401 for ever with its hash spent.
-   The *security* property does not depend on it: a grant pointing at a dead id reads as claimed and authorises nothing.
-3. The PWA presents `Authorization: Bearer sk1_…` from then on.
-
-The plaintext credential never enters a URL, a fragment, history, a `Set-Cookie`, a response body, a Worker log, or the database.
-"The API never holds the plaintext" is literally true rather than true-except-in-transit — which is what deleted the exchange endpoint, the pending-code table, its TTL and sweep, the double-claim race, and the window where a connection was committed but its credential was never collected.
-
-Each decision, with the reason it would otherwise be got wrong later:
-
-- **`/start` is a same-origin `POST`.**
-  The hash is caller-supplied, so a `GET` would be a session-fixation hole: a link carrying the attacker's hash, consented to by the victim, hands the attacker a live credential to the victim's storage.
-  `hono/csrf` does not cover JSON bodies (it matches only form and text content types, leaning on CORS preflight), so the route checks `Origin === appOrigin || Sec-Fetch-Site: same-origin` itself and keeps `csrf()` as defence in depth.
-- **Lookup is by hash, not `<id>.<secret>`.**
-  An id-then-compare needs a constant-time comparison, and `crypto.subtle.timingSafeEqual` is a Workers extension **Node's webcrypto lacks** — and the suite runs on Node against a `node:sqlite` D1 shim.
-  A unique index on the hash sidesteps a hand-rolled comparison tested under the wrong crypto.
-  Idle expiry is part of the same query, so an expired grant is indistinguishable from an unknown one.
-- **A hash is claimable once, ever, and `grants` rows are therefore never deleted.**
-  Revoking a device, disconnecting the account (the foreign key is `on delete set null`) and the cap's prune all null `connection_id` and leave the row; `grantHolder` treats a null as revoked.
-  The row that stays is a tombstone, and the unique index over `secret_hash` is what it holds.
-  "Once, ever" means once per continuous life of the database, which is not quite unconditional: D1's Time Travel restores a point in time, and the credentials themselves live in each device's IndexedDB and are not rolled back with it.
-  A restore therefore un-spends every hash issued since the restore point while the devices holding those credentials still hold them.
-  Nothing in code can see that; it belongs with the operator, alongside the fact that a deployment reset invalidates every credential at once.
-  Review caught this as a live hole rather than a precaution.
-  An earlier draft used a plain insert and reasoned that a repeated hash would fail — true only while the row exists.
-  A hash leaked from a database dump mints nothing on its own, but once its grant is gone it is claimable again, and the attacker needs nothing of the user's: they start a flow with the victim's hash, consent with storage of *their own*, and the row is re-pointed.
-  The victim's device — offline throughout, holding the plaintext, told nothing — comes back, is answered 200, and syncs the user's notes into a stranger's Drive.
-  All three ways a grant used to disappear reached it, and the prune is not even user-initiated.
-  Tested as the attack, once per path (`connect.test.ts`, "a hash is spent once, however its grant stopped being live").
-- **A connection no live device reaches is deleted, not kept.**
-  Left behind it is a sealed, live refresh token that nothing can use and nothing can revoke — disconnecting takes a credential.
-  So revoking the last live grant (only a device signing itself out can, since a caller revoking another is itself live) disconnects.
-  The grant is nulled and the row deleted in one batch, which D1 runs as one transaction (`revokeGrant` in `apps/api/src/db/connections.ts`), by a statement that asks and deletes together (`DELETE … WHERE NOT EXISTS` a live grant), and only then is the grant withdrawn at the provider, best-effort, from the row as it was read: asked first and deleted after the provider's calls, a device whose callback committed in between had the row taken from under it, and a request cut off during those calls left exactly the orphan this removes.
-  *Revised 2026-10-28:* the nulling and the delete were two statements until then, and a request cut off between them left that orphan too.
-  *Revised 2026-10-02:* this is now what the panel's Disconnect does.
-  It used to call `DELETE /api/connection`, which took the account from every device holding it: disconnecting on a phone stopped the laptop syncing too, though nothing on the laptop had been asked.
-  Disconnect now signs out the device it is pressed on and no other (`signOut` in `apps/web/src/api/client.ts`: `GET /api/connection` for this device's `grantId`, then `DELETE` that grant), so only the last device out disconnects the account and withdraws its access at the provider.
-  The question says which this will be before it is answered, from the device list's own count (live grants other than this one; `stillSignedIn`): "The other device connected to it stays connected and keeps syncing", or "This is the only device connected to it, so the account is disconnected too", or both where the server could not be asked.
-  Where to withdraw OneDrive's access by hand is said only when the account may be going.
-  Cancelling a first import signs out the same way, since the account being imported may be one another device was already syncing.
-  A device the user believes is stolen is signed out from the device list (Remove), which never takes the last.
-  A grant idle past its expiry cannot authenticate and does not count as live.
-  Connecting the account again makes a new row, and the device knows its notes by the account's id, not the row's.
-  And the device retires what it replaces: "Connect again" mints a new credential, so once that is kept the device signs out the one it held for the same connection (`claimConnection`), rather than leaving it in the device list as a live key for 180 days.
-  Best effort — a credential already revoked has nothing to retire.
-  What is still not covered, and these are the orphans that do happen: a device that clears its site data while it is the only one, and an account whose every device idles out.
-  The grants expire, but the row stays; there is no sweep, because a Worker has nowhere to run one without a cron trigger every self-hoster would then carry.
-- **A device reconnecting with the credential it already holds succeeds.**
-  The same draft refused every repeated hash, which wedged the ordinary case: nothing tells a device to mint a fresh credential before connecting again, and the duplicate rolled back the whole batch — new refresh token included — identically on the retry.
-  A hash whose row already points at *this* connection is that device; only a hash bound elsewhere, or spent, fails the connect.
-- **`GET /connections` is gone, replaced by singular `GET /api/connection`.**
-  A one-element array invites the aggregation model straight back, and the client that unbinds on an empty list would keep "working" with the wrong meaning. 404 (or 401 for a revoked credential) means *this connection is gone*; a 5xx or a network failure means nothing.
-- **`connections.account_id` is `NOT NULL`** so `(provider, account_id)` can be the upsert target: SQLite NULLs do not conflict, and a nullable target would insert a duplicate on every reconnect forever.
-- **A grant cap per connection** (20, pruned inside the same batch), because every live grant is a key to the same storage.
-  Eviction is by `last_used_at`, not `created_at`: pruning by age logs out the device someone actually relies on and keeps the ones they have stopped using, and going by use also means a grant already past its idle expiry is evicted before a live one instead of holding a slot it can no longer use.
-- **Migrations `0004`/`0005` are hand-written.**
-  `drizzle-kit`'s SQLite table rebuild emits `PRAGMA foreign_keys=OFF`, which D1 rejects and the test shim silently tolerates — green in tests, wedged on `wrangler d1 migrations apply`.
-  A rebuild written by hand avoids the pragma but not the `DROP TABLE` + `RENAME` pair in the middle, whose partial state no re-run can recover from; so the new shape gets a new table name (`storage_connections`), `0004` never drops the table it reads, and dropping the old one is `0005`'s single statement.
-  Every device reconnects after this: sessions carried that right before, and a grant can only be created by the OAuth callback.
-- **`sessions` goes; `users` and `identities` stayed**, annotated at the time as the account-first mode's only callers.
-  That mode was dropped on 2026-09-18, so the two tables now have no caller at all and are owed a migration (issue #118).
-- This retires `holdsAnotherProvider`, `session_mismatch`, `claimedBy`, the compensating delete, and the `conflict`/`signin`/`occupied` outcomes — not by relocating them but by removing what made them necessary.
+There is no shared user: a connection is reached by a credential the device that made it holds, `sk1_…`, which the server sees only as its SHA-256.
+The server's half — the connect flow, the lookup by hash, grants and their cap, and the migrations behind them — is the kit's ([§6, "Per-connection credentials"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#per-connection-credentials)).
 
 **The device half (`apps/web`).**
 The store layer was already keyed by connection; what was singular was everything that chose *which* one.
@@ -1146,7 +866,7 @@ The `sk1_` prefix reserves a non-extractable-ECDSA proof-of-possession variant t
 It is written into CLAUDE.md in words, because a hard-rules list implying IndexedDB is safe for a long-lived bearer is exactly the kind of rule that quietly stops being honest.
 
 **Deliberately not done:** no server-side revocation list, no per-device names, and no proof of possession.
-*Partly revised 2026-10-02:* each grant now keeps a label for its device, "Safari on iPhone", worked out from the User-Agent of the app's own request to start connecting (`apps/api/src/device.ts`), carried to the callback in the signed flow cookie, and refreshed when the device reconnects.
+*Partly revised 2026-10-02:* each grant now keeps a label for its device, "Safari on iPhone", worked out from the User-Agent of the app's own request to start connecting (the kit's `packages/server/src/device.ts`), carried to the callback in the signed flow cookie, and refreshed when the device reconnects.
 *Revised the same day:* it was first taken from the callback, the browser's navigation back from the provider, and a Chrome on a Mac arrived there saying it was Safari on an iPhone; whatever rewrites a User-Agent for the provider's pages (an extension, a site setting) reaches the callback, and the start is the app asking.
 It needs nothing that says who is asking — it is what the device is, not whose — and it is the label only: never the header, which says which build of which system, and no address or place.
 A row that said only "a device, last used 9:48 AM" could not be told from the phone in the user's pocket, which is the one comparison the list exists for.
@@ -1157,51 +877,19 @@ A revocation list is the one of the three that could still be built on what exis
 
 <a id="data-model-drizzle-d1"></a>
 ### Data model (Drizzle, D1)
-```
-users               id, email, email_verified, created_at              (no caller; to be dropped — #118)
-identities          id, user_id, provider ('google'|'microsoft'), subject, email, created_at   (no caller; to be dropped)
-storage_connections id, provider, account_id, display_name, root_id,
-                    secret_ciphertext, secret_iv, secret_key_id, created_at, last_used_at
-                    -- unique on (provider, account_id); no user
-                    -- secret = { refresh_token } for OAuth, { url, username, password } for WebDAV
-grants              id, connection_id (null once revoked), secret_hash, created_at, last_used_at, device
-                    -- secret_hash = base64url SHA-256 of the device's `sk1_…` credential, unique
-```
-Secrets encrypted with AES-256-GCM using `SECRETS_KEY` from env (rotate by re-encrypting; key id stored alongside ciphertext).
-Never log secrets.
-Never return them to the client.
-The credential behind `secret_hash` is never stored at all.
+
+The kit's ([§6, "Data model"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#data-model-drizzle-d1)), with its migrations.
 
 <a id="endpoints"></a>
 ### Endpoints
-| Route | Purpose |
-|---|---|
-| `POST /api/auth/connect/:provider/start` | `{ credentialHash, returnTo? }` → `{ authorizeUrl }`. Storage scopes; PKCE + state + the hash in the flow cookie. Same-origin only |
-| `POST /api/connect-code` | `{ code }` → `{ accepted: true, expiresIn }` or `{ accepted: false, reason? }`, from the policy's `checkCode`. 404 where the gate asks for no code. Same-origin only, rate-limited |
-| `GET  /api/auth/connect/:provider/callback` | Exchange code, upsert connection with encrypted refresh token **and** its grant in one batch, redirect to app. Asked again within five minutes, the same redirect; with no flow, `/?connect=expired`; any other failure, `?connect=failed`, never JSON |
-| `POST /api/connections/webdav` | *(deferred, §5.4)* Validate by `PROPFIND` against the URL, store encrypted creds |
-| `GET  /api/connection` | The one connection this credential reaches (no secrets), and this device's `grantId` |
-| `GET  /api/connection/grants` | The devices holding this connection, which one is asking, which have gone idle, and what each is (`device`, where known). No hashes |
-| `DELETE /api/connection/grants/:id` | Revoke one device, this one included ("sign out"). The grant's row stays, nulled. The connection survives while any other live device reaches it; with the last one it goes as `DELETE /api/connection` takes it, and the answer says so (`disconnected`, `revoked`) |
-| `DELETE /api/connection` | Revoke at provider where supported, delete row; every grant is nulled, not deleted. Every device at once; the web app's Disconnect signs out one (`/connection/grants/:id`) since 2026-10-02 |
-| `POST /api/token` | No body → `{ accessToken, expiresAt }` using stored refresh token |
-| `POST /api/connection/relay/ticket` | No body → `{ ticket, expiresIn }`, for opening the relay socket below. 404 `relay_disabled` where the deployment runs no relay. Rate-limited |
-| `GET  /api/relay?ticket=…` | WebSocket upgrade to the change relay ("Change relay", below). Same-origin; the ticket's grant must still be live. Outside `/api/connection*` because a browser cannot send `Authorization` on a WebSocket |
-| `ALL  /api/webdav/:connectionId/*` | *(deferred)* Authenticated proxy (see 5.4) |
 
-Everything under `/api/connection*` and `POST /api/token` requires `Authorization: Bearer sk1_…`.
-Two refusals, and the difference is actionable: `credential_required` (401) means the device never had one and should connect; `credential_revoked` (401) means the one it holds is not known here any more and should be thrown away first.
-
-There are no sign-in routes, here or anywhere: identity is the storage connection (§6).
-`AUTH_MODE=account-first` refuses to boot, which is now a refusal to honour a setting that describes something this project has decided not to build rather than something it has not built yet — the env var itself goes with the tables (issue #118).
+The kit's ([§6, "Endpoints"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#endpoints)).
 
 <a id="change-relay"></a>
 ### Change relay (optional, 2026-10-05)
 
-Where the operator turns it on, a device that has pushed tells the API and the API tells the connection's other devices, which then pull; it carries that something changed, and nothing else.
-The decision record is [`decisions/0003-change-relay.md`](decisions/0003-change-relay.md).
-
----
+The kit's ([§6, "Change relay"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#change-relay)).
+It is off unless `RELAY = "true"`, and its Durable Object is declared in `wrangler.toml` either way.
 
 <a id="local-store-and-sync-engine-client"></a><a id="s7"></a>
 ## 7. Local store and sync engine (client)
@@ -3253,30 +2941,11 @@ apps/
       sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps core engine
       api/                    # typed client for apps/api
       i18n/                   # the app's words: t(), rich(), and the English catalog in en/ (§7)
-  api/                        # Hono on Cloudflare Workers
-    wrangler.toml             # D1 binding, [assets] → ../web/dist
-    migrations/               # D1's, numbered
+  api/                        # the Worker: this app's deployment of the kit's server (@skysa/server, §6)
+    wrangler.toml             # D1 binding, with the kit's migrations; [assets] → ../web/dist
     src/
-      app.ts                  # createApp(options) — library export, no env access
       worker.ts               # default Worker entry: createApp with self-host defaults from env
-      env.ts                  # parseEnv, envWarnings: the environment checked at boot
-      routes/
-        connect.ts            # /auth/connect/:provider/* (storage), /connect-code
-        connections.ts        # /connection, /connection/grants[/:id]
-        token.ts              # /token
-        relay.ts              # /connection/relay/ticket, /relay (the change relay)
-      relay/                  # the relay's hub seam, Durable Object, rooms and tickets
-      db/                     # drizzle schema, client; connections.ts: the race-sensitive writes (commitConnection, revokeGrant, recordRefresh)
-      context.ts              # AppEnv (a request's bindings and db), AuthedEnv (+ bearer), RouteDeps (what createApp hands every router)
-      credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
-      flowCookies.ts          # the signed OAuth flow cookies (there are no sessions)
-      crypto.ts               # AES-GCM helpers
-      json.ts                 # parseJson (JSON checked by a zod schema) and formatIssues
-      http.ts                 # fail(), tooMany, requireSameOrigin, jsonBody
-      gate.ts                 # the connect gate and code check an EntitlementProvider offers
-      device.ts               # deviceLabel: a grant's device, named from the User-Agent
-      log.ts                  # logFailure: an error's name and first line, nothing more
-      oauth/                  # storage OAuth: gdrive.ts onedrive.ts dropbox.ts pkce.ts common.ts
+      index.ts relay.ts       # @skysa/api and @skysa/api/relay: what a deployment's own entry imports
 packages/
   core/                       # zero framework deps; runs in browser, Node, and Workers
     src/

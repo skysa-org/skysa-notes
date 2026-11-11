@@ -362,12 +362,12 @@ long holds once your deployment's app has been updated.
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
 its `createApp({ … })` call to pass `entitlements` as well, and point `main` in
 `wrangler.toml` at your copy. Beside the original in `apps/api/src`, its
-relative imports work as they are. Anywhere else, import `createApp` and
-`parseEnv` from `@skysa/api` instead, and `ConnectionRelay` and
-`durableObjectRelay` from `@skysa/api/relay`. Keep the copy's
-`export { ConnectionRelay }` whether or not you run the relay: `wrangler.toml`
-binds that class, and a deploy whose entry does not export it is refused. The
-stock entry never sets a gate.
+relative imports work as they are. Anywhere else, import `createApp`,
+`parseEnv`, `envWarnings` and `misconfigured` from `@skysa/api` instead, and
+`ConnectionRelay` and `durableObjectRelay` from `@skysa/api/relay`. Keep
+the copy's `export { ConnectionRelay }` whether or not you run the relay:
+`wrangler.toml` binds that class, and a deploy whose entry does not export it
+is refused. The stock entry never sets a gate.
 
 Keep the copy's `try`/`catch`. `createApp` checks the gate and throws on any of
 these:
@@ -470,6 +470,13 @@ Deploy from a release tag rather than from `main` (`git tag --list 'v*'`,
 then `git checkout vX.Y.Z`); each release's notes say whether it carries a
 migration. The security of your instance is the security of the commit you
 deployed. See [`SECURITY.md`](../SECURITY.md).
+
+The D1 migrations come with the server, in the kit's `@skysa/server`, which
+`pnpm install` puts at `apps/api/node_modules/@skysa/server/migrations`.
+`apps/api/wrangler.toml` points `migrations_dir` there. A `wrangler.toml` of
+your own points it at that folder, from wherever your file is. They are the
+same files, under the same names, as the `apps/api/migrations` they replaced in
+3.0.0, so a database migrated before then finds nothing new to apply.
 
 ## When it will not boot
 

@@ -18,7 +18,6 @@
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"typecheck": "pnpm -r run typecheck",
-		"db:generate": "pnpm --filter @skysa/api run db:generate",
 		"db:migrate": "pnpm --filter @skysa/api run db:migrate",
 		"db:migrate:remote": "pnpm --filter @skysa/api run db:migrate:remote",
 		"lint:fix": "eslint . --fix",
