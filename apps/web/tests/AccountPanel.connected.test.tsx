@@ -1286,14 +1286,13 @@ describe('AccountPanel, with an account connected', () => {
 		expect(signOut).toHaveBeenCalledTimes(1);
 	});
 
-	it('offers to connect again only where the server lets it', async () => {
+	it('offers to connect again only once the server has answered', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
 		renderPanel(
 			clientWith({
-				config: () =>
-					Promise.resolve({ authMode: 'account-first', providers: ['dropbox'] }),
+				config: () => new Promise(() => undefined),
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
 			}),
 			db,

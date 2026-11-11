@@ -369,8 +369,10 @@ What the kit's section decides that this app is built around, each named here be
   The gain is that a whole class of question stops needing an answer here: which of two identities a grant belongs to, what a verified email is worth, what happens when a linked provider is unlinked, and who may see a connection someone else made.
   A shared instance is still possible — that is what the entitlement seam is for — it just gates on the storage account rather than on a user the server invented.
 
-  **Still in the tree, and going:** `AUTH_MODE` (an env var with one legal value), the `users` and `identities` tables (the kit's `packages/server/src/db/schema.ts`, unread by any code), and the client's `account-first` branch in the storage panel (`components/account/NotConnected.tsx`).
-  They are left standing in the change that made this decision because dropping the two tables is a hand-written D1 migration and this is a documentation change; issue #118 tracks them.
+  **What it left standing is gone** (issue #118, 3.0.0).
+  The server no longer reads `AUTH_MODE`: a deployment that still sets it boots and is told at boot to remove it, and `account-first` is still refused ([kit §6](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#backend)).
+  The kit's migration `0007` drops the `users` and `identities` tables, which nothing ever read, and the storage panel has no `account-first` branch.
+  `/api/config` still sends `authMode: 'storage-first'`, so an app from before 3.0.0, which requires it, keeps working until it updates.
 
 <a id="storage-oauth-as-built"></a>
 ### Storage OAuth, as built (Phase 2)
@@ -1827,7 +1829,7 @@ What follows is this app's own.
 - *(Only if WebDAV is built, §5.4.)*
   WebDAV proxy SSRF hardening (on by default; protects operators who expose their instance to the internet): HTTPS only; resolve the host and reject private/loopback/link-local/cloud-metadata ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16, fc00::/7, ::1); reject IP-literal hosts; re-validate on redirect (or disable redirects); per-user rate limit and daily byte budget.
   Self-hosters could relax the private-range rule for a LAN Nextcloud.
-  The `WEBDAV_ALLOW_PRIVATE` flag reserved for that does nothing today and is deprecated (§6, provider enablement); a built WebDAV would bring its own.
+  The `WEBDAV_ALLOW_PRIVATE` flag once reserved for that is no longer read ([kit §6](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#backend), provider enablement); a built WebDAV would bring its own.
 - CSP: `connect-src` limited to self + `www.googleapis.com` + `*.dropboxapi.com` + OneDrive's `graph.microsoft.com` and its download hosts (`*.files.1drv.com`, `my.microsoftpersonalcontent.com`, `*.sharepoint.com`, §5.2) — each provider's hosts added with its adapter, never ahead of it (WebDAV goes through the proxy, so it adds none).
   Set for every static response in `apps/web/public/_headers` (Cloudflare applies it to the shell, the assets and `sw.js`, and a response the service worker replays keeps it; `/api/*` is the Worker's and is not a page); `tests/csp.test.ts` holds it, including that every host the adapters request is allowed.
   `script-src 'self'` with nothing inline or eval'd: zod's `new Function` probe is turned off (`src/jitless.ts`, imported first), since it reports a violation even when refused.
@@ -2054,7 +2056,7 @@ Git is asked only to *narrow* the walk, and only when its answer names that same
 ### Repo
 One public repo, `skysa-notes`, containing everything in §11.
 It is self-hostable and complete: placeholders only in `wrangler.toml`, `.dev.vars.example` listing every key, no operator credentials or deployment-specific configuration in the tree.
-Defaults are `AlwaysAllowedEntitlementProvider`, `AUTH_MODE=storage-first`, and `ENABLED_PROVIDERS` defaulting to what an operator can run without registering several apps (`dropbox`).
+Defaults are `AlwaysAllowedEntitlementProvider` and `ENABLED_PROVIDERS` defaulting to what an operator can run without registering several apps (`dropbox`).
 Anyone who needs different behavior composes it through `createApp` (§6) rather than forking.
 
 <a id="license-agpl-3-0-cla-decided-confirm-final-cla-text-with-a-lawyer"></a>

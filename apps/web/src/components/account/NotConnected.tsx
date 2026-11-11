@@ -68,9 +68,7 @@ export const NotConnected = ({
 	}));
 	const kept = useKept(keep);
 	const offerable =
-		settings?.authMode === 'storage-first'
-			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
-			: [];
+		settings?.providers.filter((provider) => CONNECTABLE.includes(provider)) ?? [];
 	const scratchpad = useScratchpadItem(LOCAL_CONNECTION_ID);
 	const items = [
 		...downloadItem(offersDownload(true, holds), downloading),
@@ -86,9 +84,6 @@ export const NotConnected = ({
 			    in its header, which never has words, so it is said here. */}
 			{slot !== undefined && offerable.length > 0 && (
 				<p className="muted">{t('account.local.useAdd')}</p>
-			)}
-			{settings?.authMode === 'account-first' && (
-				<p className="muted">{t('account.local.signInMissing')}</p>
 			)}
 			{config.kind === 'unreachable' && (
 				<p className="muted">{t('account.local.unreachable')}</p>

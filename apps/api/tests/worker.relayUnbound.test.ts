@@ -11,7 +11,6 @@ import worker from '../src/worker.js';
 const env = {
 	APP_ORIGIN: 'https://notes.example.com',
 	SECRETS_KEY: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
-	AUTH_MODE: 'storage-first',
 	DROPBOX_CLIENT_ID: 'id',
 	DROPBOX_CLIENT_SECRET: 'secret',
 	RELAY: 'true',

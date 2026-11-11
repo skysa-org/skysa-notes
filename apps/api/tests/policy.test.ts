@@ -27,7 +27,6 @@ const entitlements: EntitlementProvider = {
 const env = {
 	APP_ORIGIN: 'https://notes.example.com',
 	SECRETS_KEY: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
-	AUTH_MODE: 'storage-first',
 	ENABLED_PROVIDERS: 'webdav',
 	RELAY: 'false',
 };

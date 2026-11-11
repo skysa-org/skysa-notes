@@ -446,7 +446,7 @@ export const Connected = ({
 					sync={sync}
 					bound={bound}
 					label={label}
-					reconnectable={answer(config)?.authMode === 'storage-first'}
+					reconnectable={answer(config) !== undefined}
 					config={config}
 					returnTo={returnTo}
 					{...(navigate === undefined ? {} : { navigate })}

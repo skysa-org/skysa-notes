@@ -69,7 +69,7 @@ only a major version asks them to do anything beyond the routine steps under
   routine steps apply.
 - **major** — anything the operator, or the people using the instance, must
   act on: a setting, secret or binding that must now be set, or one renamed or
-  removed (removing `AUTH_MODE`, issue #118, is one; a new one with a default
+  removed (removing `AUTH_MODE`, issue #118, was one; a new one with a default
   is not); a migration the routine steps cannot apply; a change that makes
   every device reconnect; a `brand.json` field that changes meaning; a storage
   layout older builds can only open read-only. The summary says what to do.

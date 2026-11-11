@@ -11,7 +11,6 @@ import * as core from '../src/index.js';
 const SURFACE = [
 	'API_ERROR_CODES',
 	'APP_FOLDER_NAME',
-	'AUTH_MODES',
 	'AgeError',
 	'CLIPBOARD_FOLDER',
 	'CLIPBOARD_ITEMS',
@@ -134,7 +133,6 @@ const SURFACE = [
 type Types = [
 	Core.ApiErrorCode,
 	Core.AttachmentKind,
-	Core.AuthMode,
 	Core.ClipName,
 	Core.ConnectCodeCheck,
 	Core.ConnectGate,

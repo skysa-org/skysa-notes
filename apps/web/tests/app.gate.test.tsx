@@ -27,7 +27,6 @@ beforeEach(() => {
 		input === '/api/config'
 			? Promise.resolve(
 					Response.json({
-						authMode: 'storage-first',
 						providers: ['dropbox'],
 						connectGate: GATE,
 					})

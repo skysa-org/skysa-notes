@@ -35,8 +35,8 @@
 		"@noble/ciphers": "^2.4.0",
 		"@noble/curves": "^2.4.0",
 		"@noble/hashes": "^2.4.0",
-		"@skysa/protocol": "0.1.0",
-		"@skysa/storage": "0.1.0",
+		"@skysa/protocol": "0.2.0",
+		"@skysa/storage": "0.2.0",
 		"decode-named-character-reference": "^1.3.0",
 		"mdast-util-to-string": "^4.0.0",
 		"micromark-util-decode-numeric-character-reference": "^2.0.2",
@@ -48,7 +48,7 @@
 		"zod": "catalog:"
 	},
 	"devDependencies": {
-		"@skysa/sync": "0.1.0",
+		"@skysa/sync": "0.2.0",
 		"@types/mdast": "^4.0.4",
 		"@types/node": "catalog:",
 		"vitest": "catalog:"
