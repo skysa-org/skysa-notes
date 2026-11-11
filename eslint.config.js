@@ -1,43 +1,27 @@
-import { builtinModules } from 'node:module';
-
-import js from '@eslint/js';
-import prettierConfig from 'eslint-config-prettier';
-import functional from 'eslint-plugin-functional';
-import jsxA11y from 'eslint-plugin-jsx-a11y';
-import preferArrowFunctions from 'eslint-plugin-prefer-arrow-functions';
-import react from 'eslint-plugin-react';
-import reactHooks from 'eslint-plugin-react-hooks';
-import simpleImportSort from 'eslint-plugin-simple-import-sort';
-import unusedImports from 'eslint-plugin-unused-imports';
+import {
+	BROWSER_ONLY_GLOBALS,
+	CELL_SYNTAX,
+	NODE_BUILTINS,
+	NOT_ABOVE,
+	RESTRICTED_SYNTAX,
+	skysa,
+} from '@skysa/eslint-config';
 import globals from 'globals';
-import tseslint from 'typescript-eslint';
 
 /**
- * Syntax refused everywhere. A named list because flat config *replaces* a
- * rule's options rather than merging them: a block that sets
- * `no-restricted-syntax` without spreading these turns both of them off for
- * every file it covers, and no existing file violates them, so nothing would
- * ever say so.
+ * The lint every Skysa repository shares is the kit's (`@skysa/eslint-config`,
+ * docs/decisions/0018-the-shared-kit.md); what follows is this app's own: its
+ * marker for the rich editor's changes, its words, its layers, and what core
+ * and the Worker's entry may reach.
  */
-const RESTRICTED_SYNTAX = [
-	{
-		selector: 'IfStatement > IfStatement.alternate',
-		message: "'else if' is not allowed, use early returns instead.",
-	},
-	{
-		// A static import is what the src rule on a kit package's `/testing`
-		// sees; this keeps a lazy one from slipping a test double into a chunk.
-		selector: 'ImportExpression[source.value=/^@skysa\\/[^/]+\\/testing$/]',
-		message: 'import the test doubles statically, from a test (#449).',
-	},
-	{
-		// `no-import-type-side-effects`, for re-exports, which it does not look
-		// at: `export { type X } from 'm'` is kept as `export {} from 'm'`.
-		selector:
-			"ExportNamedDeclaration[source][exportKind='value']:not(:has(ExportSpecifier[exportKind='value']))",
-		message:
-			"a re-export of nothing but types is 'export type { … } from', which loads nothing.",
-	},
+
+/**
+ * Syntax this app refuses, on top of the kit's (`RESTRICTED_SYNTAX`, which
+ * `skysa()` sets with this wherever it sets the rule). A block below that sets
+ * `no-restricted-syntax` itself spreads all three lists: flat config replaces a
+ * rule's options rather than merging them.
+ */
+const SYNTAX = [
 	{
 		// The rich editor's marker for a change the app made (#456): set with
 		// `appChange` and asked with `isAppChange`, so that what counts as the
@@ -47,68 +31,7 @@ const RESTRICTED_SYNTAX = [
 		message:
 			"mark the app's own change with appChange(tr) and ask with isAppChange(tr), from editor/shared/dirty.ts (#456).",
 	},
-	{
-		selector: 'AwaitExpression > ImportExpression',
-		message:
-			'Await with dynamic imports (await import()) is not allowed. Use static imports at the top of the file instead.',
-	},
 ];
-
-/**
- * The one way to hold a value that changes: `cell()` from `@skysa/storage`
- * (#457). Not a `Map` keyed by one literal, and not a `{ current }` written
- * out — the two ways the rule against `let` used to be worked round, each to
- * be learned where it was met. A React ref is a cell's shape already and is
- * not written as one of these. In source only: tests keep their own idioms.
- */
-const CELL_MESSAGE =
-	'a value that changes is a cell (#457): cell() and Cell<T>, from the kit’s @skysa/storage.';
-
-const CELL_SYNTAX = [
-	{
-		// Keyed by one literal, or by a union of nothing but literals: a value or
-		// two by name, not a table. A key named through a type alias is not seen;
-		// only a type-aware rule could, and review is that here.
-		selector:
-			"NewExpression[callee.name='Map'] > TSTypeParameterInstantiation > :first-child:matches(TSLiteralType, TSUnionType:not(:has(> :not(TSLiteralType))))",
-		message: CELL_MESSAGE,
-	},
-	{
-		// A set that can only ever hold one thing is a flag.
-		selector:
-			"NewExpression[callee.name='Set'] > TSTypeParameterInstantiation > TSLiteralType:first-child",
-		message: CELL_MESSAGE,
-	},
-	{
-		selector:
-			"ObjectExpression[properties.length=1] > Property:matches([key.name='current'], [key.value='current'])",
-		message: CELL_MESSAGE,
-	},
-	{
-		selector:
-			"TSTypeLiteral[members.length=1] > TSPropertySignature:matches([key.name='current'], [key.value='current'])",
-		message: CELL_MESSAGE,
-	},
-];
-
-/**
- * Every Node built-in, by bare name and by `node:` — read from Node itself, so a
- * hand-kept list cannot leave one out. Neither core nor the Worker has them:
- * core runs in the browser and Workers too, and the Worker runs without
- * `nodejs_compat`. Names that start with `_` are Node's internals, not modules
- * anyone imports.
- */
-const NODE_BUILTINS = ['node:*', ...builtinModules.filter((name) => !name.startsWith('_'))];
-
-/**
- * Restricted import patterns for a folder that sits below others: it may not
- * reach up into the folders named, so the layers stay one way round. `**`
- * either side because a file one folder deeper writes `../../components/…`.
- */
-const NOT_ABOVE = (folders, message) => ({
-	group: folders.map((folder) => `**/${folder}/**`),
-	message,
-});
 
 /** The web app's store: the data layer, below the sync layer and the UI. */
 const STORE_LAYER = NOT_ABOVE(
@@ -155,27 +78,6 @@ const CLIENT_BELOW_SYNC = (also = []) => ({
 		'the kit’s client holds the sync layer: below it, take only its emitter and store (and in the store, the credentials’ table).',
 });
 
-/** What nothing in packages/core/src may import. */
-const CORE_IMPORTS = [
-	{
-		group: NODE_BUILTINS,
-		message: 'packages/core must not depend on Node built-ins.',
-	},
-	{
-		group: ['@skysa/web', '@skysa/api', '**/apps/**'],
-		message: 'packages/core must not import from apps/*.',
-	},
-	{
-		// The kit's engine and what is above it are handed this app's folder and
-		// format (record 0018); core, which is this app's, sits beside storage.
-		group: ['sync', 'client', 'server', 'pwa'].flatMap((kit) => [
-			`@skysa/${kit}`,
-			`@skysa/${kit}/*`,
-		]),
-		message: 'packages/core uses of the kit only @skysa/protocol and @skysa/storage.',
-	},
-];
-
 /**
  * Words the user reads, written straight into JSX: a sentence there is one no
  * translation can reach. They come from the catalog, `t()` in
@@ -207,515 +109,274 @@ const INLINE_WORDS = [
 	message: "Words the user reads come from the catalog: t('…') from src/i18n/t.js.",
 }));
 
-/**
- * What every TypeScript file is held to, `.ts` and `.tsx` alike, so component
- * code meets the same standard as the rest of the repo rather than a looser
- * one. On top of `eslint:recommended` and typescript-eslint's
- * `recommendedTypeChecked`. Formatting is Prettier's: `prettierConfig`, last
- * in the list below, switches off every rule that would fight it.
- */
-const typescriptRules = {
-	// Mistakes JavaScript lets through.
-	eqeqeq: 'error',
-	'guard-for-in': 'error',
-	'no-caller': 'error',
-	'no-extend-native': 'error',
-	'no-extra-bind': 'error',
-	'no-invalid-this': 'error',
-	'no-irregular-whitespace': 'error',
-	'no-multi-str': 'error',
-	'no-new-wrappers': 'error',
-	'no-param-reassign': 'error',
-	// Allowed, though `eslint:recommended` refuses it.
-	'no-cond-assign': 'off',
+/** What nothing in packages/core/src may import. */
+const CORE_IMPORTS = [
+	{
+		group: NODE_BUILTINS,
+		message: 'packages/core must not depend on Node built-ins.',
+	},
+	{
+		group: ['@skysa/web', '@skysa/api', '**/apps/**'],
+		message: 'packages/core must not import from apps/*.',
+	},
+	{
+		// The kit's engine and what is above it are handed this app's folder and
+		// format (record 0018); core, which is this app's, sits beside storage.
+		group: ['sync', 'client', 'server', 'pwa'].flatMap((kit) => [
+			`@skysa/${kit}`,
+			`@skysa/${kit}/*`,
+		]),
+		message: 'packages/core uses of the kit only @skysa/protocol and @skysa/storage.',
+	},
+];
 
-	// Nothing left behind from debugging, and no browser dialogs.
-	'no-console': 'error',
-	'no-debugger': 'error',
-	'no-alert': 'error',
-
-	// Shallow, flat code: early returns rather than nesting.
-	complexity: ['error', 20],
-	'max-depth': ['error', 2],
-	'no-else-return': 'error',
-	'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX],
-
-	// Declarations, names and comments.
-	'no-var': 'error',
-	'prefer-const': ['error', { destructuring: 'all' }],
-	'one-var': ['error', { var: 'never', let: 'never', const: 'never' }],
-	'object-shorthand': 'error',
-	'prefer-rest-params': 'error',
-	'prefer-spread': 'error',
-	camelcase: [
-		'error',
-		{ ignoreDestructuring: true, ignoreImports: true, ignoreGlobals: true, allow: [''] },
-	],
-	'spaced-comment': ['error', 'always'],
-
-	// Functions are arrow functions held in consts.
-	'func-style': ['error', 'expression'],
-	'prefer-arrow-callback': 'error',
-	'arrow-body-style': ['error', 'as-needed'],
-	'prefer-arrow-functions/prefer-arrow-functions': [
-		'error',
-		{ disallowPrototype: true, singleReturnOnly: false, classPropertiesAllowed: false },
-	],
-
-	// Functional style. `functional/immutable-data` is added below, for `.ts` only.
-	'functional/no-this-expressions': 'error',
-	'functional/no-loop-statements': 'error',
-	'functional/no-let': 'error',
-	'functional/functional-parameters': [
-		'error',
-		{ allowRestParameter: true, enforceParameterCount: false },
-	],
-	'functional/prefer-tacit': 'error',
-	'functional/readonly-type': 'error',
-	'functional/prefer-property-signatures': 'error',
-
-	// Imports: sorted, types imported as types, and none left unused.
-	'simple-import-sort/imports': 'error',
-	'unused-imports/no-unused-imports': 'error',
-	'@typescript-eslint/consistent-type-imports': 'error',
-	// An import whose every name is a type is `import type`: with
-	// `verbatimModuleSyntax`, `import { type X }` is kept as `import {}`, which
-	// still loads the module — and whatever it builds as it loads.
-	'@typescript-eslint/no-import-type-side-effects': 'error',
-
-	// Where typescript-eslint has a type-aware version of a core rule, the core
-	// one is off and that one is on.
-	'no-unused-vars': 'off',
-	'@typescript-eslint/no-unused-vars': [
-		'error',
-		{
-			argsIgnorePattern: '^_',
-			varsIgnorePattern: '^_',
-			destructuredArrayIgnorePattern: '^_',
-			ignoreRestSiblings: true,
-		},
-	],
-	'no-throw-literal': 'off',
-	'@typescript-eslint/only-throw-error': 'error',
-	'prefer-promise-reject-errors': 'off',
-	'@typescript-eslint/prefer-promise-reject-errors': 'error',
-	'require-await': 'off',
-	'@typescript-eslint/require-await': 'error',
-
-	// The rest of TypeScript.
-	'@typescript-eslint/no-explicit-any': 'off',
-	'@typescript-eslint/no-array-delete': 'error',
-	'@typescript-eslint/no-base-to-string': 'error',
-	'@typescript-eslint/no-deprecated': 'error',
-	'@typescript-eslint/no-duplicate-enum-values': 'error',
-	'@typescript-eslint/no-duplicate-type-constituents': 'error',
-	'@typescript-eslint/no-empty-function': 'error',
-	'@typescript-eslint/no-extra-non-null-assertion': 'error',
-	'@typescript-eslint/no-for-in-array': 'error',
-	'@typescript-eslint/no-redundant-type-constituents': 'error',
-	'@typescript-eslint/no-this-alias': 'error',
-	'@typescript-eslint/no-unnecessary-condition': 'error',
-	'@typescript-eslint/no-unnecessary-type-assertion': 'error',
-	'@typescript-eslint/no-unnecessary-type-constraint': 'error',
-	'@typescript-eslint/no-wrapper-object-types': 'error',
-	'@typescript-eslint/prefer-as-const': 'error',
-	'@typescript-eslint/restrict-plus-operands': 'error',
-	'@typescript-eslint/restrict-template-expressions': 'error',
-	'@typescript-eslint/triple-slash-reference': 'error',
+/** The Worker runs without `nodejs_compat`, so none of Node's modules are there. */
+const NO_NODE_IN_THE_WORKER = {
+	group: NODE_BUILTINS,
+	message: 'the Worker runs without nodejs_compat — Web Crypto and fetch only.',
 };
 
-export default tseslint.config(
-	{
-		ignores: [
-			'**/dist/**',
-			// vite-plugin-pwa's generated dev service worker.
-			'**/dev-dist/**',
-			'**/coverage/**',
-			'**/node_modules/**',
-			'**/.wrangler/**',
-			'.claude/**',
-			// Generated by TanStack Router from src/routes, committed only so a fresh
-			// clone can typecheck without first running Vite.
-			'**/routeTree.gen.ts',
-			// Generated by `wrangler types` from wrangler.toml.
-			'**/worker-configuration.d.ts',
-		],
-	},
+export default skysa({
+	root: import.meta.dirname,
+	ignores: [
+		// vite-plugin-pwa's generated dev service worker.
+		'**/dev-dist/**',
+		// Generated by TanStack Router from src/routes, committed only so a fresh
+		// clone can typecheck without first running Vite.
+		'**/routeTree.gen.ts',
+		// Generated by `wrangler types` from wrangler.toml.
+		'**/worker-configuration.d.ts',
+	],
+	// Handed in rather than detected; keep in sync with apps/web's react dependency.
+	react: { files: ['apps/web/**/*.{ts,tsx}'], version: '19.3.0' },
+	syntax: SYNTAX,
+	blocks: [
+		// ---- The app's words ------------------------------------------------
 
-	js.configs.recommended,
+		{
+			// The cell rule too, since this sets the rule again for every .tsx.
+			files: ['apps/web/src/**/*.tsx'],
+			rules: {
+				'no-restricted-syntax': [
+					'error',
+					...RESTRICTED_SYNTAX,
+					...SYNTAX,
+					...INLINE_WORDS,
+					...CELL_SYNTAX,
+				],
+			},
+		},
 
-	// ---- TypeScript ---------------------------------------------------------
+		// ---- Boundaries -----------------------------------------------------
 
-	{
-		files: ['packages/**/*.ts', 'apps/**/*.ts', 'apps/web/**/*.tsx'],
-		extends: [...tseslint.configs.recommendedTypeChecked],
-		languageOptions: {
-			parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+		{
+			// packages/core must stay framework-free and portable: browser, Node,
+			// Workers. Its tsconfig includes lib.dom for the web standards it does
+			// use; these are the globals that would tie it to a browser.
+			files: ['packages/core/src/**/*.ts'],
+			languageOptions: { globals: globals.browser },
+			rules: {
+				'no-restricted-globals': [
+					'error',
+					...BROWSER_ONLY_GLOBALS.map((name) => ({
+						name,
+						message: 'packages/core must run in the browser, Node and Workers alike.',
+					})),
+				],
+				'no-restricted-imports': ['error', { patterns: CORE_IMPORTS }],
+			},
 		},
-		plugins: {
-			'prefer-arrow-functions': preferArrowFunctions,
-			functional,
-			'unused-imports': unusedImports,
-			'simple-import-sort': simpleImportSort,
+		{
+			// names/ sits below markdown, which names files by it; reaching up
+			// into it would bring the cycle back. The names the sync engine and
+			// the adapters use are the kit's (`@skysa/storage`).
+			files: ['packages/core/src/names/**/*.ts'],
+			rules: {
+				'no-restricted-imports': [
+					'error',
+					{
+						patterns: [
+							...CORE_IMPORTS,
+							NOT_ABOVE(['markdown'], 'names/ sits below markdown.'),
+						],
+					},
+				],
+			},
 		},
-		rules: typescriptRules,
-	},
-	{
-		// Not in components: it flags ordinary useState setter patterns that the
-		// accessor carve-out does not quite cover.
-		files: ['packages/**/*.ts', 'apps/**/*.ts'],
-		rules: {
-			'functional/immutable-data': [
-				'error',
-				{ ignoreMapsAndSets: true, ignoreAccessorPattern: ['**.current', 'window.**'] },
-			],
+		{
+			// No Node built-ins in the Worker's entry, nor in what this package
+			// offers a deployment's own: the entry module is the likeliest place
+			// for one to appear, and `wrangler deploy --dry-run` bundles one
+			// without a word, so only the deployed Worker would find out. `pnpm
+			// typecheck` refuses it too, through `tsconfig.src.json` (src with no
+			// Node types; `tsconfig.json` holds the tests, which pull @types/node
+			// in), but this says why, and says it first. The server itself is the
+			// kit's (`@skysa/server`), which holds its own code to the same.
+			files: ['apps/api/src/**/*.ts'],
+			languageOptions: { globals: globals.node },
+			rules: {
+				'no-restricted-imports': ['error', { patterns: [NO_NODE_IN_THE_WORKER] }],
+			},
 		},
-	},
+		{
+			// Only worker.ts may read *configuration* (CLAUDE.md): the server is
+			// handed it through createApp(options). There are three ways in. This
+			// block refuses two: the bare `process` and `globalThis.process`. The
+			// third, importing `node:process`, is a Node built-in, which the block
+			// above already refuses everywhere in apps/api/src. Setting
+			// `no-restricted-imports` here would replace that block's list for
+			// these files rather than add to it, so this one sets none.
+			files: ['apps/api/src/**/*.ts'],
+			ignores: ['apps/api/src/worker.ts'],
+			rules: {
+				'no-restricted-globals': [
+					'error',
+					{
+						name: 'process',
+						message:
+							'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+					},
+				],
+				'no-restricted-syntax': [
+					'error',
+					...RESTRICTED_SYNTAX,
+					...SYNTAX,
+					...CELL_SYNTAX,
+					{
+						selector:
+							"MemberExpression[object.name='globalThis'][property.name='process']",
+						message:
+							'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+					},
+				],
+			},
+		},
+		{
+			// Workers has no logger binding and no stdout: `console` is the only
+			// sink Cloudflare's observability and `wrangler tail` read. Scoped to
+			// the entry, which reports a configuration it cannot boot with.
+			files: ['apps/api/src/worker.ts'],
+			rules: { 'no-console': 'off' },
+		},
 
-	// ---- React --------------------------------------------------------------
+		{
+			// The web app's lower layers. The store is the data layer: Dexie
+			// tables and the hooks that read them. The sync layer drives the
+			// engine against that store. Neither may import the UI or anything
+			// built on top of them, so each can be read, tested and changed
+			// without the screens.
+			files: ['apps/web/src/store/**/*.{ts,tsx}'],
+			rules: {
+				'no-restricted-imports': [
+					'error',
+					{
+						paths: [CLIENT_BELOW_SYNC(['CredentialRecord', 'PENDING_CREDENTIAL_ID'])],
+						patterns: [STORE_LAYER],
+					},
+				],
+			},
+		},
+		{
+			files: ['apps/web/src/sync/**/*.{ts,tsx}'],
+			rules: { 'no-restricted-imports': ['error', { patterns: [SYNC_LAYER] }] },
+		},
+		{
+			// The bottom layer: plain browser helpers, for anything above to use.
+			files: ['apps/web/src/lib/**/*.{ts,tsx}'],
+			rules: {
+				'no-restricted-imports': [
+					'error',
+					{
+						paths: [CLIENT_BELOW_SYNC()],
+						patterns: [
+							NOT_ABOVE(
+								[
+									'components',
+									'editor',
+									'store',
+									'routes',
+									'sync',
+									'secrets',
+									'fill',
+									'share',
+									'install',
+									'pictures',
+									'commands',
+								],
+								'lib/ is the bottom layer: it imports nothing of the app.'
+							),
+						],
+					},
+				],
+			},
+		},
 
-	{
-		files: ['apps/web/**/*.{ts,tsx}'],
-		extends: [
-			react.configs.flat.recommended,
-			react.configs.flat['jsx-runtime'], // new JSX transform — no `React` import needed
-			jsxA11y.flatConfigs.recommended,
-		],
-		languageOptions: { globals: globals.browser },
-		plugins: { 'react-hooks': reactHooks },
-		settings: {
-			// Explicit rather than 'detect': eslint-plugin-react 7.37.5's version
-			// detection calls an API ESLint 10's flat-config rule context no longer
-			// exposes, and crashes the run instead of warning. Keep in sync with
-			// apps/web's react dependency.
-			react: { version: '19.3.0' },
+		{
+			// The editors are views over a note's markdown (CLAUDE.md): they may use
+			// the store and shared UI pieces, but not the screens that hold them or
+			// the sync layer behind those.
+			files: ['apps/web/src/editor/**/*.{ts,tsx}'],
+			rules: {
+				'no-restricted-imports': [
+					'error',
+					{
+						paths: [CLIENT_BELOW_SYNC()],
+						patterns: [
+							NOT_ABOVE(
+								['routes', 'sync'],
+								'the editors are views: they do not import routes or the sync layer.'
+							),
+						],
+					},
+				],
+			},
 		},
-		rules: {
-			...reactHooks.configs['recommended-latest'].rules,
-			'react/react-in-jsx-scope': 'off', // React 19 automatic JSX runtime
-			'react/prop-types': 'off', // types come from TypeScript
+		{
+			// What both editors use, and the raw one, know nothing of the rich one.
+			// Replaces the rule above for these files, so it says that again.
+			files: ['apps/web/src/editor/{raw,shared}/**/*.{ts,tsx}'],
+			rules: {
+				'no-restricted-imports': [
+					'error',
+					{
+						paths: [CLIENT_BELOW_SYNC()],
+						patterns: [
+							NOT_ABOVE(
+								['routes', 'sync'],
+								'the editors are views: they do not import routes or the sync layer.'
+							),
+							NOT_ABOVE(
+								['rich', 'toolbar'],
+								'raw/ and shared/ do not depend on the rich editor (ProseMirror).'
+							),
+						],
+					},
+				],
+			},
 		},
-	},
 
-	{
-		// A value that changes is a cell (#457), in every package's src. The
-		// API's env block below sets the rule again, so it spreads the list too.
-		files: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.ts'],
-		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...CELL_SYNTAX] },
-	},
+		// ---- The bookmarklet ----------------------------------------------------
 
-	// ---- The app's words ----------------------------------------------------
-
-	{
-		// The cell rule too, since this sets the rule again for every .tsx.
-		files: ['apps/web/src/**/*.tsx'],
-		rules: {
-			'no-restricted-syntax': [
-				'error',
-				...RESTRICTED_SYNTAX,
-				...INLINE_WORDS,
-				...CELL_SYNTAX,
-			],
+		{
+			// Plain JavaScript a bookmark runs in another site's page
+			// (`apps/web/src/fill/bookmarklet.ts`): of the page's globals, these and
+			// nothing else, so it cannot come to need one a page may not have.
+			files: ['apps/web/src/fill/bookmarkletCode.js'],
+			languageOptions: {
+				sourceType: 'script',
+				globals: Object.fromEntries(
+					[
+						'addEventListener',
+						'alert',
+						'document',
+						'Event',
+						'getComputedStyle',
+						'Node',
+						'open',
+						'removeEventListener',
+					].map((name) => [name, 'readonly'])
+				),
+			},
 		},
-	},
-
-	// ---- Boundaries ---------------------------------------------------------
-
-	{
-		// packages/core must stay framework-free and portable: browser, Node, Workers.
-		files: ['packages/core/src/**/*.ts'],
-		languageOptions: { globals: globals.browser },
-		rules: {
-			// core's tsconfig includes lib.dom for the web standards it does use
-			// (Web Crypto, TextEncoder, fetch, URL). These are the ones that would
-			// tie it to a browser, and no lib setting excludes them on its own.
-			'no-restricted-globals': [
-				'error',
-				...[
-					'document',
-					'window',
-					'localStorage',
-					'sessionStorage',
-					'navigator',
-					'location',
-					'alert',
-					'indexedDB',
-				].map((name) => ({
-					name,
-					message: 'packages/core must run in the browser, Node and Workers alike.',
-				})),
-			],
-			'no-restricted-imports': ['error', { patterns: CORE_IMPORTS }],
-		},
-	},
-	{
-		// names/ sits below markdown, which names files by it; reaching up into
-		// it would bring the cycle back. The names the sync engine and the
-		// adapters use are the kit's (`@skysa/storage`).
-		files: ['packages/core/src/names/**/*.ts'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						...CORE_IMPORTS,
-						NOT_ABOVE(['markdown'], 'names/ sits below markdown.'),
-					],
-				},
-			],
-		},
-	},
-	{
-		// No Node built-ins in the Worker's entry, nor in what this package
-		// offers a deployment's own: the entry module is the likeliest place for
-		// one to appear, and `wrangler deploy --dry-run` bundles one without a
-		// word, so only the deployed Worker would find out. `pnpm typecheck`
-		// refuses it too, through `tsconfig.src.json` (src with no Node types;
-		// `tsconfig.json` holds the tests, which pull @types/node in), but this
-		// says why, and says it first. The server itself is the kit's
-		// (`@skysa/server`), which holds its own code to the same.
-		files: ['apps/api/src/**/*.ts'],
-		languageOptions: { globals: globals.node },
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						{
-							// wrangler.toml sets no `nodejs_compat`, so the Worker
-							// runtime has none of these.
-							group: NODE_BUILTINS,
-							message:
-								'the Worker runs without nodejs_compat — Web Crypto and fetch only.',
-						},
-					],
-				},
-			],
-		},
-	},
-	{
-		// Only worker.ts may read *configuration* (CLAUDE.md): the server is
-		// handed it through createApp(options).
-		//
-		// There are three ways in. This block refuses two: the bare `process`
-		// and `globalThis.process`. The third, importing `node:process`, is a
-		// Node built-in, which the block above already refuses everywhere in
-		// apps/api/src. Setting `no-restricted-imports` here would replace that
-		// block's list for these files rather than add to it, so this one sets
-		// none.
-		files: ['apps/api/src/**/*.ts'],
-		ignores: ['apps/api/src/worker.ts'],
-		languageOptions: { globals: globals.node },
-		rules: {
-			'no-restricted-globals': [
-				'error',
-				{
-					name: 'process',
-					message:
-						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
-				},
-			],
-			'no-restricted-syntax': [
-				'error',
-				...RESTRICTED_SYNTAX,
-				...CELL_SYNTAX,
-				{
-					selector: "MemberExpression[object.name='globalThis'][property.name='process']",
-					message:
-						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
-				},
-			],
-		},
-	},
-	{
-		// Workers has no logger binding and no stdout: `console` is the only sink
-		// Cloudflare's observability and `wrangler tail` read. Scoped to the
-		// entry, which reports a configuration it cannot boot with.
-		files: ['apps/api/src/worker.ts'],
-		rules: { 'no-console': 'off' },
-	},
-
-	{
-		// The web app's lower layers. The store is the data layer: Dexie tables
-		// and the hooks that read them. The sync layer drives the engine against
-		// that store. Neither may import the UI or anything built on top of
-		// them, so each can be read, tested and changed without the screens.
-		files: ['apps/web/src/store/**/*.{ts,tsx}'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					paths: [CLIENT_BELOW_SYNC(['CredentialRecord', 'PENDING_CREDENTIAL_ID'])],
-					patterns: [STORE_LAYER],
-				},
-			],
-		},
-	},
-	{
-		files: ['apps/web/src/sync/**/*.{ts,tsx}'],
-		rules: { 'no-restricted-imports': ['error', { patterns: [SYNC_LAYER] }] },
-	},
-	{
-		// The bottom layer: plain browser helpers, for anything above to use.
-		files: ['apps/web/src/lib/**/*.{ts,tsx}'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					paths: [CLIENT_BELOW_SYNC()],
-					patterns: [
-						NOT_ABOVE(
-							[
-								'components',
-								'editor',
-								'store',
-								'routes',
-								'sync',
-								'secrets',
-								'fill',
-								'share',
-								'install',
-								'pictures',
-								'commands',
-							],
-							'lib/ is the bottom layer: it imports nothing of the app.'
-						),
-					],
-				},
-			],
-		},
-	},
-
-	{
-		// The editors are views over a note's markdown (CLAUDE.md): they may use
-		// the store and shared UI pieces, but not the screens that hold them or
-		// the sync layer behind those.
-		files: ['apps/web/src/editor/**/*.{ts,tsx}'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					paths: [CLIENT_BELOW_SYNC()],
-					patterns: [
-						NOT_ABOVE(
-							['routes', 'sync'],
-							'the editors are views: they do not import routes or the sync layer.'
-						),
-					],
-				},
-			],
-		},
-	},
-	{
-		// What both editors use, and the raw one, know nothing of the rich one.
-		// Replaces the rule above for these files, so it says that again.
-		files: ['apps/web/src/editor/{raw,shared}/**/*.{ts,tsx}'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					paths: [CLIENT_BELOW_SYNC()],
-					patterns: [
-						NOT_ABOVE(
-							['routes', 'sync'],
-							'the editors are views: they do not import routes or the sync layer.'
-						),
-						NOT_ABOVE(
-							['rich', 'toolbar'],
-							'raw/ and shared/ do not depend on the rich editor (ProseMirror).'
-						),
-					],
-				},
-			],
-		},
-	},
-
-	// ---- File size ----------------------------------------------------------
-
-	{
-		// A warning, not an error, while the files the 2026-10-21 audit found
-		// too long are split (#446, #452–#454): it says which those are, and
-		// keeps a split file from growing back. Code lines only — the comments
-		// here are long on purpose. Tests are left out until #459 splits them.
-		files: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
-		rules: {
-			'max-lines': ['warn', { max: 600, skipBlankLines: true, skipComments: true }],
-		},
-	},
-	{
-		// The kit's test doubles are each package's `/testing` entry (#449), for
-		// tests alone: nothing the app ships may reach them, by the entry or by
-		// a path into any tests folder. typescript-eslint's rule rather than
-		// core's, which the layer blocks above set per folder and would replace
-		// this in each.
-		files: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
-		rules: {
-			'@typescript-eslint/no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						{
-							regex: '^@skysa/[^/]+/testing$',
-							message: 'test doubles are for tests.',
-						},
-						{
-							group: ['**/tests/**'],
-							message: 'test doubles are for tests.',
-						},
-					],
-				},
-			],
-		},
-	},
-
-	// ---- The bookmarklet ----------------------------------------------------
-
-	{
-		// Plain JavaScript a bookmark runs in another site's page
-		// (`apps/web/src/fill/bookmarklet.ts`): of the page's globals, these and
-		// nothing else, so it cannot come to need one a page may not have.
-		files: ['apps/web/src/fill/bookmarkletCode.js'],
-		languageOptions: {
-			sourceType: 'script',
-			globals: Object.fromEntries(
-				[
-					'addEventListener',
-					'alert',
-					'document',
-					'Event',
-					'getComputedStyle',
-					'Node',
-					'open',
-					'removeEventListener',
-				].map((name) => [name, 'readonly'])
-			),
-		},
-	},
-
-	// ---- Relaxations --------------------------------------------------------
-
-	{
-		// Vitest's `describe`/`it` callbacks are inherently imperative — shared setup
-		// captured in a closure, table-driven loops over fixtures read from disk.
-		// Production code keeps full enforcement.
-		files: ['**/*.test.ts', '**/*.test.tsx', '**/tests/**/*.ts'],
-		rules: {
-			'functional/no-let': 'off',
-			'functional/no-loop-statements': 'off',
-			'functional/immutable-data': 'off',
-			'functional/functional-parameters': 'off',
-		},
-	},
-	{
-		// Build and tool configuration: plain Node ESM, outside any package's src.
-		files: ['*.config.js', '**/*.config.ts'],
-		languageOptions: { globals: globals.node },
-		rules: {
-			'functional/no-let': 'off',
-			'functional/immutable-data': 'off',
-		},
-	},
-
-	// Must stay last: turns off every rule that would fight Prettier.
-	prettierConfig
-);
+	],
+});
