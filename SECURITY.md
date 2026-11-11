@@ -39,8 +39,13 @@ on you.
 
 ## What is in scope
 
-This repository: `apps/web` (the PWA), `apps/api` (the Cloudflare Worker), and
-`packages/core`.
+This repository: `apps/web` (the PWA), `apps/api` (the Cloudflare Worker's
+entry and configuration), and `packages/core`. Since 3.0.0 the server itself,
+the sync engine and the storage adapters are the shared kit's,
+[skysa-org/skysa-kit](https://github.com/skysa-org/skysa-kit), which this
+repository installs from npm. A finding in them is in scope here too: report it
+in either repository and it reaches the same maintainer, and the fix is
+released in the kit and taken up here.
 
 Things that are especially worth looking at, because they are where the
 interesting properties live:

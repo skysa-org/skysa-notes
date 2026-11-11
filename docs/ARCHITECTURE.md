@@ -732,7 +732,7 @@ The design that was here is there: the composition root and its seams (entitleme
 This app's part is its deployment, in `apps/api`:
 - `src/worker.ts` is the default Worker entry, and the only module here that reads the environment.
   It builds the config through the server's own `parseEnv`, logs what `envWarnings` says of it, hands it to `createApp` with the relay's Durable Object when `RELAY` is on, and answers with `misconfigured` while the config is wrong.
-- `@skysa/api` and `@skysa/api/relay` offer a deployment's own Worker entry the names it has always imported from here, so an operator who needs different behavior still writes an entry rather than a fork (`docs/self-hosting.md`).
+- `@skysa/api` and `@skysa/api/relay` (`src/index.ts`, `src/relay.ts`) are the server's names as this package has always offered them: the stock entry imports them, and so does a deployment's own, so an operator who needs different behavior still writes an entry rather than a fork (`docs/self-hosting.md`).
 - `wrangler.toml` binds D1, whose migrations are the kit's (`migrations_dir = "node_modules/@skysa/server/migrations"`), and serves the SPA from the same Worker through `[assets]`, so `/api/*` and the app share an origin.
 
 What the kit's section decides that this app is built around, each named here because this app's documents cite it by name:

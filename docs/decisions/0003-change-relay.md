@@ -22,7 +22,7 @@ It is off by default, and with it off none of this exists — `/api/config` says
 - **A seam, wired by the default entry.**
   `createApp({ relay })` takes a `RelayHub`: `connect(request, member)` is handed an upgrade the routes have already authorized, and `revoke(connectionId, grantIds?)` closes sockets.
   Routes see only that.
-  The hub that ships is a Durable Object per connection (`ConnectionRelay`, `apps/api/src/relay/`), on the WebSocket Hibernation API so an open, idle socket costs no duration, and `src/worker.ts` passes it when `RELAY=true`.
+  The hub that ships is a Durable Object per connection (`ConnectionRelay`, `apps/api/src/relay/` until 3.0.0, and the kit's `packages/server/src/relay/` since), on the WebSocket Hibernation API so an open, idle socket costs no duration, and `src/worker.ts` passes it when `RELAY=true`.
   The binding and its migration are declared in `wrangler.toml` whether or not it is used: an object nobody addresses costs nothing, and it makes turning the relay on one variable rather than an edit to a tracked file.
   `RELAY=true` with the binding removed refuses to boot.
   A deployment that wants its fan-out elsewhere passes its own hub.

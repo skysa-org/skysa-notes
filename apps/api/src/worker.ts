@@ -1,9 +1,10 @@
 import { cell } from '@skysa/core';
-import { createApp, envWarnings, misconfigured, parseEnv } from '@skysa/server';
-import { durableObjectRelay } from '@skysa/server/relay';
+
+import { createApp, envWarnings, misconfigured, parseEnv } from './index.js';
+import { durableObjectRelay } from './relay.js';
 
 /** The change relay's Durable Object, which the runtime finds by this export. */
-export { ConnectionRelay } from '@skysa/server/relay';
+export { ConnectionRelay } from './relay.js';
 
 /**
  * The default Worker entry: the only module in `apps/api` that reads the

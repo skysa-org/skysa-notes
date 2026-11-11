@@ -336,12 +336,10 @@ const kitPaths = ({ paths, tests }) => [...paths, ...tests];
 
 /** The kit's package a repository path goes to, or undefined where it stays. */
 const kitPackageOf = (path) =>
-	Object.keys(KIT).find(
-		(name) =>
-			!(KIT[name].except ?? []).includes(path) &&
-			kitPaths(KIT[name]).some((entry) =>
-				entry.endsWith('/') ? path.startsWith(entry) : path === entry
-			)
+	Object.keys(KIT).find((name) =>
+		kitPaths(KIT[name]).some((entry) =>
+			entry.endsWith('/') ? path.startsWith(entry) : path === entry
+		)
 	);
 
 /** A path as the table above writes one: from the repository's root, with `/`. */
@@ -947,7 +945,6 @@ export default tseslint.config(
 				.filter((path) => path.endsWith('/') || /\.(?:[cm]?js|tsx?)$/.test(path))
 				.map((path) => (path.endsWith('/') ? `${path}**` : path))
 		),
-		ignores: Object.values(KIT).flatMap(({ except }) => except ?? []),
 		plugins: { kit: { rules: { fence: KIT_FENCE } } },
 		rules: { 'kit/fence': 'error' },
 	},

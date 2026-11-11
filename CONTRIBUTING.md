@@ -11,7 +11,7 @@ propose the edit to `docs/ARCHITECTURE.md` in the same pull request.
 
 ## Getting it running
 
-Node 22.13 or later and pnpm 10 (`corepack enable`). The API tests use `node:sqlite`, which 22.x before 22.13 keeps behind a flag or does not have.
+Node 22.13 or later and pnpm 10 (`corepack enable`). CI runs the tests on Node 22.13 as well as the current one.
 
 ```bash
 pnpm install
@@ -50,8 +50,8 @@ pnpm verify   # format:check + lint + typecheck + knip + test
 ```
 
 CI runs the same thing plus `pnpm build` and `pnpm size` (the SPA's size
-budget), a check that the generated files (the route tree, the Worker's types,
-the migration snapshots) match their sources, the tests again on Node 22.13,
+budget), a check that the generated files (the route tree and the Worker's
+types) match their sources, the tests again on Node 22.13,
 and `pnpm audit --prod` for information only. A pull request that has not run `pnpm verify` will fail, and
 there is nothing in it that a maintainer can fix for you.
 

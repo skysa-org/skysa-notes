@@ -361,11 +361,10 @@ long holds once your deployment's app has been updated.
 
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
 its `createApp({ … })` call to pass `entitlements` as well, and point `main` in
-`wrangler.toml` at your copy. The server is the kit's, `@skysa/server`, and the
-stock entry imports it by name, so a copy beside the original in
-`apps/api/src` works as it is. Anywhere else, import `createApp`, `parseEnv`,
-`envWarnings` and `misconfigured` from `@skysa/api`, and `ConnectionRelay` and
-`durableObjectRelay` from `@skysa/api/relay`, which offer the same names. Keep
+`wrangler.toml` at your copy. Beside the original in `apps/api/src`, its
+relative imports work as they are. Anywhere else, import `createApp`,
+`parseEnv`, `envWarnings` and `misconfigured` from `@skysa/api` instead, and
+`ConnectionRelay` and `durableObjectRelay` from `@skysa/api/relay`. Keep
 the copy's `export { ConnectionRelay }` whether or not you run the relay:
 `wrangler.toml` binds that class, and a deploy whose entry does not export it
 is refused. The stock entry never sets a gate.

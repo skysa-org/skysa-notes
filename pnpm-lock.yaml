@@ -84,6 +84,9 @@ importers:
         specifier: 0.1.0
         version: 0.1.0(vitest@5.0.3)
     devDependencies:
+      '@skysa/protocol':
+        specifier: 0.1.0
+        version: 0.1.0
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
