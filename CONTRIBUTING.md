@@ -81,8 +81,8 @@ What is expected of a change:
   few loops kept (a byte scan where recursion would go too deep) sit behind a
   disable comment that says why. Each workaround has one helper: a value that
   changes is a `cell()` from `@skysa/storage` (the kit's), a set
-  of listeners is `createEmitter` or `createStore`
-  (`apps/web/src/store/emitter.ts`), and the latest prop inside a callback is
+  of listeners is `createEmitter` or `createStore` (`@skysa/client`, the
+  kit's), and the latest prop inside a callback is
   `useLatest` (`apps/web/src/hooks/`).
 - **Check the vendor docs** rather than assuming, for anything about a provider
   API — scopes, endpoints, conflict semantics — and put the URL in a comment.

@@ -20,8 +20,8 @@ import { createFolder } from '../src/store/folders.js';
  * it does not, and kept where nobody answered.
  *
  * A file of its own because `/api/config` is asked once per client for the
- * life of the module (`api/instanceConfig.ts`), and this one's gate asks for a
- * code, which `app.gate.test.tsx`'s does not.
+ * life of the module (`useInstanceConfig`, the kit's), and this one's gate asks
+ * for a code, which `app.gate.test.tsx`'s does not.
  */
 
 const GATE = {

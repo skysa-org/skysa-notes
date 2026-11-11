@@ -31,7 +31,7 @@ import { useDisconnects } from './useDisconnects.js';
  * full navigation back into the app — and again whenever another tab binds the
  * device to a connection this panel has not been told about.
  *
- * How syncing is going comes from the scheduler (`sync/scheduler.ts`), which
+ * How syncing is going comes from the scheduler (the kit's, `@skysa/client`), which
  * runs on its own; the panel only reports it and offers "Sync now".
  */
 

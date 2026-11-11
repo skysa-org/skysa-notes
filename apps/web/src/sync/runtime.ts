@@ -32,7 +32,7 @@ export const syncScheduler: NotesSync = createNotesSync({
 	document: NOTE_FORMAT,
 	syncsHidden,
 	// Asks `/config` first, so an instance without a relay is never asked for
-	// a ticket (`sync/relay.ts`).
+	// a ticket (`createRelayFactory`, the kit's).
 	relay: createRelayFactory({ credentials: db, client: api }),
 });
 

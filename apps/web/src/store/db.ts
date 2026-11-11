@@ -249,7 +249,7 @@ export interface Detached {
 }
 
 // A credential this device holds is a row of `credentials`, defined beside the
-// functions over it (`store/credentials.ts`), which go to the shared kit.
+// functions over it, which are the kit's (`@skysa/client`).
 export { type CredentialRecord, PENDING_CREDENTIAL_ID } from '@skysa/client';
 
 /**
@@ -533,8 +533,8 @@ export const refIn = (ref: string, connectionId: string): boolean =>
 	ref.startsWith(`${JSON.stringify([connectionId]).slice(0, -1)},`);
 
 /**
- * Every source's cursor dropped and `rootId` kept, as "Re-scan" does (`resync`
- * in `sync/scheduler.ts`), so the next sync of each is a scan: what a change to
+ * Every source's cursor dropped and `rootId` kept, as "Re-scan" does (`resync`,
+ * the kit's scheduler's), so the next sync of each is a scan: what a change to
  * what `syncsHidden` lets through needs, since a feed names a file again only when
  * it changes. A scan reads nothing this device already holds at its version.
  */

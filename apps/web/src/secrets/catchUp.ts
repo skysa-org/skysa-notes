@@ -24,7 +24,7 @@ import type { SecretsLock } from './lock.js';
  * It stops where the device locks, and goes on at the next unlock. A device
  * that holds no earlier key never loads the age code for this.
  *
- * Framework-free, as the wake lock is (`sync/wakeLock.ts`).
+ * Framework-free, as the wake lock is (`keepAwakeWhileSyncing`, the kit's).
  */
 
 export interface CatchUpOptions {

@@ -71,7 +71,7 @@ export const StatusLine = ({
  * says (2026-10-14), since the line no longer names the source, and this
  * does, with its account, on a phone that has no tooltip to show.
  * Paused, nothing syncs on this device until Sync now, a re-scan, the source
- * shown again after another, or a reload (`pause` in `sync/scheduler.ts`).
+ * shown again after another, or a reload (`pause`, the kit's scheduler's).
  */
 export const SyncDetails = ({
 	status,

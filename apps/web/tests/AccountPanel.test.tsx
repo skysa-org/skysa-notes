@@ -1,4 +1,4 @@
-import { type ApiClient, ApiError, hashCredential,type InstanceConfig } from '@skysa/client';
+import { type ApiClient, ApiError, hashCredential, type InstanceConfig } from '@skysa/client';
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';

@@ -769,18 +769,9 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
      The bar is drawn in the panel's bottom padding, centred in it (`.account-bar`), and takes no room: the panel is one height from the start of a sync to its end.
 2. **Push**: the engine's as well ([kit §7, "Sync loop"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#sync-loop-per-connection)).
    It drains `opQueue` in order, and sends the writes of notes at its front several at once where the provider takes them (four on Google Drive); a write the remote refuses goes through the conflict rule, a refused token is asked for again once, and an op that keeps failing is tried again with a wait between and then said.
-3. Triggers: app open, tab regains focus, `online` event, 60s interval while visible, Background Sync API when available (best effort), immediately after a local edit (debounced 2s), and — where the deployment runs the change relay (§6) — a notice that another device of the connection has pushed, and 3 and 10 s after the last such notice.
-   The relay is one more trigger, never a replacement for the others: it hears nothing of edits made in the folder by other tools.
-   **When a push goes** (`sync/scheduler.ts`, record 0018):
-   - An edit's ops go 2 s after the last one queued (`debounceMs`), and every op this app queues is an edit's.
-   - Hiding the page sends whatever is waiting, at once (`sendWaiting`).
-     A phone may not run the page again for hours, and the next device opened should find the edit.
-     Until 2026-11-09 an edit made in the 2 s before the app went out of sight waited out its 2 s, in a page the phone could have frozen by then.
-   - An app whose changes come every few seconds queues their writes lazily (`queueWrite`'s `timing`) and passes `lazyMs`: memoriam, which records a pass of practice every few.
-     A lazy write goes with the next sync — the poll while the page is in sight, or as it is hidden — and `lazyMs` after the first at the latest; a later one joins that wait rather than putting it off.
-     An edit that finds only a lazy write queued for its note replaces it, at the back of the queue, and a write that lands after another lazy change is owed again as lazily as it was queued.
-     This app passes no `lazyMs` and queues nothing lazily, and without `lazyMs` the scheduler does not read the queue to tell.
-
+3. **Triggers** are the kit's scheduler's (`@skysa/client`, [kit §7, "Sync loop"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#sync-loop-per-connection)): the app opening, the tab regaining focus, `online`, every minute while visible, shortly after a local edit, and where the deployment runs the change relay (§6) its notice, which is one more trigger and never a replacement for the others.
+   **When a push goes** is the scheduler's too: an edit's ops go 2 s after the last one queued, and whatever is waiting goes at once as the page is hidden.
+   This app queues nothing lazily, and passes the scheduler no `lazyMs`.
 <a id="folder-renames-moves"></a>
 ### Folder renames/moves
 A folder renamed or moved on the remote is applied here whatever is dirty in it, since a move does not conflict with an edit.
@@ -1739,10 +1730,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
     A rebuilt view takes the URL back without reading the bytes again (`reuse`).
     The key is the caller's, and has to name the bytes as well as the file: a version that moves on is a new URL.
 - **The screen kept on through a long sync (2026-10-05).**
-  A phone whose screen times out mid-import suspends the network, and the run fails part-way; what it had read is kept (§7, "A pull keeps what it has read"), but nothing moves until the phone is unlocked.
-  While a run long enough to count is under way (`isLongRun` in `sync/progress.ts`, the panel's own threshold of 20) and the page is visible, `sync/wakeLock.ts` holds a screen wake lock (https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API), lets go of it when the run ends or fails, and asks again when the page is shown, since the browser lets go of it as the page is hidden.
-  A refusal — battery saver — is taken as the answer until the page is shown again or another run starts.
-  A browser without the API syncs as before.
+  A phone whose screen times out mid-import suspends the network, so while a run long enough to count is under way and the page is visible, the kit's client holds a screen wake lock (`keepAwakeWhileSyncing`, [kit §8](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#pwa-specifics)).
   Pressing the power button still stops the run; the next one picks up from what was kept.
 - **Shared to the app (2026-10-06).**
   The manifest's `share_target` makes the installed app a destination in the system's share sheet where the platform offers one: Android and ChromeOS. iOS and desktop Chrome on macOS and Windows do not.
@@ -1789,18 +1777,9 @@ A test checks the answer against a parse of the whole body over four thousand bo
 - With `registerType: 'prompt'` the worker does not claim the first page load, by design: the page that registered it keeps running the build it was served, and the next navigation is the first one the worker controls.
   So "works offline" means from the second visit onwards, which is the only thing it could mean — the first visit is the one that downloads the app.
 - **Reload stops the app's requests first (2026-10-13).**
-  The prompt's Reload asks the waiting worker to take over (`skipWaiting`), and the page reloads once it has.
-  Chromium lets it take over only once the worker it replaces has no event in flight, and every request a page it controls makes is a fetch event there, a sync's to the provider most of all.
-  A request that starts while the take-over waits holds it, and after that a quiet moment no longer lets it through: it waits out Chromium's five-minute limit on an outgoing worker, through Reload pressed again and the page reloaded by hand, with the prompt still up.
-  Measured on Chromium 153 with two builds of the app and a page making four requests at a time: asked while they went on, the take-over came 300 s later, not when they stopped; asked once they had stopped, at once; a request already out when it was asked did no harm.
-  A sync goes on most of the time the app is open, so Reload looked dead.
-  Leaving provider and `/api/*` requests unrouted in the worker (no `NetworkOnly`) did not help: a request the worker does not answer is still a fetch event.
-  So Reload pauses this tab's sync, as the user's pause does, and asks every other tab to pause too over a `BroadcastChannel` (`skysa-update`).
-  It gives them 250 ms, then asks (`apps/web/src/sync/beforeUpdate.ts`).
-  With a second tab making requests until told, the take-over and both reloads came in about 1.5 s.
-  A pause lasts only until the app is opened again, so syncing starts again after the reload by itself.
+  Chromium lets a waiting worker take over only once the one it replaces has no request in flight, and one that starts while the take-over waits holds it to a five-minute limit, so with a sync going Reload looked dead.
+  So Reload pauses this tab's sync and asks every other tab to pause too, then asks the worker to take over: the kit's client's (`makeWay`, [kit §8](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#pwa-specifics)).
   The prompt says it is updating meanwhile, and after ten seconds, what else will do it.
-  A request nothing here makes, such as a picture opened at that moment or a tab still on a build from before this, still holds the take-over to the five minutes.
   The update *to* this build is one of those: the old page handles the click.
 - **The shell answers only the app's own route (2026-09-29, issue #143).**
   The navigation fallback answered every path outside `/api/*` with the shell.
@@ -1980,8 +1959,7 @@ apps/
       styles/                 # index.css imports the rest: tokens.css, base.css, primitives.css, then one per area (§7)
       assets/                 # what the build bundles: the providers' marks
       store/                  # Dexie db, notes.ts, folders.ts, and a module per thing the device holds: vault, clipboard, scratchpad, pins, pictures
-      sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps the kit's engine
-      api/                    # typed client for apps/api
+      sync/                   # store.ts (SyncStore over Dexie), dexiePorts.ts (the kit's client's ports over Dexie), notesSync.ts (the kit's scheduler, with this app's companions)
       i18n/                   # the app's words: t(), rich(), and the English catalog in en/ (§7)
   api/                        # the Worker: this app's deployment of the kit's server (@skysa/server, §6)
     wrangler.toml             # D1 binding, with the kit's migrations; [assets] → ../web/dist
@@ -2018,12 +1996,12 @@ packages/
       markdown/roundtrip.test.ts
 ```
 
-The kit's packages are dependencies, not paths here: the provider adapters and the sync engine are `@skysa/storage` and `@skysa/sync`, the shapes the app and the Worker both speak `@skysa/protocol`, and the Worker `@skysa/server` (§6), each pinned to one exact version ([record 0018](decisions/0018-the-shared-kit.md)).
+The kit's packages are dependencies, not paths here: the provider adapters and the sync engine are `@skysa/storage` and `@skysa/sync`, the shapes the app and the Worker both speak `@skysa/protocol`, the sync client — the scheduler, the API client and the credentials — `@skysa/client`, and the Worker `@skysa/server` (§6), each pinned to one exact version ([record 0018](decisions/0018-the-shared-kit.md)).
 
 Dependency rule: `core` imports nothing from `apps/*`, and of the kit only `@skysa/protocol` and `@skysa/storage`.
 `web` and `api` may import `core`, by its main entry, `@skysa/core`, which names what it offers rather than re-exporting whole modules (#449), and the kit's packages by theirs; their tests may also import a kit package's `/testing` entry, and their source may not, nor any path into a `tests` folder (ESLint).
 
-Inside `apps/web/src` the layers point one way too (2026-10-22, ESLint's `no-restricted-imports`): `lib/` is the bottom, plain browser helpers that import nothing of the app; `store/` is the data layer and imports neither the sync layer, the UI nor the editors; `sync/` imports the store, `api/`, `errors/` and `i18n/`, and no UI; `editor/` does not import `routes/` or `sync/`.
+Inside `apps/web/src` the layers point one way too (2026-10-22, ESLint's `no-restricted-imports`): `lib/` is the bottom, plain browser helpers that import nothing of the app; `store/` is the data layer and imports neither the sync layer, the UI nor the editors; `sync/` imports the store, `errors/` and `i18n/`, and no UI; `editor/` does not import `routes/` or `sync/`.
 Inside `core`, `names/` sits below `markdown/` and imports nothing of it (#449).
 The kit's engine and adapters import nothing of this app's: they are handed its `DocumentFormat` and its folder instead ([record 0018](decisions/0018-the-shared-kit.md)).
 Neither `core` nor the Worker may import a Node built-in, and the list is Node's own (`module.builtinModules`), not a hand-kept one.

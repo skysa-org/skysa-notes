@@ -17,8 +17,8 @@ const APP: AppSchedulerOptions = { lockName: SYNC_LOCK, document: NOTE_FORMAT, s
 
 /**
  * A device over this app's database, fresh for each call: the client's
- * suites (`tests/client/device.ts`) run over it as the app runs them, through
- * the ports in `sync/dexiePorts.ts`. Its scheduler is the app's, with the
+ * suites (`ClientDevice`, `@skysa/client/testing`) run over it as the app runs
+ * them, through the ports in `sync/dexiePorts.ts`. Its scheduler is the app's, with the
  * clipboard, the key file and the files beside notes attached; a document is
  * a note, made and saved as the editor makes and saves one; an op is queued
  * as a row of the queue, the shape every writer in `store/` leaves. The

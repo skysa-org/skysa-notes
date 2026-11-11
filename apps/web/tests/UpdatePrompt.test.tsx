@@ -5,7 +5,7 @@ import { UpdatePrompt } from '../src/components/shell/UpdatePrompt.js';
 
 /**
  * The prompt a new build waiting to take over puts up. Reload stops the app's
- * requests before it asks (`sync/beforeUpdate.ts`): asked while a sync was
+ * requests before it asks (`makeWay`, the kit's): asked while a sync was
  * going, the new build waited minutes, and the button looked dead.
  */
 

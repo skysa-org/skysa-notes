@@ -2,7 +2,7 @@
  * This app's scheduler under test: its database bound to a source, and its
  * scheduler made as the app makes it, with the clipboard, the key file and
  * the files beside notes attached. The rest of a scheduler under test is the
- * kit's (`tests/client/schedulerHarness.ts`).
+ * kit's (`@skysa/client/testing`).
  */
 import { cleanups, schedulerDefaults } from '@skysa/client/testing';
 import { CLIPBOARD_FOLDER, NOTE_FORMAT, syncsHidden } from '@skysa/core';
