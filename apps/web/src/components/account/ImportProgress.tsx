@@ -1,4 +1,4 @@
-import type { SyncProgress } from '@skysa/core';
+import type { SyncProgress } from '@skysa/sync';
 import { useId, useState } from 'react';
 
 import { api, type ApiClient } from '../../api/client.js';

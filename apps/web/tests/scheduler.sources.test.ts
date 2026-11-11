@@ -2,10 +2,10 @@ import {
 	buildEncryptionFile,
 	CLIPBOARD_FOLDER,
 	ENCRYPTION_FILE,
-	type RemoteEntry,
 	serializeEncryptionFile,
 } from '@skysa/core';
-import type { FakeProvider } from '@skysa/core/testing';
+import type { RemoteEntry } from '@skysa/storage';
+import type { FakeProvider } from '@skysa/storage/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';

@@ -1,4 +1,4 @@
-import { parentPath } from '@skysa/core';
+import { parentPath } from '@skysa/storage';
 import {
 	type ReactNode,
 	type RefObject,

@@ -1,4 +1,5 @@
-import { APP_FOLDER_NAME, type ProviderKind } from '@skysa/core';
+import { APP_FOLDER_NAME } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
 
 import type { ApiClient, Connection, Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';

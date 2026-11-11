@@ -7,7 +7,7 @@ import { serializeNoteFile } from './note.js';
 
 /**
  * What happens when both sides changed the same note (docs/ARCHITECTURE.md §7):
- * the copy is written beside the note, under a name from `names/conflicts.ts`,
+ * the copy is written beside the note, under a name the kit makes for it,
  * holding the contents this builds. The engine asks for them through the
  * format it is handed (`NOTE_FORMAT`, `format.ts`).
  */

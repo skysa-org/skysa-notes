@@ -1,4 +1,4 @@
-import type { FileKind } from '@skysa/core';
+import type { FileKind } from '@skysa/storage';
 
 /**
  * The app's icons, drawn here rather than installed.

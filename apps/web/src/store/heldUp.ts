@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import type Dexie from 'dexie';
 import type {
 	DBCore,

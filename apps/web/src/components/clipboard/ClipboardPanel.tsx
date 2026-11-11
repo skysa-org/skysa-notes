@@ -1,11 +1,5 @@
-import {
-	cell,
-	type ClipName,
-	contentTypeOf,
-	fileKind,
-	MAX_ATTACHMENT_BYTES,
-	readClipName,
-} from '@skysa/core';
+import { type ClipName, fileKind, MAX_ATTACHMENT_BYTES, readClipName } from '@skysa/core';
+import { cell, contentTypeOf } from '@skysa/storage';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type ClipboardEvent,

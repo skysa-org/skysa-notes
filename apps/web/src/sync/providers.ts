@@ -6,7 +6,7 @@ import {
 	createOneDriveProvider,
 	type DocumentFormat,
 	type FetchLike,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 import type { ProviderFactory } from './scheduler.js';
 

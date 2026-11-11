@@ -1,4 +1,5 @@
-import { basename, ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { basename, ROOT } from '@skysa/storage';
 import { createFileRoute, useRouterState } from '@tanstack/react-router';
 import { useCallback, useRef, useState } from 'react';
 

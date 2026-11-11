@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import {
 	type CSSProperties,
 	type KeyboardEvent,

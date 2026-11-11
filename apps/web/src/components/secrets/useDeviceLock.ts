@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { useEffect, useState } from 'react';
 
 import { BROWSER_DEVICE_LOCK, type DeviceLock } from '../../secrets/deviceLock.js';

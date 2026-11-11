@@ -1,5 +1,6 @@
 import type * as Core from '@skysa/core';
-import type { PullChange, RemoteEntry } from '@skysa/core';
+import type { RemoteEntry } from '@skysa/storage';
+import type { PullChange } from '@skysa/sync';
 import Dexie, { type Transaction } from 'dexie';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

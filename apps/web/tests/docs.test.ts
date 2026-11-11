@@ -72,7 +72,10 @@ const citations = (text: string): readonly string[] =>
 		String(name).replace(/[.,]$/u, '')
 	);
 
-/** The anchors `ARCHITECTURE.md` has, and each section of it that a text names by number. */
+/**
+ * The anchors `ARCHITECTURE.md` has, and each section of it that a text names by
+ * number or links to. A link into the kit's is to another repository's.
+ */
 const architecture = read('docs/ARCHITECTURE.md');
 const anchors = [...architecture.matchAll(/<a id="([^"]+)"><\/a>/gu)].map(([, id]) => String(id));
 const citedNumbers = (text: string): readonly string[] =>
@@ -80,7 +83,9 @@ const citedNumbers = (text: string): readonly string[] =>
 		([, number]) => `s${String(number)}`
 	);
 const citedAnchors = (text: string): readonly string[] =>
-	[...text.matchAll(/ARCHITECTURE\.md#([a-z0-9-]+)/gu)].map(([, id]) => String(id));
+	[...text.matchAll(/(?<!skysa-kit\/blob\/[^/\s]+\/docs\/)ARCHITECTURE\.md#([a-z0-9-]+)/gu)].map(
+		([, id]) => String(id)
+	);
 
 /** Each `[…](path)` in a markdown text, outside its code, that points at another file. */
 const links = (text: string): readonly string[] =>
@@ -124,7 +129,18 @@ const layoutPaths = (text: string): readonly string[] => {
 describe('the docs', () => {
 	it('finds what it is meant to look at', () => {
 		expect(CITING.flatMap((file) => citations(read(file))).length).toBeGreaterThan(200);
-		expect(layoutPaths(architecture)).toContain('packages/core/src/sync/engine.ts');
+		expect(layoutPaths(architecture)).toContain('packages/core/src/markdown/frontmatter');
+	});
+
+	it('reads a link into the kit as no anchor of this one', () => {
+		const kit = 'https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md';
+		expect(citedAnchors(`[kit §7](${kit}#files-beside-documents)`)).toEqual([]);
+		expect(citedAnchors('(docs/ARCHITECTURE.md#s7)')).toEqual(['s7']);
+		expect(
+			citedAnchors(
+				'https://github.com/skysa-org/skysa-notes/blob/main/docs/ARCHITECTURE.md#s7'
+			)
+		).toEqual(['s7']);
 	});
 
 	it('reads a citation across the lines of a comment', () => {

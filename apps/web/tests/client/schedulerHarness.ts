@@ -3,8 +3,8 @@
  * for the scheduler's suites over a device (`device.ts`) and for this app's
  * own scheduler tests.
  */
-import { AuthError, type StorageProvider } from '@skysa/core';
-import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
+import { AuthError, type StorageProvider } from '@skysa/storage';
+import { createFakeProvider, type FakeProvider } from '@skysa/storage/testing';
 import { expect, vi } from 'vitest';
 
 import type { ApiClient } from '../../src/api/client.js';

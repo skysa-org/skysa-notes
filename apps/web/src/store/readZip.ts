@@ -1,4 +1,5 @@
-import { cell, MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { crc32 } from './exportNotes.js';
 

@@ -1,4 +1,4 @@
-import { messageOf } from '@skysa/core';
+import { messageOf } from '@skysa/sync';
 
 import { ApiError } from '../api/client.js';
 

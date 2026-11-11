@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 
 import { canDrop, dropMove, type Moving } from '../src/store/rearrange.js';

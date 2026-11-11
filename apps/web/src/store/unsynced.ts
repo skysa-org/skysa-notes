@@ -1,4 +1,6 @@
-import { isWithin, linkedFiles, outOfAttempts } from '@skysa/core';
+import { linkedFiles } from '@skysa/core';
+import { isWithin } from '@skysa/storage';
+import { outOfAttempts } from '@skysa/sync';
 
 import {
 	type FileRecord,
@@ -97,8 +99,8 @@ export interface Unsynced {
 	linked: FileRecord[];
 	/**
 	 * An op of this source is out of attempts, so none of the above can be sent
-	 * right now however long the user waits (`outOfAttempts`, the engine's, in
-	 * core's `sync/attempts.ts`: the same rule the sync status says `blocked` by).
+	 * right now however long the user waits (`outOfAttempts`, the kit's engine's,
+	 * from `@skysa/sync`: the same rule the sync status says `blocked` by).
 	 */
 	blocked: boolean;
 	/**

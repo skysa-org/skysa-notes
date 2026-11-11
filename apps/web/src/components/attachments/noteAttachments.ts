@@ -1,6 +1,4 @@
 import {
-	basename,
-	cell,
 	drawsFromData,
 	imageInfo,
 	type PictureInfo,
@@ -9,6 +7,7 @@ import {
 	safeOpenType,
 	showsInline,
 } from '@skysa/core';
+import { basename, cell } from '@skysa/storage';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { closedProblem } from '../../editor/features/attachments/addFiles.js';

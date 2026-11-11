@@ -1,5 +1,4 @@
 import {
-	cell,
 	readVaultPayload,
 	type Site,
 	siteName,
@@ -10,6 +9,7 @@ import {
 	withReplacedPassword,
 	withVaultUrls,
 } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import type { Age } from '../secrets/loadAge.js';

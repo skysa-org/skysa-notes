@@ -1,10 +1,10 @@
+import { mulberry32 } from '@skysa/storage/testing';
 import { toString as nodeToString } from 'mdast-util-to-string';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toLf } from '../../src/markdown/lineEndings.js';
 import * as pipeline from '../../src/markdown/pipeline.js';
 import { deriveTitle, UNTITLED_TITLE } from '../../src/markdown/title.js';
-import { mulberry32 } from '../support/random.js';
 
 /**
  * A note's title from its first heading, read only as far as that heading

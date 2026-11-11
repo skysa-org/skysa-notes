@@ -1,12 +1,12 @@
 /**
  * What the apps may use of core, by name (#449). A name is here because
  * something in `apps/` imports it, in its source or its tests (which assert
- * with core's real errors and functions), or, for four types, because an
- * operator's policy is written against them. One nothing outside core needs
- * stays in its module, so the surface is chosen rather than whatever a module
- * happens to export. `tests/exports.test.ts` lists the values and the types,
- * so a change to this list is a change a reviewer sees. The test doubles are
- * `@skysa/core/testing`.
+ * with core's real errors and functions), or, for the kit's names at the end,
+ * because an operator's code does. One nothing outside core needs stays in its
+ * module, so the surface is chosen rather than whatever a module happens to
+ * export. `tests/exports.test.ts` lists the values and the types, so a change
+ * to this list is a change a reviewer sees. The test doubles are the kit's,
+ * from each package's `/testing` entry.
  */
 
 export { encrypt } from './age/age.js';
@@ -14,8 +14,6 @@ export { armor } from './age/armor.js';
 export { parseRecipient, recipientOf } from './age/curve.js';
 export { AgeError } from './age/errors.js';
 export { encodeIdentity, generateIdentity } from './age/keys.js';
-export { type Cell, cell } from './cell.js';
-export { API_ERROR_CODES, type ApiErrorCode, AUTH_MODES, type AuthMode } from './api.js';
 export {
 	isEncryptionFile,
 	isScratchPath,
@@ -24,8 +22,6 @@ export {
 	syncsHidden,
 	isPassedOver,
 } from './appFolder.js';
-export type { DocumentFormat } from './documentFormat.js';
-export type { AppFolderSpec } from './folderSpec.js';
 export {
 	APP_FOLDER_NAME,
 	CLIPBOARD_FOLDER,
@@ -36,27 +32,6 @@ export {
 	SCRATCHPAD_FOLDER,
 	VAULT_FOLDER,
 } from './config.js';
-// With the types a deployment's policy is written against (CLAUDE.md, the
-// `EntitlementProvider` and `RateLimiter` seams): no app imports them, but an
-// operator's code outside this repo does.
-export {
-	alwaysAllowed,
-	type ConnectCodeCheck,
-	type ConnectGate,
-	ENTITLEMENT_CODES,
-	type EntitlementCode,
-	type EntitlementContext,
-	type EntitlementDecision,
-	type EntitlementProvider,
-	type EntitlementSubject,
-	GATE_LIMITS,
-	MAX_CODE_HOLD_SECONDS,
-	MAX_CODE_REASON,
-	MAX_CONNECT_CODE,
-	neverLimited,
-	type RateLimitDecision,
-	type RateLimiter,
-} from './entitlements.js';
 export {
 	downloadName,
 	drawsFromData,
@@ -66,14 +41,12 @@ export {
 	showsInline,
 } from './files/attachments.js';
 export { type ClipName, clipName, clipPath, clipStamp, readClipName } from './files/clipboard.js';
-export { contentTypeOf, type FileKind } from './files/mediaTypes.js';
 export {
 	imageInfo,
 	type PictureInfo,
 	pictureVariant,
 	type PictureVariant,
 } from './files/pictures.js';
-export { bytesHash, contentHash } from './hash.js';
 export {
 	attachmentHref,
 	type AttachmentKind,
@@ -122,10 +95,6 @@ export {
 	withoutArmor,
 } from './markdown/secretBlocks.js';
 export { deriveTitle, titleFromFilename, UNTITLED_TITLE } from './markdown/title.js';
-export { clusters } from './names/bytes.js';
-export { conflictFilePath, conflictFolderPath } from './names/conflicts.js';
-export { extensionOf } from './names/extension.js';
-export { foldName } from './names/fold.js';
 export { conflictPath } from './names/notes.js';
 export {
 	attachmentName,
@@ -134,45 +103,6 @@ export {
 	uniqueFilename,
 	UNTITLED_SLUG,
 } from './names/slug.js';
-export {
-	ancestorPaths,
-	basename,
-	isWithin,
-	joinPath,
-	normalizePath,
-	parentPath,
-	pathSegments,
-	rebasePath,
-	replaceBasename,
-	ROOT,
-} from './paths.js';
-export { PROVIDER_KINDS, type ProviderKind } from './providerKinds.js';
-export { createDropboxProvider } from './providers/dropbox.js';
-export { createGDriveProvider } from './providers/gdrive/index.js';
-export type { FetchLike } from './providers/http.js';
-export { createOneDriveProvider } from './providers/onedrive.js';
-export { withoutNul } from './providers/text.js';
-export {
-	AuthError,
-	type EntryRef,
-	isAuthError,
-	isConflictError,
-	isNotFoundError,
-	isRateLimitError,
-	isUnreadableError,
-	NotFoundError,
-	RateLimitError,
-	type RemoteEntry,
-	type StorageProvider,
-} from './providers/types.js';
-export {
-	RELAY_CHANGED,
-	RELAY_CLOSE,
-	RELAY_PING,
-	RELAY_PONG,
-	RELAY_PUSHED,
-	RELAY_PUSHED_INTERVAL_MS,
-} from './relay.js';
 export { SCRATCH_COLORS, type ScratchColor, scratchColor } from './scratchpad.js';
 export {
 	buildEncryptionFile,
@@ -181,25 +111,6 @@ export {
 } from './secrets/encryptionFile.js';
 export { readRecoveryKey, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from './secrets/recoveryKey.js';
 export { openSecret, opensSecret, resealSecret, sealSecret } from './secrets/sealing.js';
-export { outOfAttempts } from './sync/attempts.js';
-export { createSyncEngine, type MergeInput, type SyncEngine } from './sync/engine.js';
-export { messageOf, type SyncOutcome, type Watch } from './sync/outcome.js';
-export type { SyncProgress } from './sync/progress.js';
-export {
-	type ConflictResolution,
-	isFileChange,
-	type NewSyncOp,
-	type OpOutcome,
-	type PullBatch,
-	type PullChange,
-	type SyncFile,
-	type SyncFolder,
-	type SyncNote,
-	type SyncOp,
-	type SyncOperation,
-	type SyncStore,
-	type UnreadableFile,
-} from './sync/store.js';
 export {
 	generatePassword,
 	PASSWORD_LENGTH,
@@ -229,3 +140,37 @@ export {
 	withReplacedPassword,
 	withVaultUrls,
 } from './vault/vault.js';
+// The kit's protocol (`@skysa/protocol`, record 0018), as this barrel offered
+// it before the kit: the apps import it from there, but an operator's code
+// outside this repo imports it from here, the types its policy is written
+// against among it (CLAUDE.md, the `EntitlementProvider` and `RateLimiter` seams).
+export {
+	alwaysAllowed,
+	API_ERROR_CODES,
+	type ApiErrorCode,
+	AUTH_MODES,
+	type AuthMode,
+	type ConnectCodeCheck,
+	type ConnectGate,
+	ENTITLEMENT_CODES,
+	type EntitlementCode,
+	type EntitlementContext,
+	type EntitlementDecision,
+	type EntitlementProvider,
+	type EntitlementSubject,
+	GATE_LIMITS,
+	MAX_CODE_HOLD_SECONDS,
+	MAX_CODE_REASON,
+	MAX_CONNECT_CODE,
+	neverLimited,
+	PROVIDER_KINDS,
+	type ProviderKind,
+	type RateLimitDecision,
+	type RateLimiter,
+	RELAY_CHANGED,
+	RELAY_CLOSE,
+	RELAY_PING,
+	RELAY_PONG,
+	RELAY_PUSHED,
+	RELAY_PUSHED_INTERVAL_MS,
+} from '@skysa/protocol';

@@ -1,10 +1,5 @@
-import {
-	basename,
-	parentPath,
-	type PreviewLine,
-	previewLineText,
-	SCRATCHPAD_FOLDER,
-} from '@skysa/core';
+import { type PreviewLine, previewLineText, SCRATCHPAD_FOLDER } from '@skysa/core';
+import { basename, parentPath } from '@skysa/storage';
 import { useRouter } from '@tanstack/react-router';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 

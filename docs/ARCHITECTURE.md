@@ -25,7 +25,7 @@ Cite by anchor from now on; a citation such as `§7, "The scratchpad"` still wor
 | Identity | Notes identified locally by UUID; remote identity is provider file id (Drive/Graph/Dropbox) or path (WebDAV) | Ids survive renames on id-based providers; WebDAV has nothing else |
 | Client | Vite + React + TypeScript SPA, `vite-plugin-pwa` (Workbox) for the service worker, TanStack Router, Dexie (IndexedDB) for local store | Local-first app gets nothing from SSR; vite-plugin-pwa is the best-maintained PWA tooling in the React ecosystem |
 | Backend | Hono + TypeScript on Cloudflare Workers, D1 via Drizzle | Tiny, streams bodies natively (WebDAV proxy), Workers-native |
-| Repo | pnpm workspace: `apps/web`, `apps/api`, `packages/core` (providers, sync, markdown — framework-agnostic) | Keeps the hard parts testable without any UI or server framework |
+| Repo | pnpm workspace: `apps/web`, `apps/api`, `packages/core` (markdown, names, secrets — framework-agnostic), over the kit's packages for the providers, the sync engine and the server (record 0018) | Keeps the hard parts testable without any UI or server framework |
 | Hosting | Cloudflare Workers for the API, Workers static assets for the SPA (same origin), D1 for the database | One deploy, same-origin cookies, SQLite dialect in dev and prod |
 | App folder name | `skysa-notes`, defined once as `APP_FOLDER_NAME` in `packages/core/src/config.ts`; changeable before launch | Provider registrations must match — see §5 |
 | Accounts | A device may hold several connected sources at once, each its own silo — its own notes, its own queue, its own credential — and shows one at a time (Phase 7) | Nothing aggregates them, on the server or off it |
@@ -304,424 +304,41 @@ Rules:
 ---
 <a id="provider-adapter-interface"></a><a id="s4"></a>
 ## 4. Provider adapter interface
-
-Every provider implements this.
-The sync engine only talks to this interface.
-
-```ts
-export interface RemoteEntry {
-  remoteId: string;        // provider file id; the path itself on WebDAV
-  path: string;            // relative to app root, POSIX separators, normalized
-  kind: 'file' | 'folder';
-  version: string;         // etag / rev / cTag / headRevisionId — opaque, compare for equality only
-  modifiedAt: string;      // ISO
-  size?: number;           // bytes; on every file entry, a ConflictError's remote too; absent for folders
-}
-
-/** What read/move/delete need, which is all the local store keeps. */
-export type EntryRef = Pick<RemoteEntry, 'remoteId' | 'path'>;
-
-/** A path, an id, or both: Dropbox's DeletedMetadata has no id, and an id feed may know no path. */
-export type DeletedEntry =
-  | { path: string; deleted: true; remoteId?: string }
-  | { path?: undefined; deleted: true; remoteId: string };
-
-export type ChangeEntry = (RemoteEntry & { deleted?: false }) | DeletedEntry;
-
-export interface ChangeSet {
-  entries: readonly ChangeEntry[];
-  cursor: string;          // opaque; persist per connection
-  more: boolean;
-}
-
-export interface WriteOptions {
-  /** Omitted means "create": a file already there is a ConflictError. */
-  expectedVersion?: string;
-}
-
-export interface CreateFileOptions {
-  /** Recorded where the provider keeps one (Drive's `mimeType`); decides nothing here. */
-  contentType?: string;
-}
-
-export interface StorageProvider {
-  readonly kind: ProviderKind;
-  /** Whether `list` reports everything a folder holds. False on Drive (§5.1). */
-  readonly listsEverything: boolean;
-  /** Where that is false, marks a folder emptied here instead of deleting it (§5.1). */
-  readonly leaveFolder?: (entry: EntryRef) => Promise<void>;
-  readonly ensureRoot: () => Promise<{ rootId: string }>;
-  readonly list: (folderPath: string) => Promise<RemoteEntry[]>;
-  readonly read: (entry: EntryRef) => Promise<{ content: string; version: string }>;
-  readonly write: (path: string, content: string, opts: WriteOptions) => Promise<RemoteEntry>;
-  readonly readBytes: (entry: EntryRef) => Promise<{ bytes: Uint8Array; version: string }>;
-  readonly createFile: (path: string, bytes: Uint8Array, opts?: CreateFileOptions) => Promise<RemoteEntry>;
-  readonly createFolder: (path: string) => Promise<RemoteEntry>;
-  readonly move: (entry: EntryRef, newPath: string) => Promise<RemoteEntry>;
-  readonly delete: (entry: EntryRef) => Promise<void>;
-  readonly changes: (cursor?: string) => Promise<ChangeSet>;
-}
-
-export class ConflictError extends Error { constructor(readonly remote: RemoteEntry) { … } }
-export class AuthError extends Error {}          // engine asks the backend for a fresh token
-export class NotFoundError extends Error {}      // entry gone, or expectedVersion for an absent path
-export class CursorResetError extends Error {}   // cursor unusable; discard it and full-scan
-export class UnreadableError extends Error {}    // the file is there and is not UTF-8 text; carries the path asked with
-```
-
-Three shapes differ from the sketch this section used to carry.
-Members are property signatures rather than methods, which is both the house style (`EntitlementProvider`) and what `functional/prefer-property-signatures` requires.
-`kind` reuses `ProviderKind` from `providerKinds.ts` so `PROVIDER_KINDS` stays single-sourced with the marker schema.
-And `read`/`move`/`delete` take an `EntryRef`, not a whole `RemoteEntry`: a note record persists only `remoteId`, `remoteVersion` and `path`, so passing the full entry would have every caller inventing a `kind` and a `modifiedAt` — and let an adapter come to depend on the invented value.
-
-`NotFoundError` and `CursorResetError` are additions.
-A cursor can go stale on every provider (Dropbox answers `reset`, Graph `410 resyncRequired`, WebDAV invalidates its sync-token) and without a type for it the engine cannot tell a dead cursor from a transient failure, so it retries forever.
-`NotFoundError` is what lets `ConflictError.remote` stay non-optional.
-
-Each error carries a `code` alongside its class, and ships with an `isXError` guard.
-`instanceof` is the ergonomic check and is correct today, since `@skysa/core` resolves to one module per bundle; the code keeps the guards honest if core is ever published and a consumer ends up holding two copies of it either side of a sync boundary.
-
-Semantics the signatures do not carry:
-
-- `listsEverything` is what the engine asks before removing a folder because a listing showed it empty (§7).
-  It is false on Google Drive alone: `drive.file` shows the app only the files it created, so a folder that lists empty may hold a file the user put there, and deleting it would take that file.
-  Every other capability question is answered by behaviour rather than a flag; this one cannot be, because the wrong answer is silent and costs a file.
-- `write` is create-or-update, never a blind overwrite.
-  No `expectedVersion` means "I expect nothing here" — literally WebDAV's `If-None-Match: *` — so a file already at that path is a `ConflictError`.
-  That is what makes §7's rule of re-creating on push a dirty note deleted remotely safe: if the file came back in the meantime the write conflicts instead of clobbering it.
-  An `expectedVersion` for a path with no file is a `NotFoundError`.
-- `createFolder` and `delete` are idempotent, so a queued op is always safe to replay.
-- `move` may or may not change `version` — Dropbox's `rev` survives it, OneDrive's `eTag` does not — so the caller stores the returned entry rather than assuming either way.
-  `remoteId` survives a move on every id-based provider; on WebDAV it *is* the path and so cannot, which is why renames there are re-linked through frontmatter `id`.
-- A deletion is identified by its id when it has one and by its **path** when it has not.
-  Dropbox's `DeletedMetadata` carries a name and a path and nothing else — no id, no rev, no timestamp — so `ChangeEntry` is a union rather than an entry with a flag.
-  Anything richer would have adapters fabricating fields and the engine trusting them.
-  And the path may be missing where the id is not: an id feed asked about a file its tree never placed — one this device pushed after its cursor, deleted by another device before this one pulled again — has no path to give, and dropping the deletion leaves the note on this device for ever.
-- `list` is one level.
-  `changes` covers the whole tree at every depth.
-  Neither filters hidden paths: `.notesapp.json` has to reach the engine, and the UI filters with `isPassedOver`.
-- `rootId` is opaque, non-empty and stable.
-  A provider whose root has no id of its own — a Dropbox app folder, where the root simply *is* `/` — returns a synthetic constant.
-- Content is UTF-8 text, and `read` says when it is not.
-  The body is taken as bytes and decoded strictly (`providers/text.ts`); bytes that are not UTF-8 are an `UnreadableError` carrying the path, never text with U+FFFD where the bytes were.
-  A lossy decode looks like a note, and the first push then writes the damage over the original.
-  Text holding a U+0000 is refused the same way: UTF-16 without a BOM, and most binaries, are valid UTF-8 to a decoder with a NUL for every other byte, and markdown never carries one.
-  A UTF-8 BOM is stripped, as `response.text()` always did, so hashes do not move; it is still lost on the first push, as it always was.
-  A probe that only asks whether a file exists takes `UnreadableError` for yes (§7).
-  That is `read`, and `read` is for notes.
-  Every other file — an attachment beside the note that links it (#187) — goes through `readBytes`, which hands the bytes over exactly as stored, a BOM included, and never raises `UnreadableError` (2026-10-03).
-  Each adapter's `read` is its `readBytes` decoded, so the two agree on what is there and on every other error.
-- `createFile` is create-only, and there is no update to go with it: the app never writes into a file that is not a note, and a name stamped with the file's content (#187) is never asked to hold other bytes.
-  A file **or a folder** already at the path is a `ConflictError` whose `remote` carries its `kind` and, for a file, its `size` — what lets an upload that finds its own name taken tell its own earlier upload (the same size, under a name made from a hash of the bytes) from someone else's file.
-  A missing parent may be `NotFoundError` or may be made, as for `write`.
-  `contentType` is recorded where the provider keeps one and decides nothing; the extension is what the app reads.
-  Every adapter sends the bytes in one request: a provider takes at least 150 MiB in one everywhere but Drive, which over 5 MB wants a resumable session, also sent in one `PUT` (§5.1).
-- No `AbortSignal` in the adapter interface: operations are short and the engine discards results it no longer wants.
-  **But the `fetch` an adapter is given is cancelled with its session (2026-09-23).**
-  The web app's `timedFetch` (`apps/web/src/sync/providers.ts`) combines each request's own 60 s timeout with the scheduler session's signal, so ending a session — Cancel on an import, a disconnect, a switch of source — stops a download in flight instead of leaving it to run out its timeout.
-  The contract is unchanged; an adapter sees an aborted `fetch` as the network error it is.
-  **The timeout grows with the bytes (2026-10-03, #187).**
-  A minute is a note's upload or a page of changes on a slow connection, and a 25 MB attachment at the 50 KB/s the app still means to work on takes over eight.
-  So a request gets 1 ms per 50 bytes it sends or receives on top of the minute: what it sends from the start, and what its answer holds from when the answer begins — the bytes its `Content-Length` says, at once, or, where it gives none (Dropbox does not promise one), each chunk as it arrives, so a download that keeps coming is never cut off for want of a header and one that stalls still is.
-  The answer adds to what is left rather than replacing it, so a large upload answered late keeps the time it earned, and a download keeps the rest of its minute as slack.
-  A note or a page of changes keeps the minute, give or take a millisecond.
-  What the bytes earn is credit spent when the timer comes due, so the deadline only moves later and no clock is read: a wall clock that jumps cannot bring it on early.
-- A provider asking us to slow down is `RateLimitError`, with the `retryAfterMs` it gave: Dropbox and Graph answer 429, Graph also 509 for the bandwidth cap, and Drive a 403 whose reason names the quota (`rateLimitExceeded`, `userRateLimitExceeded`, `dailyLimitExceeded`, `sharingRateLimitExceeded`).
-  **A 503 is not a rate limit, `Retry-After` or not.**
-  Graph's throttling guidance names one status — "use the HTTP error code 429 to detect throttling" — and its error table calls 503 "temporarily unavailable for maintenance or is overloaded" whose delay is "the length of which can be specified in a `Retry-After` header".
-  So the header does not tell an outage from throttling: both carry one.
-  Since a rate limit is not counted against the op (§7), a 503 read as one would retry for ever — never blocked, never surfaced, with every op behind it waiting — so it stays the counted failure any other 5xx is.
-  Drive's newer error bodies put the condition in `error.status`, and `RESOURCE_EXHAUSTED` there is read as a quota **only where Drive gave no `errors[]` reason at all**: the reason is the more specific answer and some are deliberately left out, `storageQuotaExceeded` above all, which is a full Drive that no wait fixes and which `google.rpc.Code` gives the same `RESOURCE_EXHAUSTED` as a per-user quota.
-  (Drive's errors page documents no `status` field; whether it ever sends one is on the Phase 4 live-check list.)
-  `Retry-After` is read as seconds or as an HTTP date: seconds is what Graph documents and a date is legal (RFC 9110 §10.2.3) and is what some fronts send, so both are read, and of a value `Headers.get` has joined from a header sent twice ("7, 30") the *longer* wait is taken — coming back early is refused again, coming back late costs only the wait.
-  Dropbox's `retry_after` comes out of the JSON body instead; an unreadable value says nothing rather than zero, and the caller falls back to its own backoff.
-  It is a type of its own for two reasons: it says nothing about the request, so the engine does not count it against the op's attempts (§7), and the provider's own answer for how long to wait beats any backoff we could guess.
-  Other transport failures (5xx, a dropped connection) stay plain errors on the engine's per-op backoff.
-
-Adapter contract tests: the scenario suite is `describeProviderContract(name, harnessFactory, { stableIds })` in `packages/core/tests/providers/contract.ts` — a helper rather than a test file, so Vitest's `tests/**/*.test.ts` glob does not collect it on its own.
-`tests/providers/contract.test.ts` is the registry every adapter is added to: the in-memory fake in CI, and live accounts via `PROVIDER_LIVE_TESTS=1` locally.
-Each HTTP adapter is one row of a table there, which registers it over its wire stub at one entry per page and at full pages, and against a live account when its token is given.
-The stubs share how they answer and record a request (`tests/providers/harness.ts`).
-`stableIds: false` exempts path-based providers from the move-preserves-id scenarios.
-
-Scenarios: idempotent `ensureRoot` including write-the-marker-only-if-absent, path normalization at the adapter edge, byte fidelity on read-back, the four `write` cases above, one-level `list` including hidden entries, idempotent `createFolder`, the root (a note or file written at it, or a move onto it, is a `NotFoundError`, and `createFolder('')` answers it as a folder already there — Dropbox had no guard, and its stub now refuses a write path `files.stone` does not allow, as Dropbox does), move (file, into a folder, whole folder rebasing its descendants, onto an occupied path), idempotent recursive `delete`, and a `changes` feed that scans current state on a cold start rather than replaying history, reflects each step, survives being persisted, and is drained through its `more` loop.
-And a file that is not UTF-8 text: `read` is an `UnreadableError`, while `list`, `changes`, `move` and `delete` treat it as any other file and leave its bytes as they were.
-No adapter can rewrite a file with such bytes, so the harness may offer a way in underneath (`plant`, `bytesAt`) — the fake's `plantBytes` — and a live registration, which has none, skips these.
-And a file that is not a note, through the port alone so that a live account runs it too (2026-10-03): every byte value, an empty file and a 6 MB one (over Drive's multipart limit) come back byte for byte, at the version `createFile` reported; `readBytes` keeps a BOM; `read` of one is an `UnreadableError`; `createFile` over a file, a note or a folder is a `ConflictError` whose `remote` says what is there — its kind and, for a file, its size — and leaves it as it was; it is listed and in the feed with its size in bytes; and it moves with its bytes, and once deleted is `NotFoundError` to `readBytes`.
-The wire stubs read every request body as bytes (`tests/providers/wireBody.ts`) and refuse one they cannot read: they used to take anything but a string as empty, so an upload of bytes would have arrived as an empty file with every test passing.
-
-The in-memory fake in `src/providers/fake.ts` — reached by the apps' tests as `@skysa/core/testing`, with the three provider stubs and the store contract, and never by anything they ship — is deliberately the strictest provider in the repo: where this section leaves a case open it takes the least forgiving reading, because a lenient fake lets the engine grow assumptions that only fail against a real account.
-It never creates a missing parent, re-versions even a byte-identical write, and never reuses an id.
-It holds every file as bytes, whichever method wrote it, so a stub can hand any upload to it; its `createFile` is as strict as `write`'s create, and `plantBytes` — another tool saving over whatever is there, with no version check — is for tests alone.
-Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's drain loop, folder rebasing, and auth-retry paths be tested at all.
-
+Every provider implements one interface, `StorageProvider`, and the sync engine talks to nothing else.
+It is the kit's (`@skysa/storage`), with its errors and the contract suite every adapter passes ([kit §4](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#provider-adapter-interface)).
 ---
 
 <a id="provider-specifics"></a><a id="s5"></a>
 ## 5. Provider specifics
+The adapters are the kit's (`@skysa/storage`), and so is what each provider does that the others do not ([kit §5](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#provider-specifics)).
+This app hands them its folder, with its marker and Drive's tag on it (`NOTES_FOLDER`, §3), and the format of its notes (`NOTE_FORMAT`, §7, "Conflict rule").
 
 <a id="google-drive"></a><a id="s5-1"></a>
 ### 5.1 Google Drive
-- Scope: `https://www.googleapis.com/auth/drive.file` plus `openid email` for identity.
-  Non-restricted; standard OAuth verification only.
-- Root: a folder `APP_FOLDER_NAME` (mimeType `application/vnd.google-apps.folder`) at the top of My Drive, tagged `appProperties: { notesapp: "root" }` and found by that tag, never by name, so a user who renames or moves it keeps their notes, whatever it is called.
-  The key is the app's (`AppFolderSpec`'s `driveTag`, §3), and this app's is `notesapp`.
-  **Only `ensureRoot` and a round from nothing make one**: a pull on a stored cursor, and every read and write, only look (a search that misses the folder for a moment is an error to retry, never a second folder).
-  Where one is made, the search is asked again, and every tagged folder but the earliest is folded into it — what is inside moved across (the marker trashed instead where the earliest has one), and a folder put in the trash only when a fold finds it already empty, since a device whose last pull was against it may still be writing into it; that device's next pull resets and folds again.
-  That settles two devices connecting at once, and a folder restored from the trash beside the one made while it was gone, with nothing written to either left unread; names that meet in the move are separated by the scan that follows.
-  A pull on a stored cursor is reset (`CursorResetError`) when an earlier tagged folder exists, when the folder is trashed or gone (asked of the folder itself when the search does not list it), or when the feed says so — read from `removed` and `trashed` as Drive sent them, not from the tree, which takes a name no path can hold as gone.
-- Names are not unique on Drive: a folder may hold two `a.md`.
-  A path is resolved by walking names from the app folder (`name = '…' and '<parent>' in parents and trashed = false`, with `'` and `\` escaped, compared exactly afterwards), and where a name matches more than once the **canonical** item — earliest `createdTime`, then lowest id — is what the path means, on every device.
-  No id cache: one would send a write into the wrong folder after a remote rename, and notes sit a few levels deep.
-- Nothing on Drive is conditional: v3 has no `If-Match` and nothing like create-if-absent.
-  - Create: look up the name (taken → `ConflictError`, parent missing → `NotFoundError`), upload with `POST /upload/drive/v3/files?uploadType=multipart` (`text/markdown`, the media type of `NOTE_FORMAT`, the document format the adapter is handed; bytes exactly as given), then **search again**: if another device's file of that name was made earlier, ours goes to the trash (a third device may already have written into it) and `ConflictError` names theirs, so the engine makes its conflict copy.
-    A folder is made the same way, and one that exists already is returned.
-  - A file that is not a note (`createFile`, 2026-10-03, #187): the same look, create and look again, with the bytes as the multipart body's second part and the given type as its `mimeType` (`application/octet-stream` if none).
-    Over 5 MB, where Drive's guide stops recommending multipart, it is a resumable upload instead — for a note that size too, which goes the same way: `POST …?uploadType=resumable` with the metadata, then every byte in one `PUT` to the `Location` that answers it (https://developers.google.com/workspace/drive/api/guides/manage-uploads).
-    That `Location` is used only on `www.googleapis.com` — the host the token is for, and the one `connect-src` allows — and refused anywhere else rather than sent the token.
-    The `PUT`'s answer is not relied on to carry the fields the session asked for, so a file with no `headRevisionId` in it is asked for by id.
-    **Two things to check against a live account** before attachments are built on this: that Drive exposes `Location` to a page on another origin (CORS hides a header it was not told to expose, which reads as `null`, and the upload then fails with nothing sent), and that `?alt=media` for a file of several megabytes is still served from `www.googleapis.com` rather than redirected (below).
-  - Update: by id, never by path — a file deleted since the caller saw it is `NotFoundError`, never made again.
-    `headRevisionId` is compared with the expected version (`ConflictError` if it moved), then `PATCH /upload/drive/v3/files/{id}?uploadType=media`.
-    A write landing between the two is overwritten; the next `changes` pass reports the result.
-    Nothing written on this device is lost, and what the other device wrote in that moment may be — inherent to v3.
-  - Move: `PATCH files/{id}` with `{ name }`, and `addParents`/`removeParents` only when the folder changes.
-    The destination is looked up first, so a replayed move returns without a `PATCH`.
-  - Delete: `PATCH { trashed: true }` — to the trash, not gone for good, so the user can restore a note from Drive as from OneDrive's recycle bin.
-    A 404 is success.
-- Reading: `GET files/{id}` for `headRevisionId`, **then** `?alt=media`, both on `www.googleapis.com` with the token.
-  In that order the version reported is never newer than the bytes; Drive can download a past revision only if it was kept forever, so the two cannot be pinned together.
-- Version: `headRevisionId`, which changes with content and not with a rename or a move (like Dropbox's `rev`).
-  Folders have none.
-  A file with none (a Google Docs file, which this app never makes) is left out of `list` and `changes`.
-- Changes: the cursor is JSON `{ v, phase, token, start, root, nodes, pending, walked? }`, the tree kept in `packages/core/src/providers/idTree.ts` as for OneDrive (§5.2).
-  A round from nothing asks `changes.getStartPageToken` **first**, then scans `files.list q=trashed = false` — every file the app can see, which under `drive.file` is every file it made — and follows `changes.list` (`includeRemoved`, `newStartPageToken` ends a round) from that token after.
-  A `removed` change (deletion or loss of access) or a file with `trashed` (set too when a folder above it is trashed) is gone.
-  On a stored cursor, a 404, a 410, or a 400 whose error names the page token (in `location`, reason or message) is `CursorResetError`; any other 400 is a failure to retry, not a rescan.
-  What Drive actually answers for a dead token is undocumented.
-- **A long feed becomes a scan (2026-10-14).**
-  Reported from a phone: "Checking for changes…" took a long time and found little, and pausing it for a full re-scan was quicker.
-  Measured on that Pixel against the live account: after a day away, with the account busy elsewhere, the round read **60 empty pages** of `changes.list` before the 16 holding the notes another device had imported.
-  That was about 45 s with nothing found.
-  A check straight after a sync was one page, 0.7 s.
-  `drive.file` hides every change the app cannot see, but Drive still pages through them, so a feed round grows with the whole account's activity since the last look, while a scan lists only the app's own files, a page per thousand.
-  Two changes.
-  First, the app folder is looked for **once a round**, at its first page, not before every page: that search was half of each page's cost (about 0.34 s of 0.7 s).
-  Mid-round the feed itself reports the folder going to the trash (`rootGone`).
-  A cursor stored mid-round and read by another session, which has not looked this round, looks again.
-  Second, a feed round that has read **twice the pages a scan would take, plus two** (`feedLimit`: the tree's size, a thousand a page), and has not ended, throws `CursorResetError`, and the engine's answer to that is the scan.
-  Nothing read is half kept: a feed round is read whole before any of it is applied (§7), so the reset meets nothing committed, and the stored cursor stays as it was for a scan that is interrupted.
-  The count travels as `walked`, on cursors written mid-round only.
-  One written before it was added is a round's start, so no cursor resets for it.
-  A round with real changes on many pages scans too.
-  That is the same answer by the shorter road, since a scan is the truth a re-scan already relies on.
-  Empty pages are not saved as they are read, and are not shown as progress: with the limit, there are at most a few of them.
-  Making scans common in the two-device model found a mistake only a scan could make.
-  A note deleted on one device was given the other device's file that had taken its name, and its delete removed that file.
-  It is fixed in the same change (§7, "A path can be reused").
-- Drive lists no parents of a changed item, so a round's end means only that every ancestor of what it listed is in the tree or was listed: a folder that becomes placed without having been (moved in from outside the app folder, or rescued from one deleted) has its contents **listed recursively into the same page** (`arrivals`), since the feed will not name them.
-  A folder made on another device since the last look arrives the same way, so after notebooks are moved there every folder of them is listed.
-  That was one request at a time, a wait per folder before the round could say anything.
-  Since 2026-10-13 they are asked a level at a time, four folders at once (`LISTS_AT_ONCE`, as many as writes; a list is 100 of the 325,000 quota units a user has a minute).
-  The answers go into the page in the order one at a time put them, so nothing the page makes of its order moves.
-  The query is the same single-parent `'<id>' in parents` the live suite checked; one asking for several parents with `or` would be fewer requests, but has not been run against Drive.
-  An item a round ends without placing has left the app folder — moved elsewhere in Drive, or into a folder the user made in the Drive UI, which `drive.file` cannot see — and is reported deleted where it was.
-- **Two items at one path never reach the engine**, which holds one note per path: with two, it would move one note aside locally on every pull, alternately, and an edit to the one moved aside would be written to a path with no file behind it for ever.
-  When a page places two items with one folder and name, the adapter asks Drive whether both are still there — the search, and then each one the search leaves out, by id, since the feed can announce a file before the index lists it and a clash passed over is not asked about again until one of them changes; if so the canonical one keeps the name and each other is renamed beside it with `PATCH { name }` to `conflictFilename`/`conflictFolderName` (§7's rule applied to two remote files), and reported there.
-  A file that is not a note is renamed with `conflictNameKeepingExtension` instead, which puts the stamp before its own extension (`photo (conflict 2026-09-15T14-32).png`): `conflictFilename` would have made it `photo.png (conflict …).md`, which is a note to the engine and no longer a picture to anything else.
-  And one whose `md5Checksum` and `size` equal the canonical item's is not renamed at all: it is a copy, so it goes to the trash and is reported deleted (2026-10-03, for attachments, #187).
-  Drive has no conditional trash, so the copy is asked for by id once more just before, and one moved, trashed or rewritten since it was listed is left to the feed or renamed instead; that narrows the race to one request rather than closing it, and a file lost in it is in Drive's trash, not gone.
-  Two devices uploading the same picture while offline will be the ordinary way to get there, since an attachment's name is to be stamped with its content (#187), and renaming the second would leave a file no note links to beside the one they all do.
-  Never a note: two notes with the same bytes are two rows on whichever devices hold them, and one sent to the trash would be a remote delete to each, so notes are renamed as they always were.
-  A tree that still holds a file under a name it has since left is not a duplicate, so the tree alone never triggers a rename.
-  Two devices separating the same pair at once each rename the same file; the last `PATCH` wins, and the next pull reports the name that stuck.
-  So a pull can write to Drive, which no other adapter's does.
+
+The kit's ([§5.1](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#google-drive)), with the scope `drive.file` and the root found by its tag, never by name.
 - **A folder the app has left (2026-10-13).**
-  Reported from a phone: notebooks moved into an Archive notebook on a desktop, and the phone showed every old one still there, empty — and again after a re-scan, because the directories were still on Drive.
-  A notebook moved, renamed or deleted goes up as its notes moving or going and then an `rmdir` for each directory it left (§7, "Folder renames/moves"), and on Drive that `rmdir` never deleted anything: `drive.file` hides what the user put in a folder, and trashing it would trash that too.
-  It now *leaves* the folder instead (`StorageProvider.leaveFolder`).
-  Past the same gates as a delete, one `PATCH` sets a private `appProperties` key on it — `notesappLeft`, a key of its own, so nothing can touch the app folder's `notesapp` — and nothing in it is touched.
-  The adapter keeps a left folder in its tree, since what is inside one is placed through it, but does not report it while it holds nothing the app can see: no file, and no folder that is not left too, at any depth (`hideLeftFolders` in `providers/idTree.ts`).
-  It has to be the adapter that decides and not the engine: told a folder is deleted, the engine takes the clean notes under it off the device, so "nothing is in it" has to be judged against the whole remote tree, which only the cursor holds — and judged again whenever what is in it changes, not only when the folder itself does.
-  So a feed page compares the tree before it with the tree after: a folder hidden now and not before is reported deleted, after everything else the page says, so what the page moved out of it is out first; one hidden before and not now — a note written into it, or the mark taken off — is reported as a folder again; one hidden throughout is not mentioned.
-  A scan holds every left folder back until its last page and then reports the ones something keeps, so a hidden one is never mentioned and `reconcile` takes it off a device that still has it; what is inside a kept one can arrive first, and the notebook made to hold it takes the folder's id when the folder's entry comes.
-  `createFolder` takes the mark off the folder it finds at the name, and off another device's that wins the race to make it, so a notebook made again where one was left is a notebook on every device; a folder never left costs no extra request.
-  `list` still lists a left folder: it is there, with whatever the user put in it.
-  The mark travels in the cursor as a fifth element on a left folder's tree row and on no other, so a cursor stored before it reads as it did, and OneDrive's is byte for byte what it was.
-  What the user put in a left folder stays on Drive untouched, and invisible here as it always was.
-  Folders left behind before this have no mark, and stay notebooks until they are removed again from a device.
-  **Not yet measured against a live account:** that Drive's change feed reports a change to `appProperties` alone — the reference says only that a change's `file` is "the updated state of the file".
-  The stub reports it; the first live check is on staging.
-  If the feed does not, another device learns that a folder was left only when it next scans.
-- Known gaps.
-  The engine commits page by page, where the feed means a round — the gap §5.2 describes, and Phase 6's item answers for both.
-  A folder emptied here is not removed from Drive, since no listing can show that it is empty; it is left instead, and hidden while it holds nothing the app can see (above, and §7, "A folder is removed only where a listing can prove it empty").
-  A search that misses the existing app folder at a reset still makes a second one — unless it is the folder this page last made, found or confirmed, which is asked for by id and counted unless it is in the trash or out of reach (so a first connect, where `ensureRoot` and the first pull's reset come seconds apart, makes one) — and the scan under it deletes this device's clean notes until a later round finds the earlier folder, resets back to it, and folds the second into it (the files are untouched remotely).
-  A pull on a stored cursor costs one tag search before its page.
-  Files the user adds through the Drive UI are invisible under `drive.file`.
-  The storage panel says so (`UNSEEN_AT_PROVIDER` in `apps/web/src/sync/account.ts`, 2026-10-05) — from "About Google Drive" in its gear, or in a compact window in the source's `⋯`, over everything (2026-10-06; a compact window had it as a fold-out under the source's name) — since nothing else does: a user who emptied the app folder on the Drive website and copied a folder of old notes into it saw the deletions arrive and then an empty library, with no word of why.
-  The way in for such notes is an import (§7, "Getting a library in"), which makes them the app's files, and the panel's line says so.
-- Measured against a live account, 2026-09-21, since none of it is on Drive's reference pages.
-  **The change feed lags**: a new file took 1.4–2.8s to appear in `changes.list` on an idle account, and longer under the load of a suite run.
-  **It also repeats itself**: one file creation was reported *twice*, about two seconds apart, with the same `version` and nothing having happened in between — so a cursor taken after the first echo still has the second coming, and anything reading the feed has to be idempotent on a repeat it has already applied (the engine is: it compares versions).
-  **Name lookup does not lag**: a file was findable by name in 0.3–0.4s, which is what `verify-after-create`, every path walk and finding the app folder at a reset all depend on, and was the worry that made this worth measuring.
-  **Deletion lags the other way**: the search index keeps listing a deleted file for a moment, so a scan run straight after a mass deletion finds files whose parent is already gone, cannot place them, and reports them as deletions by id — reachable by a test harness emptying a shared folder between scenarios, not by a user.
-  Both lags reached users through the change relay (§6), whose notice comes the moment a write is answered: the round it starts asked the feed before the write was in it, and a clipboard listing taken just after the feed reported a trashing could still name the file.
-  So a device looks again after a notice, and lists the clipboard twice (2026-10-06).
-- A page token Drive will not take answers **400**, with `message: "Invalid Value"` and `reason: "invalid"` — neither of which says anything about a token.
-  Only `location: "pageToken"` does, so the `locations` check in `isDeadToken` is the one doing the work and the message regex beside it is a fallback that would not fire here.
-  Confirmed 2026-09-21; `CursorResetError` follows, as §7 needs.
-- Trashing and renaming a folder are reported differently, also measured 2026-09-21.
-  **Trashing lists what is inside it**: the folder and every descendant arrive, each with `trashed: true`.
-  **Renaming lists the folder alone**, with no descendant reported — checked with the feed drained quiet first, because a child created moments earlier echoes into the round and looks like the rename listing it.
-  Deleting a folder in the same round as moving a subfolder of notes out of it leaves the notes where the remote has them (§7, "A round is one batch"): the subfolder arrives at its new parent, the old parent arrives removed, and the note under the subfolder survives untrashed.
-- `?alt=media` was served **200 from `www.googleapis.com` itself**, with no `Location` header and so no redirect to `*.googleusercontent.com` — which the CSP blocks and which cannot be allowed narrowly, since the wildcard would take in Apps Script web apps (§9).
-  Measured once, for a small file; a large one may yet be served differently.
-- A first connect leaves **one** app folder, where `ensureRoot` and the first pull's reset both go looking for it seconds apart.
-  Confirmed after a real connect: one `skysa-notes` folder, not two.
-- Tokens: backend exchanges the auth code with `access_type=offline&prompt=consent` to get a refresh token.
-  Access tokens last 1h; client requests a new one from `/api/token` on `AuthError` or proactively at 55m.
+  The directory a notebook moved, renamed or deleted here leaves behind is not deleted on Drive, where `drive.file` hides from the app what the user put in it, but tagged as left (`notesappLeft`), and not reported while it holds nothing the app can see.
+- **What the user adds through Drive is not the app's.**
+  Under `drive.file` the app sees only the files it made, so the storage panel says so (`UNSEEN_AT_PROVIDER` in `apps/web/src/sync/account.ts`, 2026-10-05), from "About Google Drive" in its gear, and the way in for such notes is an import (§7, "Getting a library in").
+- **The change feed lags (2026-10-06).**
+  A new file takes seconds to reach Drive's change feed, and a listing can still name a file the feed has reported trashed.
+  Both reached users through the change relay (§6), whose notice comes the moment a write is answered, so a device looks again after a notice (the scheduler's), and lists the clipboard, and reads the key file, twice (`lookTwice` in `sync/notesSync.ts`).
 
 <a id="onedrive-microsoft-graph"></a><a id="s5-2"></a>
 ### 5.2 OneDrive (Microsoft Graph)
-- Scopes: `Files.ReadWrite.AppFolder offline_access openid email`.
-  User consent only.
-- Root: `GET /me/drive/special/approot` — Microsoft creates `/Apps/<AppName>` automatically, where `<AppName>` is the Entra app registration display name.
-  Register it as `skysa-notes` to match `APP_FOLDER_NAME`; no ensureRoot creation logic beyond writing `.notesapp.json`.
-- Files, create: `PUT /me/drive/special/approot:/{path}:/content?@microsoft.graph.conflictBehavior=fail` (simple upload, fine for markdown; add a resumable session only if a file ever exceeds 250 MB).
-  Graph's default for an upload is to **replace**, so the `fail` is what keeps a create from being a blind overwrite; a name in use answers `409`.
-  The adapter looks the path up before raising `ConflictError`; Graph does not say what an upload into a missing folder does (it may make the folders), so a refusal with nothing at the path and no parent folder is `NotFoundError` for the parent.
-  A file that is not a note goes up the same way, its bytes as the body and its type as `content-type` (`application/octet-stream` if none) (2026-10-03, #187): a simple upload takes up to 250 MB (https://learn.microsoft.com/en-us/graph/api/driveitem-put-content), ten times the app's cap, so there is still no session.
-- Files, update: `PUT /me/drive/items/{id}/content` with `If-Match: <eTag>` → `412` when stale.
-  **By id, never by path**: an upload by path creates a file that is not there, and a file deleted since the caller last saw it is exactly what an expected version is meant to catch.
-  The adapter looks the path up first for the id (and answers a stale or missing file without uploading); `If-Match` covers the moment between.
-- Neither the `conflictBehavior=fail` → `409` nor the `If-Match` → `412` behaviour of an upload is in Graph's reference pages — they come from the OneDrive docs' issue tracker and Microsoft Q&A — and the move page documents only `if-match`, not `conflictBehavior`.
-  All three wait on the live run in Phase 3.
-- Folders, create: `POST /me/drive/items/{parentId}/children` with `{ name, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }`.
-  **The parent goes in by id, never by path** — the same rule the update above follows, and for a blunter reason: Graph answers a `POST .../children` whose parent is addressed by path with a bare `400 invalidRequest`, at every depth, whatever the name and `conflictBehavior` say.
-  Measured against a live personal account 2026-09-21: `POST special/approot/children` 400, `POST approot:/{parent}:/children` 400, `POST /me/drive/items/{parentId}/children` 201.
-  `GET .../children` by path is fine, and so is `PUT approot:/{path}:/content`, which is why an app folder could hold its marker and refuse the first notebook beside it.
-  The root's id is cached, so only a nested folder costs the lookup.
-  The wire stub accepted the path form and so could not catch this: it now refuses it as Graph does.
-- Move: `PATCH /me/drive/items/{id}?@microsoft.graph.conflictBehavior=fail` with `{ name, parentReference: { id } }`.
-  The parent is named by its real id (Graph refuses `root` there), so a move costs a lookup of the destination and its parent.
-  The destination is looked up *first*: a queued move the entry has already made returns without a request, and a rename that changes only the case of a name is still sent.
-- Reading: `/content` answers with a `302`, which a cross-origin request carrying an Authorization header may not follow.
-  The adapter reads the item for its eTag and `@microsoft.graph.downloadUrl`, then fetches that URL **without** the token: it is pre-authenticated, needs no preflight, and is not on Graph — `*.files.1drv.com`, `my.microsoftpersonalcontent.com`, or `*.sharepoint.com` for work accounts.
-  Those are the hosts §9's `connect-src` needs besides `graph.microsoft.com`.
-- Version: `eTag`.
-  It changes on a move, where Dropbox's `rev` does not — which §7's `syncedHash` answers for a note renamed while it holds unpushed edits.
-  `cTag` changes only with content, but delta on OneDrive for Business omits it, so it cannot be the version.
-- Changes: `GET /me/drive/special/approot/delta`, following `@odata.nextLink`; the `@odata.deltaLink` is the next start.
-  `410` — and, on a link we stored, a `400` (a token Graph cannot read) or a `404` (the app folder it was for is gone) — is `CursorResetError`; the same on the very first request is an ordinary failure, since starting again would ask the same thing.
-  Deleted items carry a `deleted` facet and **no `name` at all** — not on Business and not on a personal account either, which the note here used to imply.
-  Verified against a live personal account 2026-09-21: a deletion arrives as its id, its `parentReference`, the `deleted` facet and a `file`/`folder` facet, and nothing else.
-  The adapter never asks for one (it resolves a deletion by id through the tree), so nothing depended on it, but the wire stub was sending a name no caller could really have and no longer does.
-- Paths: **delta never includes `parentReference.path`**, and a renamed folder's descendants are not reported.
-  The adapter therefore keeps the tree — id → parent id, name, kind — **in the cursor** (`packages/core/src/providers/idTree.ts`, which Google Drive's adapter shares; what is Graph's own — the link, dead-link rules, the anchoring refusal — stays in `onedrive.ts`), and resolves every path from it once the whole page is applied, so an edit inside a folder renamed in the same page gets the new path.
-  Consequences: a folder rename is reported as the folder alone (the engine's folder-only path, as for Drive); a deletion is reported at the path the item had before the page, and one the tree never placed by its id alone (the engine finds nothing for an id it does not hold); an item whose parent has not arrived yet is carried in the cursor, with the path it had, until the round ends.
-  Graph lists every parent of a changed item unless asked not to (`deltaExcludeParent`), so an item the round ends without placing has left the app folder — the user can move things out of it — and is reported deleted where it was.
-  A deletion's old path is walked up the tree as it was, through any held item by the path *it* had, so a note deleted inside a folder still waiting on its new parent is reported where it was.
-  Every deletion Graph lists is reported, even inside a folder also reported deleted: the engine matches it by id, and a filter by path cannot tell two folders that held the same old path within one round apart.
-  At the end of a round anything else the tree can no longer place (what was inside a folder that was deleted or moved away) is dropped from it without being reported — something above it that was placed before moved or went, and that is reported.
-  A file delta lists with no eTag is left out rather than thrown over, since one would stop every pull.
-  A first scan that has items but none naming the app folder as parent is refused rather than reported as an empty folder, which would delete every clean note; the app folder's id is read afresh at the start of every scan.
-  The cursor grows by a few hundred bytes per item in `syncState`, and every link read back from it must be on `graph.microsoft.com` before a token is sent to it.
-  Outside delta, the path an item was asked for plus the name Graph returns gives its path.
-- Graph lists the app folder itself in its delta; the adapter drops it (§7 guards the same in the engine).
-- What a round reports, measured against a live personal account 2026-09-21, with a cursor held across each: **deleting a folder of notes** lists the folder and every note in it, each as a nameless tombstone.
-  **Moving a subfolder of notes out of a folder and deleting that folder in one round** lists the moved subfolder at its new parent and the old parent as deleted — and says nothing about the notes inside the subfolder, which is the case the id tree exists for: their paths rebase from their parent's move, not from an entry of their own.
-  **Renaming a folder while moving a note into it, in one round** lists the folder under its new name and the note under that folder, and the note ends up inside it.
-  All three match what §7's "A round is one batch" assumes.
-- Graph says to apply a round's changes after its last page, and the engine does (§7, "A round is one batch").
-  Within a page every path is where the item is once the page is in, so the adapter lists the page's folders first, outermost first, and everything else after in the order it happened: a file listed ahead of the rename of the folder it lands in would otherwise be carried off by that rename.
-- The two resync codes are told apart.
-  Graph answers a dead token with `410` and one of them, and they disagree about whose copy may have lost something: `resyncChangesApplyDifferences` says "Replace any local items with the server's version (including deletes)", which is what a scan does anyway, while `resyncChangesUploadDifferences` says "Upload any local items that the service didn't return" — a server-side restore.
-  So `CursorResetError` carries `uploadDifferences`, and the rescan it starts deletes nothing (§7, "A rescan that uploads").
-  The code is read from `code`, from `innerError` and `innererror` alike, and from the `details` list, since the page says only "an error response containing one of the error codes below" and missing it is the direction that costs notes; anything unrecognised, `resyncRequired` included, falls back to today's reset and never to uploading.
-  A folder moved *into* the app folder from elsewhere is reported alone; whether Graph lists what is inside it is one of the live checks.
-- OAuth (the kit's `packages/server/src/oauth/onedrive.ts`): Authorization Code + PKCE against `login.microsoftonline.com/{MICROSOFT_TENANT}/oauth2/v2.0/{authorize,token}` as a confidential Web client, `response_mode=query`, `prompt=select_account` — without it Microsoft silently uses whatever account the browser is signed in to, which on a shared machine may be someone else's, and in storage-first that account then signs in as the user it is connected to.
-- Account id: the ID token's **`sub`**, read from the token endpoint's response without a signature check (OIDC Core §3.1.3.7 allows it for a token received directly over TLS), and refused unless its `aud` is this client.
-  Not `oid`, which needs the `profile` scope and is the same across every app a user signs in to; `sub` is pairwise — derived from the app, the user and the tenant they signed in through — which is all a connection needs, though an operator who changes `MICROSOFT_TENANT` to a tenant where their users are guests makes every returning user look new.
-  Display name: the `email` claim, else "OneDrive"; it is unverified and a tenant admin can set it to anything, so it is stored with `email_verified = false` and must never link accounts (§6).
-  So no Graph call is needed to name the connection.
-  Claims are read at the code exchange only: the ID token a refresh returns is one Microsoft says not to rely on.
-- Tokens: refresh tokens issued to the backend and **rotated on every refresh** — `/api/token` stores the new one; access tokens ~1h.
-  Microsoft has no per-app revoke, so disconnecting deletes the row and answers `revoked: false` (§9).
+
+The kit's ([§5.2](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#onedrive-microsoft-graph)), in the app's special folder, `approot`.
 
 <a id="dropbox"></a><a id="s5-3"></a>
 ### 5.3 Dropbox
-- App type: **App folder** access.
-  Scopes: `files.metadata.read files.metadata.write files.content.read files.content.write account_info.read`.
-- Root: with App folder access, the API root *is* `/Apps/<AppName>`, where `<AppName>` is the app name set in the Dropbox App Console (immutable after creation — create it as `skysa-notes`).
-  All paths are relative to it. ensureRoot just writes `.notesapp.json` at `/`.
-- Files: `POST content.dropboxapi.com/2/files/upload` with `mode: { ".tag": "update", update: rev }` for conflict-safe overwrite (Dropbox returns a conflict error rather than auto-renaming when `autorename: false`).
-  `mode: add` for create.
-  **`strict_conflict: true` is required**: without it an `update` whose rev no longer matches still succeeds when the file has since been deleted, which is exactly the case the expected version exists to catch.
-  A file that is not a note is the same `add`, its bytes as the body (2026-10-03, #187); one request carries up to 150 MiB (the `upload` route in Dropbox's API spec, `files.stone`), past which Dropbox wants an upload session the app's cap never needs.
-- `Dropbox-API-Arg` is an HTTP header, so it must be ASCII: every character above printable ASCII has to be `\uXXXX`-escaped or a notebook named in a non-Latin script fails at the transport with an unhelpful 400.
-- Errors: only a **409** carries an endpoint-specific `error_summary`; any other status may carry plaintext or an intermediary's HTML, so a tag is only ever read out of a 409, and by whole `/`-separated segment rather than substring.
-  Otherwise a 503 whose body happens to say `conflict` would have the conflict rule copy the user's note aside over an outage.
-  Match by segment, not equality — Dropbox says the tail carries detail that can change.
-  A conflict does not include the current entry, so the adapter fetches it with `files/get_metadata` before raising `ConflictError`; that extra round trip happens only on the conflict path.
-- `strict_conflict` also means Dropbox answers `conflict` for an `update` whose file has been **deleted**, where §4 calls for `NotFoundError`.
-  The adapter tells them apart by looking the path up after a conflict: no entry plus an expected version is the deleted case.
-  The engine's re-create-on-push path depends on it.
-- `path_display` is nullable in Dropbox's spec.
-  Defaulting a missing one to the empty string would produce an entry pointing at the app-folder **root**, which a later `delete` would act on, so the adapter refuses such metadata loudly instead.
-- A cursor Dropbox cannot parse comes back as a plain **400**, not as `reset`.
-  Both mean discard and re-scan; only one is typed, so the adapter maps a 400 from `list_folder/continue` to `CursorResetError` too.
-  Without it a truncated cursor is retried forever.
-- Folders have no `rev` and no `server_modified`.
-  The adapter reports both as empty rather than inventing them, and nothing compares either for a folder.
-- `create_folder_v2` answers with a `CreateFolderResult` whose `metadata` is declared as `FolderMetadata`, not as the `Metadata` union — so alone among the endpoints the adapter reads entries from, **it carries no `.tag`**, and a shared mapper that reads one calls every folder the app creates a file.
-  `list_folder`, `get_metadata`, `move_v2` and `delete_v2` all tag what they return.
-  Verified against a live account 2026-09-21, after the wire stub had tagged it anyway and hidden exactly that bug; `toFolderEntry` sets the kind from the endpoint rather than from the payload.
-- `create_folder_v2` **creates missing parents itself**, in the one call (verified 2026-09-21: `a/missing/deep/child` under an empty `a` succeeded).
-  So a `mkdir` whose parent another device removed does not fail, and the engine's `ensureRemoteFolder` retry is unreachable on Dropbox.
-  Note the corollary: it silently re-creates a folder the user deleted elsewhere, rather than refusing.
-- A `rev` is lowercase hex of at least 9 characters, and Dropbox validates that **shape before it compares the value**: a malformed one is a plain 400, not a conflict and not a missing file.
-  Nothing in the engine can send one, since every rev it holds came from Dropbox, but a test that makes one up never reaches the behaviour it means to check — which is why the contract suite takes a per-provider `staleVersion`.
-- Worse for a test than the shape rule, and the reason the suite now seeds and deletes a real file rather than inventing a version: an `update` **whose rev Dropbox has never issued** finds nothing to conflict against, so where the path is absent it simply **creates the file**, `strict_conflict: true` or not.
-  Measured 2026-09-21: absent path + unknown rev → created; deleted path + unknown rev → created; deleted path + that file's real former rev → `conflict`, which is the case above and the only one the engine can produce; present path + non-matching rev → `conflict`.
-- Version: `rev`.
-- Changes: `files/list_folder` with `recursive: true` on first sync (returns cursor), then `files/list_folder/continue`.
-  Optional later: `files/list_folder/longpoll` for near-instant sync while the tab is open.
-- A round's entries are to be processed in order, each `DeletedMetadata` taking whatever is at its path then, and children included; a renamed folder comes back as its old path deleted and the new folder with everything in it listed again.
-  Neither is on the API reference page; both are Dropbox staff answers ([processing order](https://www.dropboxforum.com/discussions/101000014/why-should-i-remove-the-entry-and-all-its-children-for-each-deletedmetadata-when/535415), [renamed folders](https://www.dropboxforum.com/t5/Dropbox-API-Support-Feedback/Handling-renamed-folders-in-list-folder-list-folder-continue/td-p/225665)).
-  The wire stub replays what happened in order but reports a move as the new place alone, with no deletion of the old path; `randomRemote.test.ts` also runs the fake's feed told as Dropbox tells it — the old path deleted by path alone, then the new place, with and without the children listed again.
-  An id-less deletion under a folder the round renames cannot be told apart from the rename's old path, so the engine asks the provider (§7).
-  **Both confirmed against a live account 2026-09-21**: renaming `Work` to `Renamed` reported `Work/a.md` deleted, `Work/b.md` deleted, `Work` deleted, then `Renamed` and both its children — children before their parent on the way out, parent before its children on the way in.
-- Paths: use `path_display`; Dropbox also gives an `id` (`id:...`) — store both, prefer id for identity.
-- Tokens: `token_access_type=offline` → refresh token.
-  Access tokens ~4h.
-- Note: production apps need Dropbox "production" approval once past the dev user cap; App-folder apps have a light review.
+
+The kit's ([§5.3](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#dropbox)), as an App-folder app.
 
 <a id="webdav"></a><a id="s5-4"></a>
 ### 5.4 WebDAV
 *Deferred indefinitely (2026-09-17).*
-WebDAV is not being built.
-What follows is the design as planned, kept so it need not be worked out again if that changes; nothing in this repo implements it.
-
-- Auth: URL + username + password (app password recommended).
-  Stored encrypted on the backend; the client never sees them.
-- Transport: **all WebDAV traffic goes through `/api/webdav/*`** because most servers don't emit CORS headers.
-  The proxy forwards method/headers/body verbatim, injects Basic auth, restricts to the configured base URL, and streams bodies.
-  Supported methods: `PROPFIND`, `GET`, `PUT`, `MKCOL`, `MOVE`, `DELETE`, `REPORT`.
-- Root: the user supplies a base URL that *is* the app folder (e.g. `https://cloud.example.com/remote.php/dav/files/david/Notes/`).
-  ensureRoot does `PROPFIND depth 0`, `MKCOL` if 404, then writes `.notesapp.json`.
-- Files: `PUT` with `If-Match: <etag>` for updates, `If-None-Match: *` for creates.
-  Version = `ETag` (strip weak prefix `W/` and normalize quotes).
-- Changes: no universal delta.
-  Strategy in order of preference:
-  1. RFC 6578 `sync-collection` REPORT if the server advertises it (Nextcloud/ownCloud/SabreDAV do) — cursor is the `sync-token`.
-  2. Fallback: full recursive `PROPFIND depth infinity` (or depth 1 walk if infinity is refused) diffed against the last snapshot.
-     Cap frequency (e.g. on app open + every 5 min while active).
-- Identity: path-based.
-  After a `changes()` pass, re-link renamed files by reading frontmatter `id` of any "new" file whose size/etag suggests it might be a moved note.
-  Accept that renames done outside the app look like delete+create in the worst case.
-
----
+WebDAV is not being built, and the design as it was planned is the kit's ([§5.4](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#webdav)).
 - The adapter takes a `fetch`-like function, so it can point at the proxy in the browser and at the server directly in tests; a Nextcloud container was the planned test target.
 
 <a id="backend"></a><a id="s6"></a>
@@ -965,7 +582,7 @@ So it has tables of its own, as the clipboard does, rather than rows in `files`.
   A copy missed is not marked: if a worker failed or was too slow, the copy is asked for again the next time the picture is shown.
 
 **Files beside notes, in the store (2026-10-03, #187).**
-A file that is not a note is a row of its own (`SyncFile` in `packages/core/src/sync/store.ts`), mirrored as what the remote says of it — path, id, version, size — and never its bytes, which are fetched when the file is shown and kept apart in `fileBytes`.
+A file that is not a note is a row of its own (`SyncFile` in `@skysa/sync`, the kit's `packages/sync/src/store.ts`), mirrored as what the remote says of it — path, id, version, size — and never its bytes, which are fetched when the file is shown and kept apart in `fileBytes`.
 Two kinds of row, two rules:
 - A **bound** row (it has a `remoteId`) is a copy of the remote's word.
   A pull may rewrite or drop one freely: the worst a wrong one costs is a picture that does not show until the next scan.
@@ -1006,109 +623,8 @@ The store's other promises, each pinned by the contract suite:
 Bytes are an `ArrayBuffer` rather than a `Blob`.
 Every browser keeps a large value of either kind out of line, but a `Blob` does not survive the structured clone of the IndexedDB the tests run on.
 
-**Pushing files (2026-10-03, #187).**
-Three ops, each in `packages/core/src/sync/push/files.ts`:
-- **`upload`** sends a pending row's bytes to where the row is now.
-  The bytes are those held here; for a copy made when a note moved and its file could not go with it, they are the bytes of the file it copies (`copyOf`), read from the remote.
-  The provider is told a content type by extension (`contentTypeOf`), which it records and nothing here reads.
-  A missing parent is made, a level at a time, as for a write.
-  Something already at the name is handled in one of two ways:
-  - **The same file** — a file the size of the bytes being sent, that no other row holds and no queued `delete-file` is to take — is adopted.
-    It is this device's own upload whose answer never came back, or the same picture added on another device; names carry the bytes' hash, so a name and a size that both match are almost always that.
-  - **Anything else** keeps the path, and the upload goes beside it as `<stem> (conflict <stamp>).<ext>`.
-    The note that links the file is not rewritten.
-    The conflict name is chosen from one listing of the folder and the rows here, not found by trying names: Dropbox and OneDrive take the whole body before they say a name is taken, and a row not yet sent holds its name as surely as a file there.
-    A second clash is a race with another device; eight, and the op fails and is tried again.
-
-  With no bytes here and nothing left at `copyOf`, the row goes (`lost-file`).
-  Only a not-found says that: any other failure to read the original fails the op, and the copy is tried again.
-- **`move-file`** moves by id, from where the op says the file is (the store keeps that current as pulls move it) to the row's path.
-  A not-found is asked of the origin folder's listing, never of the file, since reading the file would download it: gone, the op is done; still there, the target folder is made and the move tried again.
-  The same file at the target is adopted, and the one moved from is left where it was, because another note may link it there.
-  That includes a note on another device, which copied the file rather than moving it.
-  Until a full scan this device does not see that file again: a known gap, and nothing is lost.
-  The row keeps no bytes it had cached, which were the other file's.
-  Anything else at the target and the file goes beside it, as an upload does.
-- **`delete-file`** deletes by the id the queue recorded.
-  Not found is what was wanted.
-
-`rmdir`'s third gate counts file rows, so a notebook holding a file not yet sent is the user's still.
-
-**Uploads do not hold up the queue.**
-This is the second exception to the ordered queue, after `rmdir`.
-An upload that fails is counted against its attempts and stepped over, and one out of attempts is stepped over and kept.
-It is never completed: it is the only copy of the file.
-A note that links the file goes without it, and other devices show the file as not there until it lands, which heals itself.
-- **Order.**
-  An upload's first try keeps its place, so a file lands ahead of the note that links it, and the edits behind it wait for that one try.
-  Once it has failed, each push sends it after everything else, so the edits queued since do not wait out its further tries on the connection that failed it.
-  A copy (`copyOf`) keeps its place, for the reason in the last bullet.
-- **Status.**
-  The outcome carries `waitingUploads`.
-  Its status is `retry` when an upload failed this run, and `blocked` when one is out of attempts; the scheduler gives a blocked queue its attempts back in time, as for any stuck op.
-  A conflict resolved, or a failure met, behind a stepped-over upload keeps that count.
-- **What it costs.**
-  A `retry` arms the scheduler's backoff for the whole connection, so an edit made after an upload failed waits for the backoff (5 s, doubling to 5 min), as it would after any failed run.
-  Kept so on purpose for a run that failed only on uploads (2026-10-03, #187): an upload that fails is a provider or a connection failing a request, which the next note's write would most likely meet too, and a backoff that spared upload-only runs would send the 25 MB again on every trigger while the connection is down.
-  The edits queued behind it are not lost, only later, and the user's Sync now skips the wait.
-  The queue is read once, when a run begins, so an edit typed while an upload is on its way waits for that run to end as well — up to the nearly ten minutes a 25 MB upload is given at 50 KB/s (§4) — and goes in the next.
-- **Naming what is stuck.**
-  `stuckOp` in `apps/web/src/sync/scheduler.ts` names the first op out of attempts that is *not* an upload, which is the one that stopped the drain, and an upload only when nothing else is given up on: the queue is ordered, but an upload stepped over holds nothing up.
-- A rate limit or a refused token still stops the drain, since neither is the upload's fault.
-- **What waits.**
-  One op behind a stepped-over upload does wait for it: a `delete-file` of the file the upload copies.
-  Sent first, it would leave the copy nothing to read, since a deleted file cannot be read back by its id — trashed on Drive, gone on OneDrive and Dropbox.
-  What that held delete is still in the way of waits with it: an `rmdir` over it, which would find the file and leave the folder standing for good; and an upload or a `move-file` to its name, which would meet the file on its way out and go beside it, away from the name the note links.
-  An upload held so counts as waiting, and a copy among them holds back the delete of what it copies.
-
-**Pulling files (2026-10-03, #187).**
-Every listed file that is not a note and not hidden becomes a row, or brings its row up to date.
-Nothing is downloaded: bytes are fetched when the file is shown.
-No file decision calls the network, because a wrong bound row costs at most a picture that does not show until the next scan.
-The rules, in `packages/core/src/sync/engine.ts` (`decideAttachment` and the functions around it):
-- **Matching.**
-  An entry is matched to a row by `remoteId` first.
-  A row whose remote path, version and size are unchanged is passed over.
-  Failing that, a pending row at the entry's path with the entry's size is adopted: an upload whose answer never came back, or the same picture added on two devices.
-  Otherwise the entry is a new row.
-- **The remote keeps the path.**
-  A row in the way that has no file at that path, either never sent or moved there by the user, steps aside to a conflict name that keeps its extension (`displace-file`), and its upload or move goes there instead.
-  A bound row in the way is let go of, unless the batch says later where its file went.
-- **The user's word.**
-  An entry for a file with a `delete-file` queued is passed over.
-  A row with a `move-file` queued stays where the user put it, and the move's origin follows the remote.
-- **Deletions** are matched by id, or, on Dropbox, by path against where the file is on the remote.
-  A bound row goes.
-  A row the user moved here is theirs, as an edit is: it is pending again where the user put it, and sent from the bytes held here (`reupload-file`).
-  Where none are held it is pending all the same, and goes when its upload finds nothing to send (`lost-file`).
-  The engine cannot see the bytes without reading up to 25 MB, and a row the store dropped while the engine still placed it got a later change in the batch refused, and with it the batch, on every pull for good (#194).
-  The same holds when the folder its file was in is deleted there, which the cascade alone would not reach, because the row is no longer under it; and when another file is listed at the row's old path with no word of where its own went, as Dropbox reports a file replaced in place, where the move would find nothing to move (`originsTaken`).
-- **Folders.**
-  A remote folder's deletion takes the bound rows under it, and keeps pending rows and the rows the user moved into it, whose files are still elsewhere there.
-  The notebooks they need are made again, as they are for a note a cascade keeps.
-  It also spares (`keepFiles`) a file the rest of the round lists again, so that its own entry puts it where it now is as the same row, with its bytes; taken by the cascade, it would come back as a new row with none.
-  This is the files' answer to the subfolders a deletion rescues.
-  A folder's move carries its rows.
-- **Across kinds.**
-  A note's file renamed to a name that is not a note's lets the note go, as a deletion would.
-  A file renamed into `.md` loses its row and is imported as a note.
-- **Hidden paths.**
-  An entry at a hidden path is passed over, so it says nothing of where a file went.
-  A file moved into `.trash` is gone, as a deletion would say, and no rule reads the trash as its next place (`Batch.listed`, #194).
-- **Scans.**
-  A bound row that a full scan did not return goes, as a deletion would take it, so one the user moved is sent again.
-  On an upload-differences reset every such row is sent again, and one with no bytes held is pending until the push that follows lets it go.
-- **A known gap.**
-  A row the user moved into a notebook, with the notebook and the file both deleted there and no bytes held, has the notebook made again for it, as for a note a cascade keeps.
-  When the row goes at the push, the notebook stays, empty and local.
-  Rare: the app moves a file only with the note that links it, or with its notebook.
-- **A backstop**, `settleFileClashes`, settles two rows left at one path at the end of a batch.
-
-Within a batch, the decisions are replayed over the file rows exactly as the store will apply them (`placedFiles`), memoised per batch.
-Exactly, because a row the replay and the store disagree about has a later change about it refused, and the batch with it, on every pull.
-The single-device soak (`randomRemote.test.ts`) checks after every pull, on every stub and page size, that the rows are the remote's files that are not notes.
-The two-device suite (`overProviders.test.ts`) does the same at rest, and checks that a file added on either device reaches the remote with its bytes unless its notebook was deleted.
-
+**Pushing files, and pulling them (2026-10-03, #187)**, are the engine's: three ops, `upload`, `move-file` and `delete-file`, an upload that holds up no note behind it, and a pull that mirrors the remote's files beside the notes and never reads one as a note ([the kit's "Files beside documents"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#files-beside-documents)).
+The single-device soak (`randomRemote.test.ts`) and the two-device suite (`overProviders.test.ts`) are the kit's too.
 **Files in the library (2026-10-03, #187).**
 The app's own writers, in `apps/web/src/store/files.ts`, `queue.ts`, `notes.ts` and `folders.ts`:
 - **Adding a file** (`addAttachment`) refuses anything over 25 MB, and a `.md`, which the engine would take for a note.
@@ -1196,39 +712,11 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
 
 <a id="sync-loop-per-connection"></a>
 ### Sync loop (per connection)
-1. **Pull**: `changes(cursor)` → for each remote entry:
-   - new/updated remote, local clean → fetch content, upsert local, update `remoteVersion`.
-   - new/updated remote, local dirty → **conflict** → apply rule from §1.
-   - remote deleted, local clean → delete local.
-   - remote deleted, local dirty → keep local, mark `remoteId = null` (will be re-created on push).
-   - Persist cursor only after the batch commits to IndexedDB.
-   - Cold start on a new device is a full scan (`changes(undefined)`); no remote index file.
-     Revisit only if cold start exceeds ~10 s at ~2k notes.
-   - A full scan reports how far it has got (`SyncEngineOptions.onProgress`, 2026-09-23).
-     **It lists every page before it reads a note**, where it used to read each page as it was listed: no provider gives a total up front, and listing first is what gives one before the first download rather than after the last.
-     Nothing is lost by it — a scan's pages carry no cursor, so an interrupted scan starts from the top either way — and pages are still decided and applied one at a time, so notes still appear as they arrive.
-     While listing it says how many notes it has found so far; after, `done` of `found`, counting a note already held at its version as done without reading it (so a resumed import does not claim to download everything again), with the `path` of each file read.
-     The push after it reports `done` of `total` ops and the path about to be sent.
-     A round from a stored cursor reports too (2026-10-05): it reads every page before it decides any ("A round is one batch", below), so it knows how many notes it names before it reads the first, and says `done` of `total` as each is decided — read, or already held at its version, as this device's own push reported back is.
-     It was thought short and reported nothing; but another device's import of a thousand notes is one round, nothing of which shows until all of it is read, and on Google Drive that is two requests a note one after another — minutes in which the other device showed its notebooks and nothing in them, with nothing to say why.
-     The round is still applied whole; only the count is new.
-     **It says so while it reads its pages, too (2026-10-13).**
-     Reported on a phone: after a lot of notebooks were moved on the desktop, "Syncing…" for minutes with nothing else, and then a count.
-     A notebook moved is not one folder moved on the remote — `moveFolder` sends a `mkdir` for each new folder and a move for each note and file in it — so the other device's next round names every note moved, and its pages were read with nothing said: on Google Drive each page also lists, one request a folder, every folder new in the round (four at once since a later change the same day, §5.1).
-     A round now reports `receiving` with `listing` before its first page, and after each page that names more notes, how many it has named so far (`total`, `done` 0), then `listing: false` with the whole count — even when that is none, so the words never outlive the reading.
-     A scan reports before its first page as well.
-     The line says "Checking…" (a scan, "Looking for notes…") from the first, and the count with a bar that does not know of how many once it has found twenty; on Drive a round of up to a thousand changes is one page, whose folder listing is still read before there is any count to give, so there it says the words alone.
-     The storage panel shows the count (`syncCount` in `components/account/statusWords.ts`, which reads it as a run's details and a first import's dialog do, with `runCount` and `runBar` in `sync/progress.ts`, and `runSentence` beside it): in a wide window, in a few words in the status line at the sidebar's foot ("120 of 1,000 sent"), with the sentence and the file it is on in the line's tooltip and a bar in the panel's padding under it; in a compact window, as the panel's sentence over the bar.
-     A round or a push of a few notes is not shown as a count: the panel says how many only from twenty up (`PROGRESS_FROM`), so an edit's sync does not flash a bar.
+1. **Pull**: the engine's ([kit §7, "Sync loop"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#sync-loop-per-connection)).
+   It reads from the stored cursor, or scans the whole folder on a new device, and applies what it reads a batch at a time, keeping the cursor only once its batch is in the store.
+   A run says how far it has got (`onProgress`), and the storage panel shows the count from twenty notes up (`syncCount` in `components/account/statusWords.ts`), so an edit's sync does not flash a bar.
    - **A pull keeps what it has read until its batch commits (2026-10-05).**
-     A batch is all or nothing — a round always, and a scan a page at a time, which on Google Drive is a thousand notes (`PAGE_SIZE` in `providers/gdrive/wire.ts`) — so a pull that failed at the last note threw away every note it had read, and the retry read them all again.
-     On a phone that is every time the screen goes off mid-import: the network goes with it.
-     The engine now keeps each note it reads (`held` in `packages/core/src/sync/engine.ts`), by remote id and the version the read reported, and answers a later read of that file at that same listed version from it; a committed batch's entries are let go of, entry by entry rather than all at once, since a retried scan commits its earlier pages again before it reaches the one that failed, and all of it once a pull reaches the end, when what is left is a file the listing no longer names.
-     Only the pull's own read of a note goes through it — never a read that asks whether a file is still there, which is about now, nor the push's.
-     It is in memory, so it lasts as long as the engine, which is one session of one connection (`follow` in `sync/scheduler.ts`): a reload, a switch of source, or another tab taking the sync lock starts empty.
-     Not capped: the strings are the ones the batch's own changes hold while it runs, one version per file.
-     Committing a scan in smaller pieces instead was looked at and set aside: the engine decides each entry with the whole batch in view (`noteForEntry`'s look at `batch.live`, `movesOn`, `claimed`), and a rescan split part-way can give a note's identity to the file that took its name.
-     That is already true across a provider's own page boundaries on a rescan, and is its own issue.
+     A pull that fails part-way, as one does on a phone whose screen goes off mid-import, starts again without reading again what it had read ([kit §7, "Sync loop"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#sync-loop-per-connection)).
    - **Syncing says when it waits on this device (2026-10-10).**
      Reported on a phone: "Google Drive · Syncing…" for minutes and nothing else, while the run sat behind reads another tab of the app had left open (§7, "A frozen tab lets go of the database").
      To the user that looked like a slow network.
@@ -1279,17 +767,8 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
      So the words are shorter, each fitting the 131px at the counts a sync usually has ("Checking…", "40 changes found", "1,234 notes found", "120 of 1,000 sent", "Waiting for a tab"), with a count first, so that a cut leaves the numbers.
      And the line is one line whatever it says, cut with "…" where it does not fit (`.account-status`): the whole of it is in the tooltip and in the dialog the line opens.
      The bar is drawn in the panel's bottom padding, centred in it (`.account-bar`), and takes no room: the panel is one height from the start of a sync to its end.
-2. **Push**: drain `opQueue` in order — except that where the provider takes more than one at a time (`StorageProvider.writesAtOnce`, 2026-10-05), the writes of notes at its front go that many at once (`together` in the engine).
-   That is four on Google Drive, where a new note is three or four requests end to end and, one at a time, an import of a thousand took most of half an hour; four is well inside its limits (a user has 325,000 quota units a minute, a note costs a few hundred: https://developers.google.com/workspace/drive/api/guides/limits).
-   Dropbox stays at one: it locks the namespace for each write, and enough at once are answered `429 too_many_write_operations` (https://docs.dropboxapi.com/dropbox-api/docs/performance), a rate limit that backs the whole sync off.
-   OneDrive stays at one until it has been measured.
-   Only notes' writes go together, each at its own path, and not the write of a note with a rename queued: that write takes the rename with it, and another note's write can be waiting on the name it gives up — renamed b→c and a→b, both edited, and sent together, the second met b.md still taken and was put beside it as a conflict.
-   A notebook made or removed, a move, a delete and a file each go alone in their turn, since those are what later ops depend on.
-   A notebook missing under writes sent together — deleted on another device while they had edits — is made once between them: each making it, Drive made one apiece, since its `createFolder` asks first whether the folder is there and none was yet.
-   The requests per note on Drive were left as they are: dropping the search before a create would save one in four, but it makes a duplicate on Drive that the search after must trash on every name already taken, which the stub cannot hold and no live run here has checked; and a folder-id cache is still refused (§5.1), the more so now — a notebook another device deletes in the middle of an import is what a device shown it empty does, and a cached id would send the rest of the import into the trash.
-   `write` passes `expectedVersion = remoteVersion`; on `ConflictError` → run conflict rule, re-queue.
-   On `AuthError` → request token from backend, retry once, else pause connection and surface in UI.
-   Exponential backoff per op; give up after N attempts and surface.
+2. **Push**: the engine's as well ([kit §7, "Sync loop"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#sync-loop-per-connection)).
+   It drains `opQueue` in order, and sends the writes of notes at its front several at once where the provider takes them (four on Google Drive); a write the remote refuses goes through the conflict rule, a refused token is asked for again once, and an op that keeps failing is tried again with a wait between and then said.
 3. Triggers: app open, tab regains focus, `online` event, 60s interval while visible, Background Sync API when available (best effort), immediately after a local edit (debounced 2s), and — where the deployment runs the change relay (§6) — a notice that another device of the connection has pushed, and 3 and 10 s after the last such notice.
    The relay is one more trigger, never a replacement for the others: it hears nothing of edits made in the folder by other tools.
    **When a push goes** (`sync/scheduler.ts`, record 0018):
@@ -1304,20 +783,8 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
 
 <a id="folder-renames-moves"></a>
 ### Folder renames/moves
-A remote folder rename or move is applied locally unconditionally, including when notes inside it are dirty: the move is metadata-only and does not conflict with content edits.
-Dirty notes keep their pending content ops and simply get their `path` rewritten; queued ops that reference old paths are rewritten before push.
-
-A folder renamed, moved or deleted *here* is not one op either: its notes and the files beside them (#187) go up as moves or deletes, and an `rmdir` follows them for **each** directory they left, outermost first.
-The bullets below say when an `rmdir` removes anything — which is only when the folder is still the one the queue meant and holds no file at all.
-
-One op per directory and not one for the outermost, though the outermost really does take its subdirectories with it on every provider, so each of the others sends nothing.
-The op is not only how the directory is removed: it is also how the *pull* knows the directory is spoken for.
-A sync pulls before it pushes, so between the move and the push the old directories are still on the remote, and the rows that named them have been re-pathed and stripped of their ids — which is what stops a full scan reading the id at the old path as a remote rename and undoing the move.
-To that pull they are directories nobody owns.
-`decideFolder` already refuses to make a notebook of one whose `rmdir` is queued, but it matches the op by id **and** path, which is what keeps it from dropping a folder another device has moved since; a subdirectory with no op of its own matched nothing.
-So the whole subtree came back — the notebook at its old path, ancestors conjured to hold it — and the outermost `rmdir` was then refused, because the device held a row under it again.
-The duplicate was permanent and on the remote as well as in the sidebar.
-Found by re-parenting a notebook that had been dragged into place a round earlier (2026-09-22): a directory this device made in the round before is exactly what its own next pull reports, which is why it needed a drag, a sync, and another drag to show up at all.
+A folder renamed or moved on the remote is applied here whatever is dirty in it, since a move does not conflict with an edit.
+One renamed, moved or deleted here goes up as its notes' and files' moves or deletes, and then an `rmdir` for each directory they left, which removes a directory only while it is the one the queue meant and holds nothing ([kit §7, "Folder renames/moves"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#folder-renames-moves)).
 
 <a id="re-arranging-is-moving"></a>
 ### Re-arranging is moving
@@ -1373,28 +840,13 @@ Remote wins the original path.
 Local content is saved as a new note at `<path minus .md> (conflict <YYYY-MM-DDTHH-mm>).md` with the same frontmatter except a fresh `id`.
 Both appear in the UI; a small banner links to the pair.
 
-The stamp is UTC and minute-resolution, with the `:` replaced — a colon is illegal in a filename on Windows and rejected outright by several provider APIs, and a copy the provider refuses to store is the lost edit this rule exists to prevent.
-UTC so two devices in different zones name the same conflict the same way rather than producing two copies that look hours apart and unrelated.
-A minute is not unique enough on its own, so a second conflict on the same note inside one minute gets `-2`, `-3`, and so on; the comparison is case-insensitive, because Drive, Dropbox and macOS all are.
-The name is deliberately **not** slugified: the copy has to be recognisable as the note it came from and sort next to it.
-
-The names are `packages/core/src/names/conflicts.ts`; the copy's contents, with its own `id`, are `packages/core/src/markdown/conflictCopy.ts`.
-The engine asks for both through the document format it is handed, `NOTE_FORMAT` in `markdown/format.ts` ([record 0018](decisions/0018-the-shared-kit.md)), and reads no markdown for itself.
+The engine applies the rule, and the stamp is written as the kit's section says: UTC, to the minute, with `-2` and on for a second copy in the same minute, and the name not slugified, so the copy sorts beside its note ([kit §7, "Conflict rule"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#conflict-rule-concrete)).
+This app hands the engine its document format, `NOTE_FORMAT` in `markdown/format.ts` ([record 0018](decisions/0018-the-shared-kit.md)): the kit makes the copy's name for the format's extension (`documentNames`), and the copy's contents, with a fresh `id`, are `packages/core/src/markdown/conflictCopy.ts`.
 
 <a id="merge-before-the-copy"></a>
 ### Merge before the copy
-An app may make the two sides one before the conflict rule applies, through the engine's `merge` option ([record 0018](decisions/0018-the-shared-kit.md)).
-This app passes none, so for it the rule above is the whole of it; memoriam's merges a passage practised on two devices.
-- **The option.** `merge({ path, local, remote })` returns the merged text, or `undefined` where the two cannot be one.
-  A merge that throws counts as none: a merge that cannot be made is a conflict copy, never a sync that stops.
-- **Where it is asked.** At both places the conflict rule is:
-  - a pull that finds a dirty note whose remote bytes changed (`decideKnown` in `sync/pull/notes.ts`);
-  - a write the remote refused (`pushMerged` in `sync/push/conflicts.ts`), which sends the merge against the version it read.
-- **The `merge-note` change** carries the merge to the store, which applies it only while the note still holds the text the merge was made from (`base`).
-  Otherwise the whole pull is refused, and the next one merges again from the note as it is.
-  - A merge that equals the remote's bytes leaves the note clean, and drops its queued writes.
-  - Any other merge leaves it dirty, with a write queued, so the merge is sent.
-  - A rename queued here is kept: the note stays at the name the user gave it.
+An app may make the two sides one before the conflict rule applies, through the engine's `merge` option ([kit §7, "Merge before the copy"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#merge-before-the-copy)).
+This app passes none, so for it the rule above is the whole of it.
 
 <a id="edits-the-editor-has-not-saved-yet"></a>
 ### Edits the editor has not saved yet
@@ -1486,431 +938,21 @@ The store cannot see the edit, so the save decides instead (`saveNoteBody`, `app
 
 <a id="what-the-loop-above-left-open-and-how-the-engine-answers-it"></a>
 ### What the loop above left open, and how the engine answers it
-
-The branch table is the specification; these are the cases it does not mention, each decided in the direction that cannot lose an edit.
-They live in `packages/core/src/sync/engine.ts` and, for the push, in `packages/core/src/sync/push/`.
-
-- **A file that is not a note is mirrored, and never read as one** ("Pulling files", above); anything at a hidden path is ignored.
-  The app owns the folder but not everything in it: a PDF the user dropped beside their notes would be corrupted by being read as markdown and written back, and `.notesapp.json` is our own bookkeeping.
-  Two separate checks, because the marker happens to satisfy both and would otherwise hide the loss of either.
-- **Same bytes, new version → adopt the version, do not conflict.**
-  This is our own write coming back, or two devices that saved the same thing.
-  Keeping the old version would make the next push send an `expectedVersion` the remote has moved past, manufacturing a conflict over a file that already agrees with us.
-- **A move reported as a deletion plus an entry** — which is what Dropbox and Graph do — must not act on the deletion.
-  Applied after the move it deletes the note outright, and which order they arrive in is the provider's business.
-  A remote id the batch says is somewhere *else* has been moved, not deleted.
-- **A deletion is settled by a write-back only if the write pointed the note at a *different* file.**
-  A note is written back by an entry about the very file a deletion names all the time — our own push echo arriving beside the other device's delete, which is what a rename here plus a delete there looks like.
-  Reading "this batch mentioned the note" as settled drops the deletion for ever and leaves the row pointing at a file that no longer exists; the next queued move for it can then never succeed, and the ordered queue strands every op behind it.
-  Asked of the *file*, the two cases separate cleanly.
-  A deletion carrying no id names no file, so there it stays a question about the note, and the provider is asked whether the file the note now points at is there: a rename queued here adopts the version without reading a byte, so the write-back says nothing about whether the file outlived the deletion behind it, and a note kept on suspicion points at nothing for ever.
-  Only "not found" lets go of it; any other failure fails the pull.
-- **Alive elsewhere, not alive anywhere.**
-  A batch routinely carries the state of a path before it was removed: our own write coming back, and then the other device's deletion of that same file.
-  Reading the earlier entry as evidence the file survived drops the deletion — and a deletion dropped here is dropped for ever, leaving a row that points at a file nobody will ever mention again.
-  The rule that entries are deduplicated to the last one about a thing applies here too: only an entry at a different path, or a later one at this path, says the file is still there — and an entry elsewhere counts only if it came after the thing was last listed at this path, since a round read whole carries a history (moved to `A`, back to `C`, deleted at `C`).
-  Where the batch has already carried the note or folder to the path the deletion names (edited at `B/c.md`, `B` renamed to `C`, `C/c.md` deleted), only an entry after the deletion does.
-- **A move may or may not change the version**, so the path is followed on both routes through the decision.
-  Dropbox's `rev` survives a move; OneDrive's `eTag` does not.
-  **And followed from where the batch has the note, not where the store last saw it.**
-  `A` renamed to `B`, a new `A` made, and `B/x.md` moved back to `A/x.md`, all in one round: the folder's rename carries the note to `B/x.md`, and the file's entry names the very path the row still shows.
-  Compared with the row, that reads as nothing having happened, so the pull reports `ok`, the cursor moves, and the note sits under the folder's new name over a file that is not there.
-  Its next write then finds nothing at the path, finds the file by id, finds no rename of its own to follow, and blocks the ordered queue.
-  The same holds for a file gone by the time it is read: whether the entry "would have moved" the note is asked of the batch too.
-- **The version a move hands back is not the note's until its bytes are known.**
-  A move changes no bytes, so it is tempting to keep the version it returns — but that is the version of the file as the move *found* it, and the engine has read nothing.
-  Another device can have edited the file since this one's pull.
-  Held as the note's own, the new version says "in step" about text this device has never seen: the pull skips the file as the version it already has, and the note shows old text until the file next changes; and a write checked against it is checked against the other device's edit, passes, and overwrites it with no conflict anywhere.
-  Every provider had this, the ones whose version survives a move included — there the version handed back *is* the other device's edit.
-  So after a move (`runMove`, and the move `followTheRename` makes ahead of a write) the engine keeps the returned version only if it is the one the note already held (Dropbox's `rev` and Drive's `headRevisionId` survive a move, so an unchanged file costs no read), or if the file, read by id, hashes to the note's `syncedHash` — and then it keeps the *read's* version, the one those bytes were seen under.
-  A row with no `syncedHash` uses its own text if it is clean.
-  Otherwise the note goes on holding the version it had, which is always safe: the next pull meets a version it does not know and reads the file.
-  `followTheRename` fails the write instead of sending it; the file has been moved, the retry finds it at the note's path under a version the note does not hold, and `resolvePushConflict` reads it.
-  If it did change, that is an ordinary conflict, which keeps both.
-  If it holds the bytes the note last synced, nobody edited it — the version moved because the file did, and the read that would have said so failed — and the write goes again under the version those bytes were read under, rather than demoting the user's edit to a copy beside a file with no other editor.
-  A read that fails in `followTheRename` fails the op as itself, so a rate limit is waited out and not counted; in `runMove` the rename has landed, and it is "cannot say".
-  A dirty row with no `syncedHash` at all (databases from before v0.1.0) cannot be told either way, and gets the conflict copy: a copy nobody needed, where the other guess is an edit nobody can get back.
-  The cost is one download per rename on OneDrive, whose `eTag` a move renews — no more than the pull would have spent on a version it did not hold.
-  Graph's PATCH takes `If-Match`, so a `move` with an expected version would make the check atomic and drop the read; not done.
-  The two-browser soak found both halves (seeds 578 and 461), where they turned on timing; `tests/sync/overProviders.test.ts` puts the other device's edit exactly where it has to land, over every remote.
-- **A deletion that names the file is believed.**
-  The rule above it — that a folder alive elsewhere in the batch means its children are not deleted — exists for a deletion carrying nothing but a path, and must not be applied to one carrying an id: the provider knew the file well enough to identify it, and "some folder above it is also in this batch" is not evidence against that.
-  A deletion dropped here is dropped for ever, because the cursor moves on and nothing mentions it again.
-- **A folder move is addressed by where the folder is now.**
-  Renaming `A` and then dragging `A/sub` out of it lands as two entries in one window, and the second decision is reached after the first has already rebased everything under `A`.
-  Naming the folder's pre-batch path moves nothing at all and says nothing about having failed, so the notebook keeps a position the remote abandoned until the next cursor reset — and a write into it then fails for ever.
-  Same rule as for notes, applied to the one decision-maker that was still asking the store alone.
-- **A folder move gets the folder in its way out of the way first.**
-  Two folders cannot share a path — the store keeps one row per path — so a move onto an occupied one overwrites that row and merges both notebooks' notes into whichever name survives.
-  Which of the two the engine does depends on what the rest of the batch says.
-  If the batch also reports the occupant deleted (the user deleted `Archive` and renamed `Archive 2024` onto its name), it is deleted first, which is the order the remote did it in and lets the store cascade its subfolders.
-  If nothing says it is gone, it is on its way somewhere else — two drags in one window — and it is moved aside under a conflict name, exactly as a note in the same position is, for the entry that says where it went to move it on from there.
-  Deleting it on suspicion would take notes nobody asked to lose.
-- **Which folder is in the way is a question about the batch too.**
-  By the second claim on a path, the folder standing there may be one an earlier decision moved in.
-  Reading the occupant off the store answers with the one that used to be there — and if *that* one is the one the batch deletes, the delete takes the newcomer's notes instead.
-- **A folder created and deleted inside one window is forgotten.**
-  Both halves arrive in the same batch, and the store — asked as it was before any of it — has never heard of the folder.
-  Without counting what the batch itself has just made, the notebook sits in the sidebar with nothing behind it.
-- **A remote folder delete keeps the dirty notes inside it**, detaching them so the next push re-creates them, and takes the clean ones and every subfolder with it.
-  Which of the two a note gets is decided against the batch as well: a conflict earlier in the same batch hands the local edit to a copy and leaves the note clean, so it goes with the folder rather than surviving it.
-  The folder is the user's remote layout; the note is their writing, and losing the second to a change in the first is not a trade worth making.
-  The store does the cascade in one transaction, because a provider that reports only the folder gives the engine nothing else to send.
-- **Decisions are reached against the store as it was, and applied in order**, so a later decision can be about a note an earlier one has already taken away.
-  A provider that reports a folder deletion recursively produces exactly that — the folder, and then each file that was inside it.
-  The engine tracks what the batch has already removed and says nothing twice; a note that turns up again afterwards (moved out of the folder in the same batch, or a file deleted and re-created at one path) is written back under the id it already had, so the user keeps one note rather than watching one vanish and another appear.
-  Belt and braces: `delete-note` and `detach-note` for an id the store does not hold are defined as no-ops, because a batch that rejects is a batch that is retried for ever — the cursor moves only with it, so a single unanticipated ordering would leave the user with a sync that never recovers on its own.
-- **One note per path, and one `remoteId` per note, once the batch has been applied.**
-  A note of ours can be sitting exactly where a remote one is about to land — two devices both writing an `Untitled.md` offline is the ordinary way to get there.
-  Left alone, the two share a path: the sidebar shows one row twice, the queued write for ours eventually lands on the other one's file, and both rows end up carrying one remote id — after which `noteByRemoteId` only ever hands back one of them and the other is stale for ever.
-  So ours moves aside first, under the name a conflict copy would get, because that is what it is.
-  That applies whether or not it has been pushed: a pushed note has no claim to the path either, since the remote has something else there, and it keeps its `remoteId` so the entry saying where its file went puts it back.
-  Duplicates are therefore possible *during* a batch, which is why the store must not put a unique index on the path, and must not make room by deleting what is there.
-- **Whether a path is occupied is a question about the batch, not the store.**
-  By the time a change runs, an earlier one may have moved the occupant out, deleted it, conflicted it onto the remote's path, or carried it off with a folder — and one the store says is nowhere near may be about to be carried *in* by a folder move, which re-lists no children, so nothing else in the batch mentions it.
-  Asking the store alone either moves a note that has already gone — which fails the batch, and a failed batch is retried for ever — or leaves two notes on one path.
-  So does asking it what names are free: the same folder move can bring in the exact name a conflict copy was about to take.
-  More than one note can be in the way of a single file, and each gets a name of its own.
-- **A displacement carries the note's queued ops with it**, exactly as a folder move does.
-  A queued `move` is the user's rename and its target is the very path the remote has just taken: left pointing there it conflicts on every push and can never succeed, and since the queue is ordered and a dead op stops the drain, every later op for every other note is stranded behind it.
-- **A file can be gone by the time we read it.**
-  `changes` and `read` are separate round trips on every provider, so a file the feed named can be deleted in between — the other device editing a note and then deleting it inside one cursor window is enough.
-  The entry is skipped rather than thrown on: unwinding the pull leaves the cursor where it was, so the next attempt fetches the same batch and dies the same way, and push never runs either because `sync` stops on a pull that is not `ok`.
-  Nothing is imported and nothing of ours is moved aside; the deletion arrives as an entry of its own.
-  Except for a note held by that very file which the entry would have moved: the deletion, in this batch or a later one, is at the new path, where the note never got to, and one with no id has nothing else to find it by — so the note whose file is gone is let go of there and then.
-  At its own path the deletion finds the note, and nothing is decided on the read alone.
-  Only "it is not there" is survivable — a refused or broken read is a batch nobody has decided, and moving the cursor past it would skip the changes for good.
-- **A file that is not UTF-8 is left alone.**
-  Latin-1, UTF-16, a binary named `.md`: decoded anyway it arrives as a note with U+FFFD for every byte that would not read, and the next push, even the app adding an `id`, replaces the user's bytes with that.
-  So `read` refuses it (§4), nothing is imported, and **no row holds the id of a file the engine could not read**, so no write or rename from here can land on it once a pull has seen it.
-  A clean note whose file became unreadable goes from this device and nothing is queued against the remote — a note the user had deleted included, whose delete is dropped *when the pull sees the file first*: it was of text they had seen, not of these bytes.
-  A delete pushed before any pull has seen the re-save still removes the file — `runDelete` asks nothing of it, and a download before every delete is not worth what it would close — which is the window an edit made on another device has always had.
-  The dropped delete stays queued until the next push finds no note for it, and a delete names its note by id alone; so a file arriving meanwhile that carries that id — another device's edit to the same note, set aside — is given a fresh one rather than the id a delete is queued for, or the delete would be re-aimed at it.
-  A dirty one is cut loose and moved to a conflict name, and its write creates a new file beside the one it could not read; one the user has renamed meanwhile is cut loose and left where they put it, since nothing is in its way there.
-  A note never pushed that has the same name moves aside, as for any arriving file.
-  A push that meets such a file — in the way of a note with no file of its own, or as the note's own — does the same and finishes in that drain, with no attempt spent and the op counted as pushed, since it reached the remote as a new file.
-  Where the conflict name is taken on the remote by a file this device has not pulled (another device setting its own edit aside in the same minute), the create says so and the next name is tried, bounded as a rename's is; the store is moved first and the remote second at each step, so a process that dies between them leaves an unbound dirty note whose write is still queued, never a file no row knows of.
-  A note with a readable file of its own elsewhere steps aside still bound to it, as it does for any file that is not its own.
-  A probe that only asks whether a file exists takes unreadable as yes, so a rename of such a file is carried out (it changes no bytes) and the pull that next reads it lets go of the note.
-  None of it throws, since a pull that throws never moves its cursor and these bytes read the same way every time.
-  With no row, every entry for such a file is read again, so the file is picked up as a note on the first pull after it is saved as UTF-8.
-  **The rule never turns on the app's own notes, because the app never writes a U+0000**, and that rests on there being two things a push can send and no way for either to hold one.
-  A file the app serializes is stripped where it is made (`noteFileContents`), whatever part of the note the NUL was in.
-  A `source` kept verbatim came through one of two doors: a pull, where a file holding a NUL is refused before it is a row, or `importNoteFile`, which drops it on the way in.
-  In front of both, neither editor's document ever holds one (`editor/shared/noNul.ts`): it is dropped in the transaction that brought it, so that what the editor reports is what the store keeps.
-  Stripped only in the store, the save comes back as a body the editor never wrote, is taken for a change from outside, and what was typed meanwhile is saved as a conflict copy of the user's own note.
-  `saveNoteBody` and `createNote` strip as well, as the backstop.
-  **And it is said.**
-  Each such file is kept per connection with the cursor — `syncState.unreadable`, its `remoteId` and the path it was last read at — and the storage panel lists them by path under the sync status, with what to do about it: save it as UTF-8, or delete it.
-  Without that a clean note goes from the device with nothing said.
-  A record is a `PullChange` (`unreadable`, `forget-unreadable`), so it commits with its batch and cursor or not at all, and only a change to the list is one: a file listed already at the same path is read again and nothing is emitted, so `pulled` counts a file when it is first listed, when it is renamed and when it is let go of, and not every time the feed names it.
-  A note moved aside because such a file has its name rides on the record (`movedAside`) and is said in that notice — "a note of yours had that name; it is now at …" — and not as a conflict, which it is not: nothing was edited twice and no copy was made, and the conflicts line is gone by the time the user wonders about the new name.
-  Every note the file has moved aside is kept, not the last of them, and the list keeps saying so when the file is later renamed, since nothing else ever explains the name.
-  A file stops being listed when it reads — by its id, or by its path, which covers a tool that saves by writing a new file over the old name — or when a note this device already holds is renamed onto its path; when the same id turns up as something that is not a note, or is hidden; when its own entry finds it gone; when a deletion names its id, or, naming only a path (Dropbox), names its path; and when a rescan does not return its id — except a rescan that may be missing things (`uploadDifferences`), which proves nothing gone.
-  Nothing clears the list when a rescan *starts*: an interrupted one would leave the notice blank.
-  A rename is the same id recorded at the new path.
-  A folder's move carries the paths under it along and a folder's deletion drops them, in the store, because a feed that reports a folder alone says nothing of what was in it; a deletion of a folder this device holds no row for drops them in the engine, whether or not it also carries an id, so long as it names a path.
-  A path-only folder deletion is **not** taken at its word for what is under it until the engine has ruled out the other half of a move, or a rename told as `old path deleted, folder listed` would forget files nothing in the round lists again; where it is a move, a deletion naming a file at its old path is read against where the folder went, so the file is forgotten only when nothing in the round says it moved too.
-  A deletion naming a folder by **id alone** (Graph, for a folder it can no longer place) says nothing at all about what was inside it, so where this device holds no row for that folder its files stay listed until a re-scan does not return them — a notice left standing for a path that is gone, which is the cost of not guessing at a deletion's reach.
-  With a row, the `delete-folder` takes them as it takes the notes.
-  A push that meets such a file lists it too where the conflict names the file and its path; where the file is known only by the note's id (`runWrite`, `followTheRename`, a note's own file behind another's name) it is left to the next pull, which reads it and lists it where it is.
-  **The list is a notice and nothing else.**
-  No decision reads it: with no row, every entry for such a file is read again, so a list that is stale, or lost, costs the user a line of text and never a file.
-  A file already imported lossily before this rule is not looked for.
-- **A batch sees the notes it has itself created.**
-  A file created, deleted and re-created at one path inside one cursor window arrives as three entries, and each of the last two has to know what the ones before it did: the deletion is about a note only this batch has made, and the second file lands on a path only this batch has filled.
-  The store can say nothing about either — none of it has been applied — so the decisions already taken are read back as rows.
-- **A path can be reused.**
-  A note is identified by `remoteId`; the path is a fallback, and it is what lets a note created here be recognised when its own first push comes back.
-  The one note the fallback must not claim is one whose own remote copy is alive elsewhere in the batch: that note has been moved and the path merely reused, and claiming it would hand two notes each other's contents.
-  Nor, found by a model of two devices syncing at random over every provider (`tests/sync/overProviders.test.ts`), four more, each of which hands one device's file to a note that is not its note:
-  - *a note the user has renamed onto the path*, not pushed yet — its file is still at the old name, and claimed it forgets that file, which the feed has no reason ever to mention again;
-  - *a note whose own file is still there* — unmentioned because unchanged, so this is a different file that took the name.
-    The batch usually says when the note's file went (and a full scan, which never says what was removed, is taken on trust); when it says nothing, since a provider need not report the deletion of a file replaced at its path, the provider is asked by id;
-  - *a note the user has deleted here*, wherever it stands — written back under its id, the new file is still a deleted note, and the queued delete takes it from the remote.
-    Until 2026-10-14 this held only once the batch had removed the note, which a feed does first by reporting the old file gone.
-    A full scan never says what was removed, so the note was still at the path and was claimed as a file replaced while the cursor was dead: the other device's note went from the remote.
-    Found by the same model over Drive once a long feed became a scan (§5.1, seed 36).
-    It was reachable before by a rescan or any cursor reset, only rarely;
-  - *a note never pushed, deleted here or clean, whose bytes and frontmatter `id` are not the file's* — the store reports a deleted note clean, and claimed, its queued delete has a file to aim at.
-    It moves aside instead.
-
-  A deletion is matched the other way about — by id when it has one, and by path only when it has not, since a deletion whose id we have never seen is about a file that is not ours.
-  By path, it is not about a note the user has renamed *onto* the path (often this is this device's own delete of the note that had the name, coming back) but about one renamed *from* it, whose file was there when the rename was queued — ahead of a note at the path that has never had a file, but behind one that has.
-  Another device may have moved that file on since, and the queue still names the old path, so the note found this way is let go of only if the provider says its file is gone.
-- **A note moved aside does not take the old name of a rename queued here.**
-  The file is still there until the rename runs, and the rename may be queued behind the moved note's own write, which then conflicts with it on every push.
-- **An id in a file is adopted only if nothing else holds it.**
-  The `id` in frontmatter is what makes two devices agree which note a file is, so it is adopted by default.
-  But duplicating a file is an ordinary thing to do in a folder the user can see, and the copy carries the original's id: adopting it blindly writes the copy over the note it came from, unpushed edits included, and leaves the two files fighting over one row on every sync afterwards.
-  The second file to arrive is a new note.
-- **An id names a note within its connection.**
-  The id in a file is whatever the remote says.
-  A folder copied from one account into another, or an account connected a second time after its notes were copied elsewhere, brings files that name notes a different connection holds.
-  While `notes` was keyed by `id` alone that was one key space for every connected source: adopted, the store had to refuse the write (taking the row would take the other account's unpushed edits), identically on every retry, so the cursor never moved; and the workaround — asking the port whether the id was held elsewhere and naming the file's note afresh — had two connections each writing their own id into a shared file, turn about.
-  So the key is `[connectionId + id]` (schema versions 4 and 5), as `folders` was always keyed, and the question is not asked: another connection's note of the same id is another row, neither shown to a store nor in its way.
-  IndexedDB cannot change a store's key, so the rows go out to a second store in one version and back in the next, inside the single `versionchange` transaction an open gets; a failure leaves version 3 untouched, and a tab still running the old build is stopped by the stale-tab gate rather than reopening against it.
-  Every lookup by id says which source: the store functions take a connection and default to the one showing, the editor names the note's own, and the push queue's per-note lookups filter by connection.
-  State the UI holds across renders — autosave's held edits, the deleted-note notice, "this note needs raw mode" — is keyed the same way (`noteRef`).
-  An edit or an undo that arrives after its note's source was let go finds the row where it was if the remote had not been sent it (a detach keeps those in place), follows it if a reconnect has since taken it home under a new connection id (`store/movedRows.ts` remembers this tab's moves, new id included; a move made from another tab is followed by id), is kept as an unsent note under the source made again if the row was removed with its source (the remote has the *note*, not the edit — `detachConnection` marks nothing in `store/deletedHere.ts`, whose marks are only the user's own deletes, and only under the binding they were made under: `SyncStateRecord.boundAt`), and is **never** looked for under the source showing, nor by id under any other connection than its own — only a note of the device's own pile is, since the pile's rows move once, into the first source bound, and a bind from another tab is not in `movedRows`, which with two sources connected is another account: found there, the text would be uploaded into storage it has nothing to do with.
-  A note that has to be made again goes to its own source, brought back detached if it has gone (`ensureDetached`), and never to the device's own pile.
-  Rows change connection only in a bind, which is a delete and an add; two notes of one id can meet there (a detached source's rows going home to a connection that has already pulled the same file), and the one arriving is given a fresh id, its queued ops with it, and is otherwise the row it was.
-- **One entry per file, keeping the last.**
-  Dropbox documents that a path may appear more than once in a batch and that the last entry is the current state.
-  Decided twice against the same pre-batch store, one edited note produces two conflict copies wanting the same path — which the store cannot tell apart, and the push then writes one over the other and gives them one remote id.
-  Deletions and live entries are keyed apart, both by id, because a file deleted and another created at that path in one batch is two things happening, not one thing said twice.
-  Only files: a feed that tells a round in order (`B` renamed to `A`, a file moved into `A`, `A` renamed to `C`) needs the first rename for the file to land anywhere real, and a folder decided twice is a move from wherever the first decision put it.
-  A deletion with only a path is kept each time too — `C` deleted, `A` renamed onto `C`, `C` deleted again is two folders — and the second one is about whatever the batch has put at the path since, not the folder the first took.
-- **A rename need not re-list what is inside it.**
-  The children's bytes did not change, so a provider may report a renamed folder as the folder at its new path plus the old child paths as deleted, with nothing at all about where the children went.
-  An id-less deletion of a folder the batch has alive elsewhere is that rename (unless the batch has since put a different folder at the path, which the deletion is then about).
-  One *under* such a folder is ambiguous: a file deleted before its folder was renamed reads exactly the same.
-  Dropped, the note is carried along and held over a file nobody has; taken, a file the provider never listed again is lost here.
-  So the provider is asked — a note's file by its id, a folder by listing where the rename puts it — and only "not found" lets go.
-  The provider answers for now, not for where the round ended, so neither a missing parent nor a listing without the folder is taken as proof: the folder goes only when none of the notes under it is found by its id, and those not found are let go of.
-- **A round is one batch.**
-  From a stored cursor every page is read before anything is decided, and the round is decided once and applied with its cursor.
-  Graph asks for exactly that, and page boundaries fall anywhere: between a folder's deletion and the move of a subfolder out of it, whose cascade would take the subfolder's clean notes; between a folder's two renames.
-  The decisions already reason about a batch as a whole, so a round over many pages gets the answers one page would.
-  The cost: a failure on any page redoes the round from the stored cursor (as a failure before the first page always did), and one round's decisions, note contents included, are held in memory until it is applied — rounds are normally a few changes, and an import of thousands on another device is one round too.
-  Deciding stays near the round's size squared rather than cubed: what the store said is kept with the decision that asked, and a note's place is replayed from its own changes and the folders' rather than from every decision.
-  Two thousand new notes in one round decide in about a second in the tests, and a test holds the store reads to a few per note.
-  A path already in normal form is not split again to be compared, which was most of the cost of a renamed notebook re-listed note by note.
-  A scan keeps applying page by page with no cursor until its last, since it reports no deletions until `reconcile` and a first sync of many notes shows as it arrives.
-- **A folder's deletion waits for what the round moves out of it.**
-  `C` deleted, and later in the round `C/A` moved to `B` (or up to `C` itself): the subfolder's last entry is decided first, then `C` goes from wherever that left it.
-  Outermost first, and each entry is decided again in its own turn, which replays the round's history from where the rescue put the folder.
-  Folders only — a note moved out has an entry of its own that finds the note by id, and a note with unpushed edits decided twice would be copied aside twice.
-  A folder moving up to take its parent's name is moved out of a parent displaced aside, never deleted with it.
-  The same holds when the deletion is reached early, clearing the way for a folder made at or moved onto the doomed folder's path.
-  A subfolder whose own entry is the decision that reached the deletion — two folders deleted, each one's subfolder moved to the other's name — cannot be decided again, and is moved out beside the folder for that decision to move on.
-- **A folder arriving where another is leaving.**
-  A new folder at a path whose folder the round goes on to move or delete gets that folder out of the way first, as a folder move does; merged into one row, the move that follows would carry the newcomer off with the other's notes.
-  Where the one in the way is the folder the arrival is moving out of (`Z/X` moved up to `B` while `B` is renamed to `Z`), the arrival is asked where it is again after the displacement.
-  A folder that is not mentioned again stays merged, as before.
-- **Two notes meeting at a path neither ends up at.**
-  A folder rename can land a note on a path another note has just arrived at, when the round goes on to rename the landing note elsewhere.
-  Displacing either leaves a conflict copy of a note that never conflicted, so the landing note is left to its later entry.
-- **A conflict copy is named against the folder the note ends up in**, not the one it came from, and avoids every name the batch is bringing in, every name already in the store, and every name the batch has already chosen — one entry can need both a displacement and a conflict copy, and both are named from the same path.
-  Two devices syncing on the same interval conflict inside the same minute, so the copy one of them made arrives in the very batch that decides to make the other; landing on the same name overwrites the edit the copy exists to save.
-  Naming it against the old folder is the same bug in a different direction — the old folder may be one this batch is deleting.
-- **A full scan reconciles, folders included — and only once it is all in.**
-  A scan says what exists, never what was removed, so after a `CursorResetError` every note deleted while the cursor was dead would come back, and a notebook deleted then would sit in the sidebar for ever with nothing behind it.
-  Notes and folders carrying a `remoteId` the scan did not mention are treated as remotely deleted; anything never pushed is left alone.
-  Two things make this the most destructive rule in the file.
-  It runs on the last page only, because no page before it has seen everything and reconciling against one would delete nearly the whole store — and the pages after would put a note back at each path, so the app would look right and every note would be a different note.
-  And it exempts whatever the same batch has just re-established: a file replaced at one path while the cursor was dead leaves the row carrying the *old* `remoteId`, which a scan that only saw the new one never mentions.
-- **A scan sweeps up only what the batch has not already settled.**
-  Reconciling names the notes a scan never mentioned, and a `delete-folder` in the same batch names none of the notes it cascades over — so without asking where each note stands once the batch has run, the sweep deletes them a second time.
-- **The app folder is never a folder row, and never a folder change.**
-  Several providers report the root as an entry of its own — Graph's `delta` returns the root item.
-  There is nothing above it to hold a row, and a row for it would be reconciled away after the next cursor reset as a folder the scan did not mention.
-  Since every path is within the root, that one `delete-folder` is every note on the device.
-  Guarded where the row would be made and again where it would be deleted.
-- **A deletion of the app folder itself is ignored.**
-  An adapter that reported the root by mistake would otherwise wipe every note on the device in one batch, and if the folder really is gone it is the connection that needs attention, not the notes.
-- **A note that changed while it was being pushed stays dirty.**
-  The outcome handed to the store carries the exact bytes that were sent, and the store clears the flag only if the note still holds them.
-  Otherwise the last thing the user typed is marked as saved and never sent.
-- **A failed push stops the queue rather than stepping over it.**
-  The queue is ordered because later ops depend on earlier ones — a write into a folder whose `mkdir` failed would land nowhere, or resurrect a folder on a provider that creates missing parents.
-  An op that has failed five times is surfaced rather than retried.
-  Writes sent together are met in queue order once all of them have answered: those that landed are done, and the first that did not is handled as if it had gone alone, with the others that did not behind it — so a rate limit or a failure stops the drain where it would have, and what landed beside it is a write, which nothing behind it waits on.
-  A rate limit among them is the one handled, wherever it came: handled behind a conflict, which lets the drain go on, it sent the rest straight back through the wait the provider asked for.
-- **A queued row that fits no kind is read as `malformed`, kept, and failed (2026-10-26, #447).**
-  `SyncOp` is a union by `op`, each kind with the fields it cannot be sent without (`noteId` for a note's ops, `targetPath` for a move, `fileId` for a file's, `remoteId` for a `delete-file`), and the web store reads each row through a schema of those (`toSyncOp`); the rows themselves are as they were, and every release since 1.0 has queued each kind with its fields.
-  A row that fits none — a move that lost its target, a kind a later version queued — used to reach the engine as whatever it said it was: a move with no target threw, and a kind this version does not know ran as a note's write.
-  It is read now as `malformed`, never thrown on, so the rest of the queue still reads, and never dropped: the engine fails it like any op that cannot be sent, and at five failures it stops the push and says why, as the ordered-queue rule has any op do.
-- **Same bytes, new version is not a conflict on the push side either.**
-  An interrupted push looks exactly like one: the write reached the remote and the store could not be told before the tab closed, so the op is still queued carrying a version the remote has moved past.
-  Conflicting would hand the user a copy of the note they already have.
-- **The op that hit a conflict is finished, not re-queued.**
-  Its content is preserved in the copy; replaying it would overwrite the remote with the very bytes the user has just been handed a copy of.
-  Only a `write` is answered this way: a `move` that finds its target occupied and a `mkdir` that finds a file in the way carry no two versions of anything, and resolving them would point the note at somebody else's file.
-  They fail, and stop the queue like any other failure.
-- **A push that finds nothing at the path asks whether the file merely moved.**
-  `write` is addressed by path, so a file renamed remotely reports exactly what a deleted one reports, and §7's answer to a deleted file — re-create it — would leave the user with two notes where they had one.
-  The engine reads by `remoteId` first; if the file is gone it re-creates, and if it is still there it asks *who* renamed it.
-  A remote rename is left for the next pull to rebase.
-  A local one — the user edited and then renamed, so the queue is a write and then a move — can never resolve itself: no pull will move a note over a rename the remote has not heard of, and the ordered queue cannot reach the `move` while the `write` in front of it is failing.
-  The queue is what tells the two apart, so it is asked, and the rename is performed there and then.
-- **A move whose file is gone is finished, not retried.**
-  Nothing will make it succeed, and failing it blocks the ordered queue for ever over a rename — the least of what the user has waiting behind it.
-  The note keeps its contents, and the pull that reports the deletion cuts it loose or takes it away.
-- **A transient failure is a status, not a rejection.**
-  Offline, a 500, a store that could not commit: the batch rolled back and the cursor did not move, so `pull` answers `retry` exactly as `push` does.
-  That covers every store call, not just the batch — reading the cursor and reading the queue are store calls too.
-  Rejecting instead would make every caller wrap `sync()` in a `try` to discover something `status` exists to tell them, and one that forgot would take the app down on a flight.
-- **A locally deleted note keeps its row until the remote copy is gone, and every read sees it.**
-  The queued `delete` carries a note id and nothing else; the `remoteId` it needs lives on the row, so the row *is* the tombstone.
-  A store with a `deleted` flag and filtered indexes is a natural reading of "every live note", and it loses a note the first time one is deleted here and edited on another device: the pull cannot see the row, mints a second note at that path, and the queued delete then removes the file that was just imported.
-  Where both happen in one window the delete wins — the row is written back by the pull and purged by the op behind it.
-  That is a decision, not an accident: the delete is something the user did, and the remote change may be their own from the other device.
-- **A push is addressed by where the note is now.**
-  A pull between queueing an op and running it rebases the note and leaves the op's own `path` behind.
-  Invisible where `remoteId` identifies the file, and the whole address where it does not (WebDAV, deferred).
-- **A move with no target fails rather than being marked done.**
-  It is a store that lost the column, not a move with nothing to do, and completing it would discard the user's rename with nothing said anywhere.
-- **Nothing is reported that did not happen to the user.**
-  A deletion that matches no note, file or folder we hold — a file at a hidden path, a file never imported — is not news, and counting it puts a number in front of someone for an event that was never about them.
-- **A folder move clears the notes in its way, not just the folder.**
-  A cascade keeps a dirty note and merely cuts it loose, so a deleted folder can leave notes behind at their paths with no folder row above them.
-  Moving another folder onto that path then drops its notes on top of theirs: two rows at one path, which the sidebar shows twice and which the next push has overwrite each other for ever.
-  The local note is displaced to a conflict copy — the remote keeps the path — at whatever depth under the destination it sits.
-- **A folder deletion says which folder, not which path.**
-  Two drags in one cursor window name one path and mean two folders: delete `A`, rename `B` onto `A`, delete `A`.
-  Matched by `remoteId` where the provider gives one and by the row that was at the path where it does not, and answered with the position that folder ends up at once the decisions in front of it have been applied.
-  A deletion dropped here is dropped for ever, because the cursor moves on and nothing says it again.
-- **Two files deleted at one path are two deletions.**
-  Keyed by `remoteId` rather than path, so a file replaced and then removed inside one window does not fold into a single event that lets go of only the second.
-- **An entry is not matched by path to a note the batch has already moved.**
-  A folder rename carries every note under it and the feed says one word about the whole subtree, so the store still shows the note at its old path.
-  A different file arriving there would otherwise be written into it, while its own file goes on existing under the new name.
-  A note the batch merely *removed* is still matched: it has nothing of its own left and becomes the arriving file, which is what keeps one note rather than two when a path is reused.
-- **A `move` that reports not found asks which end was missing.**
-  A provider answers the same way for a file that is gone and for a destination folder that was never created, and a note dragged into a notebook made on this device hits the second every time — nothing queues a `mkdir` for a folder that has only ever been moved into.
-  The folder chain is created and the move retried; only a genuinely missing source finishes the op.
-- **A conflict discards the losing edit's queued write.**
-  That op carries the content the copy now holds, and the note itself holds the remote's bytes.
-  Replaying it puts the remote's own content back under a new version, which every other device pulls as a change that changed nothing — and which can lose a race against a real edit made in between.
-  The user's rename is left queued: the conflict rule is about content.
-- **A rescan names the outermost vanished folder only.**
-  `delete-folder` cascades, so naming a nested one as well is a second delete of a row the first has already taken.
-- **A rescan names a vanished folder by where its row ends up.**
-  A scan is one batch like any other, and a `move-folder` decided in front of it has already rebased the row; naming the pre-batch path deletes nothing and leaves the notebook the remote no longer has in the sidebar under its new name.
-- **A note the rescan only moved aside is still a note the rescan did not find.**
-  Moving ours out of the way for a file arriving at its name says nothing about the file our row holds — a scan can do that without ever mentioning it.
-  Exempted from the reconcile on the strength of the displacement, a clean note whose file is gone keeps its row and a dead `remoteId` until the next scan, and what the user is left with meanwhile is a conflict copy of a note that never conflicted — a scan being the only thing that can put it right, and one that need not come for weeks.
-  So the exemption covers what the batch wrote back or took away, and a note it merely displaced is asked after like any other: its own file among what the scan returned is what keeps it, and nothing else.
-  A dirty one is cut loose and keeps its edit, as everywhere else.
-  **Not on a rescan that uploads**, and not because absence proves less there — that rescan acts on absence all the time, by sending the note back up.
-  It is sending a *displaced* note back up that is wrong: `reupload-note` strips the row and queues a create-only write at the note's path, which by then is the fresh conflict name the displacement gave it, so the create cannot fail the way it would at the note's own path, where a file that was there all along conflicts and puts itself right.
-  It simply lands, and the user has two files where they had one.
-- **Every batch-aware question about notes includes the ones the batch has moved by name.**
-  A folder is not the only thing that carries a note somewhere: a `move-note` brings one in from anywhere at all, and its row is still at the old path in the store.
-  Missing it means nothing is displaced when a second file lands on the same name — two rows at one path, which the sidebar shows twice and the next push has overwrite each other.
-- **A write that finds nothing makes the folder before re-creating the file.**
-  A provider answers not found for a missing file and a missing parent alike, and the second is the ordinary case of a notebook deleted on another device while a note inside it had unsaved work: the pull keeps that note and cuts it loose, leaving nothing on the remote above it.
-  Without this the write fails identically on every attempt and the ordered queue strands every op behind it, for every note.
-- **A cascade leaves the notes it keeps a notebook to be in.**
-  `delete-folder` takes the folder rows on the way down but not the dirty notes, so the rows a surviving note needs are re-established — at the end of the batch, because whether a note is still there is not known until the batch is over.
-- **A rename the user has queued is not undone by our own echo of it.**
-  The feed cannot say whose rename an entry describes; the queue can.
-  Moving the row back undoes what the user just did in front of them and frees the path they renamed *to*, so a file arriving there in the same batch is imported rather than displaced and the queued move then conflicts on that path for ever.
-  The version is still adopted; only the path is left alone.
-  `followTheRename` asks the same question from the push side, and only about a queued move whose target is where the note now is.
-- **A push conflict over a file another note already holds is not that note's conflict.**
-  The path is simply taken, by a file whose own row is elsewhere because its rename has not been pulled yet.
-  Adopting it would give two rows one `remoteId` — `noteByRemoteId` hands back one of them and the other is stale for ever.
-  The note moves aside instead and its write is retried where it now is — unless it has no file of its own left to stay bound to, in which case its edit goes up as a new file at the new name in this drain, as it does for a file that cannot be read.
-  **Either way the name is asked of the remote, not of the store alone**, which has never heard of the file another device set *its* edit aside to in the same minute.
-  Where the note's edit is being written, the write is the asking and a refusal moves on to the next name.
-  Where the note stays bound to a file of its own there is nothing to write — the path belongs to somebody else's file and ours may be perfectly good — so each candidate is read for instead, at a request apiece on a name that is almost always free at the first ask.
-  Without it the retry meets that file, steps the note aside again from a name that already carries a suffix (nothing strips one back off), and leaves `x (conflict …) (conflict …).md` behind having spent a second of the op's five attempts with the ordered queue stopped.
-  A read by path is no more proof than a listing is on a provider that hides what the app did not make (§5.1); what it settles is the case it is for, since the file in question is one another device of this app wrote.
-- **A queued rename onto a path the remote will not give up lands beside it.**
-  A `move` is not a `write`, so the conflict rule has no second version to reconcile, and nothing will ever free that name: left queued it fails on every attempt and strands every op behind it over a rename.
-  The remote keeps the path and the rename takes a conflict name, where the user can see what became of it.
+The cases the branch table does not mention are the kit's engine's, each decided in the direction that cannot lose an edit ([kit §7, "What the loop above left open"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#what-the-loop-above-left-open-and-how-the-engine-answers-it)): moves and deletions read against the whole batch, one note per path, folders made, moved, left and removed, files that are not notes, stuck ops, rescans, and renames of notes holding edits.
+Among them, the ones this app's documents cite by name:
+- **The version a move hands back is not the note's until its bytes are known**, since another device may have edited the file since this one's pull.
+- **A file that is not UTF-8 is left alone**: `read` refuses it, nothing is imported, and no row holds the id of a file the engine could not read.
+- **A path can be reused**: the path is a fallback to `remoteId`, and never claims a note whose own file is alive elsewhere in the batch.
+- **A rename need not re-list what is inside it**: a folder at its new path and its children's old paths deleted is read as the rename it is.
+- **A round is one batch**: from a stored cursor every page is read before anything is decided, and the round is applied with its cursor.
+- **A push conflict over a file another note already holds is not that note's conflict**: the note moves aside rather than adopting the file.
 - **A directory the user's notebook left is removed by an op of its own, and only when five things agree.**
-  The notes' moves and deletes go up first; the `rmdir` behind them carries the folder's `remoteId` as the queue recorded it.
-  It finishes without deleting anything unless all five hold: the provider's listings are the whole truth about a folder (`listsEverything` — see the bullet below; where they are not, the other four stand before the folder is *left* instead); it has that id at all — without one the folder it is about cannot be told from whatever holds the name now; the store has no folder row at the path and no live note at or under it — the user made the notebook again, or a pull brought it back, and it is a folder to keep; the parent's listing has a *folder* at that path whose id is the one recorded — a folder renamed or replaced elsewhere is not ours to remove, and only the id says which it is, since the name alone is the same either way; and a walk of the folder finds no file anywhere beneath it, hidden files and files this device has never pulled included.
-  The walk goes one subfolder at a time and stops at the first file: it is the only walk in the engine whose depth the user chooses, and in parallel a deep notebook would put an unbounded number of listings at the provider at once.
-  Not found at any step is finished rather than retried: the folder is already gone.
-  - The row check is exact where the note check is "at or under" because every path that makes a folder row makes its ancestors too (`ensureFolderChain`, and the memory store's `putFolder`), so a row under the path cannot exist without one at it.
-  - **Known gap:** a file written into the folder between the walk and the delete goes with it.
-    That lands in the provider's trash or recycle bin on all three, and on Dropbox in deleted files, so it is recoverable — but this device will not report it.
-  - **Known gap:** a notebook deleted while its own `mkdir` is at the network leaves the directory behind.
-    The answer arrives to a store with no row at that path, so the id has nowhere to go and no `rmdir` can name it.
-    It shows up as an empty notebook after a re-scan.
-- **A folder is removed only where a listing can prove it empty.**
-  Deleting a folder takes everything under it, seen or not, so the `rmdir` above never deletes on a provider whose `list` is not authoritative: `StorageProvider.listsEverything` is false on Google Drive, where `drive.file` shows the app only the files it made and a PDF the user dropped into the notebook through drive.google.com is invisible (§5.1).
-  There the directory stays.
-  Until 2026-10-13 so did the notebook — on every other device at once, and on this one after a re-scan — as the cost of not trashing a file the app cannot see.
-  Now the op *leaves* the directory instead (`leaveFolder`), past the same gates: it is marked, nothing in it is touched, and the adapter does not report it while it holds nothing the app can see (§5.1, "A folder the app has left").
-  True on Dropbox and OneDrive, which give the app its own folder and everything in it, and delete.
-- **A dead `rmdir` is given up on rather than surfaced.**
-  Every other op that runs out of attempts stops the queue and asks for help (the ordered-queue rule below), because what is behind it depends on it.
-  Nothing depends on an `rmdir`: it tidies an empty directory away, and an empty notebook nobody asked for costs the user nothing next to every note they write from then on waiting behind it.
-  So at the limit it is completed, and the directory stays.
-- **A folder this device is removing is not made again by our own echo.**
-  A sync pulls before it pushes, so the round after a notebook's deletion routinely carries the `mkdir` this device's own push landed, reported as a folder that exists — which re-creates the row, and the `rmdir` behind it then finds the store holding the notebook and finishes without removing anything.
-  A folder change is dropped when a queued `rmdir` holds its `remoteId` *and* names the path the entry is at.
-  Scoped to the path, because the same folder renamed by another device meanwhile is a notebook to keep at its new name, and a folder that device made fresh at the name we are removing is not the one the queue is about.
-- **A folder deletion with no id is not about a notebook the remote has never heard of.**
-  Dropbox reports a deletion as a path and nothing else, this device's own included — so the round after an `rmdir` lands carries the deletion of a name the user may well have made a notebook at since, which is the ordinary sequence of deleting a notebook and making another with the same name.
-  Matched by the path alone it deletes the row the user has just made and cascades over what they have put in it, while the `mkdir` queued behind it makes the directory again, and the two fight every round.
-  A row with no `remoteId` is one no `mkdir` of ours has landed on, so no deletion of ours can be about it — strictly, a row `ensureFolderChain` made for a directory the remote does have is id-less too, and is now beyond the reach of a path-only deletion until a pull reports the directory and gives the row its id; the alternative, deleting by name, is the notebook-the-user-just-made case above — and nothing else at that path can be either: whatever the batch has put there arrived after the deletion was recorded.
+- **A folder is removed only where a listing can prove it empty**, which on Google Drive it cannot, so there the folder is left (§5.1, "A folder the app has left").
+- **A dead `rmdir` is given up on rather than surfaced**, since nothing behind it depends on it.
 - **A notebook the remote no longer has does not take the notes whose files were never in it.**
-  A note is in a notebook here as soon as the user moves it there; its file moves when the queued `move` runs, which may be days later if the device is offline.
-  Another device removing that directory meanwhile is reporting something true — the directory is gone — but it says nothing about a file that was never inside it.
-  Cascaded over, the note's row goes with the notebook while its file stays on the remote with nothing here naming it, and since the cursor has moved past that file nothing mentions it again: the note is gone from this device until a re-scan.
-  So a `delete-folder` carries the notes the cascade must leave alone (`keep`), read from the queue — the same place that says which renames are the user's — and a rename left in the queue makes the directory again at the far end when it runs, as every push does.
-  A note whose file *is* inside the directory is taken as before.
-  Found by the two-device soak, at seeds 378, 427 and 591 of 600.
-- **A notebook gone before its `mkdir` was sent withdraws it.**
-  Queued and sent, that `mkdir` makes a directory on the remote that this device can never ask to have removed: the row it would read the id onto is gone, so no `rmdir` can name it, and the next pull that reports the directory makes the notebook again, empty — the very thing the `rmdir` exists to prevent.
-  So a delete or a rename withdraws every queued `mkdir` at or under the path it is leaving, and a notebook renamed twice before a sync sends one `mkdir`, for the name it ended at.
-  The notes' own ops stay: a note in there may have been moved out rather than deleted, and a write that finds no parent makes it.
+- **A rate limit is not an attempt**: a `RateLimitError` is retried without counting toward the five failures that stop an op.
 
-- **A rate limit is not an attempt.**
-  An op stops being tried after five failures, and a provider refusing every request while a quota resets would spend all five in half a minute on an op there is nothing wrong with — the user's note, blocked, with every op behind it waiting.
-  A `RateLimitError` says nothing about the request, so the engine reports it as a retry without counting it, on the pull side as well as the push side.
-  Everything else is counted, including a 5xx: it may be the request.
-  The same goes for a rate limit met while *resolving* a push conflict — reading the remote entry the conflict rule needs is a request like any other — so the resolution's own error, not the conflict that led to it, decides which branch the failure takes.
-- **Known gap: a rate limit that never ends is never *named*.**
-  Nothing counts an uncounted retry, so a provider that answers 429 for ever leaves the op retrying for ever — every five minutes at the least, since the wait is the longer of the backoff (capped at five) and the provider's own answer (capped at fifteen) — and the status says `retrying` with the provider's message rather than naming the op that is stuck behind it.
-  Retrying for ever is the *right* answer while the limit is real: the op is fine and the provider will serve us again.
-  What is wrong is only that it is never named, which matters most for the cases that do last — Drive's daily quota, or a full Drive answering `RESOURCE_EXHAUSTED` with no reason we can read.
-  An attempts-ceiling (after N rate limits in a row, count the next one) is **not** the answer and is deliberately not built: it would block a note over a quota that was about to reset, which is the worse failure.
-  The answer that fits is the one `blocked` already uses — a "throttled since" clock beside `blockedSince` that, after some minutes of consecutive rate limits, publishes `attention` with the op named, without ever touching `attempts`.
-  That closes the visible half and leaves "a rate limit is not an attempt" intact.
-  It is not built yet because nothing in the phase needs it and the threshold wants a real quota to calibrate against; it goes on the live-check list.
-- **The provider's own answer for how long to wait wins, but never shortens the wait.**
-  A `Retry-After` is the only informed answer to when the remote will serve us again, so the scheduler waits for it — but takes the longer of it and its own backoff, since a one-second `Retry-After` on the fifth failure in a row is not an invitation to come straight back.
-  Capped at fifteen minutes: Drive's daily quota says a day, and a device asleep past any horizon the user can make sense of looks broken.
-  Coming back sooner costs one request refused the same way, and the wait starts again from what it says then.
-  The cap is also the ceiling on what a *misread* header can ask for, which is the half of its job that is easy to lose: `parseRetryAfter` (`packages/core`) takes the longer of two values `Headers.get` has joined, and `Date.parse` will make a date out of most things, so a malformed `Retry-After` can cost fifteen minutes and never more.
-  Anyone weighing raising the cap, or dropping it, is weighing both.
-- **A tombstone owes the remote its delete and nothing else.**
-  `queueWrite` refuses to queue one for a deleted note, and `queueDelete` withdraws the writes already queued for it.
-  Both halves matter, and the second was missing: a note made and deleted before either op was sent still had its write run, so the file was created and then removed.
-  That is only waste while the path is this device's own — but a path is not.
-  Another device that made a note of the same name meanwhile finds a file there when its own write runs, binds its note to that file rather than making one, and loses it when the delete behind it lands.
-  Nobody deleted that note, and it is gone from every device.
-  A queued **move** is not withdrawn: the file is still at the name it had, and while every provider the app syncs to deletes by id, the queue is not the thing that should be deciding that.
-  A write already at the network loses its queue row only, which is what `completeOp`, `failOp` and now `resolveConflict` all tolerate: the file it creates is still recorded on the row, so the delete has the `remoteId` it needs.
-- **A stuck op is named, with the path the user gave it.**
-  "Some changes could not be sent" leaves the user with nothing to act on, and the queue is ordered, so the first op out of attempts is also why everything behind it is waiting.
-  The status carries that op — what it was doing, the path (a rename's destination, which is the name the user is looking for), how many attempts, and what the provider said — and the panel offers to open the note it is about, where the note is still there.
-  There is no "discard": dropping a queued write leaves a dirty note that never syncs.
-- **A rescan that uploads.**
-  A scan says what exists and never what was removed, so reconciling treats a note it did not return as deleted.
-  That is right when the provider's copy is the authority — but a provider can say it is not.
-  Graph's `resyncChangesUploadDifferences` means "Upload any local items that the service didn't return", which is what a server-side restore answers, and there the scan looks exactly like a user who deleted everything: trusted, it deletes every clean note on every device that syncs after it, quietly, and the words are gone.
-  So a `CursorResetError` carrying `uploadDifferences` starts a rescan that **infers no deletion from absence**.
-  Each note the scan did not return forgets its `remoteId`, `remoteVersion` and `syncedHash`, is marked dirty and is owed a `write`; each notebook the store had bound to a remote folder forgets its `remoteId` and is owed a `mkdir`, outermost first and ahead of the writes this rescan queues.
-  Not ahead of every write: a *dirty* note's write was queued when the user typed, so it has a lower `seq` than anything here and still makes its own parent through `runWrite`'s not-found recovery, which this does not make unreachable.
-  This is the one place a pull marks a note dirty, against §3's rule that only a user's editing transaction does: the row genuinely is ahead of the remote now, and the unsynced dot the sidebar paints on it is true until the push drains.
-  A deletion the scan *proves* still stands — a file it listed that is gone by the time the engine reads it is a positive answer, not an absence, and is still forgotten.
-  A note the user deleted here is left alone entirely: its tombstone is reported clean, so the scan names it for reupload, and the store declines — it owes the remote its delete and nothing else, and forgetting the `remoteId` would leave that delete addressed at nothing and the file back on the next pull.
-  A notebook the store holds with **no** `remoteId` is not named either: the reconcile asks only about folders bound to a remote one.
-  An empty local-only notebook therefore stays local-only, as it was before the rescan; one with notes in it is made by the writes of the notes inside.
-  Forgetting all three matters: a write against a `remoteVersion` for a file that is not there is refused, and a kept `syncedHash` says these bytes are already up, so nothing would ever send them.
-  No folder cascades, since the notes inside are named one by one — the cascade exists to stop notes floating at a path with no folder, and here neither is going anywhere.
-  A note the scan *did* return with different bytes needs no special case: a clean note's bytes are what it last synced, so the remote's are the newer ones, and a dirty note takes the conflict rule as always.
-  The flag survives an interruption for free — the stored cursor is left in place, so the next pull meets the same refusal and is told the same thing.
-- **Reading everything again is offered, with what it costs said first.**
-  A cursor the provider has lost, or a store that disagrees with the remote about what is there, is otherwise a dead end the user cannot get out of.
-  "Re-scan from scratch" drops the cursor and gives every op its attempts back, in one transaction so a scan cannot start against a half-reset queue, and keeps `rootId` — it is the same folder.
-  The confirm says what a scan means: notes the provider no longer has are removed here too, unless they hold edits that have not been sent.
-
-**Renames of notes holding unpushed edits, on providers with file ids.**
-A note renamed remotely *while it holds unpushed edits* arrives under a new path, and — on OneDrive, whose `eTag` changes on a move — a new version too, which on its own reads exactly like a remote edit.
-So every note records `syncedHash`, the `contentHash` of the bytes it and its remote file last agreed on: set by every pull that writes a note (`upsert-note`, and a conflict's remote side) and every push that lands (`pushed`, whether or not the user typed meanwhile — the remote holds what was sent), passed on `adopt-version` and `move-note` (read afresh when the version moved, carried over when it did not), and dropped with the remote (`detach-note`, a deleted folder's dirty notes, a copy into another account, a note brought back from a pull's delete, a note restored while its delete was in flight).
-A dirty note whose remote file's bytes hash to it — read at the version the feed named, since a read that answers with another version proves nothing about that one — was not edited over there: the engine follows the rename (`move-note`) or takes the version (`adopt-version`), the edit stays dirty and goes out against the new version, and no conflict copy is made.
-A note with no hash — rows from before it existed — cannot say, and takes the conflict as it always did, so nothing is migrated.
-WebDAV is not helped: its `remoteId` is the path, so a rename arrives as a deletion and a new file, the dirty note is detached and re-created on push, and the renamed file becomes a second note — nothing is lost, but the user sees two.
-The engine computes every hash and the store only writes it, since a Dexie transaction cannot wait on `crypto.subtle`.
+What follows here is this app's own: search, the window and what is in it, and the commands.
 
 **Search is a question, not a place.**
 Every note is already on the device, so search is answered here and nothing about it goes near a provider or `apps/api`.
@@ -2826,7 +1868,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
   Everything else is saved, never shown.
   A picture is drawn only through `<img>`, and an SVG only from a `data:` URL, whose origin is opaque.
   Tests pin the list, extension by extension and type by type; anything added to it must be a type that runs nothing.
-  The types are read from the one table of what the app knows of each extension (`packages/core/src/files/mediaTypes.ts`, #449), but which extensions open is named one by one in `files/attachments.ts`, not read from a flag on that table, so that a row changed for an upload or a kind cannot widen it.
+  The types are read from the one table of what the app knows of each extension (`@skysa/storage`'s `files/mediaTypes.ts`, #449), but which extensions open is named one by one in `files/attachments.ts`, not read from a flag on that table, so that a row changed for an upload or a kind cannot widen it.
 - **The clipboard runs nothing it is handed** (2026-10-06, §7).
   An item is drawn as text, as a picture through `<img>` from a `blob:` URL of raster bytes (never an SVG, which is a file card), or as a card that saves the file and never opens it.
   Of what the browser's clipboard holds, Paste reads plain text and pictures only, and never parses HTML.
@@ -2938,7 +1980,7 @@ apps/
       styles/                 # index.css imports the rest: tokens.css, base.css, primitives.css, then one per area (§7)
       assets/                 # what the build bundles: the providers' marks
       store/                  # Dexie db, notes.ts, folders.ts, and a module per thing the device holds: vault, clipboard, scratchpad, pins, pictures
-      sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps core engine
+      sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps the kit's engine
       api/                    # typed client for apps/api
       i18n/                   # the app's words: t(), rich(), and the English catalog in en/ (§7)
   api/                        # the Worker: this app's deployment of the kit's server (@skysa/server, §6)
@@ -2947,62 +1989,19 @@ apps/
       worker.ts               # default Worker entry: createApp with self-host defaults from env
       index.ts relay.ts       # @skysa/api and @skysa/api/relay: what a deployment's own entry imports
 packages/
-  core/                       # zero framework deps; runs in browser, Node, and Workers
+  core/                       # this app's own, beside the kit's packages; zero framework deps, runs in browser, Node, and Workers
     src/
-      index.ts                # what the apps may use, by name; tests/exports.test.ts lists the values (#449)
-      config.ts               # APP_FOLDER_NAME; NOTES_FOLDER, this app's folder as the adapters are handed it
-      folderSpec.ts           # AppFolderSpec: an app's folder, its marker and Drive's tag on it (record 0018)
-      documentFormat.ts       # DocumentFormat: what an app's synced files are — extension, media type, claimed id, conflict copy (record 0018)
-      cell.ts                 # cell(): the one way to hold a value that changes, where `let` is not allowed (#457)
-      marker.ts paths.ts      # the marker file; paths as POSIX, relative to the app's root
-      hash.ts json.ts         # content hashes; JSON from outside, parsed without throwing (no schema)
-      api.ts relay.ts         # the shapes the app and the Worker both speak: refusals, the relay's frames
-      entitlements.ts         # the seam an operator restricts connecting and minting through (§6, "Entitlement seam")
+      index.ts                # what the apps may use, by name, and the kit's protocol for an operator's code; tests/exports.test.ts lists the values (#449)
+      config.ts               # APP_FOLDER_NAME; NOTES_FOLDER, this app's folder as the kit's adapters are handed it
       scratchpad.ts           # the colours a scratch note can have
       appFolder.ts            # the app folder's places that are not notebooks: isScratchPath isVaultPath isClipPath isEncryptionFile
-      files/                  # files that are not notes: mediaTypes.ts (one table of types) attachments.ts (how one is shown or opened)
+      files/                  # files that are not notes: attachments.ts (how one is shown or opened)
                               #   pictures.ts (a picture's header, and the copies made of it) clipboard.ts (the clipboard's items)
       vault/                  # vault.ts (a password item's JSON and body) password.ts (the generator) sites.ts (which logins a page is offered)
-      providers/
-        types.ts              # StorageProvider interface, errors
-        onedrive.ts dropbox.ts fake.ts
-        text.ts               # a file's bytes as a note's text, or UnreadableError
-        gdrive/               # Google Drive, by part: wire.ts (endpoints, answers, the client) root.ts (the app folder)
-                              #   upload.ts cursor.ts (changes) duplicates.ts (two items at one path) index.ts
-        idTree.ts             # the id → parent tree an id-based change feed is read against (OneDrive, Drive)
-        http.ts               # what the HTTP adapters share on the wire: the transport, error bodies, Retry-After
-        adapter.ts            # and on the contract's side: the marker, read as text, the root's guard, isSelf
-      names/                  # what a file is called, below both providers and sync (#449): fold.ts (one name as every provider compares it)
-                              #   bytes.ts (the 255-byte cap, cut at a character) slug.ts (a title, tag or folder as a name; a free name)
-                              #   extension.ts (a name's extension) conflicts.ts (a conflict copy's name and path; documentNames, by extension)
-                              #   notes.ts (this app's: isNoteName, and a note's copy's name and path)
-      sync/
-        engine.ts
-        document.ts           # a document read: the provider's read, and the format's word on whether the text is one
-        context.ts            # what every part of the engine is handed (EngineContext): provider, store, clock, ids, bounds, meter
-        names.ts              # finding a free conflict name: tried in turn, bounded, the last refusal thrown (findFreeName)
-        providerOps.ts        # asking the provider where "nothing there" is an answer: orIfNotFound, withParent
-        outcome.ts            # what a run comes to (SyncOutcome) and the pieces every outcome is built from
-        progress.ts           # how far the run under way has got, for onProgress: a scan's, a round's and a push's count
-        pull/                 # the pull's pure parts, out of engine.ts (#446): batch.ts (what a batch's decisions are reached against) files.ts (the files' replay)
-                              #   replay.ts (where a note, a folder, an unreadable file is once the decisions so far are applied)
-                              #   occupancy.ts (which notes end up in or under a folder, and the names a copy there must not take)
-                              #   attachments.ts (the files that are not notes, as a pull decides them: placed, adopted, gone, clashing)
-                              #   cascade.ts (what a folder's deletion takes with it, and the folders above a kept note it must not)
-                              #   folders.ts (the folders, as a pull decides them: made, moved, moved over, deleted once rescued)
-                              #   deletions.ts (a deletion believed or not by the rest of the batch, and what it takes with it)
-                              #   notes.ts (the notes, as a pull decides them: matched, read, reconciled, moved aside, let go of)
-                              #   decided.ts (what a batch's decisions have already spoken for: written back, or said anything about)
-                              #   reconcile.ts (a scan's last word on what it never mentioned)
-                              #   decide.ts (a batch decided entry by entry, each sent to the part for its kind)
-                              #   run.ts (a pull run: a round from the cursor or a scan from the top, a cursor reset, one auth retry)
-        push/                 # the push's parts, out of engine.ts (#446): folders.ts (folders made before a write, and removed or left once empty)
-                              #   files.ts (files that are not notes: uploaded, moved, deleted, beside what they meet)
-                              #   notes.ts (notes: written after a rename, renamed or moved aside, deleted)
-                              #   conflicts.ts (a write the remote would not take: set aside under a conflict name, or reconciled)
-                              #   drain.ts (the queue drained in order, op by op, writes sent together, a failed op answered; createPush wires the parts)
+      names/                  # this app's names: slug.ts (a title, tag or folder as a name; a free name)
+                              #   notes.ts (isNoteName, and a note's copy's name and path, from the kit's documentNames)
       markdown/
-        format.ts             # NOTE_FORMAT: this app's documents, as the engine and the adapters are handed them (record 0018)
+        format.ts             # NOTE_FORMAT: this app's documents, as the kit's engine and adapters are handed them (record 0018)
         conflictCopy.ts       # a conflict copy's contents: the local note's, with a fresh id
         frontmatter/          # split.ts (the block found and taken off the body) read.ts (the fields the app understands)
                               #   write.ts (fields written back, nothing else touched, or refused up front); each builds on the one before (#449)
@@ -3015,18 +2014,18 @@ packages/
       secrets/                # recoveryKey.ts (the printed key, typed back) encryptionFile.ts (.encryption.json; its path is appFolder.ts's)
                               #   sealing.ts (sealing and opening a secret: the one module here with the curve in it)
     tests/
-      testing.ts              # @skysa/core/testing: the fake, the provider stubs, the store contract, for the apps' tests
-      providers/contract.test.ts
+      folderSpec.test.ts      # NOTES_FOLDER, and the marker 1.0 wrote, byte for byte, against the kit's code
       markdown/roundtrip.test.ts
-      sync/*.test.ts
 ```
 
-Dependency rule: `core` imports nothing from `apps/*`.
-`web` and `api` may import `core`, by its main entry, `@skysa/core`, which names what it offers rather than re-exporting whole modules (#449); their tests may also import `@skysa/core/testing`, and their source may not, nor any path into a `tests` folder (ESLint).
+The kit's packages are dependencies, not paths here: the provider adapters and the sync engine are `@skysa/storage` and `@skysa/sync`, the shapes the app and the Worker both speak `@skysa/protocol`, and the Worker `@skysa/server` (§6), each pinned to one exact version ([record 0018](decisions/0018-the-shared-kit.md)).
+
+Dependency rule: `core` imports nothing from `apps/*`, and of the kit only `@skysa/protocol` and `@skysa/storage`.
+`web` and `api` may import `core`, by its main entry, `@skysa/core`, which names what it offers rather than re-exporting whole modules (#449), and the kit's packages by theirs; their tests may also import a kit package's `/testing` entry, and their source may not, nor any path into a `tests` folder (ESLint).
 
 Inside `apps/web/src` the layers point one way too (2026-10-22, ESLint's `no-restricted-imports`): `lib/` is the bottom, plain browser helpers that import nothing of the app; `store/` is the data layer and imports neither the sync layer, the UI nor the editors; `sync/` imports the store, `api/`, `errors/` and `i18n/`, and no UI; `editor/` does not import `routes/` or `sync/`.
-Inside `core`, nothing under `providers/` imports `sync/` (#449): what both need, a conflict copy's name say, sits below them in `names/`, which imports neither of them nor `markdown/`.
-Nor do `providers/` and `sync/` import `markdown/`, `NOTE_EXTENSION` or notes' names (`names/notes.ts`): they are handed a `DocumentFormat` instead ([record 0018](decisions/0018-the-shared-kit.md)).
+Inside `core`, `names/` sits below `markdown/` and imports nothing of it (#449).
+The kit's engine and adapters import nothing of this app's: they are handed its `DocumentFormat` and its folder instead ([record 0018](decisions/0018-the-shared-kit.md)).
 Neither `core` nor the Worker may import a Node built-in, and the list is Node's own (`module.builtinModules`), not a hand-kept one.
 
 A `.ts` and a `.tsx` may not share a stem in the same directory.

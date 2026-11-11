@@ -1,4 +1,5 @@
-import { basename, clusters, titleFromFilename, UNTITLED_TITLE } from '@skysa/core';
+import { titleFromFilename, UNTITLED_TITLE } from '@skysa/core';
+import { basename, clusters } from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import type { NoteRecord } from './db.js';

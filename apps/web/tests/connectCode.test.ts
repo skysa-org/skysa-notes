@@ -1,4 +1,4 @@
-import { MAX_CONNECT_CODE } from '@skysa/core';
+import { MAX_CONNECT_CODE } from '@skysa/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {

@@ -1,4 +1,4 @@
-import { parentPath } from '@skysa/core';
+import { parentPath } from '@skysa/storage';
 
 import { NoteList, type NoteListProps } from '../../components/list/NoteList.js';
 import { noteMenuItems } from '../../components/list/noteMenu.js';

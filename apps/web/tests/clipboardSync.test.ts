@@ -1,14 +1,12 @@
 import {
-	basename,
-	bytesHash,
 	CLIPBOARD_FOLDER,
 	CLIPBOARD_ITEMS,
 	clipName,
 	MAX_ATTACHMENT_BYTES,
 	readClipName,
-	type StorageProvider,
 } from '@skysa/core';
-import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
+import { basename, bytesHash, type StorageProvider } from '@skysa/storage';
+import { createFakeProvider, type FakeProvider } from '@skysa/storage/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {

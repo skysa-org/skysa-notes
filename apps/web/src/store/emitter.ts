@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 /**
  * The two halves of every store the UI reads through `useSyncExternalStore`,

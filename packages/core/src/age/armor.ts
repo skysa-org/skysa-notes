@@ -1,5 +1,5 @@
-import { concatBytes } from '../bytes.js';
-import { cell } from '../cell.js';
+import { cell, concatBytes } from '@skysa/storage';
+
 import { decodeBase64, encodeBase64 } from './base64.js';
 import { AgeError } from './errors.js';
 

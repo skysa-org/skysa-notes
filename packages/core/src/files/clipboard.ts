@@ -1,7 +1,7 @@
+import { extensionOf, joinPath } from '@skysa/storage';
+
 import { CLIPBOARD_FOLDER, NOTE_EXTENSION } from '../config.js';
-import { extensionOf } from '../names/extension.js';
 import { attachmentName } from '../names/slug.js';
-import { joinPath } from '../paths.js';
 import { showsInline } from './attachments.js';
 
 /**

@@ -1,3 +1,4 @@
+import { sanitizeFolderName } from '@skysa/core';
 import {
 	basename,
 	isWithin,
@@ -5,8 +6,7 @@ import {
 	normalizePath,
 	parentPath,
 	rebasePath,
-	sanitizeFolderName,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import {

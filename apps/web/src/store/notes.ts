@@ -1,28 +1,30 @@
 import {
-	basename,
 	conflictContent,
 	conflictPath,
-	contentHash,
 	deriveTitle,
 	isScratchPath,
 	isVaultPath,
-	joinPath,
 	normalizeTag,
 	NOTE_EXTENSION,
-	parentPath,
 	type ParsedNoteFile,
 	parseNoteFile,
 	readFrontmatter,
-	replaceBasename,
 	SCRATCHPAD_FOLDER,
 	serializeNoteFile,
 	splitFrontmatter,
 	uniqueFilename,
 	UNTITLED_SLUG,
 	UNTITLED_TITLE,
-	withoutNul,
 	writeFrontmatter,
 } from '@skysa/core';
+import {
+	basename,
+	contentHash,
+	joinPath,
+	parentPath,
+	replaceBasename,
+	withoutNul,
+} from '@skysa/storage';
 import Dexie from 'dexie';
 
 import {

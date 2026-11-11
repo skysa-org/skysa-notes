@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 

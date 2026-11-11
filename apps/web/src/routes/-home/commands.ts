@@ -1,4 +1,4 @@
-import { basename } from '@skysa/core';
+import { basename } from '@skysa/storage';
 import { useNavigate } from '@tanstack/react-router';
 import { type RefObject, useCallback, useEffect, useState } from 'react';
 

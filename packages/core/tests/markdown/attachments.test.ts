@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 
+import { bytesHash, conflictNameKeepingExtension, extensionOf } from '@skysa/storage';
 import type { Image, Link, Paragraph } from 'mdast';
 import { describe, expect, it } from 'vitest';
 
-import { bytesHash } from '../../src/hash.js';
 import {
 	attachmentHref,
 	attachmentLabel,
@@ -15,8 +15,6 @@ import {
 	resolveRelative,
 } from '../../src/markdown/attachments.js';
 import { parse } from '../../src/markdown/pipeline.js';
-import { conflictNameKeepingExtension } from '../../src/names/conflicts.js';
-import { extensionOf } from '../../src/names/extension.js';
 import { attachmentName } from '../../src/names/slug.js';
 
 const HASH = '3f9a1c2b7d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8';

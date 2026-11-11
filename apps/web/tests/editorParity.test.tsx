@@ -28,10 +28,10 @@ import { destroyRichEditors, mountRich } from './support/editor.js';
 
 /**
  * The two editors, held to one contract (#456), the way every provider is held
- * to `packages/core/tests/providers/contract.test.ts`. A note's markdown is
- * the only truth and either editor is a view of it (CLAUDE.md), so a feature
- * both editors offer is to behave the same in both: what is found, what a
- * replace leaves, where a link goes. Each editor has its own suite for what
+ * to the kit's `packages/storage/tests/providers/contract.test.ts`. A note's
+ * markdown is the only truth and either editor is a view of it (CLAUDE.md), so
+ * a feature both editors offer is to behave the same in both: what is found,
+ * what a replace leaves, where a link goes. Each editor has its own suite for what
  * is its alone; this one is for the drift between them, which is how the
  * link-range (#436) and secret-keeping (#439) bugs arrived — fixed in one
  * editor and not the other.

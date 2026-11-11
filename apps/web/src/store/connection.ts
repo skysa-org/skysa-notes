@@ -1,16 +1,15 @@
+import { conflictPath, linkedFiles } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
 import {
 	ancestorPaths,
 	basename,
 	conflictFilePath,
-	conflictPath,
 	isNotFoundError,
 	isUnreadableError,
 	joinPath,
-	linkedFiles,
 	parentPath,
-	type ProviderKind,
 	type StorageProvider,
-} from '@skysa/core';
+} from '@skysa/storage';
 import type { PromiseExtended } from 'dexie';
 
 import {
@@ -309,7 +308,7 @@ const placeFiles = async (
  * fresh one, and what is queued for it follows it; it is otherwise the row it
  * was, file and all. Its file still says the old id until the note is next
  * written, which is how any note stands whose file names an id its source
- * already had (`idForNewNote` in `packages/core`).
+ * already had (`idForNewNote`, the kit's engine's).
  *
  * Two rows can also meet over one *file*: a detached source's rows resuming
  * into a connection that is already live for the same account, and has pulled

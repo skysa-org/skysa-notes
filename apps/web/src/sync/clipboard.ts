@@ -1,14 +1,11 @@
+import { CLIPBOARD_FOLDER, clipPath, MAX_ATTACHMENT_BYTES, readClipName } from '@skysa/core';
 import {
 	basename,
-	CLIPBOARD_FOLDER,
-	clipPath,
 	contentTypeOf,
 	isConflictError,
 	isNotFoundError,
-	MAX_ATTACHMENT_BYTES,
-	readClipName,
 	type RemoteEntry,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 import { PREVIEW_CHARS, showsClipboard } from '../store/clipboard.js';
 import type { ClipKey, ClipRecord, NotesDatabase } from '../store/db.js';

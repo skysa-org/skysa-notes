@@ -30,7 +30,7 @@ describe('doc comments', () => {
 	);
 
 	it('finds the source it is meant to look at', () => {
-		expect(files).toContain(join(ROOT, 'packages/core/src/sync/store.ts'));
+		expect(files).toContain(join(ROOT, 'packages/core/src/markdown/frontmatter/read.ts'));
 		expect(files).toContain(join(ROOT, 'apps/web/src/store/hooks.ts'));
 		expect(files).toContain(join(ROOT, 'apps/api/src/worker.ts'));
 	});

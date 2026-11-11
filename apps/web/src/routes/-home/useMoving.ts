@@ -1,4 +1,5 @@
-import { isScratchPath, isWithin, rebasePath } from '@skysa/core';
+import { isScratchPath } from '@skysa/core';
+import { isWithin, rebasePath } from '@skysa/storage';
 import { type RefObject, useCallback, useEffect, useState } from 'react';
 
 import { useNotices } from '../../components/ui/notices.js';

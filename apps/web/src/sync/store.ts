@@ -1,27 +1,27 @@
+import { conflictContent, type ParsedNoteFile, parseNoteFile } from '@skysa/core';
 import {
 	basename,
-	conflictContent,
-	type ConflictResolution,
 	contentHash,
-	isFileChange,
 	isWithin,
-	type NewSyncOp,
 	normalizePath,
-	type OpOutcome,
 	parentPath,
-	type ParsedNoteFile,
-	parseNoteFile,
-	type PullBatch,
-	type PullChange,
 	rebasePath,
 	ROOT,
+} from '@skysa/storage';
+import {
+	type ConflictResolution,
+	isFileChange,
+	type NewSyncOp,
+	type OpOutcome,
+	type PullBatch,
+	type PullChange,
 	type SyncFile,
 	type SyncFolder,
 	type SyncNote,
 	type SyncOp,
 	type SyncStore,
 	type UnreadableFile,
-} from '@skysa/core';
+} from '@skysa/sync';
 import Dexie from 'dexie';
 import { z } from 'zod';
 
@@ -55,8 +55,8 @@ import { eachInSlices } from '../store/slices.js';
  * One store per connection: every read and write here is scoped to
  * `connectionId`, so two accounts never see each other's notes, folders, ops or
  * cursor. The engine's promises that the type cannot state are checked by the
- * contract suite in `packages/core/tests/sync/storeContract.ts`, registered
- * against this store in `apps/web/tests/syncStore.test.ts`.
+ * kit's contract suite (`describeSyncStoreContract`, `@skysa/sync/testing`),
+ * registered against this store in `apps/web/tests/syncStore.test.ts`.
  *
  * Tombstones are notes like any other here. The port asks every read to see a
  * note whose delete is still queued, because the row is what carries the

@@ -1,13 +1,7 @@
-import {
-	bytesHash,
-	createSyncEngine,
-	isPassedOver,
-	MAX_ATTACHMENT_BYTES,
-	NOTE_FORMAT,
-	type StorageProvider,
-	syncsHidden,
-} from '@skysa/core';
-import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
+import { isPassedOver, MAX_ATTACHMENT_BYTES, NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import { bytesHash, type StorageProvider } from '@skysa/storage';
+import { createFakeProvider, type FakeProvider } from '@skysa/storage/testing';
+import { createSyncEngine } from '@skysa/sync';
 import { describe, expect, it } from 'vitest';
 
 import {

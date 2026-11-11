@@ -1,4 +1,5 @@
-import { ROOT, SCRATCHPAD_FOLDER } from '@skysa/core';
+import { SCRATCHPAD_FOLDER } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 
 import {

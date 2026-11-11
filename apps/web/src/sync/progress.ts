@@ -1,4 +1,4 @@
-import type { SyncProgress } from '@skysa/core';
+import type { SyncProgress } from '@skysa/sync';
 
 /**
  * From how many a run's count is said. A run of a few — an edit sent, a

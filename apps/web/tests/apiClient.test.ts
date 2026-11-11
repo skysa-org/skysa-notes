@@ -1,4 +1,4 @@
-import { MAX_CONNECT_CODE } from '@skysa/core';
+import { MAX_CONNECT_CODE } from '@skysa/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError, createApiClient, type FetchLike } from '../src/api/client.js';

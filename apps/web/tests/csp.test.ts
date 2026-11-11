@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type FetchLike, NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
+import { NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
+import type { FetchLike } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 

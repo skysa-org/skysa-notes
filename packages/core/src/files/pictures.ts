@@ -1,4 +1,4 @@
-import { cell } from '../cell.js';
+import { cell } from '@skysa/storage';
 
 /**
  * What a picture's own bytes say about it, read from its header without
@@ -35,8 +35,8 @@ type Step<T> = Readonly<{ found: T }> | Readonly<{ next: number }> | undefined;
  * until one is what was looked for or there is nothing more to read. A loop
  * where this package would recurse: a GIF's first frame alone can be thousands
  * of blocks, and a walk that recursed for each would run out of stack on a
- * large one. Hence this package's second loop (`chain` in `providers/idTree.ts`
- * is the first, for the same reason).
+ * large one. Hence this package's loop (`chain` in the kit's
+ * `packages/storage/src/providers/idTree.ts` is another, for the same reason).
  */
 const walk = <T>(from: number, step: (at: number) => Step<T>): T | undefined => {
 	// eslint-disable-next-line functional/no-let -- see above: recursion here would run out of stack

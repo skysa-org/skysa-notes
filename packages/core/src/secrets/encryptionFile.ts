@@ -1,8 +1,8 @@
+import { parseJson } from '@skysa/storage';
 import { z } from 'zod';
 
 import { spellsRecipient } from '../age/keys.js';
 import { ENCRYPTION_SCHEMA_VERSION } from '../config.js';
-import { parseJson } from '../json.js';
 
 /** The version alone, read first: a newer build's file may be any other shape. */
 const versionSchema = z.object({ schemaVersion: z.number().int().positive() });

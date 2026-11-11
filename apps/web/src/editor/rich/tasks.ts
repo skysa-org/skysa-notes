@@ -8,7 +8,7 @@ import {
 } from '@milkdown/kit/prose/state';
 import { StepMap } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { t } from '../../i18n/t.js';
 import { isAppChange } from '../shared/dirty.js';

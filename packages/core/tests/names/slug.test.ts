@@ -1,7 +1,7 @@
+import { documentNames } from '@skysa/storage';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveTitle, titleFromFilename } from '../../src/markdown/title.js';
-import { documentNames } from '../../src/names/conflicts.js';
 import { conflictFilename, conflictPath, isNoteName } from '../../src/names/notes.js';
 import { noteFilename, sanitizeFolderName, slugify, uniqueFilename } from '../../src/names/slug.js';
 
@@ -307,7 +307,7 @@ describe('a note’s conflict names', () => {
 
 	it('leave a note’s name, at the slug’s cap, exactly as it was', () => {
 		// The cap leaves room for the suffix a conflict copy adds, so the copy of
-		// a note this app named is named in full (`names/conflicts.ts`).
+		// a note this app named is named in full (`conflictFilename`, the kit's).
 		const slug = noteFilename('\u6f22'.repeat(200));
 		expect(utf8Bytes(slug)).toBe(219);
 		const copy = conflictFilename(slug, AT);

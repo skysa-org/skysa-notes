@@ -1,4 +1,5 @@
-import { cell, classifyHref, drawsFromData, fileKind, type PreviewEmbed } from '@skysa/core';
+import { classifyHref, drawsFromData, fileKind, type PreviewEmbed } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import {
 	createContext,
 	type CSSProperties,

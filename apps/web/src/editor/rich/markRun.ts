@@ -1,5 +1,5 @@
 import type { Mark, MarkType, Node as ProseNode } from '@milkdown/kit/prose/model';
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 /**
  * The whole run of text around `pos` that carries `mark`, in the block `pos`

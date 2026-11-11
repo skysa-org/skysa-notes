@@ -1,4 +1,4 @@
-import { cell, ROOT } from '@skysa/core';
+import { cell, ROOT } from '@skysa/storage';
 import {
 	memo,
 	type ReactNode,

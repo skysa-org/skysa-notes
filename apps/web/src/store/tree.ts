@@ -1,4 +1,5 @@
-import { ancestorPaths, basename, isScratchPath, isVaultPath, parentPath, ROOT } from '@skysa/core';
+import { isScratchPath, isVaultPath } from '@skysa/core';
+import { ancestorPaths, basename, parentPath, ROOT } from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import { type NotebookPin, pinnedFirst, pinnedToEnds } from './pins.js';

@@ -80,7 +80,7 @@ What is expected of a change:
 - **No `let`, no loops, no mutation** outside tests; the lint rules say so. The
   few loops kept (a byte scan where recursion would go too deep) sit behind a
   disable comment that says why. Each workaround has one helper: a value that
-  changes is a `cell()` from `@skysa/core` (`packages/core/src/cell.ts`), a set
+  changes is a `cell()` from `@skysa/storage` (the kit's), a set
   of listeners is `createEmitter` or `createStore`
   (`apps/web/src/store/emitter.ts`), and the latest prop inside a callback is
   `useLatest` (`apps/web/src/hooks/`).

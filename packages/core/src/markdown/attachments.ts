@@ -1,9 +1,15 @@
+import {
+	basename,
+	extensionOf,
+	extensionPart,
+	parentPath,
+	pathSegments,
+	SEPARATOR,
+} from '@skysa/storage';
 import type { Nodes, Root } from 'mdast';
 
 import { isPassedOver } from '../appFolder.js';
 import { NOTE_EXTENSION } from '../config.js';
-import { extensionOf, extensionPart } from '../names/extension.js';
-import { basename, parentPath, pathSegments, SEPARATOR } from '../paths.js';
 import { parse, serialize } from './pipeline.js';
 
 /**

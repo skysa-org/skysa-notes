@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createSyncEngine, isPassedOver, NOTE_FORMAT, syncsHidden } from '@skysa/core';
-import { createFakeProvider } from '@skysa/core/testing';
+import { isPassedOver, NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import { createFakeProvider } from '@skysa/storage/testing';
+import { createSyncEngine } from '@skysa/sync';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection } from '../src/store/connection.js';

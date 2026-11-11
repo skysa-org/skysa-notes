@@ -1,4 +1,4 @@
-import { isWithin, rebasePath } from '@skysa/core';
+import { isWithin, rebasePath } from '@skysa/storage';
 import { useEffect } from 'react';
 
 import { useShell } from '../../components/shell/context.js';

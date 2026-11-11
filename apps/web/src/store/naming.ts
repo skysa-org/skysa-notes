@@ -1,15 +1,14 @@
+import { NOTE_EXTENSION, uniqueFilename } from '@skysa/core';
 import {
 	basename,
 	foldName,
 	joinPath,
 	normalizePath,
-	NOTE_EXTENSION,
 	parentPath,
 	pathSegments,
 	replaceBasename,
 	ROOT,
-	uniqueFilename,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 /**
  * Finding a free name for a note, shared by every writer that puts one
@@ -32,7 +31,7 @@ import {
  * from whatever wrote them, NFD is what a macOS file and an iOS share sheet
  * hand you, and a folder other tools write to is the entire premise.
  *
- * `foldName` is core's own answer to that question, and the one `uniqueFilename`
+ * `foldName` is the kit's answer to that question, and the one `uniqueFilename`
  * compares with — imported rather than restated, because the check here guards
  * that renamer and the two have to agree. Every time a copy of this has drifted
  * from it, the check has been the half that failed open.

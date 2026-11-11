@@ -1,6 +1,6 @@
 import { type Extension, StateEffect, StateField, type TransactionSpec } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
-import { extensionOf } from '@skysa/core';
+import { extensionOf } from '@skysa/storage';
 
 import { settleAfter } from '../../../store/heldEdits.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';

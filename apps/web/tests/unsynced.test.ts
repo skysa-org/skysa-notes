@@ -1,5 +1,6 @@
-import { createSyncEngine, NOTE_FORMAT, syncsHidden } from '@skysa/core';
-import { createFakeProvider } from '@skysa/core/testing';
+import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import { createFakeProvider } from '@skysa/storage/testing';
+import { createSyncEngine } from '@skysa/sync';
 import { describe, expect, it } from 'vitest';
 
 import { bindConnection, verifyResume } from '../src/store/connection.js';

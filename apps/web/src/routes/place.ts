@@ -1,12 +1,5 @@
-import {
-	basename,
-	isScratchPath,
-	isVaultPath,
-	parentPath,
-	ROOT,
-	SCRATCHPAD_FOLDER,
-	VAULT_FOLDER,
-} from '@skysa/core';
+import { isScratchPath, isVaultPath, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { basename, parentPath, ROOT } from '@skysa/storage';
 
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
 import { titleShown } from '../store/titles.js';

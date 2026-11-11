@@ -1,16 +1,17 @@
+import { createFakeProvider } from '@skysa/storage/testing';
+import { syncWorld } from '@skysa/sync/testing';
 import { describe, expect, it } from 'vitest';
 
 import { NOTES_WATCH, syncsHidden } from '../src/appFolder.js';
 import { NOTE_FORMAT } from '../src/markdown/format.js';
-import { createFakeProvider } from '../src/providers/fake.js';
-import { syncWorld } from './sync/kit/world.js';
 
 /**
  * The hidden folders a round meets — the clipboard's, the secrets key file,
  * the scratchpad's and the vault's — and what the engine makes of them
  * (`names`), handed this app's rules (`syncsHidden`, `NOTES_WATCH`) and its
  * documents. The engine's own tests run with no app's
- * (`sync/engine/hiddenFolders.test.ts`); these are this app's.
+ * (the kit's `packages/sync/tests/engine/hiddenFolders.test.ts`); these are
+ * this app's.
  */
 const { world, engineWith, pullNow, remoteFile, noteAt } = syncWorld(NOTE_FORMAT, {
 	syncsHidden,

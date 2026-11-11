@@ -1,4 +1,4 @@
-import { isWithin } from '@skysa/core';
+import { isWithin } from '@skysa/storage';
 import { z } from 'zod';
 
 import type { NoteKey, NotesDatabase } from './db.js';

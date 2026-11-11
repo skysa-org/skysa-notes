@@ -1,11 +1,6 @@
-import {
-	createSyncEngine,
-	isPassedOver,
-	MAX_ATTACHMENT_BYTES,
-	NOTE_FORMAT,
-	syncsHidden,
-} from '@skysa/core';
-import { createFakeProvider } from '@skysa/core/testing';
+import { isPassedOver, MAX_ATTACHMENT_BYTES, NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import { createFakeProvider } from '@skysa/storage/testing';
+import { createSyncEngine } from '@skysa/sync';
 import { describe, expect, it } from 'vitest';
 
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';

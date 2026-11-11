@@ -1,11 +1,11 @@
 import {
-	cell,
 	type PreviewLine,
 	previewLineText,
 	type PreviewMark,
 	type PreviewMarker,
 	type ScratchColor,
 } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import {
 	Fragment,
 	memo,

@@ -1,4 +1,4 @@
-import { basename, isWithin, joinPath, normalizePath, parentPath, ROOT } from '@skysa/core';
+import { basename, isWithin, joinPath, normalizePath, parentPath, ROOT } from '@skysa/storage';
 
 /**
  * What a drop would do, worked out without rendering anything.

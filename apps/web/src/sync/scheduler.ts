@@ -1,22 +1,24 @@
+import type { ProviderKind } from '@skysa/protocol';
 import {
 	AuthError,
 	type Cell,
 	cell,
-	createSyncEngine,
 	type DocumentFormat,
 	isAuthError,
 	isRateLimitError,
+	type StorageProvider,
+} from '@skysa/storage';
+import {
+	createSyncEngine,
 	type MergeInput,
 	messageOf,
-	type ProviderKind,
-	type StorageProvider,
 	type SyncEngine,
 	type SyncOp,
 	type SyncOutcome,
 	type SyncProgress,
 	type SyncStore,
 	type Watch,
-} from '@skysa/core';
+} from '@skysa/sync';
 
 import type { ApiClient, Denial, Refusal } from '../api/client.js';
 import type { CredentialStore } from '../store/credentials.js';
@@ -25,7 +27,7 @@ import { createTokenSource, type TokenSource, type TokenStates } from './tokens.
 
 /**
  * When to sync, and what the last attempt came to. The engine decides nothing
- * about time (`packages/core/src/sync/engine.ts`); this is the part that does,
+ * about time (`@skysa/sync`'s engine); this is the part that does,
  * with the triggers docs/ARCHITECTURE.md §7 lists: app open, the tab regaining focus or
  * becoming visible, `online`, every minute while visible, and shortly after a
  * local edit. Background Sync is not here: it needs the service worker to reach

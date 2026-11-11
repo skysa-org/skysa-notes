@@ -1,4 +1,4 @@
-import { messageOf } from '@skysa/core';
+import { messageOf } from '@skysa/sync';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 
 import { t } from '../../i18n/t.js';

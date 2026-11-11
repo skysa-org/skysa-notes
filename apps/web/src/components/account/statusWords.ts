@@ -1,4 +1,5 @@
-import type { EntitlementCode, SyncProgress } from '@skysa/core';
+import type { EntitlementCode } from '@skysa/protocol';
+import type { SyncProgress } from '@skysa/sync';
 
 import type { Refusal } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';

@@ -2,7 +2,7 @@ import { codeBlockSchema } from '@milkdown/kit/preset/commonmark';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $view } from '@milkdown/kit/utils';
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { iconElement, type IconName } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';

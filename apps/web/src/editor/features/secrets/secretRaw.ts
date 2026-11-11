@@ -16,7 +16,8 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from '@codemirror/view';
-import { armor as armorOf, type Cell, cell, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
+import { armor as armorOf, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
+import { type Cell, cell } from '@skysa/storage';
 
 import { el } from '../../shared/dom.js';
 import type { SecretHost } from './secretHost.js';

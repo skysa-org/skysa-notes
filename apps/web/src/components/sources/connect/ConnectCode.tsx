@@ -1,4 +1,4 @@
-import { type ConnectGate, MAX_CONNECT_CODE } from '@skysa/core';
+import { type ConnectGate, MAX_CONNECT_CODE } from '@skysa/protocol';
 import { type RefObject, useEffect, useId, useState } from 'react';
 
 import { type ApiClient, ApiError } from '../../../api/client.js';

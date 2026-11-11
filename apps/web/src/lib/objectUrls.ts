@@ -1,4 +1,4 @@
-import { type Cell, cell } from '@skysa/core';
+import { type Cell, cell } from '@skysa/storage';
 
 /**
  * Object URLs for the files beside a note (#187), one per file however many
