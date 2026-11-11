@@ -42,7 +42,7 @@ import { useDrafts } from './useDrafts.js';
  * they were for; and the page's title.
  */
 
-/** The page's title with no note open: the brand's name (`brand.ts`). */
+/** The page's title with no note open: the brand's name (`vite.config.ts`). */
 const APP_NAME = import.meta.env.VITE_APP_NAME ?? '';
 
 /**

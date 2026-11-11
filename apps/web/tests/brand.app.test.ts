@@ -1,18 +1,23 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 
+import { BRAND_ICONS, brandCss, loadBrand } from '@skysa/pwa';
 import { describe, expect, it } from 'vitest';
 
-import { BRAND_ICONS, brandCss, loadBrand } from '../brand.js';
 import { DEFAULT_BRAND } from '../pwaApp.js';
 
 /**
  * This app's own brand, which it builds with when a deployment names none
  * (`DEFAULT_BRAND` in `pwaApp.ts`). How a brand file is read and checked is
- * the build's, in `brand.test.ts`.
+ * the kit's (`@skysa/pwa`).
  */
 
-const defaults = JSON.parse(readFileSync(DEFAULT_BRAND, 'utf8')) as Record<string, unknown>;
+// The schema is named apart: its path is the kit's package, which is no one's brand.
+const { $schema: schema, ...defaults } = JSON.parse(readFileSync(DEFAULT_BRAND, 'utf8')) as Record<
+	string,
+	unknown
+>;
 
 describe('the default brand', () => {
 	const brand = loadBrand(DEFAULT_BRAND);
@@ -37,9 +42,10 @@ describe('the default brand', () => {
 		expect(brand.icons.map((icon) => icon.file)).toEqual(BRAND_ICONS.map((icon) => icon.file));
 	});
 
-	it("points an editor at the build's JSON Schema", () => {
-		const schema = String(defaults.$schema);
-		expect(existsSync(resolve(dirname(DEFAULT_BRAND), schema))).toBe(true);
-		expect(schema).toMatch(/brand\.schema\.json$/);
+	it("points an editor at the kit's JSON Schema", () => {
+		const kit = createRequire(import.meta.url).resolve('@skysa/pwa/brand.schema.json');
+		expect(realpathSync(resolve(dirname(DEFAULT_BRAND), String(schema)))).toBe(
+			realpathSync(kit)
+		);
 	});
 });

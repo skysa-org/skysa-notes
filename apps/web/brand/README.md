@@ -5,10 +5,10 @@ nothing here (`docs/self-hosting.md`, "Your own brand").
 
 - `brand.json`: the name ("Notes"), the colours, and where the icons are. No
   fonts, so the app keeps the system's. Its JSON Schema, for an editor, is the
-  build's: `../brand.schema.json`, which `tests/brand.test.ts` holds to the
-  schema in `brand.ts` (`brandJsonSchema`). `DEFAULT_BRAND` in `pwaApp.ts` is
-  what names this file to the build.
-- `icons/`: the six icons, at the names and sizes in `BRAND_ICONS`. They are the
+  kit's, `@skysa/pwa/brand.schema.json`, which this file names by its path
+  under `node_modules`. `DEFAULT_BRAND` in `pwaApp.ts` is what names this file
+  to the build.
+- `icons/`: the six icons, at the names and sizes in the kit's `BRAND_ICONS`. They are the
   page-with-a-curled-corner artwork the app shipped with up to v0.5.2, on the
   default brand's gray (`#4B5563`, its light `brand`) instead of that release's
   blue. The favicons are a rounded tile; every other icon is a full square,

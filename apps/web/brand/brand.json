@@ -1,5 +1,5 @@
 {
-	"$schema": "../brand.schema.json",
+	"$schema": "../node_modules/@skysa/pwa/brand.schema.json",
 	"name": "Notes",
 	"shortName": "Notes",
 	"description": "Local-first markdown notes that sync to your own cloud storage.",

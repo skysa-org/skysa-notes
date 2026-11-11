@@ -7,7 +7,7 @@ import { allStyles, importedStyles, STYLES_FOLDER } from './support/styles.js';
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, '');
 
-/** Written by a component as it draws, or by the brand's stylesheet (`brand.ts`). */
+/** Written by a component as it draws, or by the brand's stylesheet (the kit's `brandCss`). */
 const SET_ELSEWHERE: ReadonlySet<string> = new Set([
 	'--card-picture-ratio',
 	'--card-picture-width',
