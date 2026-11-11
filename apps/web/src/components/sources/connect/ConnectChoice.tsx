@@ -1,5 +1,4 @@
-import type { ApiClient } from '@skysa/client';
-import { heldConnectCode, heldConnectCodeShown } from '@skysa/client';
+import { type ApiClient, heldConnectCode, heldConnectCodeShown } from '@skysa/client';
 import type { ConnectGate, ProviderKind } from '@skysa/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 

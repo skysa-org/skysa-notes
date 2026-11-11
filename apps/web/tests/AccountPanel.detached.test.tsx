@@ -1,5 +1,4 @@
-import type { ApiClient } from '@skysa/client';
-import { hashCredential } from '@skysa/client';
+import { type ApiClient, hashCredential } from '@skysa/client';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';

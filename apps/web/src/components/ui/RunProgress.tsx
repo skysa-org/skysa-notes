@@ -1,5 +1,4 @@
-import type { SchedulerStatus } from '@skysa/client';
-import { runBar } from '@skysa/client';
+import { runBar, type SchedulerStatus } from '@skysa/client';
 
 /**
  * How far a run has got, drawn: a bar, and under it, lightly, the file it is

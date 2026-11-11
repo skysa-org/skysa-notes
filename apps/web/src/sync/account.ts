@@ -1,5 +1,13 @@
-import type { ApiClient, Connection, Refusal, SyncScheduler } from '@skysa/client';
-import { credentialFor, forgetCredential, keepCredential, pendingCredential } from '@skysa/client';
+import {
+	type ApiClient,
+	type Connection,
+	credentialFor,
+	forgetCredential,
+	keepCredential,
+	pendingCredential,
+	type Refusal,
+	type SyncScheduler,
+} from '@skysa/client';
 import { APP_FOLDER_NAME } from '@skysa/core';
 import type { ProviderKind } from '@skysa/protocol';
 

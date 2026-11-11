@@ -1,5 +1,4 @@
-import type { SyncScheduler } from '@skysa/client';
-import { createEmitter } from '@skysa/client';
+import { createEmitter, type SyncScheduler } from '@skysa/client';
 import {
 	drawsFromData,
 	imageInfo,

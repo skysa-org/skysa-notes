@@ -772,6 +772,7 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
 3. **Triggers** are the kit's scheduler's (`@skysa/client`, [kit §7, "Sync loop"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#sync-loop-per-connection)): the app opening, the tab regaining focus, `online`, every minute while visible, shortly after a local edit, and where the deployment runs the change relay (§6) its notice, which is one more trigger and never a replacement for the others.
    **When a push goes** is the scheduler's too: an edit's ops go 2 s after the last one queued, and whatever is waiting goes at once as the page is hidden.
    This app queues nothing lazily, and passes the scheduler no `lazyMs`.
+
 <a id="folder-renames-moves"></a>
 ### Folder renames/moves
 A folder renamed or moved on the remote is applied here whatever is dirty in it, since a move does not conflict with an edit.
@@ -1731,7 +1732,8 @@ A test checks the answer against a parse of the whole body over four thousand bo
     The key is the caller's, and has to name the bytes as well as the file: a version that moves on is a new URL.
 - **The screen kept on through a long sync (2026-10-05).**
   A phone whose screen times out mid-import suspends the network, so while a run long enough to count is under way and the page is visible, the kit's client holds a screen wake lock (`keepAwakeWhileSyncing`, [kit §8](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#pwa-specifics)).
-  Pressing the power button still stops the run; the next one picks up from what was kept.
+  A refusal, such as battery saver's, is taken as the answer until the page is shown again, and a browser without the API syncs as before.
+  Pressing the power button still stops the run; the next one picks up from what the last had read and kept (§7, "A pull keeps what it has read").
 - **Shared to the app (2026-10-06).**
   The manifest's `share_target` makes the installed app a destination in the system's share sheet where the platform offers one: Android and ChromeOS. iOS and desktop Chrome on macOS and Windows do not.
   It is a `multipart/form-data` POST to `/share` carrying `title`, `text`, `url` and `files`, and never a GET, which would put what was shared in a URL that logs keep.
@@ -1780,6 +1782,7 @@ A test checks the answer against a parse of the whole body over four thousand bo
   Chromium lets a waiting worker take over only once the one it replaces has no request in flight, and one that starts while the take-over waits holds it to a five-minute limit, so with a sync going Reload looked dead.
   So Reload pauses this tab's sync and asks every other tab to pause too, then asks the worker to take over: the kit's client's (`makeWay`, [kit §8](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#pwa-specifics)).
   The prompt says it is updating meanwhile, and after ten seconds, what else will do it.
+  A request nothing here makes, such as a picture opened at that moment or a tab still on a build from before this, still holds the take-over to the five minutes.
   The update *to* this build is one of those: the old page handles the click.
 - **The shell answers only the app's own route (2026-09-29, issue #143).**
   The navigation fallback answered every path outside `/api/*` with the shell.
@@ -2127,12 +2130,12 @@ The first six seams are cut:
 - the scheduler and the provider factory say nothing in words of their own, and the factory is handed what a timeout says (`timedOut`);
 - the in-memory store and the store contract are handed the format, and make a conflict copy with it, while the Dexie store, which is notes', makes notes';
 - the credential, the token source and the relay reach the database through ports (`CredentialTable`, `TokenStates`), made over the app's database in `sync/dexiePorts.ts`;
-- the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule keeps Dexie, the app's tables and its words out of everything that moves.
+- the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule kept Dexie, the app's tables and its words out of everything that was to move, until it moved: the kit's client has no Dexie to import, nor the app's words.
 
 Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked are here.
 A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, holds every module that moves, and every test that moves with it, to what goes with it.
 Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests.
-The client's tests that ran over this app's database follow as suites over a device (`tests/client/device.ts`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
+The client's tests that ran over this app's database follow as suites over a device (`ClientDevice`, now `@skysa/client/testing`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
 The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring, and 0.1.0 is on npm (record 0018, step 2).
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 

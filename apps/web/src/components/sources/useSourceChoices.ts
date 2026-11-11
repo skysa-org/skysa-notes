@@ -1,5 +1,4 @@
-import type { ApiClient } from '@skysa/client';
-import { answer, useInstanceConfig } from '@skysa/client';
+import { answer, type ApiClient, useInstanceConfig } from '@skysa/client';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 import { t } from '../../i18n/t.js';

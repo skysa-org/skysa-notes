@@ -1,4 +1,3 @@
-import type { SchedulerStatus } from '@skysa/client';
 import {
 	type ApiClient,
 	ApiError,
@@ -7,6 +6,7 @@ import {
 	holdAcceptedCode,
 	holdConnectCode,
 	type InstanceConfig,
+	type SchedulerStatus,
 } from '@skysa/client';
 import { MAX_CONNECT_CODE } from '@skysa/protocol';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';

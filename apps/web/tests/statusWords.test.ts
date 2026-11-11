@@ -1,5 +1,4 @@
-import type { SchedulerStatus, StuckOp } from '@skysa/client';
-import { PROGRESS_FROM } from '@skysa/client';
+import { PROGRESS_FROM, type SchedulerStatus, type StuckOp } from '@skysa/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {

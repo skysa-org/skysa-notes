@@ -145,6 +145,18 @@ const SYNC_LAYER = NOT_ABOVE(
 	'the sync layer drives the store; it does not import the UI.'
 );
 
+/**
+ * What a layer below the sync layer may take from the kit's client, which
+ * holds the sync layer now (the scheduler, the API client, the relay): its
+ * emitter and store, and in the store, the credentials' table too.
+ */
+const CLIENT_BELOW_SYNC = (also = []) => ({
+	name: '@skysa/client',
+	allowImportNames: ['createEmitter', 'createStore', ...also],
+	message:
+		'the kit’s client holds the sync layer: below it, take only its emitter and store (and in the store, the credentials’ table).',
+});
+
 /** What nothing in packages/core/src may import. */
 const CORE_IMPORTS = [
 	{
@@ -693,7 +705,15 @@ export default tseslint.config(
 		// that store. Neither may import the UI or anything built on top of
 		// them, so each can be read, tested and changed without the screens.
 		files: ['apps/web/src/store/**/*.{ts,tsx}'],
-		rules: { 'no-restricted-imports': ['error', { patterns: [STORE_LAYER] }] },
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [CLIENT_BELOW_SYNC(['CredentialRecord', 'PENDING_CREDENTIAL_ID'])],
+					patterns: [STORE_LAYER],
+				},
+			],
+		},
 	},
 	{
 		files: ['apps/web/src/sync/**/*.{ts,tsx}'],
@@ -719,6 +739,7 @@ export default tseslint.config(
 			'no-restricted-imports': [
 				'error',
 				{
+					paths: [CLIENT_BELOW_SYNC()],
 					patterns: [
 						NOT_ABOVE(
 							[
@@ -751,6 +772,7 @@ export default tseslint.config(
 			'no-restricted-imports': [
 				'error',
 				{
+					paths: [CLIENT_BELOW_SYNC()],
 					patterns: [
 						NOT_ABOVE(
 							['routes', 'sync'],
@@ -769,6 +791,7 @@ export default tseslint.config(
 			'no-restricted-imports': [
 				'error',
 				{
+					paths: [CLIENT_BELOW_SYNC()],
 					patterns: [
 						NOT_ABOVE(
 							['routes', 'sync'],

@@ -1,5 +1,4 @@
-import type { ApiClient, InstanceConfig } from '@skysa/client';
-import { PROGRESS_FROM } from '@skysa/client';
+import { type ApiClient, type InstanceConfig, PROGRESS_FROM } from '@skysa/client';
 import {
 	createMemoryHistory,
 	createRootRoute,

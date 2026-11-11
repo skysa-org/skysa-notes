@@ -3,8 +3,12 @@
  * drawn over it, and the steps through its menus, for the `AccountPanel.*.test.tsx`
  * files.
  */
-import type { ApiClient, InstanceConfig, SchedulerStatus } from '@skysa/client';
-import { beginConnect } from '@skysa/client';
+import {
+	type ApiClient,
+	beginConnect,
+	type InstanceConfig,
+	type SchedulerStatus,
+} from '@skysa/client';
 import {
 	createMemoryHistory,
 	createRootRoute,

@@ -1,5 +1,4 @@
-import type { ApiClient } from '@skysa/client';
-import { createSyncScheduler, type SyncScheduler } from '@skysa/client';
+import { type ApiClient, createSyncScheduler, type SyncScheduler } from '@skysa/client';
 import { fakeEnvironment } from '@skysa/client/testing';
 import { isPassedOver, NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import {

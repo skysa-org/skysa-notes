@@ -1,5 +1,4 @@
-import type { ApiClient, Grant } from '@skysa/client';
-import { answer, type Asked, credentialFor } from '@skysa/client';
+import { answer, type ApiClient, type Asked, credentialFor, type Grant } from '@skysa/client';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
 import { failedAt, saying } from '../../errors/reached.js';

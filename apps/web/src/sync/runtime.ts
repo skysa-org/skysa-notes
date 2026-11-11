@@ -1,5 +1,10 @@
-import type { SchedulerStatus, SyncScheduler } from '@skysa/client';
-import { api, createProviderFactory, createRelayFactory } from '@skysa/client';
+import {
+	api,
+	createProviderFactory,
+	createRelayFactory,
+	type SchedulerStatus,
+	type SyncScheduler,
+} from '@skysa/client';
 import { NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import { useSyncExternalStore } from 'react';
 

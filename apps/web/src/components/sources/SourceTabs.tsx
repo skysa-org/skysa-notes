@@ -1,5 +1,4 @@
-import type { SyncScheduler } from '@skysa/client';
-import { api, type ApiClient } from '@skysa/client';
+import { api, type ApiClient, type SyncScheduler } from '@skysa/client';
 import { type ReactNode, useState } from 'react';
 
 import { t } from '../../i18n/t.js';

@@ -1,5 +1,4 @@
-import type { SchedulerStatus, SyncScheduler } from '@skysa/client';
-import { api, type ApiClient } from '@skysa/client';
+import { api, type ApiClient, type SchedulerStatus, type SyncScheduler } from '@skysa/client';
 import type { SyncProgress } from '@skysa/sync';
 import { useId, useState } from 'react';
 

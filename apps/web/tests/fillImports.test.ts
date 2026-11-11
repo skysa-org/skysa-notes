@@ -15,13 +15,35 @@ import { describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Every module specifier a file imports and keeps once compiled: not `import type`. */
-const specifiers = (text: string): string[] =>
+/** What one import of a file takes: a module, and the names it keeps once compiled. */
+interface Taken {
+	readonly specifier: string;
+	/** `*` where it takes all of the module, or does not say: a namespace, a default, a dynamic import. */
+	readonly names: readonly string[];
+}
+
+/** A clause's names, less `type` ones, as the module that offers them calls them. */
+const namesOf = (clause: string): readonly string[] => {
+	const braces = /\{([^}]*)\}/u.exec(clause);
+	if (braces === null) return ['*'];
+	return (braces[1] ?? '')
+		.split(',')
+		.map((name) => name.trim())
+		.filter((name) => name !== '' && !name.startsWith('type '))
+		.map((name) => name.split(/\s+as\s+/u)[0] ?? name);
+};
+
+/** Every import a file keeps once compiled, `export … from` and dynamic ones too: not `import type`. */
+const imports = (text: string): readonly Taken[] =>
 	[
 		...text.matchAll(
-			/^\s*(?:import|export)\s+(?!type\b)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^\s*import\s*['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/gmu
+			/^\s*(?:import|export)\s+(?!type\b)([^'"]*?)\bfrom\s*['"]([^'"]+)['"]|^\s*import\s*['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]\s*\)/gmu
 		),
-	].map((match) => match[1] ?? match[2] ?? match[3] ?? '');
+	].map(([, clause = '', from, bare, dynamic]) =>
+		from === undefined
+			? { specifier: bare ?? dynamic ?? '', names: ['*'] }
+			: { specifier: from, names: namesOf(clause) }
+	);
 
 /** The file a relative specifier names: `.js` written, `.ts` or `.tsx` on disk. */
 const fileOf = (from: string, specifier: string): string | undefined => {
@@ -32,24 +54,44 @@ const fileOf = (from: string, specifier: string): string | undefined => {
 	);
 };
 
-/** The app's own modules `entry` loads, by path from the app's root. */
-const loaded = (entry: string): Set<string> => {
+/** The modules `entries` load, as far as relative imports go, by path from `base`. */
+const walk = (entries: readonly string[], base: string): Set<string> => {
 	const seen = new Set<string>();
 	const visit = (file: string) => {
-		const name = relative(root, file);
+		const name = relative(base, file);
 		if (seen.has(name)) return;
 		seen.add(name);
-		if (!/\.tsx?$/u.test(file)) return;
-		specifiers(readFileSync(file, 'utf8'))
-			.filter((specifier) => specifier.startsWith('.'))
-			.forEach((specifier) => {
+		if (!/\.(?:tsx?|js)$/u.test(file)) return;
+		imports(readFileSync(file, 'utf8'))
+			.filter(({ specifier }) => specifier.startsWith('.'))
+			.forEach(({ specifier }) => {
 				const next = fileOf(file, specifier);
 				if (next !== undefined) visit(next);
 			});
 	};
-	visit(join(root, entry));
+	entries.forEach(visit);
 	return seen;
 };
+
+/** The app's own modules `entry` loads, by path from the app's root. */
+const loaded = (entry: string): Set<string> => walk([join(root, entry)], root);
+
+/**
+ * The kit's client as published, and the module each name its entry offers
+ * comes from. A name it does not offer, or `*`, is its entry, and so all of it.
+ */
+const client = join(root, 'node_modules/@skysa/client');
+const clientEntry = join(client, 'dist/src/index.js');
+const clientModules = new Map(
+	[
+		...readFileSync(clientEntry, 'utf8').matchAll(
+			/^export\s*\{([^}]*)\}\s*from\s*'([^']+)'/gmu
+		),
+	].flatMap(([, names = '', from = '']) =>
+		namesOf(`{${names}}`).map((name) => [name, resolve(dirname(clientEntry), from)] as const)
+	)
+);
+const clientModuleOf = (name: string): string => clientModules.get(name) ?? clientEntry;
 
 describe('the fill window', () => {
 	const modules = loaded('src/fill/main.tsx');
@@ -72,23 +114,42 @@ describe('the fill window', () => {
 		expect(modules).not.toContain(module);
 	});
 
-	it('takes from the kit’s client only an emitter, a store and base64url', () => {
+	it('takes from the kit’s client only what holds no sync, nor anything that loads it', () => {
 		// The scheduler is the kit's (`@skysa/client`), so the walk above cannot
 		// see it: what reaches the window's chunk of that package is what the
-		// window's modules name from it.
-		const named = [...modules].flatMap((module) =>
-			[
-				...readFileSync(join(root, module), 'utf8').matchAll(
-					/^import\s+(?!type\b)\{([^}]*)\}\s*from\s*'@skysa\/client'/gmu
-				),
-			].flatMap(([, names = '']) =>
-				names
-					.split(',')
-					.map((name) => name.trim())
-					.filter((name) => name !== '' && !name.startsWith('type '))
-			)
+		// window's modules take from it, and what those names' modules load.
+		const names = new Set(
+			[...modules]
+				.filter((module) => /\.tsx?$/u.test(module))
+				.flatMap((module) => imports(readFileSync(join(root, module), 'utf8')))
+				.filter(({ specifier }) => specifier === '@skysa/client')
+				.flatMap(({ names }) => names)
 		);
-		expect([...new Set(named)].sort()).toEqual(['createEmitter', 'createStore', 'toBase64Url']);
+		expect([...names].sort()).toEqual([
+			'PENDING_CREDENTIAL_ID',
+			'createEmitter',
+			'createStore',
+			'toBase64Url',
+		]);
+		expect([...walk([...names].map(clientModuleOf), client)].sort()).toEqual([
+			'dist/src/store/credentials.js',
+			'dist/src/store/emitter.js',
+		]);
+	});
+
+	it('reads what a module takes from the kit’s client, however it takes it', () => {
+		expect(
+			[
+				"import { a, type B, c as d } from '@skysa/client';",
+				"export { type E, f } from '@skysa/client';",
+				"import * as everything from '@skysa/client';",
+				"const later = await import('@skysa/client');",
+				"import type { G } from '@skysa/client';",
+			].map((line) => imports(line).flatMap(({ names }) => names))
+		).toEqual([['a', 'c'], ['f'], ['*'], ['*'], []]);
+		expect(clientModuleOf('createEmitter')).toBe(join(client, 'dist/src/store/emitter.js'));
+		expect(clientModuleOf('*')).toBe(clientEntry);
+		expect(walk([clientEntry], client)).toContain('dist/src/sync/scheduler.js');
 	});
 
 	it('does not load the router', () => {

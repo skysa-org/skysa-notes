@@ -1,5 +1,11 @@
-import type { ApiClient, Connection, Result } from '@skysa/client';
-import { beginConnect, credentialFor, keepCredential } from '@skysa/client';
+import {
+	type ApiClient,
+	beginConnect,
+	type Connection,
+	credentialFor,
+	keepCredential,
+	type Result,
+} from '@skysa/client';
 import { describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
