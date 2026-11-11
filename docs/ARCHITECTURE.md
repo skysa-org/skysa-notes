@@ -2118,7 +2118,7 @@ The first six seams are cut:
 - the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule kept Dexie, the app's tables and its words out of everything that was to move, until it moved: the kit's client has no Dexie to import, nor the app's words.
 
 Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked are here.
-A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, holds every module that moves, and every test that moves with it, to what goes with it.
+A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, held every module bound for the kit, and every test that went with it, to what went with it, until the last of them moved.
 Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests.
 The client's tests that ran over this app's database follow as suites over a device (`ClientDevice`, now `@skysa/client/testing`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
 The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring, and 0.1.0 is on npm (record 0018, step 2).
