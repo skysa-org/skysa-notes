@@ -1,5 +1,17 @@
 # @skysa/web
 
+## 3.0.0
+
+### Patch Changes
+
+- da31e00: The app's sync client — the scheduler, the API client, the credentials and the connect code a device holds — is now the shared kit's, `@skysa/client`, installed from npm with the rest. Nothing changes for the person using the app or for an operator, and there is nothing to do.
+- b55df24: `AUTH_MODE` and `WEBDAV_ALLOW_PRIVATE` are no longer read, and the server's migration `0007_drop_sign_in_tables` drops the `users` and `identities` tables, which nothing ever read (#118; the kit at 0.2.0). Remove `AUTH_MODE` from `[vars]` in your `wrangler.toml`, and either setting from `.dev.vars` or your secrets if it is there: the Worker still boots with them, and logs a line at boot asking for each to be removed. `AUTH_MODE=account-first` is still refused at boot. The migration is applied by the routine steps. An app from before this release keeps working against the new server, which still sends the field that app reads. Code of your own that imported `AUTH_MODES` or `AuthMode` from `@skysa/core` drops them: there is nothing left to choose.
+- 7102db7: An edit made just before the app goes out of sight is now sent as it goes, rather than two seconds later.
+- 61718ba: The build's service worker, manifest and brand are now made by the shared kit, `@skysa/pwa`, installed from npm with the rest; the manifest it makes is byte for byte the one before. A deployment's own `brand.json` whose `$schema` names `apps/web/brand.schema.json` should name `apps/web/node_modules/@skysa/pwa/brand.schema.json` instead: the build never reads that path, so until then only an editor's hints are missing.
+- Updated dependencies [13957b2]
+- Updated dependencies [b55df24]
+  - @skysa/core@3.0.0
+
 ## 2.1.1
 
 ### Patch Changes
