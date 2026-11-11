@@ -23,7 +23,7 @@ export default defineConfig({
 			// up: a pull request that raises a package's numbers raises these.
 			thresholds: {
 				'packages/core/src/**': { statements: 95, branches: 90, functions: 98, lines: 97 },
-				'apps/api/src/**': { statements: 93, branches: 89, functions: 92, lines: 95 },
+				'apps/api/src/**': { statements: 99, branches: 92, functions: 99, lines: 99 },
 				'apps/web/src/**': { statements: 94, branches: 89, functions: 94, lines: 96 },
 			},
 		},

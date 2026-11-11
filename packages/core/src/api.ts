@@ -2,7 +2,7 @@
  * The API's answers that are not the thing asked for, as the Worker gives them
  * and the app reads them (#451). Kept here, as the relay's protocol is in
  * `relay.ts`, so the two ends cannot drift: the server answers only with a
- * code on this list (`fail` in `apps/api/src/http.ts`), and the app's
+ * code on this list (`fail` in the kit's `packages/server/src/http.ts`), and the app's
  * `Refusal` is a part of it.
  *
  * Each is `{ error: code }`, with its HTTP status; `not_entitled` carries the

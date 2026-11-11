@@ -4,9 +4,6 @@
 	"workspaces": {
 		"apps/web": {
 			"entry": ["brand/recolour.mjs"]
-		},
-		"apps/api": {
-			"ignoreDependencies": ["cloudflare"]
 		}
 	}
 }

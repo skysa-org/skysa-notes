@@ -5,8 +5,8 @@
 	"license": "AGPL-3.0-only",
 	"type": "module",
 	"exports": {
-		".": "./src/app.ts",
-		"./relay": "./src/relay/durableObject.ts"
+		".": "./src/index.ts",
+		"./relay": "./src/relay.ts"
 	},
 	"scripts": {
 		"dev": "wrangler dev --port 8787",
@@ -16,19 +16,15 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.src.json --noEmit",
 		"test": "vitest run",
 		"cf-typegen": "wrangler types --env-file ../../.dev.vars.example",
-		"db:generate": "drizzle-kit generate",
 		"db:migrate": "wrangler d1 migrations apply skysa-notes --local",
 		"db:migrate:remote": "wrangler d1 migrations apply skysa-notes --remote"
 	},
 	"dependencies": {
 		"@skysa/core": "workspace:*",
-		"drizzle-orm": "^0.45.4",
-		"hono": "^4.13.13",
-		"zod": "catalog:"
+		"@skysa/server": "0.1.0"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
-		"drizzle-kit": "^0.31.11",
 		"vitest": "catalog:",
 		"wrangler": "^4.149.0"
 	}

@@ -55,7 +55,6 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 | `pnpm format` / `pnpm format:check` | Prettier write / check |
 | `pnpm knip` | Unused files, exports and dependencies; an export kept on purpose is tagged `@public` with its reason |
 | `pnpm verify` | format:check + lint + typecheck + knip + test — run before every commit |
-| `pnpm db:generate` | Generate a Drizzle migration from the schema |
 | `pnpm db:migrate` / `pnpm db:migrate:remote` | Apply migrations locally / to Cloudflare |
 | `pnpm run setup` | Prompt for credentials and write `apps/api/.dev.vars` |
 | `pnpm run deploy` | Build core, SPA and Worker, then `wrangler deploy` |

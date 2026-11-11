@@ -289,7 +289,7 @@ describe('the API client', () => {
 		// world moved would unbind a connection that is alive. This pins only
 		// that the client *asks* — `fetch` is a stub here and nothing reads
 		// `cache`. What proves a real response says so is the API's own test
-		// (`apps/api/tests/caching.test.ts`).
+		// (the kit's `packages/server/tests/caching.test.ts`).
 		expect(calls[0]?.init?.cache).toBe('no-store');
 	});
 

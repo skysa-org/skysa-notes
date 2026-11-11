@@ -18,7 +18,7 @@ run_worker_first = ["/api/*"]
 binding = "DB"
 database_name = "skysa-notes"
 database_id = "00000000-0000-0000-0000-000000000000"
-migrations_dir = "migrations"
+migrations_dir = "node_modules/@skysa/server/migrations"
 
 # The change relay's hub (docs/ARCHITECTURE.md §6, "Change relay"): one object
 # per connection. Declared whether or not the relay is on — an object nobody

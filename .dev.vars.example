@@ -69,8 +69,9 @@ MICROSOFT_TENANT="common"
 
 # Dropbox App Console — required when ENABLED_PROVIDERS includes dropbox.
 # Create the app with the name "skysa-notes"; Dropbox app names are immutable.
-# Choose Scoped access / App folder, grant the five storage scopes listed in
-# apps/api/src/oauth/dropbox.ts, and register this redirect URI:
+# Choose Scoped access / App folder, grant the five storage scopes the server
+# asks for (packages/server/src/oauth/dropbox.ts in skysa-org/skysa-kit), and
+# register this redirect URI:
 #   <APP_ORIGIN>/api/auth/connect/dropbox/callback
 DROPBOX_CLIENT_ID=""
 DROPBOX_CLIENT_SECRET=""

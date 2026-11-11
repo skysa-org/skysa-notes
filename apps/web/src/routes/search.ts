@@ -37,8 +37,8 @@ export interface AppSearch {
 }
 
 /**
- * Exactly what the callback can redirect with — `Outcome` in
- * `apps/api/src/routes/connect.ts`, and nothing beside it.
+ * Exactly what the callback can redirect with — `Outcome` in the kit's
+ * `packages/server/src/routes/connect.ts`, and nothing beside it.
  *
  * `conflict`, `signin` and `occupied` were here until 2026-09-18. Phase 7
  * retired all three on the server when connections stopped aggregating under a

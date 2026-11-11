@@ -46,7 +46,7 @@ const gateSchema = z.object({
 	message: z.string().min(1).max(GATE_LIMITS.message),
 	action: z.object({
 		label: z.string().min(1).max(GATE_LIMITS.label),
-		// Normalized for the reason `apps/api/src/gate.ts` gives: an
+		// Normalized for the reason the kit's `packages/server/src/gate.ts` gives: an
 		// `https:example.com` would otherwise be a link into this app.
 		url: z.url({ protocol: /^https$/, normalize: true }).max(GATE_LIMITS.url),
 	}),
