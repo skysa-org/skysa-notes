@@ -3487,7 +3487,7 @@ Every fix in skysa-draw's and memoriam's copies of these layers was this app's a
 A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, holds every module that moves, and every test that moves with it, to what goes with it.
 Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests.
 The client's tests that ran over this app's database follow as suites over a device (`tests/client/device.ts`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
-The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring; it publishes to npm once the `@skysa` scope is claimed there (record 0018, step 2).
+The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring, and 0.1.0 is on npm (record 0018, step 2).
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

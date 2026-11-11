@@ -237,10 +237,11 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
 **In order.**
 1. The seams above, here.
 2. The kit's repository, its CI, the CLA and the documents, and 0.x on npm.
-   This step is done but for npm (2026-11-10).
+   This step is done (2026-11-11).
    [`skysa-org/skysa-kit`](https://github.com/skysa-org/skysa-kit) holds the seven packages with their history, its own CI, the CLA (which covers it, confirmed 2026-11-10, and is signed there on a list of its own), its own `ARCHITECTURE.md` and the wiring for its releases.
-   It starts private, and is made public once the maintainer has looked it over.
-   Its release workflow tags a version and publishes nothing until the `@skysa` scope is claimed on npm and publishing is switched on there, as its `.changeset/README.md` says; the first 0.x on npm comes then.
+   It was made public once the maintainer had looked it over.
+   Its release workflow tags a version and then publishes it from that tag, as its `.changeset/README.md` says.
+   0.1.0 is on npm (2026-11-11), all seven packages, with provenance.
    Its comments and documents are in American English, as skysa-draw's are, and its docs test holds them to it; a file ported from here before step 3 is respelled on the way.
 3. This app depends on it and deletes what moved.
    `@skysa/api` keeps exporting `createApp`, `parseEnv`, `AppConfig` and `@skysa/api/relay`, and `@skysa/core` the seams' types, so a deployment's own Worker entry builds unchanged.
@@ -260,4 +261,3 @@ Where anything is keyed on a storage account, the descriptor's account-id rule s
 **Open, and decided when its step comes.**
 - Whether #118, which is breaking, ships in the same major release as step 3.
 - Whether skysa-draw's and memoriam's D1 databases are reset onto the kit's migrations (steps 4 and 5): their `0000_init.sql` has this repository's file name and not its contents.
-- The `@skysa` organisation on npm has to be claimed before the kit's first publish, and the kit made public before it, since npm's provenance needs a public repository.
