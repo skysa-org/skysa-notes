@@ -1,3 +1,5 @@
+import { type ApiClient, createSyncScheduler, type SyncScheduler } from '@skysa/client';
+import { fakeEnvironment } from '@skysa/client/testing';
 import { isPassedOver, NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import {
 	type AppFolderSpec,
@@ -19,7 +21,6 @@ import {
 } from '@skysa/storage/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient } from '../src/api/client.js';
 import {
 	bindConnection,
 	detachConnection,
@@ -53,11 +54,9 @@ import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { disconnectAccount } from '../src/sync/account.js';
 import { clientStoreOf } from '../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../src/sync/lock.js';
-import { createSyncScheduler, type SyncScheduler } from '../src/sync/scheduler.js';
 import { noteById } from './noteRows.js';
 import { holdCredential } from './support/connection.js';
 import { freshDatabase } from './support/db.js';
-import { fakeEnvironment } from './support/fakes/environment.js';
 
 /**
  * Two browsers, one account — Phase 6's soak, as the checklist names it: "two

@@ -1,4 +1,5 @@
-import { describeTokenSource } from './client/tokenSource.js';
+import { describeTokenSource } from '@skysa/client/testing';
+
 import { dexieDevice } from './support/dexieDevice.js';
 
 // The token source over this app's database, through `sync/dexiePorts.ts`:

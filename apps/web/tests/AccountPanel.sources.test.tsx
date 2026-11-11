@@ -1,8 +1,8 @@
+import type { ApiClient } from '@skysa/client';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient } from '../src/api/client.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import { activeConnectionId, PENDING_CREDENTIAL_ID } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';

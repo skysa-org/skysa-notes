@@ -1,5 +1,5 @@
-import type { ApiClient, InstanceConfig } from '../../api/client.js';
-import type { Asked } from '../../api/instanceConfig.js';
+import type { ApiClient, Asked, InstanceConfig } from '@skysa/client';
+
 import type { NotesSync } from '../../sync/notesSync.js';
 import type { AccountSlot } from '../sources/SourcePanel.js';
 

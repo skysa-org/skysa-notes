@@ -1,10 +1,9 @@
+import { SYNC_WAIT_MS } from '@skysa/client';
+import { describePausing, reaches, stopSchedulers } from '@skysa/client/testing';
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { heldUpOf } from '../src/store/heldUp.js';
-import { SYNC_WAIT_MS } from '../src/sync/scheduler.js';
-import { describePausing } from './client/pausing.js';
-import { reaches, stopSchedulers } from './client/schedulerHarness.js';
 import { dexieDevice } from './support/dexieDevice.js';
 import { holding, otherTab } from './support/otherTab.js';
 import { bound, type Harness, started } from './support/scheduler.js';

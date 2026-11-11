@@ -1,4 +1,4 @@
-import { createStore } from '../store/emitter.js';
+import { createStore } from '@skysa/client';
 
 /**
  * Installing the app from the page (docs/ARCHITECTURE.md §8, "Installing from

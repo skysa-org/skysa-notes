@@ -1,3 +1,4 @@
+import type { AppSchedulerOptions, ClientDevice } from '@skysa/client/testing';
 import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
 
 import { bindConnection, detachConnection, showConnection } from '../../src/store/connection.js';
@@ -6,7 +7,6 @@ import { createNote, saveNoteBody } from '../../src/store/notes.js';
 import { clientStoreOf } from '../../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../../src/sync/lock.js';
 import { createNotesSync } from '../../src/sync/notesSync.js';
-import type { AppSchedulerOptions, ClientDevice } from '../client/device.js';
 import { lazily } from '../noteRows.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';
@@ -17,8 +17,8 @@ const APP: AppSchedulerOptions = { lockName: SYNC_LOCK, document: NOTE_FORMAT, s
 
 /**
  * A device over this app's database, fresh for each call: the client's
- * suites (`tests/client/device.ts`) run over it as the app runs them, through
- * the ports in `sync/dexiePorts.ts`. Its scheduler is the app's, with the
+ * suites (`ClientDevice`, `@skysa/client/testing`) run over it as the app runs
+ * them, through the ports in `sync/dexiePorts.ts`. Its scheduler is the app's, with the
  * clipboard, the key file and the files beside notes attached; a document is
  * a note, made and saved as the editor makes and saves one; an op is queued
  * as a row of the queue, the shape every writer in `store/` leaves. The

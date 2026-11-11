@@ -1,7 +1,7 @@
+import { createEmitter } from '@skysa/client';
 import { cell } from '@skysa/storage';
 
 import { t } from '../../../i18n/t.js';
-import { createEmitter } from '../../../store/emitter.js';
 import { buttonEl, el } from '../../shared/dom.js';
 import type { Sealer, SecretHost } from './secretHost.js';
 import { createSecretPanel, LABEL_MAX, type SecretPanel } from './secretPanel.js';

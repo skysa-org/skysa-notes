@@ -1,6 +1,5 @@
+import { createStore } from '@skysa/client';
 import { useSyncExternalStore } from 'react';
-
-import { createStore } from './emitter.js';
 
 /**
  * A notebook or a source being renamed, as it is typed, so that everything on

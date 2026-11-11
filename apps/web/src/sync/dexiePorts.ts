@@ -1,3 +1,4 @@
+import type { ClientStore, TokenStates } from '@skysa/client';
 import { outOfAttempts } from '@skysa/sync';
 import { liveQuery } from 'dexie';
 
@@ -8,15 +9,13 @@ import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
-import type { ClientStore } from './scheduler.js';
 import { createDexieSyncStore, toSyncOp } from './store.js';
-import type { TokenStates } from './tokens.js';
 
 /**
- * The sync client's ports, over this app's database. The client goes to the
- * shared kit and reaches IndexedDB only through ports
+ * The sync client's ports, over this app's database. The client is the shared
+ * kit's (`@skysa/client`) and reaches IndexedDB only through ports
  * (docs/decisions/0018-the-shared-kit.md); the tables they are made over, and
- * these, stay with the app. The scheduler is handed `clientStoreOf`, which
+ * these, are the app's. The scheduler is handed `clientStoreOf`, which
  * carries the rest. The credentials need no adapter: the database fits
  * `CredentialStore` as it is.
  */

@@ -1,3 +1,4 @@
+import { type ApiClient, type InstanceConfig, PROGRESS_FROM } from '@skysa/client';
 import {
 	createMemoryHistory,
 	createRootRoute,
@@ -9,12 +10,10 @@ import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient, InstanceConfig } from '../src/api/client.js';
 import { AccountPanel } from '../src/components/account/AccountPanel.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { DatabaseProvider } from '../src/store/database.js';
 import { createNote } from '../src/store/notes.js';
-import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { updateNote } from './noteRows.js';
 import {
 	type Answers,

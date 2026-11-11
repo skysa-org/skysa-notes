@@ -1,12 +1,10 @@
+import { type ApiClient, beginConnect, heldConnectCode } from '@skysa/client';
 import type { ProviderKind } from '@skysa/protocol';
 import { type ReactNode, useRef, useState } from 'react';
 
-import type { ApiClient } from '../../../api/client.js';
 import { failedAt, saying } from '../../../errors/reached.js';
 import { t } from '../../../i18n/t.js';
-import { heldConnectCode } from '../../../store/connectCode.js';
 import { pileContents } from '../../../store/connection.js';
-import { beginConnect } from '../../../store/credentials.js';
 import { useDb } from '../../../store/database.js';
 import { PROVIDER_LABELS } from '../../../sync/account.js';
 import { ConfirmDialog } from '../../ui/ConfirmDialog.js';
@@ -36,8 +34,9 @@ import { ConfirmDialog } from '../../ui/ConfirmDialog.js';
  * the first: whatever the pile holds goes into whichever account is next.
  *
  * A code typed into the operator's gate goes with it, whichever button this is
- * (`store/connectCode.ts`): read as it is pressed, so a "Connect again" in the
- * storage panel carries the code typed into the `+` menu a moment before.
+ * (`heldConnectCode`, the kit's client's): read as it is pressed, so a
+ * "Connect again" in the storage panel carries the code typed into the `+` menu
+ * a moment before.
  */
 
 export interface ConnectButtonProps {

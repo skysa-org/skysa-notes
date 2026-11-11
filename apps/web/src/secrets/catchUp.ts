@@ -1,6 +1,7 @@
+import type { SchedulerStatus } from '@skysa/client';
+
 import { activeConnectionId, type NotesDatabase } from '../store/db.js';
 import { enrolment } from '../store/secretKeys.js';
-import type { SchedulerStatus } from '../sync/scheduler.js';
 import { type Age, loadAge } from './loadAge.js';
 import type { SecretsLock } from './lock.js';
 
@@ -23,7 +24,7 @@ import type { SecretsLock } from './lock.js';
  * It stops where the device locks, and goes on at the next unlock. A device
  * that holds no earlier key never loads the age code for this.
  *
- * Framework-free, as the wake lock is (`sync/wakeLock.ts`).
+ * Framework-free, as the wake lock is (`keepAwakeWhileSyncing`, the kit's).
  */
 
 export interface CatchUpOptions {

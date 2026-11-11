@@ -1,3 +1,4 @@
+import type { SchedulerStatus } from '@skysa/client';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 import { t } from '../../i18n/t.js';
@@ -6,7 +7,6 @@ import { useDb } from '../../store/database.js';
 import type { SyncStateRecord } from '../../store/db.js';
 import { getScratchpadShown, setScratchpadShown } from '../../store/scratchpad.js';
 import type { Unsynced } from '../../store/unsynced.js';
-import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { secretsLabel } from '../secrets/secretsLabel.js';
 import type { OptionsMenuItem } from '../ui/OptionsMenu.js';
 import { importingHere, isSyncable } from './SyncState.js';

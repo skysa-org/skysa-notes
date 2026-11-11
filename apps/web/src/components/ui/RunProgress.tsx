@@ -1,5 +1,4 @@
-import { runBar } from '../../sync/progress.js';
-import type { SchedulerStatus } from '../../sync/scheduler.js';
+import { runBar, type SchedulerStatus } from '@skysa/client';
 
 /**
  * How far a run has got, drawn: a bar, and under it, lightly, the file it is

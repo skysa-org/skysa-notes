@@ -1,8 +1,8 @@
+import { beginConnect, keepCredential } from '@skysa/client';
 import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection, finishImport } from '../src/store/connection.js';
-import { beginConnect, keepCredential } from '../src/store/credentials.js';
 import { db, PENDING_CREDENTIAL_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';

@@ -1,8 +1,13 @@
+import {
+	answer,
+	type Asked,
+	type Grant,
+	type InstanceConfig,
+	type SchedulerStatus,
+} from '@skysa/client';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Grant, InstanceConfig } from '../../api/client.js';
-import { answer, type Asked } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
 import type { pickFiles } from '../../lib/pickFiles.js';
 import { tabLock } from '../../secrets/tabLock.js';
@@ -19,7 +24,6 @@ import {
 	type UnsentAnswer,
 } from '../../sync/account.js';
 import { useSyncStatus } from '../../sync/runtime.js';
-import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { ClipboardPanel } from '../clipboard/ClipboardPanel.js';
 import { SecretsDialog } from '../secrets/SecretsDialog.js';
 import type { SecretsDialogProps } from '../secrets/types.js';

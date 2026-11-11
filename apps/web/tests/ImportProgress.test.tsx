@@ -1,14 +1,13 @@
+import type { ApiClient, Result, SchedulerStatus } from '@skysa/client';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient, Result } from '../src/api/client.js';
 import { CommandsProvider } from '../src/commands/context.js';
 import { ImportDialog, importMessage } from '../src/components/account/ImportProgress.js';
 import { bindConnection } from '../src/store/connection.js';
 import { LOCAL_CONNECTION_ID, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
-import type { SchedulerStatus } from '../src/sync/scheduler.js';
 import { holdCredential } from './support/connection.js';
 import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';

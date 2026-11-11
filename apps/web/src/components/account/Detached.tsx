@@ -1,4 +1,5 @@
-import { answer } from '../../api/instanceConfig.js';
+import { answer } from '@skysa/client';
+
 import { t } from '../../i18n/t.js';
 import type { SyncStateRecord } from '../../store/db.js';
 import type { Unsynced } from '../../store/unsynced.js';

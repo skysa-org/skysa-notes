@@ -1,7 +1,7 @@
+import type { SchedulerStatus } from '@skysa/client';
 import type { ReactNode, RefObject } from 'react';
 
 import { t } from '../../i18n/t.js';
-import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { InfoDialog } from '../ui/InfoDialog.js';
 import { RunBar, RunProgress } from '../ui/RunProgress.js';
 import { lineStatus, statusMessage, type SyncCount } from './statusWords.js';
@@ -71,7 +71,7 @@ export const StatusLine = ({
  * says (2026-10-14), since the line no longer names the source, and this
  * does, with its account, on a phone that has no tooltip to show.
  * Paused, nothing syncs on this device until Sync now, a re-scan, the source
- * shown again after another, or a reload (`pause` in `sync/scheduler.ts`).
+ * shown again after another, or a reload (`pause`, the kit's scheduler's).
  */
 export const SyncDetails = ({
 	status,

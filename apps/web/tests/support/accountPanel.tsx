@@ -4,6 +4,12 @@
  * files.
  */
 import {
+	type ApiClient,
+	beginConnect,
+	type InstanceConfig,
+	type SchedulerStatus,
+} from '@skysa/client';
+import {
 	createMemoryHistory,
 	createRootRoute,
 	createRouter,
@@ -15,20 +21,17 @@ import type userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { expect, vi } from 'vitest';
 
-import type { ApiClient, InstanceConfig } from '../../src/api/client.js';
 import { AccountPanel, returnPath } from '../../src/components/account/AccountPanel.js';
 import { SourcePanel } from '../../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../../src/components/sources/SourceTabs.js';
 import { NoticesProvider, useShownNotices } from '../../src/components/ui/notices.js';
 import { Toast } from '../../src/components/ui/Toast.js';
 import type { pickFiles } from '../../src/lib/pickFiles.js';
-import { beginConnect } from '../../src/store/credentials.js';
 import { DatabaseProvider } from '../../src/store/database.js';
 import type { NotesDatabase } from '../../src/store/db.js';
 import type { Library } from '../../src/store/exportNotes.js';
 import { createKeeping, type Keeping } from '../../src/store/keeping.js';
 import { createNote } from '../../src/store/notes.js';
-import type { SchedulerStatus } from '../../src/sync/scheduler.js';
 import { updateNote } from '../noteRows.js';
 import { holdCredential } from './connection.js';
 

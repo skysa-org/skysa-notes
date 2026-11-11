@@ -1,8 +1,13 @@
+import {
+	describeChangeRelay,
+	quiet,
+	reaches,
+	relayed,
+	stopSchedulers,
+} from '@skysa/client/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { setClipboardShown } from '../src/store/clipboard.js';
-import { describeChangeRelay, relayed } from './client/changeRelay.js';
-import { quiet, reaches, stopSchedulers } from './client/schedulerHarness.js';
 import { dexieDevice } from './support/dexieDevice.js';
 import { bound, pastedElsewhere, previews, started } from './support/scheduler.js';
 

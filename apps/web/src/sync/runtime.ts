@@ -1,14 +1,17 @@
+import {
+	api,
+	createProviderFactory,
+	createRelayFactory,
+	type SchedulerStatus,
+	type SyncScheduler,
+} from '@skysa/client';
 import { NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import { useSyncExternalStore } from 'react';
 
-import { api } from '../api/client.js';
 import { t } from '../i18n/t.js';
 import { db } from '../store/db.js';
 import { SYNC_LOCK } from './lock.js';
 import { createNotesSync, type NotesSync } from './notesSync.js';
-import { createProviderFactory } from './providers.js';
-import { createRelayFactory } from './relay.js';
-import type { SchedulerStatus, SyncScheduler } from './scheduler.js';
 import { needsReconnect } from './status.js';
 
 /**
@@ -34,7 +37,7 @@ export const syncScheduler: NotesSync = createNotesSync({
 	document: NOTE_FORMAT,
 	syncsHidden,
 	// Asks `/config` first, so an instance without a relay is never asked for
-	// a ticket (`sync/relay.ts`).
+	// a ticket (`createRelayFactory`, the kit's).
 	relay: createRelayFactory({ credentials: db, client: api }),
 });
 

@@ -1,4 +1,4 @@
-import { createStore } from './emitter.js';
+import { createStore } from '@skysa/client';
 
 /**
  * How code blocks are shown: wrapped or scrolling, numbered or not.

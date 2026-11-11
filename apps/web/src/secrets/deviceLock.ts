@@ -1,5 +1,6 @@
+import { toBase64Url } from '@skysa/client';
+
 import { t } from '../i18n/t.js';
-import { toBase64Url } from '../store/credentials.js';
 import type { DeviceUnlock } from '../store/secretKeys.js';
 
 /**

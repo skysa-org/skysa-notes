@@ -1,8 +1,14 @@
+import {
+	type ApiClient,
+	beginConnect,
+	type Connection,
+	credentialFor,
+	keepCredential,
+	type Result,
+} from '@skysa/client';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient, Connection, Result } from '../src/api/client.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
-import { beginConnect, credentialFor, keepCredential } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
 	LOCAL_CONNECTION_ID,

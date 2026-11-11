@@ -5,6 +5,7 @@ import './styles/index.css';
 // the banner that shows it has mounted (see the module).
 import './install/installPrompt.js';
 
+import { keepAwakeWhileSyncing, makeWayWhenAsked, updateChannel } from '@skysa/client';
 import { createRouter, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -14,9 +15,7 @@ import { routeTree } from './routeTree.gen';
 import { catchUpSecrets } from './secrets/catchUp.js';
 import { tabLock } from './secrets/tabLock.js';
 import { db } from './store/db.js';
-import { makeWayWhenAsked, updateChannel } from './sync/beforeUpdate.js';
 import { syncScheduler } from './sync/runtime.js';
-import { keepAwakeWhileSyncing } from './sync/wakeLock.js';
 
 const router = createRouter({
 	routeTree,
@@ -38,7 +37,7 @@ syncScheduler.start();
 // an import part-way. Never stopped either, for the same reason.
 keepAwakeWhileSyncing(syncScheduler);
 // Another tab's Reload pauses syncing here too, so the new build can take over
-// (`sync/beforeUpdate.ts`). Never stopped either.
+// (`makeWayWhenAsked`, the kit's client's). Never stopped either.
 makeWayWhenAsked(syncScheduler, updateChannel());
 // Secrets still made with a key a source had before, encrypted afresh to the
 // one it has as it is unlocked (`secrets/catchUp.ts`). Never stopped either.

@@ -1,8 +1,8 @@
+import { type ApiClient, ApiError } from '@skysa/client';
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, ApiError } from '../src/api/client.js';
 import { bindConnection } from '../src/store/connection.js';
 import { activeConnectionId } from '../src/store/db.js';
 import {

@@ -1,7 +1,6 @@
+import { describeScheduling, reaches, stopSchedulers } from '@skysa/client/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { reaches, stopSchedulers } from './client/schedulerHarness.js';
-import { describeScheduling } from './client/scheduling.js';
 import { dexieDevice } from './support/dexieDevice.js';
 import { bound, started } from './support/scheduler.js';
 

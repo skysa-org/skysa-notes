@@ -1,3 +1,4 @@
+import { credentialFor } from '@skysa/client';
 import { parentPath, ROOT } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 
@@ -12,7 +13,6 @@ import {
 	rememberAccount,
 	showConnection,
 } from '../src/store/connection.js';
-import { credentialFor } from '../src/store/credentials.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,

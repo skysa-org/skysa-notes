@@ -2,8 +2,9 @@
  * This app's scheduler under test: its database bound to a source, and its
  * scheduler made as the app makes it, with the clipboard, the key file and
  * the files beside notes attached. The rest of a scheduler under test is the
- * kit's (`tests/client/schedulerHarness.ts`).
+ * kit's (`@skysa/client/testing`).
  */
+import { cleanups, schedulerDefaults } from '@skysa/client/testing';
 import { CLIPBOARD_FOLDER, NOTE_FORMAT, syncsHidden } from '@skysa/core';
 import type { FakeProvider } from '@skysa/storage/testing';
 
@@ -15,7 +16,6 @@ import {
 	type NotesSync,
 	type NotesSyncOptions,
 } from '../../src/sync/notesSync.js';
-import { cleanups, schedulerDefaults } from '../client/schedulerHarness.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';
 

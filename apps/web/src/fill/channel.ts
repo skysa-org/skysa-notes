@@ -1,7 +1,7 @@
+import { createEmitter } from '@skysa/client';
 import { pageSite, type Site } from '@skysa/core';
 import { cell } from '@skysa/storage';
 
-import { createEmitter } from '../store/emitter.js';
 import {
 	BOOKMARKLET_REVISION,
 	FILL_MESSAGE,

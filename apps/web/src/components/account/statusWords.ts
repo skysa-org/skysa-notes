@@ -1,11 +1,17 @@
+import {
+	isLongRun,
+	type Refusal,
+	runBar,
+	type RunCount,
+	runCount,
+	type SchedulerStatus,
+	type StuckOp,
+} from '@skysa/client';
 import type { EntitlementCode } from '@skysa/protocol';
 import type { SyncProgress } from '@skysa/sync';
 
-import type { Refusal } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { type MessageKey, t } from '../../i18n/t.js';
-import { isLongRun, runBar, type RunCount, runCount } from '../../sync/progress.js';
-import type { SchedulerStatus, StuckOp } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 
 /**

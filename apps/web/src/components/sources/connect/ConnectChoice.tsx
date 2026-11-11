@@ -1,9 +1,8 @@
+import { type ApiClient, heldConnectCode, heldConnectCodeShown } from '@skysa/client';
 import type { ConnectGate, ProviderKind } from '@skysa/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ApiClient } from '../../../api/client.js';
 import { t } from '../../../i18n/t.js';
-import { heldConnectCode, heldConnectCodeShown } from '../../../store/connectCode.js';
 import { PROVIDER_LABELS } from '../../../sync/account.js';
 import { ProviderIcon } from '../ProviderIcon.js';
 import { ConnectButton } from './ConnectButton.js';
@@ -79,10 +78,10 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
  *
  * A gate that asks for a code is two steps, one open at a time: the gate with
  * its code field, then the buttons. A code the policy accepts is held for as
- * long as it said (`store/connectCode.ts`), and while it is, the gate is folded
- * to a line naming it, or saying it was accepted where the policy gave
- * something to hold in its place (`ConnectCodeLine`), from which it opens again
- * and the buttons close. When the hold ends, here or while the app was closed, the gate
+ * long as it said (`holdAcceptedCode`, the kit's client's), and while it is,
+ * the gate is folded to a line naming it, or saying it was accepted where the
+ * policy gave something to hold in its place (`ConnectCodeLine`), from which it
+ * opens again and the buttons close. When the hold ends, here or while the app was closed, the gate
  * asks again. Where the operator made the code `required`, that is the only
  * way to the buttons, for every device. Where not, "Already have access?"
  * shows them without one, and a device with an account syncing here starts on

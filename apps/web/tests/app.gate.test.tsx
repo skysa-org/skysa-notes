@@ -1,9 +1,9 @@
+import { dropConnectCode, heldConnectCode, holdConnectCode } from '@skysa/client';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
-import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 
@@ -12,7 +12,7 @@ import { createFolder } from '../src/store/folders.js';
  * where a refusal can offer something to do instead.
  *
  * A file of its own because `/api/config` is asked once per client for the
- * life of the module (`api/instanceConfig.ts`), and the app's client is one
+ * life of the module (`useInstanceConfig`, the kit's), and the app's client is one
  * module-level `api`: an answer with a gate in it would still be the answer in
  * every test after this one in `app.test.tsx`.
  */

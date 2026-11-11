@@ -1,5 +1,5 @@
 /**
- * The Web Lock a sync of one connection runs under (`sync/scheduler.ts`), so
+ * The Web Lock a sync of one connection runs under (the kit's scheduler), so
  * that one tab syncs a connection at a time. Web Locks are the origin's own,
  * so the name has only this app's tabs to agree with — but those include a tab
  * still running an older build, which takes the lock by the name that build
