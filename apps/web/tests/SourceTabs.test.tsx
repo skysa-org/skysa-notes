@@ -60,8 +60,7 @@ vi.mock('../src/store/connection.js', async (importOriginal) => {
  * and writing into the wrong one.
  */
 
-const STORAGE_FIRST: InstanceConfig = {
-	authMode: 'storage-first',
+const INSTANCE: InstanceConfig = {
 	providers: ['dropbox', 'onedrive'],
 };
 
@@ -72,7 +71,7 @@ afterEach(() => {
 
 type Client = Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 
-const clientWith = (config: () => Promise<InstanceConfig> = () => Promise.resolve(STORAGE_FIRST)) =>
+const clientWith = (config: () => Promise<InstanceConfig> = () => Promise.resolve(INSTANCE)) =>
 	({
 		config,
 		startConnect: (_provider: unknown, _hash: unknown, returnTo: string) =>
@@ -994,7 +993,7 @@ describe('the way to connect, on an instance whose operator gates it', () => {
 		message: 'Sync on this server is part of the paid plan.',
 		action: { label: 'See plans', url: 'https://example.com/plans' },
 	};
-	const gated = () => clientWith(() => Promise.resolve({ ...STORAGE_FIRST, connectGate: GATE }));
+	const gated = () => clientWith(() => Promise.resolve({ ...INSTANCE, connectGate: GATE }));
 
 	const expectLinkOut = (link: HTMLElement) => {
 		expect(link.getAttribute('href')).toBe(GATE.action.url);
@@ -1159,7 +1158,7 @@ describe("the gate's code, on an instance that asks for one", () => {
 		);
 		const checkConnectCode = vi.fn<ApiClient['checkConnectCode']>(check);
 		const client = {
-			config: () => Promise.resolve({ ...STORAGE_FIRST, connectGate: gate }),
+			config: () => Promise.resolve({ ...INSTANCE, connectGate: gate }),
 			startConnect,
 			checkConnectCode,
 		} as unknown as Client;
@@ -1213,7 +1212,7 @@ describe("the gate's code, on an instance that asks for one", () => {
 				over(freshDatabase())
 			);
 
-			answer({ ...STORAGE_FIRST, connectGate: GATE });
+			answer({ ...INSTANCE, connectGate: GATE });
 
 			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
 			await waitFor(() => {

@@ -478,7 +478,8 @@ The D1 migrations come with the server, in the kit's `@skysa/server`, which
 `apps/api/wrangler.toml` points `migrations_dir` there. A `wrangler.toml` of
 your own points it at that folder, from wherever your file is. They are the
 same files, under the same names, as the `apps/api/migrations` they replaced in
-3.0.0, so a database migrated before then finds nothing new to apply.
+3.0.0, so a database migrated before then applies only the migrations added
+since: in 3.0.0, `0007_drop_sign_in_tables`.
 
 ## When it will not boot
 

@@ -13,6 +13,7 @@ import {
 	connectVia,
 	fakeSync,
 	gearLabels,
+	INSTANCE,
 	NOTHING_CONNECTED,
 	offered,
 	openAdd,
@@ -20,7 +21,6 @@ import {
 	renderDropdown,
 	renderPanel,
 	settled,
-	STORAGE_FIRST,
 } from './support/accountPanel.js';
 import { freshDatabase } from './support/db.js';
 
@@ -41,7 +41,7 @@ describe('AccountPanel, with nothing connected', () => {
 	it('asks the server what it offers once, for the bar and the panel together', async () => {
 		// `/api/*` is never cached below the app, so two components asking on
 		// mount would be two round trips on every open (`useInstanceConfig`).
-		const config = vi.fn(() => Promise.resolve(STORAGE_FIRST));
+		const config = vi.fn(() => Promise.resolve(INSTANCE));
 		renderPanel(clientWith({ config }), freshDatabase());
 
 		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
@@ -225,7 +225,7 @@ describe('AccountPanel, with nothing connected', () => {
 	it('offers only providers the server has enabled and this build can sync', async () => {
 		const offering = (providers: InstanceConfig['providers']) =>
 			clientWith({
-				config: () => Promise.resolve({ authMode: 'storage-first', providers }),
+				config: () => Promise.resolve({ providers }),
 			});
 		renderPanel(offering(['webdav']), freshDatabase());
 
@@ -253,7 +253,6 @@ describe('AccountPanel, with nothing connected', () => {
 			clientWith({
 				config: () =>
 					Promise.resolve({
-						authMode: 'storage-first',
 						providers: ['dropbox', 'onedrive', 'gdrive'],
 					}),
 			}),

@@ -35,7 +35,7 @@ import { createNote } from '../../src/store/notes.js';
 import { updateNote } from '../noteRows.js';
 import { holdCredential } from './connection.js';
 
-export const STORAGE_FIRST: InstanceConfig = { authMode: 'storage-first', providers: ['dropbox'] };
+export const INSTANCE: InstanceConfig = { providers: ['dropbox'] };
 
 export const dropbox = {
 	id: 'c1',
@@ -70,7 +70,7 @@ export const clientWith = (answers: Answers = {}): Client & { asked: string[] } 
 	const asked: string[] = [];
 	return {
 		asked,
-		config: answers.config ?? (() => Promise.resolve(STORAGE_FIRST)),
+		config: answers.config ?? (() => Promise.resolve(INSTANCE)),
 		checkConnectCode:
 			answers.checkConnectCode ??
 			(() => Promise.resolve({ ok: true, value: { accepted: true, expiresIn: 900 } })),

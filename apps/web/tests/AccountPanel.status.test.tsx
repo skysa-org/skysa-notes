@@ -25,6 +25,7 @@ import {
 	fakeSync,
 	gearLabels,
 	holding,
+	INSTANCE,
 	naming,
 	NOTHING_CONNECTED,
 	offered,
@@ -32,7 +33,6 @@ import {
 	renderPanel,
 	settled,
 	statusLine,
-	STORAGE_FIRST,
 	WithNotices,
 } from './support/accountPanel.js';
 import { freshDatabase } from './support/db.js';
@@ -495,7 +495,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			{
 				config: () =>
 					Promise.resolve({
-						...STORAGE_FIRST,
+						...INSTANCE,
 						connectGate: {
 							message: 'Sync here is part of the paid plan.',
 							action: { label: 'Renew', url: 'https://example.com/renew' },

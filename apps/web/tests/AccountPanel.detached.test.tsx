@@ -122,8 +122,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		const { db } = await detached();
 		renderPanel(
 			clientWith({
-				config: () =>
-					Promise.resolve({ authMode: 'storage-first', providers: ['onedrive'] }),
+				config: () => Promise.resolve({ providers: ['onedrive'] }),
 			}),
 			db
 		);
@@ -582,7 +581,6 @@ describe('AccountPanel, with a detached source in front', () => {
 			clientWith({
 				config: () =>
 					Promise.resolve({
-						authMode: 'storage-first',
 						providers: ['dropbox', 'onedrive'],
 					}),
 				connection: () =>
