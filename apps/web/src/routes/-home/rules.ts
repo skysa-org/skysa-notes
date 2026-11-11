@@ -1,4 +1,5 @@
-import { isScratchPath, isVaultPath, ROOT } from '@skysa/core';
+import { isScratchPath, isVaultPath } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 
 import type { SyncStateRecord } from '../../store/db.js';
 

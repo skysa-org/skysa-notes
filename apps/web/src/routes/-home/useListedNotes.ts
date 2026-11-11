@@ -1,4 +1,5 @@
-import { isScratchPath, parentPath } from '@skysa/core';
+import { isScratchPath } from '@skysa/core';
+import { parentPath } from '@skysa/storage';
 import { useEffect, useMemo } from 'react';
 
 import type { NoteRecord } from '../../store/db.js';

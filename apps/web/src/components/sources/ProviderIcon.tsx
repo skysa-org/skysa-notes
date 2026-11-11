@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
 
 import dropbox from '../../assets/providers/dropbox.svg';
 import gdrive16 from '../../assets/providers/gdrive-16.png';

@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { liveQuery, type Subscription } from 'dexie';
 
 import type { NotesDatabase } from './db.js';

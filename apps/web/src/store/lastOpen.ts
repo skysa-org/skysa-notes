@@ -1,4 +1,5 @@
-import { isVaultPath, isWithin, parentPath, ROOT } from '@skysa/core';
+import { isVaultPath } from '@skysa/core';
+import { isWithin, parentPath, ROOT } from '@skysa/storage';
 import { z } from 'zod';
 
 import type { NotesDatabase } from './db.js';

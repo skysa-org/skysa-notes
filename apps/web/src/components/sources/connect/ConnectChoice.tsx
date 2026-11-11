@@ -1,4 +1,4 @@
-import type { ConnectGate, ProviderKind } from '@skysa/core';
+import type { ConnectGate, ProviderKind } from '@skysa/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ApiClient } from '../../../api/client.js';

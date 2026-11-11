@@ -1,4 +1,5 @@
-import { basename, VAULT_FOLDER } from '@skysa/core';
+import { VAULT_FOLDER } from '@skysa/core';
+import { basename } from '@skysa/storage';
 import { useLayoutEffect } from 'react';
 
 import type { Pane } from '../../routes/panel.js';

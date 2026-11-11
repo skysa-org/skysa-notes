@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 /**

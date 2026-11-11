@@ -1,4 +1,5 @@
-import { cell, encodeIdentity, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
+import { encodeIdentity, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { useEffect, useId, useState } from 'react';
 
 import { t } from '../../../i18n/t.js';

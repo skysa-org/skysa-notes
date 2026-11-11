@@ -1,4 +1,4 @@
-import { ENTITLEMENT_CODES, type EntitlementCode } from '@skysa/core';
+import { ENTITLEMENT_CODES, type EntitlementCode } from '@skysa/protocol';
 
 import { isShareId } from '../share/received.js';
 

@@ -1,5 +1,5 @@
 import { buildEncryptionFile, ENCRYPTION_FILE, serializeEncryptionFile } from '@skysa/core';
-import { createFakeProvider, type FakeProvider } from '@skysa/core/testing';
+import { createFakeProvider, type FakeProvider } from '@skysa/storage/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createKeyFileSync, type KeyFileSession } from '../src/sync/keyFile.js';

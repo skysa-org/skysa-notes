@@ -1,4 +1,5 @@
-import { AgeError, cell } from '@skysa/core';
+import { AgeError } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AttachmentProblem } from '../../editor/features/attachments/attachHost.js';

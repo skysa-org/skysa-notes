@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
 
 import { t } from '../i18n/t.js';
 import type { ConnectedSource } from '../store/connection.js';

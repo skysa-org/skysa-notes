@@ -1,4 +1,4 @@
-import { clusters } from '@skysa/core';
+import { clusters } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 
 import { middleEllipsis } from '../src/components/shell/middleEllipsis.js';

@@ -1,4 +1,5 @@
-import { cell, pageSite, type Site } from '@skysa/core';
+import { pageSite, type Site } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { createEmitter } from '../store/emitter.js';
 import {

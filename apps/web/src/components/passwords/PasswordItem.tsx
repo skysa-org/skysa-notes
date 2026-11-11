@@ -1,5 +1,4 @@
 import {
-	cell,
 	EMPTY_VAULT_FIELDS,
 	isEmptyVaultFields,
 	type PreviousPassword,
@@ -12,6 +11,7 @@ import {
 	vaultUrls,
 	withVaultUrls,
 } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 import { linkAddress, openLink } from '../../editor/features/links/links.js';

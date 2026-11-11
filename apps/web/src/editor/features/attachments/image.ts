@@ -5,7 +5,8 @@ import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $prose, $view } from '@milkdown/kit/utils';
-import { cell, classifyHref } from '@skysa/core';
+import { classifyHref } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { openFile, saveFile } from '../../../components/attachments/fileActions.js';
 import { t } from '../../../i18n/t.js';

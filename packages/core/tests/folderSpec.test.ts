@@ -1,7 +1,7 @@
+import { buildMarker, parseMarker, serializeMarker } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 
 import { NOTES_FOLDER } from '../src/config.js';
-import { buildMarker, parseMarker, serializeMarker } from '../src/marker.js';
 
 describe('NOTES_FOLDER', () => {
 	it('names what every library connected since 1.0 already holds', () => {

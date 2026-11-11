@@ -1,4 +1,4 @@
-import type { NewSyncOp } from '@skysa/core';
+import type { NewSyncOp } from '@skysa/sync';
 
 import type { AccessToken } from '../../src/api/client.js';
 import type { ClientStore, SyncScheduler, SyncSchedulerOptions } from '../../src/sync/scheduler.js';

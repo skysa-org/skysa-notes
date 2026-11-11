@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
 
 /**
  * The credential that proves this device's right to a connection.

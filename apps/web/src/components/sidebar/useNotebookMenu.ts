@@ -1,4 +1,4 @@
-import { ancestorPaths, basename } from '@skysa/core';
+import { ancestorPaths, basename } from '@skysa/storage';
 import { useState } from 'react';
 
 import { useCommand } from '../../commands/context.js';

@@ -1,7 +1,7 @@
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import type { CodeDisplayStore } from '../../../store/codeDisplay.js';
 import { ancestor } from '../../rich/lists.js';

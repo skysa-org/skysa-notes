@@ -2,7 +2,7 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { ATTACHMENT } from '../../features/attachments/attachment.js';
 import { markRunIn } from '../markRun.js';

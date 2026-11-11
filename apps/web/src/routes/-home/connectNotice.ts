@@ -1,4 +1,4 @@
-import type { ConnectGate, EntitlementCode } from '@skysa/core';
+import type { ConnectGate, EntitlementCode } from '@skysa/protocol';
 import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 

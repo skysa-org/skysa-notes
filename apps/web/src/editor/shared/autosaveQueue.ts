@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 /**
  * The edits `useAutosave` has handed to `save` and does not yet know are stored:

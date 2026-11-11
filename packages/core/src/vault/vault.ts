@@ -1,4 +1,5 @@
-import { isJsonObject, parseJson } from '../json.js';
+import { isJsonObject, parseJson } from '@skysa/storage';
+
 import { SECRET_LANGUAGE, secretBlocksIn } from '../markdown/secretBlocks.js';
 
 /**

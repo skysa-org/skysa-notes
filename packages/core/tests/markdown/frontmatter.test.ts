@@ -1,3 +1,4 @@
+import { mulberry32 } from '@skysa/storage/testing';
 import { describe, expect, it } from 'vitest';
 import { parseDocument } from 'yaml';
 
@@ -11,7 +12,6 @@ import {
 } from '../../src/markdown/frontmatter/index.js';
 import { type LineEnding, withLineEnding } from '../../src/markdown/lineEndings.js';
 import { serializeNoteFile } from '../../src/markdown/note.js';
-import { mulberry32 } from '../support/random.js';
 
 describe('splitFrontmatter', () => {
 	it('splits a fenced YAML mapping from the body', () => {

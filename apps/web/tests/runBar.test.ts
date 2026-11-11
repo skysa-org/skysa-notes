@@ -1,4 +1,4 @@
-import type { SyncProgress } from '@skysa/core';
+import type { SyncProgress } from '@skysa/sync';
 import { describe, expect, it } from 'vitest';
 
 import { runBar } from '../src/sync/progress.js';

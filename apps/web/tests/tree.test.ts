@@ -1,4 +1,4 @@
-import { ancestorPaths, ROOT } from '@skysa/core';
+import { ancestorPaths, ROOT } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 
 import {

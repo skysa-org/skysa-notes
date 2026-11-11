@@ -1,12 +1,8 @@
-import {
-	conflictContent,
-	contentHash,
-	createSyncEngine,
-	NOTE_FORMAT,
-	type RemoteEntry,
-	syncsHidden,
-} from '@skysa/core';
-import { createFakeProvider, describeSyncStoreContract } from '@skysa/core/testing';
+import { conflictContent, NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import { contentHash, type RemoteEntry } from '@skysa/storage';
+import { createFakeProvider } from '@skysa/storage/testing';
+import { createSyncEngine } from '@skysa/sync';
+import { describeSyncStoreContract } from '@skysa/sync/testing';
 import { describe, expect, it } from 'vitest';
 
 // The suite lives beside the port it checks, in `packages/core`, and is not a

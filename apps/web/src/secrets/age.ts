@@ -1,6 +1,5 @@
 import {
 	AgeError,
-	cell,
 	generateIdentity,
 	openSecret,
 	opensSecret,
@@ -11,6 +10,7 @@ import {
 	sealSecret,
 	secretBlocksIn,
 } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { noteKey, type NoteRecord, type NotesDatabase } from '../store/db.js';
 import { rewriteNoteBody } from '../store/notes.js';

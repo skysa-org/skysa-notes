@@ -1,4 +1,5 @@
-import { type Cell, cell, type PictureVariant } from '@skysa/core';
+import type { PictureVariant } from '@skysa/core';
+import { type Cell, cell } from '@skysa/storage';
 
 import type { PictureRecord } from '../store/db.js';
 import type { PictureShrinker } from './shrinker.js';

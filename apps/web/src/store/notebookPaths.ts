@@ -1,4 +1,4 @@
-import { isWithin, rebasePath } from '@skysa/core';
+import { isWithin, rebasePath } from '@skysa/storage';
 import { z } from 'zod';
 
 import type { NotesDatabase } from './db.js';

@@ -1,4 +1,4 @@
-import { parentPath } from '@skysa/core';
+import { parentPath } from '@skysa/storage';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { NoteDraft } from '../../components/note/types.js';

@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
 import { type ReactNode, useRef, useState } from 'react';
 
 import type { ApiClient } from '../../../api/client.js';

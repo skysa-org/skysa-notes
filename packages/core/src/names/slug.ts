@@ -1,8 +1,15 @@
+import {
+	type Caps,
+	cut,
+	extensionAt,
+	extensionForType,
+	fitBytes,
+	foldName,
+	isImageExtension,
+	MAX_NAME_BYTES,
+} from '@skysa/storage';
+
 import { NOTE_EXTENSION } from '../config.js';
-import { extensionForType, isImageExtension } from '../files/mediaTypes.js';
-import { type Caps, cut, fitBytes, MAX_NAME_BYTES } from './bytes.js';
-import { extensionAt } from './extension.js';
-import { foldName } from './fold.js';
 
 /**
  * Filenames are a slug of the title; `id` in frontmatter is the stable identity,

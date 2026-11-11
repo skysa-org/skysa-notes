@@ -5,7 +5,7 @@
  * kit's (`tests/client/schedulerHarness.ts`).
  */
 import { CLIPBOARD_FOLDER, NOTE_FORMAT, syncsHidden } from '@skysa/core';
-import type { FakeProvider } from '@skysa/core/testing';
+import type { FakeProvider } from '@skysa/storage/testing';
 
 import { bindConnection } from '../../src/store/connection.js';
 import type { NotesDatabase } from '../../src/store/db.js';

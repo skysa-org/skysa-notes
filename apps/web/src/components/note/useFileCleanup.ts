@@ -1,4 +1,5 @@
-import { basename, linkedFiles } from '@skysa/core';
+import { linkedFiles } from '@skysa/core';
+import { basename } from '@skysa/storage';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { useLatest } from '../../hooks/useLatest.js';

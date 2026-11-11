@@ -1,4 +1,4 @@
-import { outOfAttempts } from '@skysa/core';
+import { outOfAttempts } from '@skysa/sync';
 import { liveQuery } from 'dexie';
 
 import { bindingCount, finishImport, verifyResume } from '../store/connection.js';

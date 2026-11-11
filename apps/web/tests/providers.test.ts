@@ -1,5 +1,5 @@
-import type { FetchLike } from '@skysa/core';
-import { TEST_FOLDER, TEST_FORMAT } from '@skysa/core/testing';
+import type { FetchLike } from '@skysa/storage';
+import { TEST_FOLDER, TEST_FORMAT } from '@skysa/storage/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';

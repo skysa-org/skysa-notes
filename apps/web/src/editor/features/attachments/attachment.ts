@@ -3,7 +3,8 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { MarkdownNode } from '@milkdown/kit/transformer';
 import { $nodeSchema, $view } from '@milkdown/kit/utils';
-import { cell, fileKind, isAttachmentHref } from '@skysa/core';
+import { fileKind, isAttachmentHref } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import {
 	type FileBrowser,

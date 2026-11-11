@@ -1,5 +1,6 @@
+import { documentNames } from '@skysa/storage';
+
 import { NOTE_EXTENSION } from '../config.js';
-import { documentNames } from './conflicts.js';
 
 /**
  * This app's documents' names: a note's ends `.md` (`NOTE_FORMAT`), and a copy

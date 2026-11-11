@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import { useEffect, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';

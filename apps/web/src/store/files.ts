@@ -4,16 +4,12 @@ import {
 	attachmentLabel,
 	attachmentMarkdown,
 	attachmentName,
-	basename,
-	bytesHash,
-	conflictFilePath,
-	joinPath,
 	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
-	parentPath,
 	resolveRelative,
 	showsInline,
 } from '@skysa/core';
+import { basename, bytesHash, conflictFilePath, joinPath, parentPath } from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import {

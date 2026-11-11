@@ -1,12 +1,5 @@
-import {
-	ancestorPaths,
-	basename,
-	cell,
-	normalizePath,
-	NOTE_EXTENSION,
-	parentPath,
-	ROOT,
-} from '@skysa/core';
+import { NOTE_EXTENSION } from '@skysa/core';
+import { ancestorPaths, basename, cell, normalizePath, parentPath, ROOT } from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import type { FileBytesRecord, FileRecord, NoteRecord, NotesDatabase } from './db.js';

@@ -1,4 +1,5 @@
-import { isScratchPath, isVaultPath, ROOT } from '@skysa/core';
+import { isScratchPath, isVaultPath } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { startTransition, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 

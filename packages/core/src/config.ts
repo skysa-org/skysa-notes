@@ -1,4 +1,4 @@
-import type { AppFolderSpec } from './folderSpec.js';
+import type { AppFolderSpec } from '@skysa/storage';
 
 /**
  * Values that must agree with the operator's provider app registrations.

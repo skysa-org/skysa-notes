@@ -1,4 +1,4 @@
-import { clusters } from '@skysa/core';
+import { clusters } from '@skysa/storage';
 
 /**
  * Text shortened in its middle rather than at its end, for the compact bar's

@@ -1,4 +1,4 @@
-import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PING, RELAY_PONG, RELAY_PUSHED } from '@skysa/core';
+import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PING, RELAY_PONG, RELAY_PUSHED } from '@skysa/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';

@@ -11,7 +11,7 @@ import {
 	MAX_CONNECT_CODE,
 	PROVIDER_KINDS,
 	type ProviderKind,
-} from '@skysa/core';
+} from '@skysa/protocol';
 import { z } from 'zod';
 
 /**

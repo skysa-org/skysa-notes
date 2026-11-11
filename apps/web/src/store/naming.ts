@@ -1,15 +1,14 @@
+import { NOTE_EXTENSION, uniqueFilename } from '@skysa/core';
 import {
 	basename,
 	foldName,
 	joinPath,
 	normalizePath,
-	NOTE_EXTENSION,
 	parentPath,
 	pathSegments,
 	replaceBasename,
 	ROOT,
-	uniqueFilename,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 /**
  * Finding a free name for a note, shared by every writer that puts one

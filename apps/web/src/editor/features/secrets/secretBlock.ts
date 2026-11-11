@@ -11,7 +11,8 @@ import {
 } from '@milkdown/kit/prose/view';
 import type { MarkdownNode, NodeSchema } from '@milkdown/kit/transformer';
 import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
-import { cell, isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
+import { isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { iconElement } from '../../../components/ui/icons.js';
 import { t } from '../../../i18n/t.js';

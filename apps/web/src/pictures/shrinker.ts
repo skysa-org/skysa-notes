@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 /**
  * Smaller copies of pictures (#276), made on a worker of their own

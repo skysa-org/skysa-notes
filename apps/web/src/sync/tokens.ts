@@ -1,4 +1,4 @@
-import { AuthError, cell } from '@skysa/core';
+import { AuthError, cell } from '@skysa/storage';
 
 import type { AccessToken, ApiClient, Denial, Refusal } from '../api/client.js';
 import { credentialFor, type CredentialStore } from '../store/credentials.js';

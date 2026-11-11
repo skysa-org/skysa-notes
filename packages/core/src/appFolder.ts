@@ -1,5 +1,6 @@
+import { HIDDEN_PREFIX, isHidden, isWithin, normalizePath, pathSegments } from '@skysa/storage';
+
 import { CLIPBOARD_FOLDER, ENCRYPTION_FILE, SCRATCHPAD_FOLDER, VAULT_FOLDER } from './config.js';
-import { HIDDEN_PREFIX, isHidden, isWithin, normalizePath, pathSegments } from './paths.js';
 
 /**
  * The app folder's own places, the ones that are not notebooks: which path is

@@ -1,11 +1,11 @@
 import {
-	bytesHash,
 	CLIPBOARD_ITEMS,
 	clipName,
 	clipStamp,
 	MAX_ATTACHMENT_BYTES,
 	readClipName,
 } from '@skysa/core';
+import { bytesHash } from '@skysa/storage';
 
 import { t } from '../i18n/t.js';
 import type { ClipRecord, ClipThumbRecord, NotesDatabase, SyncStateRecord } from './db.js';

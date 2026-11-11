@@ -1,4 +1,5 @@
-import { ROOT, SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';

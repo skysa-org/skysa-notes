@@ -1,4 +1,5 @@
-import { ROOT, VAULT_FOLDER } from '@skysa/core';
+import { VAULT_FOLDER } from '@skysa/core';
+import { ROOT } from '@skysa/storage';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';

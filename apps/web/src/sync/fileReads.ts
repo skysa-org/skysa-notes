@@ -5,7 +5,7 @@ import {
 	isAuthError,
 	isNotFoundError,
 	type StorageProvider,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 import type { FileRecord, NotesDatabase } from '../store/db.js';
 import { CACHE_BUDGET_BYTES, cacheBytes, evictCache, heldFile } from '../store/fileCache.js';

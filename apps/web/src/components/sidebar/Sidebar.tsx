@@ -1,4 +1,5 @@
-import { ancestorPaths, basename, isScratchPath, isVaultPath, ROOT } from '@skysa/core';
+import { isScratchPath, isVaultPath } from '@skysa/core';
+import { ancestorPaths, basename, ROOT } from '@skysa/storage';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';

@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { isLongRun } from './progress.js';
 import type { SchedulerStatus, SyncScheduler } from './scheduler.js';
@@ -6,8 +6,8 @@ import type { SchedulerStatus, SyncScheduler } from './scheduler.js';
 /**
  * The screen kept on while a long sync runs in front of the user. A phone
  * whose screen times out mid-import suspends the network with it, and the run
- * fails part-way; the engine keeps what it had read (`held` in
- * `packages/core/src/sync/engine.ts`), but the run is still stopped until the
+ * fails part-way; the engine keeps what it had read (`held` in the kit's
+ * `packages/sync/src/engine.ts`), but the run is still stopped until the
  * phone is unlocked. Only for a run long enough to count (`isLongRun`) — an
  * edit sent is over before a screen could time out — and only while the page
  * is visible, which is the only time a browser grants one. It lets go when the

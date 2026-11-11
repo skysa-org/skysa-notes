@@ -1,11 +1,8 @@
-import {
-	cell,
-	isNotFoundError,
-	outOfAttempts,
-	type ProviderKind,
-	type SyncStore,
-} from '@skysa/core';
-import { createMemoryStore, type MemoryStore, TEST_FORMAT } from '@skysa/core/testing';
+import type { ProviderKind } from '@skysa/protocol';
+import { cell, isNotFoundError } from '@skysa/storage';
+import { TEST_FORMAT } from '@skysa/storage/testing';
+import { outOfAttempts, type SyncStore } from '@skysa/sync';
+import { createMemoryStore, type MemoryStore } from '@skysa/sync/testing';
 
 import type { AccessToken } from '../../src/api/client.js';
 import type { CredentialRecord } from '../../src/store/credentials.js';

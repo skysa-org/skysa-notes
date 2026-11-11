@@ -1,4 +1,6 @@
-import type { PictureInfo, PictureVariant, ProviderKind, SyncOperation } from '@skysa/core';
+import type { PictureInfo, PictureVariant } from '@skysa/core';
+import type { ProviderKind } from '@skysa/protocol';
+import type { SyncOperation } from '@skysa/sync';
 import Dexie, { type Table, type Transaction } from 'dexie';
 
 import type { CredentialRecord } from './credentials.js';
@@ -267,7 +269,8 @@ type QueuedOperation = SyncOperation;
  * A file beside a note that is not one (#187): one row for every such file the
  * remote has, and for every file added here and not yet uploaded (no
  * `remoteId`). Its bytes, where the device holds them, are in `fileBytes`.
- * `SyncFile` in `packages/core/src/sync/store.ts` says what each kind of row
+ * `SyncFile` in `@skysa/sync` (the kit's `packages/sync/src/store.ts`) says
+ * what each kind of row
  * may and may not have done to it.
  */
 export interface FileRecord {
@@ -565,8 +568,8 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// briefly share one. A unique index rejects that write, which fails the
 	// batch — and since the cursor is persisted only with the batch, the same
 	// one is retried for ever and the user's sync never recovers on its own.
-	// The reasoning is set out in full on `PullChange` in
-	// `packages/core/src/sync/store.ts`.
+	// The reasoning is set out in full on `PullChange` in `@skysa/sync` (the
+	// kit's `packages/sync/src/store.ts`).
 	//
 	// So no live note is knowingly put where another one is, and that is kept by
 	// the writers rather than by IndexedDB: `freeName`/`freePath` in

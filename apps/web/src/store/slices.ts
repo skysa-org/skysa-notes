@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 /**
  * Work over a whole library, done on the main thread a slice at a time (#275):

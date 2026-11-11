@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import type { RemoteEntry } from '@skysa/core';
+import type { RemoteEntry } from '@skysa/storage';
 import { act, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 

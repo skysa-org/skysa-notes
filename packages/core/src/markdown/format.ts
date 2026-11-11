@@ -1,5 +1,6 @@
+import type { DocumentFormat } from '@skysa/storage';
+
 import { NOTE_EXTENSION } from '../config.js';
-import type { DocumentFormat } from '../documentFormat.js';
 import { conflictContent } from './conflictCopy.js';
 import { parseNoteFile } from './note.js';
 

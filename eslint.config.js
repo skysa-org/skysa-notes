@@ -27,9 +27,9 @@ const RESTRICTED_SYNTAX = [
 		message: "'else if' is not allowed, use early returns instead.",
 	},
 	{
-		// A static import is what the src rule on `@skysa/core/testing` sees;
-		// this keeps a lazy one from slipping a test double into a chunk.
-		selector: "ImportExpression[source.value='@skysa/core/testing']",
+		// A static import is what the src rule on a kit package's `/testing`
+		// sees; this keeps a lazy one from slipping a test double into a chunk.
+		selector: 'ImportExpression[source.value=/^@skysa\\/[^/]+\\/testing$/]',
 		message: 'import the test doubles statically, from a test (#449).',
 	},
 	{
@@ -57,14 +57,14 @@ const RESTRICTED_SYNTAX = [
 ];
 
 /**
- * The one way to hold a value that changes: `cell()` from `@skysa/core`
+ * The one way to hold a value that changes: `cell()` from `@skysa/storage`
  * (#457). Not a `Map` keyed by one literal, and not a `{ current }` written
  * out — the two ways the rule against `let` used to be worked round, each to
  * be learned where it was met. A React ref is a cell's shape already and is
  * not written as one of these. In source only: tests keep their own idioms.
  */
 const CELL_MESSAGE =
-	'a value that changes is a cell (#457): cell() and Cell<T>, from @skysa/core, or from src/cell.js inside core.';
+	'a value that changes is a cell (#457): cell() and Cell<T>, from the kit’s @skysa/storage.';
 
 const CELL_SYNTAX = [
 	{
@@ -174,49 +174,6 @@ const CORE_IMPORTS = [
 ];
 
 /**
- * Notes' own app folder, which the layers bound for the shared kit are handed
- * (`AppFolderSpec`) rather than import, so that they name no app
- * (docs/decisions/0018-the-shared-kit.md).
- */
-const NO_APP_FOLDER = {
-	group: ['**/config.js'],
-	importNames: ['APP_FOLDER_NAME', 'NOTES_FOLDER'],
-	message:
-		'the app folder is handed in as an AppFolderSpec, not imported (docs/decisions/0018-the-shared-kit.md).',
-};
-
-/**
- * Notes' own document format, which the sync engine and the adapters are
- * handed (`DocumentFormat`) rather than import, so that they read no file
- * format of their own (docs/decisions/0018-the-shared-kit.md): the note's
- * extension, markdown, and the names made from them.
- */
-const NOTE_FORMAT_MESSAGE =
-	'what a document is comes from the DocumentFormat handed in, not from markdown (docs/decisions/0018-the-shared-kit.md).';
-const NO_NOTE_FORMAT = [
-	{ group: ['**/config.js'], importNames: ['NOTE_EXTENSION'], message: NOTE_FORMAT_MESSAGE },
-	{ group: ['**/markdown/**', '**/names/notes.js'], message: NOTE_FORMAT_MESSAGE },
-];
-
-/**
- * Notes' own places in its folder — the scratchpad's, the vault's, the
- * clipboard's, the key file — which the sync engine is handed as rules
- * (`syncsHidden`, `watch`) rather than import, so that neither it nor the
- * path rules beneath it name a place of this app's
- * (docs/decisions/0018-the-shared-kit.md).
- */
-const APP_PATHS_MESSAGE =
-	'which hidden paths sync, and which a pull reports, are handed to the engine, not imported (docs/decisions/0018-the-shared-kit.md).';
-const NO_APP_PATHS = [
-	{
-		group: ['**/config.js'],
-		importNames: ['SCRATCHPAD_FOLDER', 'VAULT_FOLDER', 'CLIPBOARD_FOLDER', 'ENCRYPTION_FILE'],
-		message: APP_PATHS_MESSAGE,
-	},
-	{ group: ['**/appFolder.js'], message: APP_PATHS_MESSAGE },
-];
-
-/**
  * Where each module bound for the shared kit goes, and the packages each may
  * use: the table in docs/decisions/0018-the-shared-kit.md, in code, with the
  * tests that go with each package's code. A path ending in `/` is a folder and
@@ -226,50 +183,6 @@ const NO_APP_PATHS = [
  * it or to a package beneath it, so that moving the code is a move.
  */
 const KIT = {
-	protocol: {
-		uses: [],
-		paths: [
-			'packages/core/src/api.ts',
-			'packages/core/src/entitlements.ts',
-			'packages/core/src/relay.ts',
-			'packages/core/src/providerKinds.ts',
-		],
-		tests: [],
-	},
-	storage: {
-		uses: ['protocol'],
-		paths: [
-			'packages/core/src/providers/',
-			'packages/core/src/names/fold.ts',
-			'packages/core/src/names/conflicts.ts',
-			'packages/core/src/names/bytes.ts',
-			'packages/core/src/names/extension.ts',
-			'packages/core/src/paths.ts',
-			'packages/core/src/marker.ts',
-			'packages/core/src/folderSpec.ts',
-			'packages/core/src/documentFormat.ts',
-			'packages/core/src/hash.ts',
-			'packages/core/src/json.ts',
-			'packages/core/src/cell.ts',
-			'packages/core/src/bytes.ts',
-			'packages/core/src/files/mediaTypes.ts',
-		],
-		tests: [
-			'packages/core/tests/providers/',
-			'packages/core/tests/support/',
-			'packages/core/tests/names/conflicts.test.ts',
-			'packages/core/tests/paths.test.ts',
-			'packages/core/tests/marker.test.ts',
-			'packages/core/tests/json.test.ts',
-			'packages/core/tests/files/mediaTypes.test.ts',
-		],
-	},
-	sync: {
-		uses: ['protocol', 'storage'],
-		paths: ['packages/core/src/sync/'],
-		// `@skysa/core/testing`: everything it offers goes with the kit.
-		tests: ['packages/core/tests/sync/', 'packages/core/tests/testing.ts'],
-	},
 	client: {
 		uses: ['protocol', 'storage', 'sync'],
 		paths: [
@@ -379,11 +292,13 @@ const namesIn = (barrel) =>
 /** Core's entries, each read once when the config loads: the app's, and the tests'. */
 const CORE_ENTRIES = new Map([
 	['@skysa/core', namesIn(resolve(import.meta.dirname, 'packages/core/src/index.ts'))],
-	[
-		'@skysa/core/testing',
-		namesIn(resolve(import.meta.dirname, 'packages/core/tests/testing.ts')),
-	],
 ]);
+
+/**
+ * The kit's packages already on npm (record 0018, step 3), which a module still
+ * bound for it imports by name: that name is the package it is judged by.
+ */
+const PUBLISHED = /^@skysa\/(protocol|storage|sync|server)(?:\/|$)/;
 
 /** A local rule: what `KIT` says a module bound for the kit may import. */
 const KIT_FENCE = {
@@ -400,7 +315,7 @@ const KIT_FENCE = {
 		if (from === undefined) return {};
 
 		const judge = (node, target) => {
-			const to = kitPackageOf(target);
+			const to = PUBLISHED.exec(target)?.[1] ?? kitPackageOf(target);
 			if (to === undefined) {
 				context.report({ node, messageId: 'stays', data: { from, target } });
 				return;
@@ -733,72 +648,9 @@ export default tseslint.config(
 		},
 	},
 	{
-		// A provider moves bytes and names for the sync engine; it knows nothing
-		// of the engine. What both need — a conflict copy's name, say — lives
-		// below them both, in names/ (#449). Nor does it know which app's folder
-		// it works in, or what the app's files hold: it is handed both. Repeats
-		// core's patterns, since a rule set here replaces the one above rather
-		// than adding to it.
-		files: ['packages/core/src/providers/**/*.ts'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						...CORE_IMPORTS,
-						NO_APP_FOLDER,
-						...NO_NOTE_FORMAT,
-						...NO_APP_PATHS,
-						NOT_ABOVE(['sync'], 'a provider does not import the sync engine.'),
-					],
-				},
-			],
-		},
-	},
-	{
-		// The sync engine, like the providers, is handed the app's folder, what
-		// its documents are and which of its hidden paths count, and reads none
-		// of them for itself.
-		files: ['packages/core/src/sync/**/*.ts'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT, ...NO_APP_PATHS] },
-			],
-		},
-	},
-	{
-		// The in-memory store and the store contract go to the kit with the
-		// engine, as its testing half: like it, they are handed the app's folder,
-		// what its documents are and which of its hidden paths count.
-		files: ['packages/core/tests/sync/{memoryStore,storeContract}.ts'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT, ...NO_APP_PATHS] },
-			],
-		},
-	},
-	{
-		// The marker, what describes an app's folder and its documents, and the
-		// path rules every layer here uses, are any app's: what they are about
-		// is handed to them.
-		files: [
-			'packages/core/src/marker.ts',
-			'packages/core/src/folderSpec.ts',
-			'packages/core/src/documentFormat.ts',
-			'packages/core/src/paths.ts',
-		],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{ patterns: [...CORE_IMPORTS, NO_APP_FOLDER, ...NO_NOTE_FORMAT, ...NO_APP_PATHS] },
-			],
-		},
-	},
-	{
-		// names/ sits below providers, sync and markdown, which all name files
-		// by it; reaching up into any of them would bring the cycle back.
+		// names/ sits below markdown, which names files by it; reaching up into
+		// it would bring the cycle back. The names the sync engine and the
+		// adapters use are the kit's (`@skysa/storage`).
 		files: ['packages/core/src/names/**/*.ts'],
 		rules: {
 			'no-restricted-imports': [
@@ -806,32 +658,7 @@ export default tseslint.config(
 				{
 					patterns: [
 						...CORE_IMPORTS,
-						NOT_ABOVE(
-							['sync', 'providers', 'markdown'],
-							'names/ sits below sync, providers and markdown.'
-						),
-					],
-				},
-			],
-		},
-	},
-	{
-		// The names the engine and the providers use are made from the format's
-		// extension (`documentNames`); notes' own, `notes.ts` and `slug.ts`, stay
-		// with the app. Repeats the block above, which this replaces for these.
-		files: ['packages/core/src/names/{fold,conflicts,bytes,extension}.ts'],
-		rules: {
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						...CORE_IMPORTS,
-						NOT_ABOVE(
-							['sync', 'providers', 'markdown'],
-							'names/ sits below sync, providers and markdown.'
-						),
-						...NO_NOTE_FORMAT,
-						{ group: ['./notes.js', './slug.js'], message: NOTE_FORMAT_MESSAGE },
+						NOT_ABOVE(['markdown'], 'names/ sits below markdown.'),
 					],
 				},
 			],
@@ -1033,21 +860,23 @@ export default tseslint.config(
 		},
 	},
 	{
-		// Core's test doubles are `@skysa/core/testing` (#449), for tests alone:
-		// nothing the app ships may reach them, by the entry or by a path into
-		// any tests folder. typescript-eslint's rule rather than core's, which the
-		// layer blocks above set per folder and would replace this in each.
+		// The kit's test doubles are each package's `/testing` entry (#449), for
+		// tests alone: nothing the app ships may reach them, by the entry or by
+		// a path into any tests folder. typescript-eslint's rule rather than
+		// core's, which the layer blocks above set per folder and would replace
+		// this in each.
 		files: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
 		rules: {
 			'@typescript-eslint/no-restricted-imports': [
 				'error',
 				{
-					paths: [
-						{ name: '@skysa/core/testing', message: 'test doubles are for tests.' },
-					],
 					patterns: [
 						{
-							group: ['**/tests/**', '**/providers/fake', '**/providers/fake.js'],
+							regex: '^@skysa/[^/]+/testing$',
+							message: 'test doubles are for tests.',
+						},
+						{
+							group: ['**/tests/**'],
 							message: 'test doubles are for tests.',
 						},
 					],

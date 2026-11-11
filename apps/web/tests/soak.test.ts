@@ -1,3 +1,4 @@
+import { isPassedOver, NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import {
 	type AppFolderSpec,
 	createDropboxProvider,
@@ -5,13 +6,9 @@ import {
 	createOneDriveProvider,
 	type DocumentFormat,
 	type FetchLike,
-	isPassedOver,
-	NOTE_FORMAT,
-	NOTES_FOLDER,
 	parentPath,
 	type StorageProvider,
-	syncsHidden,
-} from '@skysa/core';
+} from '@skysa/storage';
 import {
 	createDropboxStub,
 	createFakeProvider,
@@ -19,7 +16,7 @@ import {
 	createOneDriveStub,
 	type FakeProvider,
 	mulberry32,
-} from '@skysa/core/testing';
+} from '@skysa/storage/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApiClient } from '../src/api/client.js';
@@ -66,8 +63,8 @@ import { fakeEnvironment } from './support/fakes/environment.js';
  * Two browsers, one account — Phase 6's soak, as the checklist names it: "two
  * browsers, edit the same note offline, reconnect".
  *
- * `packages/core/tests/sync/overProviders.test.ts` asks the same questions of
- * the engine, but it is the engine's own test: it queues the ops by hand,
+ * The kit's `packages/sync/tests/overProviders.test.ts` asks the same
+ * questions of the engine, but it is the engine's own test: it queues the ops by hand,
  * copying what `store/queue.ts` would have done. This is the whole app. Two
  * Dexie databases, two schedulers, and every edit made through the writer the
  * UI actually calls — so what it asks is whether `store/notes.ts`,

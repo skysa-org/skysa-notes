@@ -1,4 +1,17 @@
 import {
+	isPassedOver,
+	isVaultPath,
+	linkedFiles,
+	MAX_ATTACHMENT_BYTES,
+	NOTE_EXTENSION,
+	type ParsedNoteFile,
+	parseNoteFile,
+	SCRATCHPAD_FOLDER,
+	splitFrontmatter,
+	titleFromFilename,
+	UNTITLED_TITLE,
+} from '@skysa/core';
+import {
 	ancestorPaths,
 	basename,
 	cell,
@@ -6,23 +19,12 @@ import {
 	conflictFolderPath,
 	contentHash,
 	foldName,
-	isPassedOver,
-	isVaultPath,
 	joinPath,
-	linkedFiles,
-	MAX_ATTACHMENT_BYTES,
 	normalizePath,
-	NOTE_EXTENSION,
 	parentPath,
-	type ParsedNoteFile,
-	parseNoteFile,
 	pathSegments,
-	SCRATCHPAD_FOLDER,
-	splitFrontmatter,
-	titleFromFilename,
-	UNTITLED_TITLE,
 	withoutNul,
-} from '@skysa/core';
+} from '@skysa/storage';
 
 import { holdsPile } from './connection.js';
 import {

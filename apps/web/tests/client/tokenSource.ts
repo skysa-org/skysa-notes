@@ -1,4 +1,4 @@
-import { isAuthError } from '@skysa/core';
+import { isAuthError } from '@skysa/storage';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ApiClient } from '../../src/api/client.js';

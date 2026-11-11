@@ -1,4 +1,6 @@
-import { cell, NOTES_WATCH, type SyncOutcome } from '@skysa/core';
+import { NOTES_WATCH } from '@skysa/core';
+import { cell } from '@skysa/storage';
+import type { SyncOutcome } from '@skysa/sync';
 
 import type { NotesDatabase } from '../store/db.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';

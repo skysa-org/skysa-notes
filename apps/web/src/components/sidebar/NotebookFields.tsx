@@ -1,4 +1,4 @@
-import { basename } from '@skysa/core';
+import { basename } from '@skysa/storage';
 import { useEffect, useRef, useState } from 'react';
 
 import { t } from '../../i18n/t.js';

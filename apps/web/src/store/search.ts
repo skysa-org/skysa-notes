@@ -1,4 +1,5 @@
-import { cell, withoutArmor } from '@skysa/core';
+import { withoutArmor } from '@skysa/core';
+import { cell } from '@skysa/storage';
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord, noteRef } from './db.js';

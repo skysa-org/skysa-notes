@@ -1,5 +1,5 @@
-import type { SyncOutcome, Watch } from '@skysa/core';
-import { type FakeProvider, TEST_FOLDER } from '@skysa/core/testing';
+import { type FakeProvider, TEST_FOLDER } from '@skysa/storage/testing';
+import type { SyncOutcome, Watch } from '@skysa/sync';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSyncScheduler, type SchedulerEvent } from '../../src/sync/scheduler.js';

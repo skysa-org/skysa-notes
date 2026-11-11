@@ -1,4 +1,4 @@
-import { cell } from '@skysa/core';
+import { cell } from '@skysa/storage';
 
 import { modKeyLabel } from '../../../commands/chord.js';
 import { iconElement } from '../../../components/ui/icons.js';

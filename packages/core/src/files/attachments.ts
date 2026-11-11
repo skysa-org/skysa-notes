@@ -1,6 +1,12 @@
-import { fitBytes, MAX_NAME_BYTES, utf8Length } from '../names/bytes.js';
-import { extensionAt, extensionOf } from '../names/extension.js';
-import { type FileKind, mediaOf } from './mediaTypes.js';
+import {
+	extensionAt,
+	extensionOf,
+	type FileKind,
+	fitBytes,
+	MAX_NAME_BYTES,
+	mediaOf,
+	utf8Length,
+} from '@skysa/storage';
 
 /**
  * What the app knows about a file beside a note from its name alone: how to
@@ -9,7 +15,7 @@ import { type FileKind, mediaOf } from './mediaTypes.js';
  * recorded at upload is the uploader's word, and decides nothing here.
  */
 
-export type { FileKind } from './mediaTypes.js';
+export type { FileKind } from '@skysa/storage';
 
 export const fileKind = (name: string): FileKind => mediaOf(extensionOf(name))?.kind ?? 'file';
 

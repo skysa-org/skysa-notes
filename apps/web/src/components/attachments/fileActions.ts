@@ -1,4 +1,5 @@
-import { contentTypeOf, downloadName, opensInTab, safeOpenType } from '@skysa/core';
+import { downloadName, opensInTab, safeOpenType } from '@skysa/core';
+import { contentTypeOf } from '@skysa/storage';
 
 import type {
 	AttachmentHost,

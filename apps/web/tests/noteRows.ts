@@ -1,4 +1,4 @@
-import { contentHash } from '@skysa/core';
+import { contentHash } from '@skysa/storage';
 import Dexie from 'dexie';
 
 import type { NoteRecord, NotesDatabase } from '../src/store/db.js';
