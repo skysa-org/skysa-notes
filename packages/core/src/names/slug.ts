@@ -63,7 +63,7 @@ export const UNTITLED_SLUG = 'untitled';
  * The byte cap is what lets a name this app chose take one conflict suffix
  * whole. Beside the stem, in the 255:
  *
- *   ` (conflict 2026-09-15T14-32)`   28   `conflictFilename` in names/conflicts.ts
+ *   ` (conflict 2026-09-15T14-32)`   28   `conflictFilename`, the kit's `documentNames`
  *   `.md`                             3
  *   `-999`                            4   `uniqueFilename`, telling two titles apart
  *   `-999`                            4   the same, for two conflicts in one minute

@@ -20,6 +20,7 @@
 		"db:migrate:remote": "wrangler d1 migrations apply skysa-notes --remote"
 	},
 	"dependencies": {
+		"@skysa/core": "workspace:*",
 		"@skysa/server": "0.1.0",
 		"@skysa/storage": "0.1.0"
 	},

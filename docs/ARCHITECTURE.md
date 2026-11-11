@@ -25,7 +25,7 @@ Cite by anchor from now on; a citation such as `§7, "The scratchpad"` still wor
 | Identity | Notes identified locally by UUID; remote identity is provider file id (Drive/Graph/Dropbox) or path (WebDAV) | Ids survive renames on id-based providers; WebDAV has nothing else |
 | Client | Vite + React + TypeScript SPA, `vite-plugin-pwa` (Workbox) for the service worker, TanStack Router, Dexie (IndexedDB) for local store | Local-first app gets nothing from SSR; vite-plugin-pwa is the best-maintained PWA tooling in the React ecosystem |
 | Backend | Hono + TypeScript on Cloudflare Workers, D1 via Drizzle | Tiny, streams bodies natively (WebDAV proxy), Workers-native |
-| Repo | pnpm workspace: `apps/web`, `apps/api`, `packages/core` (providers, sync, markdown — framework-agnostic) | Keeps the hard parts testable without any UI or server framework |
+| Repo | pnpm workspace: `apps/web`, `apps/api`, `packages/core` (markdown, names, secrets — framework-agnostic), over the kit's packages for the providers, the sync engine and the server (record 0018) | Keeps the hard parts testable without any UI or server framework |
 | Hosting | Cloudflare Workers for the API, Workers static assets for the SPA (same origin), D1 for the database | One deploy, same-origin cookies, SQLite dialect in dev and prod |
 | App folder name | `skysa-notes`, defined once as `APP_FOLDER_NAME` in `packages/core/src/config.ts`; changeable before launch | Provider registrations must match — see §5 |
 | Accounts | A device may hold several connected sources at once, each its own silo — its own notes, its own queue, its own credential — and shows one at a time (Phase 7) | Nothing aggregates them, on the server or off it |
@@ -319,6 +319,11 @@ This app hands them its folder, with its marker and Drive's tag on it (`NOTES_FO
 The kit's ([§5.1](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#google-drive)), with the scope `drive.file` and the root found by its tag, never by name.
 - **A folder the app has left (2026-10-13).**
   The directory a notebook moved, renamed or deleted here leaves behind is not deleted on Drive, where `drive.file` hides from the app what the user put in it, but tagged as left (`notesappLeft`), and not reported while it holds nothing the app can see.
+- **What the user adds through Drive is not the app's.**
+  Under `drive.file` the app sees only the files it made, so the storage panel says so (`UNSEEN_AT_PROVIDER` in `apps/web/src/sync/account.ts`, 2026-10-05), from "About Google Drive" in its gear, and the way in for such notes is an import (§7, "Getting a library in").
+- **The change feed lags (2026-10-06).**
+  A new file takes seconds to reach Drive's change feed, and a listing can still name a file the feed has reported trashed.
+  Both reached users through the change relay (§6), whose notice comes the moment a write is answered, so a device looks again after a notice (the scheduler's), and lists the clipboard, and reads the key file, twice (`lookTwice` in `sync/notesSync.ts`).
 
 <a id="onedrive-microsoft-graph"></a><a id="s5-2"></a>
 ### 5.2 OneDrive (Microsoft Graph)
@@ -945,6 +950,7 @@ Among them, the ones this app's documents cite by name:
 - **A rate limit is not an attempt**: a `RateLimitError` is retried without counting toward the five failures that stop an op.
 
 What follows here is this app's own: search, the window and what is in it, and the commands.
+
 **Search is a question, not a place.**
 Every note is already on the device, so search is answered here and nothing about it goes near a provider or `apps/api`.
 Not by Dexie either: IndexedDB indexes whole keys and their prefixes, so it can find a title that *starts with* what was typed and nothing else — a word in the middle of a body is invisible to it, and a scan for a substring would rank nothing and miss "meetings" for "meeting".

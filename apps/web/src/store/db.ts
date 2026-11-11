@@ -48,7 +48,7 @@ export interface NoteRecord {
 	/**
 	 * SHA-256 of the file as this note and its remote file last agreed on it —
 	 * pulled or pushed — unlike `contentHash`, which follows every edit. Only the
-	 * sync store writes it; see `SyncNote.syncedHash` in `@skysa/core`. Not
+	 * sync store writes it; see `SyncNote.syncedHash` in `@skysa/sync`. Not
 	 * indexed, so rows from before it need no migration: absent reads as "cannot
 	 * say".
 	 */
@@ -262,7 +262,7 @@ interface PreferenceRecord {
 	value: string;
 }
 
-/** The kinds of op the queue holds: core's, so a new one is a row the app can store. */
+/** The kinds of op the queue holds: the kit's engine's, so a new one is a row the app can store. */
 type QueuedOperation = SyncOperation;
 
 /**

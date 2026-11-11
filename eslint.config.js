@@ -276,8 +276,9 @@ const sourceOf = (path) =>
 
 /**
  * The module each name a barrel offers comes from, read from the barrel,
- * whose every line is `export { … } from './module.js'` (#449). A module bound
- * for the kit imports core by name, and the name's module is what moves.
+ * whose every line is `export { … } from './module.js'` (#449), or from a kit
+ * package it re-exports, which is named as it is. A module bound for the kit
+ * imports core by name, and the name's module is what moves.
  */
 const namesIn = (barrel) =>
 	new Map(
@@ -292,7 +293,9 @@ const namesIn = (barrel) =>
 				.filter((name) => name !== '')
 				.map((name) => [
 					name.split(/\s+as\s+/).at(-1),
-					fromRoot(sourceOf(resolve(dirname(barrel), from))),
+					from.startsWith('.')
+						? fromRoot(sourceOf(resolve(dirname(barrel), from)))
+						: from,
 				])
 		)
 	);

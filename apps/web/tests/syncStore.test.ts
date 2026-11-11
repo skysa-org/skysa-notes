@@ -5,9 +5,9 @@ import { createSyncEngine } from '@skysa/sync';
 import { describeSyncStoreContract } from '@skysa/sync/testing';
 import { describe, expect, it } from 'vitest';
 
-// The suite lives beside the port it checks, in `packages/core`, and is not a
-// `*.test.ts` there so that it runs only where a store registers it. `core`
-// cannot import `apps/*`, so this store registers here instead.
+// The suite lives beside the port it checks, in the kit's `@skysa/sync`, and is
+// not a `*.test.ts` there so that it runs only where a store registers it. The
+// kit cannot import this app, so this store registers here instead.
 import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import {
 	createNote,
