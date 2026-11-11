@@ -1,10 +1,9 @@
+import type { ApiClient, Grant } from '@skysa/client';
+import { answer, type Asked, credentialFor } from '@skysa/client';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ApiClient, Grant } from '../../api/client.js';
-import { answer, type Asked } from '../../api/instanceConfig.js';
 import { failedAt, saying } from '../../errors/reached.js';
 import { t } from '../../i18n/t.js';
-import { credentialFor } from '../../store/credentials.js';
 import { useDb } from '../../store/database.js';
 import type { NotesDatabase } from '../../store/db.js';
 import { Icon } from '../ui/icons.js';

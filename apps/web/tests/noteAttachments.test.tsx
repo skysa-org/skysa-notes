@@ -1,3 +1,4 @@
+import type { SchedulerStatus, SyncScheduler } from '@skysa/client';
 import { imageInfo, MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +21,6 @@ import type { FileRecord, NoteRecord } from '../src/store/db.js';
 import { createNote, draftNote } from '../src/store/notes.js';
 import { heldCopy, heldPicture, keepPicture } from '../src/store/pictures.js';
 import type { FileRead } from '../src/sync/fileReads.js';
-import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
 import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 

@@ -145,22 +145,6 @@ const SYNC_LAYER = NOT_ABOVE(
 	'the sync layer drives the store; it does not import the UI.'
 );
 
-/**
- * What the sync client bound for the shared kit reaches the device without:
- * Dexie, the app's tables and stores, and the app's words. It has ports for
- * the first and says nothing in the last (docs/decisions/0018-the-shared-kit.md).
- */
-const CLIENT_MESSAGE =
-	'the sync client reaches the device through its ports and has no words of its own (docs/decisions/0018-the-shared-kit.md).';
-const CLIENT_PORTS = [
-	{ group: ['dexie', '**/i18n/**', '**/db.js'], message: CLIENT_MESSAGE },
-	{
-		group: ['**/store/*', '!**/store/credentials.js', '!**/store/connectCode.js'],
-		message: CLIENT_MESSAGE,
-	},
-	{ group: ['./store.js', './dexiePorts.js', './notesSync.js'], message: CLIENT_MESSAGE },
-];
-
 /** What nothing in packages/core/src may import. */
 const CORE_IMPORTS = [
 	{
@@ -191,48 +175,6 @@ const CORE_IMPORTS = [
  * the code is a move.
  */
 const KIT = {
-	client: {
-		uses: ['protocol', 'storage', 'sync'],
-		paths: [
-			'apps/web/src/api/',
-			'apps/web/src/sync/tokens.ts',
-			'apps/web/src/sync/providers.ts',
-			'apps/web/src/sync/relay.ts',
-			'apps/web/src/sync/scheduler.ts',
-			'apps/web/src/sync/wakeLock.ts',
-			'apps/web/src/sync/beforeUpdate.ts',
-			'apps/web/src/sync/progress.ts',
-			'apps/web/src/store/credentials.ts',
-			'apps/web/src/store/connectCode.ts',
-			'apps/web/src/store/emitter.ts',
-		],
-		// Those over the device's database are suites over a device
-		// (`tests/client/device.ts`), run here over the ports in memory and by
-		// this app over its own (`tokens.dexie.test.ts`). The scheduler's
-		// companions are this app's, and their tests stay with it
-		// (`scheduler.sources.test.ts`).
-		tests: [
-			'apps/web/tests/client/',
-			'apps/web/tests/apiClient.test.ts',
-			'apps/web/tests/beforeUpdate.test.ts',
-			'apps/web/tests/clientStore.test.ts',
-			'apps/web/tests/connectCode.test.ts',
-			'apps/web/tests/emitter.test.ts',
-			'apps/web/tests/instanceConfig.test.tsx',
-			'apps/web/tests/providers.test.ts',
-			'apps/web/tests/relay.test.ts',
-			'apps/web/tests/runBar.test.ts',
-			'apps/web/tests/scheduler.connection.test.ts',
-			'apps/web/tests/scheduler.failures.test.ts',
-			'apps/web/tests/scheduler.pausing.test.ts',
-			'apps/web/tests/scheduler.relay.test.ts',
-			'apps/web/tests/scheduler.test.ts',
-			'apps/web/tests/scheduler.timing.test.ts',
-			'apps/web/tests/tokens.test.ts',
-			'apps/web/tests/wakeLock.test.ts',
-			'apps/web/tests/support/fakes/environment.ts',
-		],
-	},
 	pwa: {
 		uses: [],
 		// The app hands in its default brand, its routes and share target
@@ -309,7 +251,7 @@ const CORE_ENTRIES = new Map([
  * The kit's packages already on npm (record 0018, step 3), which a module still
  * bound for it imports by name: that name is the package it is judged by.
  */
-const PUBLISHED = /^@skysa\/(protocol|storage|sync|server)(?:\/|$)/;
+const PUBLISHED = /^@skysa\/(protocol|storage|sync|server|client)(?:\/|$)/;
 
 /** A local rule: what `KIT` says a module bound for the kit may import. */
 const KIT_FENCE = {
@@ -756,22 +698,6 @@ export default tseslint.config(
 	{
 		files: ['apps/web/src/sync/**/*.{ts,tsx}'],
 		rules: { 'no-restricted-imports': ['error', { patterns: [SYNC_LAYER] }] },
-	},
-	{
-		// The sync client goes to the shared kit (docs/decisions/0018-the-shared-kit.md).
-		// It reaches the device only through its ports and says nothing in words
-		// of its own, so none of it imports Dexie, the app's tables, its stores
-		// or the catalog. The credentials go with it. Repeats each layer's
-		// patterns, which a rule set here replaces rather than adds to.
-		files: [
-			'apps/web/src/api/**/*.ts',
-			'apps/web/src/sync/{tokens,providers,relay,scheduler,wakeLock,beforeUpdate}.ts',
-		],
-		rules: { 'no-restricted-imports': ['error', { patterns: [SYNC_LAYER, ...CLIENT_PORTS] }] },
-	},
-	{
-		files: ['apps/web/src/store/{credentials,connectCode}.ts'],
-		rules: { 'no-restricted-imports': ['error', { patterns: [STORE_LAYER, ...CLIENT_PORTS] }] },
 	},
 	{
 		// Everything bound for the shared kit imports only what goes with it

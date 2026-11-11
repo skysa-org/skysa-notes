@@ -1,3 +1,4 @@
+import type { AppSchedulerOptions, ClientDevice } from '@skysa/client/testing';
 import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
 
 import { bindConnection, detachConnection, showConnection } from '../../src/store/connection.js';
@@ -6,7 +7,6 @@ import { createNote, saveNoteBody } from '../../src/store/notes.js';
 import { clientStoreOf } from '../../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../../src/sync/lock.js';
 import { createNotesSync } from '../../src/sync/notesSync.js';
-import type { AppSchedulerOptions, ClientDevice } from '../client/device.js';
 import { lazily } from '../noteRows.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';

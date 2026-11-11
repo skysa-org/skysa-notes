@@ -1,9 +1,9 @@
+import type { ApiClient } from '@skysa/client';
+import { heldConnectCode, heldConnectCodeShown } from '@skysa/client';
 import type { ConnectGate, ProviderKind } from '@skysa/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ApiClient } from '../../../api/client.js';
 import { t } from '../../../i18n/t.js';
-import { heldConnectCode, heldConnectCodeShown } from '../../../store/connectCode.js';
 import { PROVIDER_LABELS } from '../../../sync/account.js';
 import { ProviderIcon } from '../ProviderIcon.js';
 import { ConnectButton } from './ConnectButton.js';

@@ -1,7 +1,7 @@
+import { api, type ApiClient } from '@skysa/client';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
-import { api, type ApiClient } from '../../api/client.js';
 import { t } from '../../i18n/t.js';
 import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/connection.js';
 import { useDb } from '../../store/database.js';

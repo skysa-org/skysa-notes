@@ -1,3 +1,4 @@
+import type { ClientStore, TokenStates } from '@skysa/client';
 import { outOfAttempts } from '@skysa/sync';
 import { liveQuery } from 'dexie';
 
@@ -8,9 +9,7 @@ import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS } from '../store/queue.js';
 import { rowsOf } from '../store/rows.js';
 import { isLiveSource } from '../store/rowStates.js';
-import type { ClientStore } from './scheduler.js';
 import { createDexieSyncStore, toSyncOp } from './store.js';
-import type { TokenStates } from './tokens.js';
 
 /**
  * The sync client's ports, over this app's database. The client goes to the

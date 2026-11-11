@@ -1,10 +1,15 @@
+import type { SyncPhase, SyncSchedulerOptions } from '@skysa/client';
+import {
+	describeFailures,
+	focused,
+	nextTimer,
+	reaches,
+	stopSchedulers,
+} from '@skysa/client/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { NotesDatabase, OpQueueRecord } from '../src/store/db.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
-import type { SyncPhase, SyncSchedulerOptions } from '../src/sync/scheduler.js';
-import { describeFailures } from './client/failures.js';
-import { focused, nextTimer, reaches, stopSchedulers } from './client/schedulerHarness.js';
 import { dexieDevice } from './support/dexieDevice.js';
 import { bound, started } from './support/scheduler.js';
 

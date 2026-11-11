@@ -1,3 +1,5 @@
+import type { RelayFactory } from '@skysa/client';
+import { focused, quiet, reaches, remote, stopSchedulers } from '@skysa/client/testing';
 import {
 	buildEncryptionFile,
 	CLIPBOARD_FOLDER,
@@ -11,8 +13,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import type { NotesDatabase } from '../src/store/db.js';
 import type { FileRead } from '../src/sync/fileReads.js';
-import type { RelayFactory } from '../src/sync/relay.js';
-import { focused, quiet, reaches, remote, stopSchedulers } from './client/schedulerHarness.js';
 import { bound, pastedElsewhere, previews, started } from './support/scheduler.js';
 
 afterEach(stopSchedulers);

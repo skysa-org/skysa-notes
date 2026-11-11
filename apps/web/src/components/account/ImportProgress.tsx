@@ -1,14 +1,14 @@
+import type { SchedulerStatus, SyncScheduler } from '@skysa/client';
+import { api, type ApiClient } from '@skysa/client';
 import type { SyncProgress } from '@skysa/sync';
 import { useId, useState } from 'react';
 
-import { api, type ApiClient } from '../../api/client.js';
 import { saying } from '../../errors/reached.js';
 import { t } from '../../i18n/t.js';
 import { useDb } from '../../store/database.js';
 import type { SyncStateRecord } from '../../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../../sync/runtime.js';
-import type { SchedulerStatus, SyncScheduler } from '../../sync/scheduler.js';
 import { Dialog, DialogActions } from '../ui/Dialog.js';
 import { RunProgress } from '../ui/RunProgress.js';
 import { runSentence } from './statusWords.js';

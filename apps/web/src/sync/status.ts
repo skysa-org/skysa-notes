@@ -1,4 +1,4 @@
-import type { SchedulerStatus } from './scheduler.js';
+import type { SchedulerStatus } from '@skysa/client';
 
 /**
  * A problem that connecting the account again is the answer to: said in the

@@ -1,6 +1,6 @@
+import { ApiError } from '@skysa/client';
 import { describe, expect, it } from 'vitest';
 
-import { ApiError } from '../src/api/client.js';
 import { failedAt, saying } from '../src/errors/reached.js';
 
 /**

@@ -1,6 +1,7 @@
+import type { SyncScheduler } from '@skysa/client';
+import { api, type ApiClient } from '@skysa/client';
 import { type ReactNode, useState } from 'react';
 
-import { api, type ApiClient } from '../../api/client.js';
 import { t } from '../../i18n/t.js';
 import { type ConnectedSource, LABEL_LIMIT, showConnection } from '../../store/connection.js';
 import { useDb } from '../../store/database.js';
@@ -8,7 +9,6 @@ import { LOCAL_CONNECTION_ID } from '../../store/db.js';
 import { isLiveSource } from '../../store/rowStates.js';
 import { CONNECT_FIRST_LABEL, tabName } from '../../sync/account.js';
 import { syncScheduler, useNeedsReconnect } from '../../sync/runtime.js';
-import type { SyncScheduler } from '../../sync/scheduler.js';
 import { RowRename } from '../ui/RowRename.js';
 import { AddSource } from './AddSource.js';
 import { ProviderIcon, sourceKind } from './ProviderIcon.js';

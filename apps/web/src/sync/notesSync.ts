@@ -1,3 +1,11 @@
+import {
+	browserEnvironment,
+	type Companion,
+	createSyncScheduler,
+	type SchedulerEnvironment,
+	type SyncScheduler,
+	type SyncSchedulerOptions,
+} from '@skysa/client';
 import { NOTES_WATCH } from '@skysa/core';
 import { cell } from '@skysa/storage';
 import type { SyncOutcome } from '@skysa/sync';
@@ -7,14 +15,6 @@ import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { clientStoreOf } from './dexiePorts.js';
 import { createFileReader, type FileReader } from './fileReads.js';
 import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
-import {
-	browserEnvironment,
-	type Companion,
-	createSyncScheduler,
-	type SchedulerEnvironment,
-	type SyncScheduler,
-	type SyncSchedulerOptions,
-} from './scheduler.js';
 
 /**
  * This app's sync: the scheduler, which knows nothing of notes' own folders

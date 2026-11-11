@@ -1,4 +1,4 @@
-import { createEmitter } from '../../store/emitter.js';
+import { createEmitter } from '@skysa/client';
 
 /**
  * Which editor is open now, for whatever outside it has to reach it: the find

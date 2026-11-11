@@ -38,6 +38,7 @@
 		"@milkdown/kit": "7.22.3",
 		"@milkdown/react": "7.22.3",
 		"@prosemirror-adapter/react": "0.5.5",
+		"@skysa/client": "0.1.0",
 		"@skysa/core": "workspace:*",
 		"@skysa/protocol": "0.1.0",
 		"@skysa/storage": "0.1.0",

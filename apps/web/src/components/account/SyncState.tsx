@@ -1,9 +1,9 @@
+import type { InstanceConfig, SchedulerStatus } from '@skysa/client';
+import { answer, type Asked } from '@skysa/client';
 import { isVaultPath } from '@skysa/core';
 import { Link } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 
-import type { InstanceConfig } from '../../api/client.js';
-import { answer, type Asked } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
 import { noteLink } from '../../routes/place.js';
 import { useDb } from '../../store/database.js';
@@ -12,7 +12,6 @@ import { getNote } from '../../store/notes.js';
 import { isTombstone } from '../../store/rowStates.js';
 import { CONNECTABLE } from '../../sync/account.js';
 import { useSyncStatus } from '../../sync/runtime.js';
-import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { needsReconnect } from '../../sync/status.js';
 import { ConnectButton } from '../sources/connect/ConnectButton.js';
 import { DialogActions, InlineDialog } from '../ui/Dialog.js';

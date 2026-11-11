@@ -1,9 +1,9 @@
+import { dropConnectCode, heldConnectCode, holdConnectCode } from '@skysa/client';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
-import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 

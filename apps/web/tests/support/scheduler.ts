@@ -4,6 +4,7 @@
  * the files beside notes attached. The rest of a scheduler under test is the
  * kit's (`tests/client/schedulerHarness.ts`).
  */
+import { cleanups, schedulerDefaults } from '@skysa/client/testing';
 import { CLIPBOARD_FOLDER, NOTE_FORMAT, syncsHidden } from '@skysa/core';
 import type { FakeProvider } from '@skysa/storage/testing';
 
@@ -15,7 +16,6 @@ import {
 	type NotesSync,
 	type NotesSyncOptions,
 } from '../../src/sync/notesSync.js';
-import { cleanups, schedulerDefaults } from '../client/schedulerHarness.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';
 

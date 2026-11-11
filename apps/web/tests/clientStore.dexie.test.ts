@@ -1,4 +1,5 @@
-import { describeClientStore } from './client/clientStore.js';
+import { describeClientStore } from '@skysa/client/testing';
+
 import { dexieDevice } from './support/dexieDevice.js';
 
 // The scheduler's port over this app's database (`clientStoreOf`, in

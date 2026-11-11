@@ -1,7 +1,7 @@
+import type { SchedulerStatus } from '@skysa/client';
 import type { ReactNode, RefObject } from 'react';
 
 import { t } from '../../i18n/t.js';
-import type { SchedulerStatus } from '../../sync/scheduler.js';
 import { InfoDialog } from '../ui/InfoDialog.js';
 import { RunBar, RunProgress } from '../ui/RunProgress.js';
 import { lineStatus, statusMessage, type SyncCount } from './statusWords.js';

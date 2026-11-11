@@ -1,15 +1,15 @@
+import type { ApiClient } from '@skysa/client';
+import { hashCredential } from '@skysa/client';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApiClient } from '../src/api/client.js';
 import {
 	bindConnection,
 	detachConnection,
 	finishImport,
 	showConnection,
 } from '../src/store/connection.js';
-import { hashCredential } from '../src/store/credentials.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,

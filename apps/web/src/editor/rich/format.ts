@@ -1,7 +1,7 @@
 import { liftListItem, sinkListItem } from '@milkdown/kit/prose/schema-list';
 import type { EditorState } from '@milkdown/kit/prose/state';
+import { createStore } from '@skysa/client';
 
-import { createStore } from '../../store/emitter.js';
 import { listAround, type ListKind } from './lists.js';
 import { markRunIn } from './markRun.js';
 import { CODE_BLOCK_NODE, LINK_MARK, LIST_ITEM_NODE } from './schema.js';

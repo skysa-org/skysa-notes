@@ -1,9 +1,9 @@
+import type { CredentialRecord } from '@skysa/client';
 import type { PictureInfo, PictureVariant } from '@skysa/core';
 import type { ProviderKind } from '@skysa/protocol';
 import type { SyncOperation } from '@skysa/sync';
 import Dexie, { type Table, type Transaction } from 'dexie';
 
-import type { CredentialRecord } from './credentials.js';
 import type { EditorMode } from './editorMode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
 import { watchForHeldUp } from './heldUp.js';
@@ -250,7 +250,7 @@ export interface Detached {
 
 // A credential this device holds is a row of `credentials`, defined beside the
 // functions over it (`store/credentials.ts`), which go to the shared kit.
-export { type CredentialRecord, PENDING_CREDENTIAL_ID } from './credentials.js';
+export { type CredentialRecord, PENDING_CREDENTIAL_ID } from '@skysa/client';
 
 /**
  * App-wide settings. A table rather than `localStorage` because the store is

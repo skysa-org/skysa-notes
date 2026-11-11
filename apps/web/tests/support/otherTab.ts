@@ -1,5 +1,6 @@
+import { cleanups } from '@skysa/client/testing';
+
 import type { NotesDatabase } from '../../src/store/db.js';
-import { cleanups } from '../client/schedulerHarness.js';
 
 /** Another tab's connection to the same database, as IndexedDB opens one. */
 export const otherTab = (db: NotesDatabase) =>

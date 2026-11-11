@@ -1,16 +1,17 @@
-import { type ConnectGate, MAX_CONNECT_CODE } from '@skysa/protocol';
-import { type RefObject, useEffect, useId, useState } from 'react';
-
-import { type ApiClient, ApiError } from '../../../api/client.js';
-import { rich } from '../../../i18n/rich.js';
-import { t } from '../../../i18n/t.js';
 import {
+	type ApiClient,
+	ApiError,
 	connectCodeHeldUntil,
 	heldConnectCode,
 	heldConnectCodeShown,
 	holdAcceptedCode,
 	watchConnectCode,
-} from '../../../store/connectCode.js';
+} from '@skysa/client';
+import { type ConnectGate, MAX_CONNECT_CODE } from '@skysa/protocol';
+import { type RefObject, useEffect, useId, useState } from 'react';
+
+import { rich } from '../../../i18n/rich.js';
+import { t } from '../../../i18n/t.js';
 
 /**
  * Asks the operator's policy about a code, and holds it — or what the policy

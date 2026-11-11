@@ -63,7 +63,6 @@ describe('the fill window', () => {
 	it.each([
 		'src/main.tsx',
 		'src/sync/runtime.ts',
-		'src/sync/scheduler.ts',
 		'src/components/secrets/noteSecrets.tsx',
 		'src/secrets/catchUp.ts',
 	])('does not load %s', (module) => {
@@ -71,6 +70,25 @@ describe('the fill window', () => {
 		// the check would pass whatever the window loads.
 		expect(existsSync(join(root, module))).toBe(true);
 		expect(modules).not.toContain(module);
+	});
+
+	it('takes from the kit’s client only an emitter, a store and base64url', () => {
+		// The scheduler is the kit's (`@skysa/client`), so the walk above cannot
+		// see it: what reaches the window's chunk of that package is what the
+		// window's modules name from it.
+		const named = [...modules].flatMap((module) =>
+			[
+				...readFileSync(join(root, module), 'utf8').matchAll(
+					/^import\s+(?!type\b)\{([^}]*)\}\s*from\s*'@skysa\/client'/gmu
+				),
+			].flatMap(([, names = '']) =>
+				names
+					.split(',')
+					.map((name) => name.trim())
+					.filter((name) => name !== '' && !name.startsWith('type '))
+			)
+		);
+		expect([...new Set(named)].sort()).toEqual(['createEmitter', 'createStore', 'toBase64Url']);
 	});
 
 	it('does not load the router', () => {

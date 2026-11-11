@@ -1,3 +1,5 @@
+import type { SchedulerStatus, StuckOp } from '@skysa/client';
+import { PROGRESS_FROM } from '@skysa/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -6,8 +8,6 @@ import {
 	statusMessage,
 	syncCount,
 } from '../src/components/account/statusWords.js';
-import { PROGRESS_FROM } from '../src/sync/progress.js';
-import type { SchedulerStatus, StuckOp } from '../src/sync/scheduler.js';
 
 /**
  * What the storage panel says about how syncing is going, as tables: the

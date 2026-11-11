@@ -1,6 +1,5 @@
+import { ApiError } from '@skysa/client';
 import { messageOf } from '@skysa/sync';
-
-import { ApiError } from '../api/client.js';
 
 /**
  * How far a failure got, for the messages that have to say.

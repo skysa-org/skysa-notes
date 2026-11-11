@@ -1,10 +1,9 @@
+import { type ApiClient, ApiError, hashCredential,type InstanceConfig } from '@skysa/client';
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { returnPath } from '../src/components/account/AccountPanel.js';
-import { hashCredential } from '../src/store/credentials.js';
 import { PENDING_CREDENTIAL_ID } from '../src/store/db.js';
 import { createKeeping } from '../src/store/keeping.js';
 import { createNote } from '../src/store/notes.js';

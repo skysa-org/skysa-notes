@@ -1,3 +1,5 @@
+import type { SyncScheduler } from '@skysa/client';
+import { createEmitter } from '@skysa/client';
 import {
 	drawsFromData,
 	imageInfo,
@@ -29,7 +31,6 @@ import { copyTurns, nearestCopy } from '../../pictures/copies.js';
 import { noShrinker, type PictureShrinker, pictureShrinker } from '../../pictures/shrinker.js';
 import { useDb } from '../../store/database.js';
 import type { FileRecord, NoteRecord, NotesDatabase, PictureRecord } from '../../store/db.js';
-import { createEmitter } from '../../store/emitter.js';
 import { heldFile, holdsBytes } from '../../store/fileCache.js';
 import {
 	addAttachment,
@@ -41,7 +42,6 @@ import { heldCopy, heldPicture, keepPicture, type MadeCopy } from '../../store/p
 import { watchSourceFiles } from '../../store/sourceFiles.js';
 import type { FileRead } from '../../sync/fileReads.js';
 import { syncScheduler } from '../../sync/runtime.js';
-import type { SyncScheduler } from '../../sync/scheduler.js';
 
 /**
  * The files beside one open note, for its editor (#187): `AttachmentHost`,

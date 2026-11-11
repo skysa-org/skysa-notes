@@ -1,14 +1,12 @@
+import type { SchedulerStatus, SyncScheduler } from '@skysa/client';
+import { api, createProviderFactory, createRelayFactory } from '@skysa/client';
 import { NOTE_FORMAT, NOTES_FOLDER, syncsHidden } from '@skysa/core';
 import { useSyncExternalStore } from 'react';
 
-import { api } from '../api/client.js';
 import { t } from '../i18n/t.js';
 import { db } from '../store/db.js';
 import { SYNC_LOCK } from './lock.js';
 import { createNotesSync, type NotesSync } from './notesSync.js';
-import { createProviderFactory } from './providers.js';
-import { createRelayFactory } from './relay.js';
-import type { SchedulerStatus, SyncScheduler } from './scheduler.js';
 import { needsReconnect } from './status.js';
 
 /**

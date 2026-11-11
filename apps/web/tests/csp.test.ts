@@ -4,12 +4,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createProviderFactory } from '@skysa/client';
 import { NOTE_FORMAT, NOTES_FOLDER } from '@skysa/core';
 import type { FetchLike } from '@skysa/storage';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-
-import { createProviderFactory } from '../src/sync/providers.js';
 
 /**
  * The Content-Security-Policy in `public/_headers` (docs/ARCHITECTURE.md §9).

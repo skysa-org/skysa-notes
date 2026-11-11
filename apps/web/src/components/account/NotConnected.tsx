@@ -1,7 +1,7 @@
+import { answer } from '@skysa/client';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useSyncExternalStore } from 'react';
 
-import { answer } from '../../api/instanceConfig.js';
 import { t } from '../../i18n/t.js';
 import type { pickFiles } from '../../lib/pickFiles.js';
 import { useDb } from '../../store/database.js';

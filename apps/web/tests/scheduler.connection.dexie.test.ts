@@ -1,9 +1,8 @@
+import { describeConnection, reaches, stopSchedulers } from '@skysa/client/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { bindConnection } from '../src/store/connection.js';
 import { createNote } from '../src/store/notes.js';
-import { describeConnection } from './client/connection.js';
-import { reaches, stopSchedulers } from './client/schedulerHarness.js';
 import { holdCredential } from './support/connection.js';
 import { watchedDatabase } from './support/db.js';
 import { dexieDevice } from './support/dexieDevice.js';

@@ -5,6 +5,7 @@ import './styles/index.css';
 // the banner that shows it has mounted (see the module).
 import './install/installPrompt.js';
 
+import { keepAwakeWhileSyncing,makeWayWhenAsked, updateChannel } from '@skysa/client';
 import { createRouter, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -14,9 +15,7 @@ import { routeTree } from './routeTree.gen';
 import { catchUpSecrets } from './secrets/catchUp.js';
 import { tabLock } from './secrets/tabLock.js';
 import { db } from './store/db.js';
-import { makeWayWhenAsked, updateChannel } from './sync/beforeUpdate.js';
 import { syncScheduler } from './sync/runtime.js';
-import { keepAwakeWhileSyncing } from './sync/wakeLock.js';
 
 const router = createRouter({
 	routeTree,

@@ -1,9 +1,18 @@
+import type { SchedulerStatus } from '@skysa/client';
+import {
+	type ApiClient,
+	ApiError,
+	dropConnectCode,
+	heldConnectCode,
+	holdAcceptedCode,
+	holdConnectCode,
+	type InstanceConfig,
+} from '@skysa/client';
 import { MAX_CONNECT_CODE } from '@skysa/protocol';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import dropboxMark from '../src/assets/providers/dropbox.svg';
 import gdrive16 from '../src/assets/providers/gdrive-16.png';
 import gdrive32 from '../src/assets/providers/gdrive-32.png';
@@ -13,12 +22,6 @@ import { ShellTo } from '../src/components/shell/context.js';
 import { type AccountSlot, SourcePanel } from '../src/components/sources/SourcePanel.js';
 import { SourceTabs } from '../src/components/sources/SourceTabs.js';
 import { useShowingSource } from '../src/components/sources/useShowingSource.js';
-import {
-	dropConnectCode,
-	heldConnectCode,
-	holdAcceptedCode,
-	holdConnectCode,
-} from '../src/store/connectCode.js';
 import type * as Connection from '../src/store/connection.js';
 import {
 	bindConnection,
@@ -31,7 +34,6 @@ import { LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
-import type { SchedulerStatus } from '../src/sync/scheduler.js';
 import { over } from './support/database.js';
 import { freshDatabase } from './support/db.js';
 

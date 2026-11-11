@@ -1,9 +1,8 @@
+import { answer, api, type Asked, useInstanceConfig } from '@skysa/client';
 import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 
-import { api } from '../../api/client.js';
-import { answer, type Asked, useInstanceConfig } from '../../api/instanceConfig.js';
 import type { pickFiles } from '../../lib/pickFiles.js';
 import { useDb } from '../../store/database.js';
 import { activeConnectionId } from '../../store/db.js';

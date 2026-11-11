@@ -1,7 +1,7 @@
+import { createStore } from '@skysa/client';
 import { cell } from '@skysa/storage';
 import type Dexie from 'dexie';
 
-import { createStore } from './emitter.js';
 import { flushEditors } from './heldEdits.js';
 
 /**

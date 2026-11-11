@@ -1,11 +1,10 @@
+import { type ApiClient, ApiError, hashCredential } from '@skysa/client';
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, ApiError } from '../src/api/client.js';
 import type { pickFiles } from '../src/lib/pickFiles.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
-import { hashCredential } from '../src/store/credentials.js';
 import { activeConnectionId, LOCAL_CONNECTION_ID, PENDING_CREDENTIAL_ID } from '../src/store/db.js';
 import { ArchiveLimitError } from '../src/store/exportNotes.js';
 import { createFolder } from '../src/store/folders.js';
