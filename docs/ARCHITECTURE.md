@@ -1915,6 +1915,8 @@ The decision record is [`decisions/0001-disconnecting-without-an-invisible-pile.
 ```
 pnpm-workspace.yaml
 package.json                  # root scripts: dev, build, test, lint, verify (the gate before a push), db:migrate
+eslint.config.js              # the kit's lint, skysa() from @skysa/eslint-config, with this app's words, layers and boundaries
+tsconfig.base.json            # the kit's compiler settings, which each package extends; Prettier's are the kit's too (.prettierrc.json)
 docs/                         # this file; decisions/ (a record per decision); history.md (the build record)
 .changeset/                   # a changeset per PR; README.md says how a release is cut
 scripts/setup.sh              # first-run setup
@@ -1984,7 +1986,7 @@ packages/
       markdown/roundtrip.test.ts
 ```
 
-The kit's packages are dependencies, not paths here: the provider adapters and the sync engine are `@skysa/storage` and `@skysa/sync`, the shapes the app and the Worker both speak `@skysa/protocol`, the sync client — the scheduler, the API client and the credentials — `@skysa/client`, the Worker `@skysa/server` (§6), and the build's service worker, manifest and brand `@skysa/pwa` (§8), each pinned to one exact version ([record 0018](decisions/0018-the-shared-kit.md)).
+The kit's packages are dependencies, not paths here: the provider adapters and the sync engine are `@skysa/storage` and `@skysa/sync`, the shapes the app and the Worker both speak `@skysa/protocol`, the sync client — the scheduler, the API client and the credentials — `@skysa/client`, the Worker `@skysa/server` (§6), the build's service worker, manifest and brand `@skysa/pwa` (§8), and the lint, the compiler's settings and Prettier's `@skysa/eslint-config`, each pinned to one exact version ([record 0018](decisions/0018-the-shared-kit.md)).
 
 Dependency rule: `core` imports nothing from `apps/*`, and of the kit only `@skysa/protocol` and `@skysa/storage`.
 `web` and `api` may import `core`, by its main entry, `@skysa/core`, which names what it offers rather than re-exporting whole modules (#449), and the kit's packages by theirs; their tests may also import a kit package's `/testing` entry, and their source may not, nor any path into a `tests` folder (ESLint).

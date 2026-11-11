@@ -1,8 +1,9 @@
 root = true
 
-# Matches .prettierrc.json: tabs shown four wide. Prettier formats every file
-# it reaches, so this is for what it does not — and for the editor's first
-# keystroke before a format on save.
+# Matches Prettier's settings (the kit's, `@skysa/eslint-config/prettier`):
+# tabs shown four wide. Prettier formats every file it reaches, so this is for
+# what it does not — and for the editor's first keystroke before a format on
+# save.
 [*]
 charset = utf-8
 end_of_line = lf

@@ -1,0 +1,7 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": { "noEmit": true },
+	// What is no one package's: the coverage run's config, which the kit's lint
+	// reads with types as it reads every TypeScript file.
+	"include": ["vitest.config.ts"]
+}
