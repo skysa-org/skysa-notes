@@ -785,6 +785,7 @@ A file goes where the notes beside it go, by the rules the notes follow ("Lettin
 ### Folder renames/moves
 A folder renamed or moved on the remote is applied here whatever is dirty in it, since a move does not conflict with an edit.
 One renamed, moved or deleted here goes up as its notes' and files' moves or deletes, and then an `rmdir` for each directory they left, which removes a directory only while it is the one the queue meant and holds nothing ([kit §7, "Folder renames/moves"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#folder-renames-moves)).
+
 <a id="re-arranging-is-moving"></a>
 ### Re-arranging is moving
 
@@ -841,10 +842,12 @@ Both appear in the UI; a small banner links to the pair.
 
 The engine applies the rule, and the stamp is written as the kit's section says: UTC, to the minute, with `-2` and on for a second copy in the same minute, and the name not slugified, so the copy sorts beside its note ([kit §7, "Conflict rule"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#conflict-rule-concrete)).
 This app hands the engine its document format, `NOTE_FORMAT` in `markdown/format.ts` ([record 0018](decisions/0018-the-shared-kit.md)): the kit makes the copy's name for the format's extension (`documentNames`), and the copy's contents, with a fresh `id`, are `packages/core/src/markdown/conflictCopy.ts`.
+
 <a id="merge-before-the-copy"></a>
 ### Merge before the copy
 An app may make the two sides one before the conflict rule applies, through the engine's `merge` option ([kit §7, "Merge before the copy"](https://github.com/skysa-org/skysa-kit/blob/main/docs/ARCHITECTURE.md#merge-before-the-copy)).
 This app passes none, so for it the rule above is the whole of it.
+
 <a id="edits-the-editor-has-not-saved-yet"></a>
 ### Edits the editor has not saved yet
 "Local dirty" is the `dirty` flag, and an edit reaches it only when autosave runs, up to 2 s after the keystroke.
