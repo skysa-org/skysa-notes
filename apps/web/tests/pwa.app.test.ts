@@ -1,16 +1,15 @@
+import { loadBrand, pwaManifest, pwaWorkbox } from '@skysa/pwa';
+import { APP, workerOf } from '@skysa/pwa/testing';
 import { createRouter } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 
-import { loadBrand } from '../brand.js';
-import { pwaManifest, pwaWorkbox } from '../pwa.js';
 import { DEFAULT_BRAND, NOTES_PWA, receiveShare } from '../pwaApp.js';
 import { routeTree } from '../src/routeTree.gen';
-import { APP, workerOf } from './support/serviceWorker.js';
 
 /**
  * What this app hands the build of its own (`pwaApp.ts`): its one route, and
  * its share target, which is its clipboard's. The build's own checklist is
- * `pwa.test.ts`.
+ * the kit's (`@skysa/pwa`).
  */
 
 const manifest = pwaManifest(loadBrand(DEFAULT_BRAND), NOTES_PWA);

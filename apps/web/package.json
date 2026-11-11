@@ -54,6 +54,7 @@
 		"zod": "catalog:"
 	},
 	"devDependencies": {
+		"@skysa/pwa": "0.1.0",
 		"@tanstack/router-plugin": "^1.168.43",
 		"@testing-library/dom": "^10.4.2",
 		"@testing-library/react": "^16.3.3",

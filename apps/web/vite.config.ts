@@ -1,13 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { brandPlugin, loadBrand, pwaOptions } from '@skysa/pwa';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-import { brandPlugin, loadBrand } from './brand.js';
-import { pwaOptions } from './pwa.js';
 import { DEFAULT_BRAND, NOTES_PWA } from './pwaApp.js';
 
 const API_DEV_ORIGIN = 'http://localhost:8787';

@@ -1,12 +1,12 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { PwaApp } from './pwa.js';
+import type { PwaApp } from '@skysa/pwa';
 
 /**
  * What this app hands the build of its own: its one route, and its share
- * target, which is its clipboard's (`PwaApp` in `pwa.ts`); and the brand it
- * builds with when a deployment names none (`loadBrand` in `brand.ts`).
+ * target, which is its clipboard's (`PwaApp`, the kit's `@skysa/pwa`); and the
+ * brand it builds with when a deployment names none (the kit's `loadBrand`).
  */
 
 /**

@@ -1,5 +1,5 @@
 /* What the brand's stylesheet sets, for a page without one. `:where` weighs
-   nothing, so `brand.ts`'s `:root` wins whichever of the two loads first. */
+   nothing, so the brand's `:root` wins whichever of the two loads first. */
 :where(:root) {
 	--brand: var(--accent);
 	--on-brand: #ffffff;
@@ -162,8 +162,8 @@
 	--accent: #2563eb;
 	/* `--brand` and `--on-brand`, the colour behind the app's icon: the
 	   answer a question expects, filled, and every link. Set for each theme by
-	   the brand's stylesheet, with `--font-sans` and `--font-mono` (`brand.ts`,
-	   docs/ARCHITECTURE.md §8). */
+	   the brand's stylesheet, with `--font-sans` and `--font-mono` (the kit's
+	   `brandCss`, docs/ARCHITECTURE.md §8). */
 	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 	--on-fg: var(--accent);
 	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);

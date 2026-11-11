@@ -33,8 +33,7 @@ const CITING = [
 	]
 		.flatMap(under)
 		.filter((file) => /\.(?:tsx?|css)$/u.test(file)),
-	'apps/web/brand.ts',
-	'apps/web/pwa.ts',
+	'apps/web/pwaApp.ts',
 	'apps/web/vite.config.ts',
 	'apps/api/wrangler.toml',
 	...[

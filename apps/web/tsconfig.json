@@ -11,8 +11,6 @@
 		"src/**/*.tsx",
 		"tests/**/*.ts",
 		"tests/**/*.tsx",
-		"brand.ts",
-		"pwa.ts",
 		"pwaApp.ts",
 		"vite.config.ts",
 		"vitest.config.ts"
