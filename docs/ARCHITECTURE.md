@@ -2103,11 +2103,11 @@ Operators running an instance for many users should know two things, both to be 
 <a id="the-shared-kit"></a>
 ### The shared kit (2026-11-09)
 
-The layers here that do not care what a file holds are to move to a repository of their own, `skysa-org/skysa-kit`, which this app, skysa-draw and memoriam will depend on from npm.
+The layers here that do not care what a file holds have moved to a repository of their own, `skysa-org/skysa-kit`, which this app depends on from npm, and skysa-draw and memoriam are to.
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
-Until this app depends on it, this repository is still the whole product, as above.
-The first six seams are cut:
+This app pins the kit at one exact version (§11), and what moved is gone from here: each section that described it is a sentence pointing at the kit's.
+The seams the move needed were cut here first:
 - the adapters are handed the app's folder (§3), and the scheduler its lock's name;
 - the engine and the adapters are handed what a document is (`NOTE_FORMAT`);
 - the engine and the scheduler take the app's merge where it has one, and this app has none (§7, "Merge before the copy");
@@ -2124,6 +2124,7 @@ A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, held every module bou
 Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests.
 The client's tests that ran over this app's database follow as suites over a device (`ClientDevice`, now `@skysa/client/testing`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
 The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring, and 0.1.0 is on npm (record 0018, step 2).
+This app took it and deleted what moved (step 3), and #118 goes with that into 3.0.0.
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

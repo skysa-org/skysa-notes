@@ -1,6 +1,6 @@
 # 0018. The shared kit
 
-*2026-11-09. Planned; nothing has moved yet. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
+*2026-11-09. Steps 1 and 2 are done, and step 3's move is made (2026-11-11), to ship as 3.0.0. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 The layers of this app that do not care what a file holds are to move to a repository of their own, `skysa-org/skysa-kit`, published to npm.
 This app, [skysa-draw](https://github.com/skysa-org/skysa-draw) and [memoriam](https://github.com/skysa-org/memoriam) will depend on it.
@@ -135,7 +135,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   5. The scheduler reaches the database through one port, and none of what moves imports the app's `store/`, Dexie or its words.
      The port is `ClientStore`, in `sync/scheduler.ts`: the source shown, the connection's row (its root, when a pull last reached the end, the first import, a re-scan), the queue (its seqs, what came after one, the ops out of attempts and giving them back), the engine's store, the credentials, the token's row, what this tab waits on, and the queue's limit on attempts.
      The app's adapter is `clientStoreOf` in `sync/dexiePorts.ts`, and `createNotesSync` hands it over.
-     A lint rule keeps Dexie, the app's tables and stores, and the catalog out of the modules in the table above.
+     A lint rule kept Dexie, the app's tables and stores, and the catalog out of the modules in the table above until they moved (step 3): the kit's client has none of them to import.
      Two helpers they import are in neither list, `sync/progress.ts` and `store/emitter.ts`, and the fence below says where they go.
      This part is cut.
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has.
@@ -143,11 +143,11 @@ Each is a pull request of its own in this repository, released as usual, so that
   What they had that this lacked was tests, and four of their cases are mutations no test here caught: a file the format refuses, met by the pull's and the push's reads of a file as a document, and the hidden paths an engine syncs, asked of a deletion and of a scan's count.
   They are here now, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
   This part is done.
-- **A lint rule fences what is to move** from what stays, and once it passes the move can be made.
-  It is `kit/fence` in `eslint.config.js`, over `KIT`, which is the table above in code.
-  A module bound for one package imports only what goes to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
-  What it takes from `@skysa/core` it takes by name, and the module each name comes from is held to the same.
-  The deny-lists each seam added stay, since they say why a thing is handed in rather than imported, and the fence is the floor under them.
+- **A lint rule fenced what was to move** from what stayed, and once it passed the move could be made.
+  It was `kit/fence` in `eslint.config.js`, over `KIT`, which was the table above in code; both went in step 3 with the last of what they fenced.
+  A module bound for one package imported only what went to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
+  What it took from `@skysa/core` it took by name, and the module each name came from was held to the same.
+  The deny-lists each seam added stayed beside it, since they said why a thing is handed in rather than imported, and went with the code they guarded.
   It is cut in four parts: the first two a pull request each, the third one for each of its steps, and the fourth, which the kit's own tests found, one.
   1. The source.
      Six imports crossed it, and each moved to where it goes: `PROVIDER_KINDS` to `providerKinds.ts`, `HIDDEN_PREFIX` to `paths.ts`, `concatBytes` to `bytes.ts` (where skysa-draw keeps it), and `contentTypeOf` to `files/mediaTypes.ts`.
@@ -244,7 +244,14 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    0.1.0 is on npm (2026-11-11), all seven packages, with provenance.
    Its comments and documents are in American English, as skysa-draw's are, and its docs test holds them to it; a file ported from here before step 3 is respelled on the way.
 3. This app depends on it and deletes what moved.
-   `@skysa/api` keeps exporting `createApp`, `parseEnv`, `AppConfig` and `@skysa/api/relay`, and `@skysa/core` the seams' types, so a deployment's own Worker entry builds unchanged.
+   The move is made (2026-11-11), a pull request a layer, each with its tests, its documents and its changeset: the server (#714); the protocol, storage and the engine (#715); the client (#716); the build (#717); the lint and the compiler's settings (#718); and this record (#719).
+   249 of the 1,172 files under `apps/` and `packages/` went.
+   Every test this app ran before still runs, here or in the kit at 0.1.0, by file and title, but for two that stronger ones replaced: the fill window's check of what it loads, and the default brand's of its schema.
+   The built manifest is byte for byte what it was, and the bundle is within its budget.
+   Every kit package is pinned at one version, exactly, and `apps/web/tests/kitVersion.test.ts` holds the manifests to it.
+   `@skysa/api` keeps exporting `createApp`, `parseEnv`, `AppConfig`, `envWarnings`, `misconfigured` and `@skysa/api/relay`, and `@skysa/core` the seams' types and values, `PROVIDER_KINDS` and `MAX_CONNECT_CODE`, so a deployment's own policy builds unchanged.
+   What an operator changes: a Worker entry of their own imports from `@skysa/api`, not from the files beside `worker.ts`, and a `wrangler.toml` of their own points `migrations_dir` at the kit's (`node_modules/@skysa/server/migrations`).
+   #118, which is breaking, ships in the same major, 3.0.0, so an operator acts once (decided 2026-11-11): the kit's server stops reading `AUTH_MODE` and drops the tables a sign-in would have used, in its next minor version, and this app takes that version before the release.
    Before that release: the bundle against its budget (`pnpm size`), since tree-shaking now crosses a package's edge; the live provider suites; and a check on staging.
    The kit is 1.0.0 once this reaches production.
 4. skysa-draw depends on it, and its record 0002 is superseded.
@@ -259,5 +266,4 @@ Google revokes per Cloud project, so a project shared by two apps would let disc
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
 
 **Open, and decided when its step comes.**
-- Whether #118, which is breaking, ships in the same major release as step 3.
 - Whether skysa-draw's and memoriam's D1 databases are reset onto the kit's migrations (steps 4 and 5): their `0000_init.sql` has this repository's file name and not its contents.
