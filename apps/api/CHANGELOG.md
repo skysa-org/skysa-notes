@@ -1,5 +1,18 @@
 # @skysa/api
 
+## 3.0.0
+
+### Major Changes
+
+- b55df24: `AUTH_MODE` and `WEBDAV_ALLOW_PRIVATE` are no longer read, and the server's migration `0007_drop_sign_in_tables` drops the `users` and `identities` tables, which nothing ever read (#118; the kit at 0.2.0). Remove `AUTH_MODE` from `[vars]` in your `wrangler.toml`, and either setting from `.dev.vars` or your secrets if it is there: the Worker still boots with them, and logs a line at boot asking for each to be removed. `AUTH_MODE=account-first` is still refused at boot. The migration is applied by the routine steps. An app from before this release keeps working against the new server, which still sends the field that app reads. Code of your own that imported `AUTH_MODES` or `AuthMode` from `@skysa/core` drops them: there is nothing left to choose.
+- 1294469: The server is now the shared kit's, `@skysa/server`, installed from npm with the rest; `apps/api` keeps the Worker's entry and its `wrangler.toml`. With the stock entry and `apps/api/wrangler.toml` there is nothing to do beyond the routine steps. A Worker entry of your own that imported from the server's files beside `src/worker.ts` (`./app.js`, `./env.js`, `./http.js`, `./relay/durableObject.js`) imports `createApp`, `parseEnv`, `envWarnings` and `misconfigured` from `./index.js` there, as the stock entry now does, or from `@skysa/api` anywhere else, and `ConnectionRelay` and `durableObjectRelay` from `./relay.js` or `@skysa/api/relay`; one that already imported from `@skysa/api` builds unchanged. A `wrangler.toml` of your own points `migrations_dir` at the server's migrations, which `pnpm install` puts at `apps/api/node_modules/@skysa/server/migrations`, written from wherever your file is: they are the same files under the same names, so a database migrated before applies only the migrations added since, which in this release is `0007_drop_sign_in_tables`. `pnpm db:generate` is gone with the schema it read.
+
+### Patch Changes
+
+- Updated dependencies [13957b2]
+- Updated dependencies [b55df24]
+  - @skysa/core@3.0.0
+
 ## 2.1.1
 
 ### Patch Changes
