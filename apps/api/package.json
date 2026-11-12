@@ -21,8 +21,8 @@
 	},
 	"dependencies": {
 		"@skysa/core": "workspace:*",
-		"@skysa/server": "0.2.0",
-		"@skysa/storage": "0.2.0"
+		"@skysa/server": "1.0.0",
+		"@skysa/storage": "1.0.0"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",

@@ -2126,7 +2126,8 @@ A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, held every module bou
 Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests.
 The client's tests that ran over this app's database follow as suites over a device (`ClientDevice`, now `@skysa/client/testing`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
 The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring, and 0.1.0 is on npm (record 0018, step 2).
-This app took it and deleted what moved (step 3), and #118 goes with that into 3.0.0.
+This app took it and deleted what moved (step 3), and #118 went with that into 3.0.0.
+Once 3.0.0 was in production, the kit was 1.0.0 (2026-11-12).
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

@@ -244,6 +244,7 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    0.1.0 is on npm (2026-11-11), all seven packages, with provenance.
    Its comments and documents are in American English, as skysa-draw's are, and its docs test holds them to it; a file ported from here before step 3 is respelled on the way.
 3. This app depends on it and deletes what moved.
+   This step is done (2026-11-12).
    The move is made (2026-11-11), a pull request a layer, each with its tests, its documents and its changeset: the server (#714); the protocol, storage and the engine (#715); the client (#716); the build (#717); the lint and the compiler's settings (#718); and this record (#719).
    249 of the 1,172 files under `apps/` and `packages/` went.
    Every test this app ran before still runs, here or in the kit at 0.1.0, by file and title, but for two that stronger ones replaced: the fill window's check of what it loads, and the default brand's of its schema.
@@ -254,6 +255,7 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    #118, which is breaking, ships in the same major, 3.0.0, so an operator acts once (decided 2026-11-11): the kit's server stops reading `AUTH_MODE` and drops the tables a sign-in would have used, in its next minor version, and this app takes that version before the release.
    Before that release: the bundle against its budget (`pnpm size`), since tree-shaking now crosses a package's edge; the live provider suites; and a check on staging.
    The kit is 1.0.0 once this reaches production.
+   3.0.0 reached production on 2026-11-12, and the kit was 1.0.0 the same day (skysa-kit#12 and skysa-kit#13), with nothing changed from 0.2.0 but what its version promises; this app pins it.
 4. skysa-draw depends on it, and its record 0002 is superseded.
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
 
