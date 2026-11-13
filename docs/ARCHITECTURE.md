@@ -2105,7 +2105,7 @@ Operators running an instance for many users should know two things, both to be 
 <a id="the-shared-kit"></a>
 ### The shared kit (2026-11-09)
 
-The layers here that do not care what a file holds have moved to a repository of their own, `skysa-org/skysa-kit`, which this app depends on from npm, and skysa-draw and memoriam are to.
+The layers here that do not care what a file holds have moved to a repository of their own, `skysa-org/skysa-kit`, which this app and skysa-draw depend on from npm, and memoriam is to.
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 This app pins the kit at one exact version (§11), and what moved is gone from here: each section that described it is a sentence pointing at the kit's.

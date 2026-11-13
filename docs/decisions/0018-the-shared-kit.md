@@ -1,6 +1,6 @@
 # 0018. The shared kit
 
-*2026-11-09. Steps 1 and 2 are done, and step 3's move is made (2026-11-11), to ship as 3.0.0. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
+*2026-11-09. Steps 1 to 4 are done: the kit is on npm (2026-11-11), this app depends on it (2026-11-12), and so does skysa-draw (2026-11-13). Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 The layers of this app that do not care what a file holds are to move to a repository of their own, `skysa-org/skysa-kit`, published to npm.
 This app, [skysa-draw](https://github.com/skysa-org/skysa-draw) and [memoriam](https://github.com/skysa-org/memoriam) will depend on it.
@@ -81,7 +81,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   This one is cut: the type is in `packages/core/src/folderSpec.ts`, this app's folder is `NOTES_FOLDER` in `config.ts`, and its lock is `SYNC_LOCK` in `apps/web/src/sync/lock.ts`.
   The fake works in a folder that is no app's, `TEST_FOLDER`, so the engine's whole suite runs without this app's names, and a lint rule keeps them out of `providers/`, `marker.ts` and `folderSpec.ts`.
 - **A document format, not a note.**
-  This is skysa-draw's seam (`sync/document.ts` there): a document's extension and media type, the id a file claims, a conflict copy's contents, and every read that holds a file as a document.
+  This is skysa-draw's seam (`sync/document.ts` there, `DRAW_FORMAT` in its `packages/core/src/drawing/format.ts` since step 4): a document's extension and media type, the id a file claims, a conflict copy's contents, and every read that holds a file as a document.
   Here it is over `NOTE_EXTENSION`, `text/markdown`, `parseNoteFile` and `serializeNoteFile`, and the layers that move take them from it rather than importing them.
   This one is cut: the type is `DocumentFormat` in `packages/core/src/documentFormat.ts`, this app's is `NOTE_FORMAT` in `markdown/format.ts`, and the engine and the adapters are handed it.
   The names they use are made from its extension (`documentNames`), and this app's own are `names/notes.ts`.
@@ -259,10 +259,13 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
 4. skysa-draw depends on it, and its record 0002 is superseded.
    This step is done (2026-11-13).
    A pull request a layer there, as here: the server (skysa-draw#5); the build (skysa-draw#6); the lint and the compiler's settings (skysa-draw#7); the protocol, storage, the engine and the client in one (skysa-draw#8), since its scheduler was older than the seams; and its records (skysa-draw#10), where its record 0005 supersedes 0002.
-   It speaks the kit's words, a note and a notebook, only where it implements the kit's ports, and maps them onto its own drawings and folders, so its database's schema is what it was.
-   Every test it ran before still runs, there or in the kit, by file and title once its renames are reversed, and each title that did not match is accounted for in its pull request; its built manifest is byte for byte what it was.
-   What it found the kit lacked went into the kit's 1.1.0 (2026-11-12), a minor this app can take without changing: the conflict stamp exported (skysa-kit#14), a device's own writer for the client's suites (skysa-kit#15), a build plugin's name that named this app (skysa-kit#16), and a brand's description escaped twice in the page (skysa-kit#17).
-   Its review found three pieces it had ported from here and never called: an editor's held edits written before the database is acted on, the window a newer build retires saying so, and the request that the browser keep its store; all three are wired (skysa-draw#12).
+   The kit's ports call a document a note (`SyncNote`, `noteId`, the `*-note` changes) and a folder a folder; skysa-draw uses those names where it implements a port and where it reads what the kit hands back, and maps them there onto its own drawings, so its database did not change.
+   Each of its pull requests held every test it ran before, there or in the kit, matched by title with the kit's words read as its own, and each title that did not match is accounted for in the pull request that moved it; its built manifest is byte for byte what it was.
+   Its D1 database is reset onto the kit's migrations rather than carried over (decided 2026-11-12): it had no deployment, and a self-hosted 0.1.0 database is reset as its `self-hosting.md` says, its tables dropped and the kit's migrations applied, after which every device connects again and no drawing is touched.
+   What it found the kit lacked went into the kit's 1.1.0 (2026-11-12), a minor: the conflict stamp exported (skysa-kit#14), a device's own writer for the client's suites (skysa-kit#15), a build plugin's name that named this app (skysa-kit#16), and a brand's description escaped twice in the page (skysa-kit#17).
+   This app takes 1.1.0 in a pull request of its own, its suites' device passing this app's writer, since a note claims its id in its frontmatter.
+   Its review found what it had ported from here without what uses it: nothing registered an editor's held edits to be written before the database is acted on, nothing asked the browser to keep its store, and a window a newer build retires closed its database without saying so, since the notice that says it had not come with it; all three are done (skysa-draw#12).
+   Two gaps in its own save path, older than the move, are its issues (skysa-draw#14, skysa-draw#16).
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
 
 Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), the catalog's machinery, and the gate's logic without its screens.
@@ -274,5 +277,4 @@ Google revokes per Cloud project, so a project shared by two apps would let disc
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
 
 **Open, and decided when its step comes.**
-- Whether memoriam's D1 database is reset onto the kit's migrations (step 5): its `0000_init.sql` has this repository's file name and not its contents.
-  skysa-draw's is reset (decided 2026-11-12, step 4): it had no deployment, so nothing real was lost, and every account connects again; its `self-hosting.md` says how.
+- Whether memoriam's D1 database is reset onto the kit's migrations (step 5), as skysa-draw's is (step 4): its `0000_init.sql` has this repository's file name and not its contents.
