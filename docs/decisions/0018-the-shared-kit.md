@@ -257,6 +257,12 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    The kit is 1.0.0 once this reaches production.
    3.0.0 reached production on 2026-11-12, and the kit was 1.0.0 the same day (skysa-kit#12 and skysa-kit#13), with nothing changed from 0.2.0 but what its version promises; this app pins it.
 4. skysa-draw depends on it, and its record 0002 is superseded.
+   This step is done (2026-11-13).
+   A pull request a layer there, as here: the server (skysa-draw#5); the build (skysa-draw#6); the lint and the compiler's settings (skysa-draw#7); the protocol, storage, the engine and the client in one (skysa-draw#8), since its scheduler was older than the seams; and its records (skysa-draw#10), where its record 0005 supersedes 0002.
+   It speaks the kit's words, a note and a notebook, only where it implements the kit's ports, and maps them onto its own drawings and folders, so its database's schema is what it was.
+   Every test it ran before still runs, there or in the kit, by file and title once its renames are reversed, and each title that did not match is accounted for in its pull request; its built manifest is byte for byte what it was.
+   What it found the kit lacked went into the kit's 1.1.0 (2026-11-12), a minor this app can take without changing: the conflict stamp exported (skysa-kit#14), a device's own writer for the client's suites (skysa-kit#15), a build plugin's name that named this app (skysa-kit#16), and a brand's description escaped twice in the page (skysa-kit#17).
+   Its review found three pieces it had ported from here and never called: an editor's held edits written before the database is acted on, the window a newer build retires saying so, and the request that the browser keep its store; all three are wired (skysa-draw#12).
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
 
 Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), the catalog's machinery, and the gate's logic without its screens.
@@ -268,4 +274,5 @@ Google revokes per Cloud project, so a project shared by two apps would let disc
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
 
 **Open, and decided when its step comes.**
-- Whether skysa-draw's and memoriam's D1 databases are reset onto the kit's migrations (steps 4 and 5): their `0000_init.sql` has this repository's file name and not its contents.
+- Whether memoriam's D1 database is reset onto the kit's migrations (step 5): its `0000_init.sql` has this repository's file name and not its contents.
+  skysa-draw's is reset (decided 2026-11-12, step 4): it had no deployment, so nothing real was lost, and every account connects again; its `self-hosting.md` says how.

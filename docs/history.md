@@ -627,8 +627,10 @@ The layers that do not care what a file holds moved to [`skysa-org/skysa-kit`](h
 - **The kit's repository** was made from this one's history with `git filter-repo`, so blame goes with the code, and 0.1.0 was published from its tag, with provenance.
 - **Then this app took it**, a layer at a time (#714–#719), and 249 of the 1,172 files under `apps/` and `packages/` went, with every test either still here or in the kit, by file and title.
 - **3.0.0** carried the move and #118 together, so an operator acted once, and once it was in production (2026-11-12) the kit was 1.0.0.
+- **skysa-draw** took it next (2026-11-13), a layer at a time as here, with its database reset onto the kit's migrations, and the four things it found the kit lacked went into 1.1.0.
 
 Learned on the way:
 - The kit's tests, run in a repository of their own for the first time, found what none here had: `server_misconfigured` was answered only in this app's Worker entry, which an operator's own would have had to copy (#712).
 - Laying out the packages found two seams the fence had passed: the build read this app's default brand and budget from beside itself (#711).
 - A module the fence passed still had to typecheck in its new package: the client needs ES2024's `Promise` types, which this app had only by accident, through a dependency's.
+- A layer ported without its callers passes every test it brought: skysa-draw had the held-edits registry, the stale-window gate and the storage request from here, and called none of them, which only a review of what its records claimed found (skysa-draw#11).
