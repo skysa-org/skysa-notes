@@ -627,7 +627,7 @@ The layers that do not care what a file holds moved to [`skysa-org/skysa-kit`](h
 - **The kit's repository** was made from this one's history with `git filter-repo`, so blame goes with the code, and 0.1.0 was published from its tag, with provenance.
 - **Then this app took it**, a layer at a time (#714–#719), and 249 of the 1,172 files under `apps/` and `packages/` went, with every test either still here or in the kit, by file and title.
 - **3.0.0** carried the move and #118 together, so an operator acted once, and once it was in production (2026-11-12) the kit was 1.0.0.
-- **skysa-draw** took it next (2026-11-12 and 2026-11-13), in four pull requests and a fifth for its records, an earlier build's D1 database to be reset onto the kit's migrations rather than carried over, and the four things it found the kit lacked went into 1.1.0.
+- **skysa-draw** took it next (2026-11-12 and 2026-11-13), in four pull requests and a fifth for its records; a database from its earlier builds is reset onto the kit's migrations rather than carried over, and what the move found the kit lacked went into 1.1.0.
 
 Learned on the way:
 - The kit's tests, run in a repository of their own for the first time, found what none here had: `server_misconfigured` was answered only in this app's Worker entry, which an operator's own would have had to copy (#712).

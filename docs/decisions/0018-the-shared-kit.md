@@ -141,7 +141,8 @@ Each is a pull request of its own in this repository, released as usual, so that
 - **The forks' fixes come back first**, so that the kit starts with every fix any of the three has.
   Every fix either fork made to a shared layer was this repository's already: memoriam's checks of the root in the contract suite are #497 and #511, ported to it, and skysa-draw's changes were the seams above.
   What they had that this lacked was tests, and four of their cases are mutations no test here caught: a file the format refuses, met by the pull's and the push's reads of a file as a document, and the hidden paths an engine syncs, asked of a deletion and of a scan's count.
-  They came here, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, and went to the kit with the engine (step 3), with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
+  They came here, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
+  Each went to the kit with the layer it tests (step 3).
   This part is done.
 - **A lint rule fenced what was to move** from what stayed, and once it passed the move could be made.
   It was `kit/fence` in `eslint.config.js`, over `KIT`, which was the table above in code; both went in step 3 with the last of what they fenced.
@@ -259,10 +260,10 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
 4. skysa-draw depends on it, and its record 0002 is superseded.
    This step is done (2026-11-13).
    skysa-draw took it in skysa-draw#5 to skysa-draw#8, the protocol, storage, the engine and the client in one (skysa-draw#8) rather than the two planned, since its scheduler was older than the seams, and wrote it down in skysa-draw#10; its [record 0005](https://github.com/skysa-org/skysa-draw/blob/main/docs/decisions/0005-on-the-kit.md), which supersedes 0002, says how, by the checks this app's step held to.
-   Its D1 database is reset onto the kit's migrations rather than carried over (decided 2026-11-12), since it had no deployment; its `self-hosting.md` says how, and what a reset costs.
-   What it found the kit lacked went into the kit's 1.1.0, a minor: the conflict stamp exported (skysa-kit#14), a device's own writer for the client's suites (skysa-kit#15), a build plugin's name that named this app (skysa-kit#16), and a brand's description escaped twice in the page (skysa-kit#17).
-   This app takes 1.1.0 in a pull request of its own, its suites' device passing this app's writer, since a note claims its id in its frontmatter.
-   Reviewing its records found three things its first copy from here had left unfinished, which it has since finished (skysa-draw#11, skysa-draw#12).
+   A database from its earlier builds is reset onto the kit's migrations rather than carried over (decided 2026-11-12), since it holds connections and nothing else; its [`self-hosting.md`](https://github.com/skysa-org/skysa-draw/blob/main/docs/self-hosting.md#a-database-from-010) says how, and what a reset costs.
+   The kit's 1.1.0, a minor, has what the move found it lacked: two things draw's rehearsal needed, the conflict stamp exported (skysa-kit#14) and a device's own writer for the client's suites (skysa-kit#15); and two fixes to the build it took from this app, a plugin's name that named this app (skysa-kit#16) and a brand's description escaped twice in the page (skysa-kit#17).
+   This app takes 1.1.0 in a pull request of its own: its suites' device passes this app's writer, since a note claims its id in its frontmatter, and an operator's brand description with an `&` in it is escaped once, not twice.
+   Reviewing its records found three things its first copy from here had left unwired (skysa-draw#11); they are wired (skysa-draw#12), and what is left on that path is in its own issues.
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
 
 Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), the catalog's machinery, and the gate's logic without its screens.
@@ -274,4 +275,4 @@ Google revokes per Cloud project, so a project shared by two apps would let disc
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
 
 **Open, and decided when its step comes.**
-- Whether memoriam's D1 database is reset onto the kit's migrations (step 5), as skysa-draw's is (step 4): its `0000_init.sql` has this repository's file name and not its contents.
+- Whether memoriam's D1 database is reset onto the kit's migrations (step 5), as a database from skysa-draw's earlier builds is (step 4): its `0000_init.sql` has this repository's file name and not its contents.
