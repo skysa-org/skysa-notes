@@ -1,5 +1,5 @@
 import type { AppSchedulerOptions, ClientDevice } from '@skysa/client/testing';
-import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
+import { NOTE_FORMAT, serializeNoteFile, syncsHidden } from '@skysa/core';
 
 import { bindConnection, detachConnection, showConnection } from '../../src/store/connection.js';
 import { addAttachment } from '../../src/store/files.js';
@@ -30,6 +30,14 @@ export const dexieDevice = (): ClientDevice => {
 		store: clientStoreOf(db),
 		app: APP,
 		schedule: (options) => createNotesSync({ ...APP, ...options, db }),
+		// A note's file as another device writes one: the id in its frontmatter,
+		// as `noteFileContents` writes it, and nothing above the body without one.
+		written: (body, id) =>
+			serializeNoteFile({
+				frontmatter: null,
+				body,
+				metadata: id === undefined ? {} : { id },
+			}),
 		create: async (connectionId, name, body) => {
 			const note = await createNote(db, { connectionId, title: name, body });
 			return { id: note.id, path: note.path };
