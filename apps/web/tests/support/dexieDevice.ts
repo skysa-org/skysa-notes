@@ -1,9 +1,10 @@
 import type { AppSchedulerOptions, ClientDevice } from '@skysa/client/testing';
-import { NOTE_FORMAT, serializeNoteFile, syncsHidden } from '@skysa/core';
+import { NOTE_FORMAT, syncsHidden } from '@skysa/core';
 
 import { bindConnection, detachConnection, showConnection } from '../../src/store/connection.js';
+import type { NoteRecord } from '../../src/store/db.js';
 import { addAttachment } from '../../src/store/files.js';
-import { createNote, saveNoteBody } from '../../src/store/notes.js';
+import { createNote, noteFileContents, saveNoteBody } from '../../src/store/notes.js';
 import { clientStoreOf } from '../../src/sync/dexiePorts.js';
 import { SYNC_LOCK } from '../../src/sync/lock.js';
 import { createNotesSync } from '../../src/sync/notesSync.js';
@@ -11,6 +12,24 @@ import { lazily } from '../noteRows.js';
 import { holdCredential } from './connection.js';
 import { watchedDatabase } from './db.js';
 import { holding, otherTab } from './otherTab.js';
+
+/**
+ * A note as another device of this app has it, but for its id and body: named,
+ * so its title is written, and at fixed times, so its file is the same each
+ * time it is written.
+ */
+const ELSEWHERE: Omit<NoteRecord, 'id' | 'body'> = {
+	connectionId: 'elsewhere',
+	path: 'Elsewhere.md',
+	title: 'Elsewhere',
+	frontmatter: null,
+	tags: [],
+	contentHash: '',
+	dirty: 0,
+	deletedLocally: 0,
+	createdAt: 0,
+	updatedAt: 0,
+};
 
 /** What this app hands its scheduler of its own. */
 const APP: AppSchedulerOptions = { lockName: SYNC_LOCK, document: NOTE_FORMAT, syncsHidden };
@@ -30,14 +49,12 @@ export const dexieDevice = (): ClientDevice => {
 		store: clientStoreOf(db),
 		app: APP,
 		schedule: (options) => createNotesSync({ ...APP, ...options, db }),
-		// A note's file as another device writes one: the id in its frontmatter,
-		// as `noteFileContents` writes it, and nothing above the body without one.
+		// A note's file as another device writes one (`noteFileContents`): its id,
+		// title and times in the frontmatter. Without an id it is no note of this
+		// app's own making, and the body stands as it is, as a file put in the
+		// folder by hand does.
 		written: (body, id) =>
-			serializeNoteFile({
-				frontmatter: null,
-				body,
-				metadata: id === undefined ? {} : { id },
-			}),
+			id === undefined ? body : noteFileContents({ ...ELSEWHERE, id, body }),
 		create: async (connectionId, name, body) => {
 			const note = await createNote(db, { connectionId, title: name, body });
 			return { id: note.id, path: note.path };
