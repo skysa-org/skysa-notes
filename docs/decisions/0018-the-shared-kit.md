@@ -1,6 +1,6 @@
 # 0018. The shared kit
 
-*2026-11-09. Steps 1 to 4 are done, the last on 2026-11-13. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
+*2026-11-09. Steps 1 to 5 are done, the last on 2026-11-15, but for the copies skysa-kit#22 asks the kit to take. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 The layers of this app that do not care what a file holds are to move to a repository of their own, `skysa-org/skysa-kit`, published to npm.
 This app, [skysa-draw](https://github.com/skysa-org/skysa-draw) and [memoriam](https://github.com/skysa-org/memoriam) will depend on it.
@@ -143,7 +143,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   What they had that this lacked was tests, and four of their cases are mutations no test here caught: a file the format refuses, met by the pull's and the push's reads of a file as a document, and the hidden paths an engine syncs, asked of a deletion and of a scan's count.
   They came here, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
   Each went to the kit with the layer it tests (step 3).
-  This part is done.
+  This part is done; memoriam's own move found nine more of its tests of the shared layers that had not come (step 5).
 - **A lint rule fenced what was to move** from what stayed, and once it passed the move could be made.
   It was `kit/fence` in `eslint.config.js`, over `KIT`, which was the table above in code; both went in step 3 with the last of what they fenced.
   A module bound for one package imported only what went to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
@@ -265,14 +265,23 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    This app takes 1.1.0 in a pull request of its own: its suites' device passes this app's writer, since a note claims its id in its frontmatter, and an operator's brand description with an `&` in it is escaped once, not twice.
    Reviewing its records found three things its first copy from here had left unwired (skysa-draw#11); they are wired (skysa-draw#12), and what is left on that path is in its own issues.
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
+   This step is done (2026-11-15), but for what came by copy, which skysa-kit#22 asks the kit to take.
+   Memoriam merged the stack that brought its copy, ported from here on 2026-10-13, up to this app's layout after the audit (memoriam#22 to memoriam#35); then took the kit at 1.1.0 (memoriam#39 to memoriam#42), had the relay, the gate and connect codes from it (memoriam#44), and wrote it down (memoriam#46).
+   The sync section of its [`docs/ARCHITECTURE.md`](https://github.com/skysa-org/memoriam/blob/main/docs/ARCHITECTURE.md) says how, and what it keeps of its own, and its roadmap has the step as S7.
+   The relay's Durable Object came with the kit's server, and the relay's link, `/config`'s gate and the connect-code store with its client.
+   What came by copy, as this app and skysa-draw have it: the gate's logic, which is the rules for asking about a typed code, asking again about a held one, telling when a refusal is about the code, and the timer that follows a hold; when a source needs connecting again (`needsReconnect`); and the Worker's refusal to boot with `RELAY` on and no `RELAY_HUB`.
+   A database from its earlier builds is reset onto the kit's migrations (decided 2026-11-15): memoriam has never been deployed, and its one release, 0.1.0, came before it had a Worker, so only a Worker someone deployed from its main branch has such a database, though marking the kit's migrations applied would have kept its rows, since its schema matches the kit's; its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how, and what a reset costs.
+   What is left on memoriam's side is in its own issues (memoriam#38, memoriam#43, memoriam#45, memoriam#47).
+   One was a question for the owner, decided 2026-11-15 (memoriam#45): Connect again, where a source needs connecting again (`needsReconnect`), stays out from behind the operator's gate in all three apps, and memoriam offers the code's field beside it, as this app and skysa-draw offer it where a source is added.
+   The kit needed no new version for it, and what the move found is in the kit's issues:
+   - skysa-kit#20: twelve findings in code the kit carries, five from reviewing memoriam's stack and seven from the move, among them that no test now holds the server's answers to the client's schemas, which memoriam's own test did;
+   - skysa-kit#21: memoriam's device, over which it runs the client's suites but for 23 tests skipped by title, since it holds one library, keeps none detached, has none to resume, makes no first import and follows no other tab's transactions; and nine tests of six parts that memoriam had and the kit does not, six of which memoriam keeps over the kit's functions and three of which now run nowhere;
+   - skysa-kit#22: what came by copy, the relay's link asking again and again for a ticket where a browser refuses the socket, and a refusal cleared at the start of each run, so this app's `Denied` unmounts and comes back with every run.
 
-Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), the catalog's machinery, and the gate's logic without its screens.
+Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), and the catalog's machinery; the gate's logic without its screens, which all three now have, is skysa-kit#22.
 
 **For whoever hosts more than one of these apps.**
 One Worker and one origin per app: the Content-Security-Policy, the device's credential and its IndexedDB each belong to an origin, by design (§6, "Per-connection credentials").
 Each app is registered with each provider on its own.
 Google revokes per Cloud project, so a project shared by two apps would let disconnecting one take away the other's access, and Dropbox and OneDrive name the app folder after the registration.
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
-
-**Open, and decided when its step comes.**
-- Whether memoriam's D1 database is reset onto the kit's migrations (step 5), as a database from skysa-draw's earlier builds is (step 4): its `0000_init.sql` has this repository's file name and not its contents.
