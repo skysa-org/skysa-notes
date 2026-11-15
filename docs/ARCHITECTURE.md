@@ -2105,7 +2105,7 @@ Operators running an instance for many users should know two things, both to be 
 <a id="the-shared-kit"></a>
 ### The shared kit (2026-11-09)
 
-The layers here that do not care what a file holds have moved to a repository of their own, `skysa-org/skysa-kit`, which this app and skysa-draw depend on from npm, and memoriam is to.
+The layers here that do not care what a file holds have moved to a repository of their own, `skysa-org/skysa-kit`, which this app, skysa-draw and memoriam depend on from npm.
 They are the storage providers, the sync engine, the connect and credential server, the browser's sync client and the PWA build.
 Every storage option, today's three and any added later, is built there and nowhere else.
 This app pins the kit at one exact version (§11), and what moved is gone from here: each section that described it is a sentence pointing at the kit's.
@@ -2129,6 +2129,7 @@ The kit's repository is made, with these layers and their history, its own CI, C
 This app took it and deleted what moved (step 3), and #118 went with that into 3.0.0.
 Once 3.0.0 was in production, the kit was 1.0.0 (2026-11-12).
 skysa-draw took it next (step 4), and what it found the kit lacked is in 1.1.0.
+Memoriam took it last (step 5), at 1.1.0, and has the relay, the gate and connect codes from it without porting them.
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

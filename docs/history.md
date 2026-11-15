@@ -628,9 +628,11 @@ The layers that do not care what a file holds moved to [`skysa-org/skysa-kit`](h
 - **Then this app took it**, a layer at a time (#714–#719), and 249 of the 1,172 files under `apps/` and `packages/` went, with every test either still here or in the kit, by file and title.
 - **3.0.0** carried the move and #118 together, so an operator acted once, and once it was in production (2026-11-12) the kit was 1.0.0.
 - **skysa-draw** took it next (2026-11-12 and 2026-11-13), in four pull requests and a fifth for its records; a database from its earlier builds is reset onto the kit's migrations rather than carried over, and what the move found the kit lacked went into 1.1.0.
+- **Memoriam** took it last (2026-11-15), once it had merged the stack that brought its copy up to this app's layout: four pull requests for the move, one for the relay, the gate and connect codes, which its screens take from the kit's client rather than port, and one for its records; the kit needed no new version for it.
 
 Learned on the way:
 - The kit's tests, run in a repository of their own for the first time, found what none here had: `server_misconfigured` was answered only in this app's Worker entry, which an operator's own would have had to copy (#712).
 - Laying out the packages found two seams the fence had passed: the build read this app's default brand and budget from beside itself (#711).
 - A module the fence passed still had to typecheck in its new package: the client needs ES2024's `Promise` types, which this app had only by accident, through a dependency's.
 - A copy is finished when something uses it, and neither its tests nor knip, which counts a test as a use, can say whether anything does: skysa-draw's first copy from here had the held-edits registry with nothing registering in it, the storage request with nothing asking, and the stale-tab store without the notice it feeds, and a review of what its records claimed found them (skysa-draw#11).
+- A suite over a device carries the model of the app it was written for: the kit's client suites assume this app's several sources, one kept detached and one resumed, and 23 of their tests cannot run over memoriam's one library, which runs the rest; a device needs a way to say what it does not do (skysa-kit#21).

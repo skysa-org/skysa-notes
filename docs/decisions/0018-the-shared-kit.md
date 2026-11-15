@@ -1,6 +1,6 @@
 # 0018. The shared kit
 
-*2026-11-09. Steps 1 to 4 are done, the last on 2026-11-13. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
+*2026-11-09. Steps 1 to 5 are done, the last on 2026-11-15. Cited in the code as §13, "The shared kit". A `§` here means a section of [`ARCHITECTURE.md`](../ARCHITECTURE.md).*
 
 The layers of this app that do not care what a file holds are to move to a repository of their own, `skysa-org/skysa-kit`, published to npm.
 This app, [skysa-draw](https://github.com/skysa-org/skysa-draw) and [memoriam](https://github.com/skysa-org/memoriam) will depend on it.
@@ -265,6 +265,15 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    This app takes 1.1.0 in a pull request of its own: its suites' device passes this app's writer, since a note claims its id in its frontmatter, and an operator's brand description with an `&` in it is escaped once, not twice.
    Reviewing its records found three things its first copy from here had left unwired (skysa-draw#11); they are wired (skysa-draw#12), and what is left on that path is in its own issues.
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
+   This step is done (2026-11-15).
+   Memoriam first merged the fourteen pull requests that brought its copy, ported from this app on 2026-10-13, to the layout this app had after its audit (memoriam#22 to memoriam#35).
+   Then it took the kit at 1.1.0 in four: the server (memoriam#39), the build (memoriam#40), the lint, the compiler's settings and Prettier's (memoriam#41), and the protocol, storage, the engine and the client in one (memoriam#42), as skysa-draw did, since its scheduler too was older than the seams.
+   What its users hold is as it was: the folder and its marker, Drive's tags, the files, and the device's lock and database, handed to the kit through the seams step 1 cut, with memoriam's merge, `mergeFile`, as the engine's `merge`.
+   The relay, the gate's message and connect codes came with the kit's client; memoriam wrote its screens and its words for them, with the policy's reasons beside a refusal, and the rules for when a code is asked about, which this app has too (memoriam#44).
+   memoriam#46 wrote it all down.
+   A database from its earlier builds is reset onto the kit's migrations, as skysa-draw's is (decided 2026-11-15); its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how.
+   The kit needed no new version for it.
+   What the move found the kit could do better is in the kit's issues: five findings in code it carries (skysa-kit#20); a device that holds one library, over which 23 of the client suites' tests cannot run, and six parts with no test of their own (skysa-kit#21); and the connect-code rules, now in two apps, with the relay's link asking for a ticket again and again where a browser refuses its socket (skysa-kit#22).
 
 Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), the catalog's machinery, and the gate's logic without its screens.
 
@@ -273,6 +282,3 @@ One Worker and one origin per app: the Content-Security-Policy, the device's cre
 Each app is registered with each provider on its own.
 Google revokes per Cloud project, so a project shared by two apps would let disconnecting one take away the other's access, and Dropbox and OneDrive name the app folder after the registration.
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
-
-**Open, and decided when its step comes.**
-- Whether memoriam's D1 database is reset onto the kit's migrations (step 5), as a database from skysa-draw's earlier builds is (step 4): its `0000_init.sql` has this repository's file name and not its contents.
