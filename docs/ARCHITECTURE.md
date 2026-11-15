@@ -2121,15 +2121,16 @@ The seams the move needed were cut here first:
 - the credential, the token source and the relay reach the database through ports (`CredentialTable`, `TokenStates`), made over the app's database in `sync/dexiePorts.ts`;
 - the scheduler reaches it through one port (`ClientStore`, made by `clientStoreOf` in the same file), and a lint rule kept Dexie, the app's tables and its words out of everything that was to move, until it moved: the kit's client has no Dexie to import, nor the app's words.
 
-Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked came here and went to the kit with the layers.
+Every fix in skysa-draw's and memoriam's copies of these layers was this app's already, and the tests they had that it lacked came here and went to the kit with the layers, but for six of memoriam's, which its move found (skysa-kit#21).
 A lint rule, `kit/fence` over `KIT` in `eslint.config.js`, held every module bound for the kit, and every test that went with it, to what went with it, until the last of them moved.
 Those tests run on a format and a folder of the kit's own (`TEST_FORMAT`, `TEST_FOLDER`), and this app's own are pinned by its own tests.
 The client's tests that ran over this app's database follow as suites over a device (`ClientDevice`, now `@skysa/client/testing`), which the kit runs over ports in memory and this app over its database; the token source's and the relay's have, the scheduler's port has a contract run over both, and so have the scheduler's own tests, but for its companions', which are this app's.
+Memoriam runs them over its own database, skipping by title the 23 that a device of one library cannot run (skysa-kit#21).
 The kit's repository is made, with these layers and their history, its own CI, CLA and documents, and its release wiring, and 0.1.0 is on npm (record 0018, step 2).
 This app took it and deleted what moved (step 3), and #118 went with that into 3.0.0.
 Once 3.0.0 was in production, the kit was 1.0.0 (2026-11-12).
 skysa-draw took it next (step 4), and what it found the kit lacked is in 1.1.0.
-Memoriam took it last (step 5), at 1.1.0, and has the relay, the gate and connect codes from it without porting them.
+Memoriam took it last (step 5), at 1.1.0, with the relay, the gate and connect codes, but for the rules for asking about a code again and the relay's boot check, which each app has a copy of until the kit takes them (skysa-kit#22).
 The decision record is [`decisions/0018-the-shared-kit.md`](decisions/0018-the-shared-kit.md).
 
 <a id="not-planned-possible-future-add-ons"></a><a id="s14"></a>

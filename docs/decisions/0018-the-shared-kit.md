@@ -265,15 +265,19 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    This app takes 1.1.0 in a pull request of its own: its suites' device passes this app's writer, since a note claims its id in its frontmatter, and an operator's brand description with an `&` in it is escaped once, not twice.
    Reviewing its records found three things its first copy from here had left unwired (skysa-draw#11); they are wired (skysa-draw#12), and what is left on that path is in its own issues.
 5. Memoriam depends on it, and has the entitlement seam, the gate, connect codes and the relay back without porting them.
-   This step is done (2026-11-15).
-   Memoriam first merged the fourteen pull requests that brought its copy, ported from this app on 2026-10-13, to the layout this app had after its audit (memoriam#22 to memoriam#35).
-   Then it took the kit at 1.1.0 in four: the server (memoriam#39), the build (memoriam#40), the lint, the compiler's settings and Prettier's (memoriam#41), and the protocol, storage, the engine and the client in one (memoriam#42), as skysa-draw did, since its scheduler too was older than the seams.
-   What its users hold is as it was: the folder and its marker, Drive's tags, the files, and the device's lock and database, handed to the kit through the seams step 1 cut, with memoriam's merge, `mergeFile`, as the engine's `merge`.
-   The relay, the gate's message and connect codes came with the kit's client; memoriam wrote its screens and its words for them, with the policy's reasons beside a refusal, and the rules for when a code is asked about, which this app has too (memoriam#44).
-   memoriam#46 wrote it all down.
-   A database from its earlier builds is reset onto the kit's migrations, as skysa-draw's is (decided 2026-11-15); its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how.
-   The kit needed no new version for it.
-   What the move found the kit could do better is in the kit's issues: five findings in code it carries (skysa-kit#20); a device that holds one library, over which 23 of the client suites' tests cannot run, and six parts with no test of their own (skysa-kit#21); and the connect-code rules, now in two apps, with the relay's link asking for a ticket again and again where a browser refuses its socket (skysa-kit#22).
+   This step is done (2026-11-15), but for two parts that came by copy, which skysa-kit#22 asks the kit to take.
+   Memoriam merged the stack that brought its copy, ported from here on 2026-10-13, up to this app's layout after the audit (memoriam#22 to memoriam#35); then took the kit at 1.1.0 (memoriam#39 to memoriam#42), had the relay, the gate and connect codes from it (memoriam#44), and wrote it down (memoriam#46).
+   The sync section of its [`docs/ARCHITECTURE.md`](https://github.com/skysa-org/memoriam/blob/main/docs/ARCHITECTURE.md) says how, and what it keeps of its own, and its roadmap has the step as S7.
+   The relay's Durable Object came with the kit's server, and the relay's link, the gate and the connect-code store with its client.
+   The two parts copied, as skysa-draw and this app have them, are the rules for when a held code is asked about again, and the Worker's refusal to boot with `RELAY` on and no `RELAY_HUB`.
+   A database from its earlier builds is reset onto the kit's migrations (decided 2026-11-15): memoriam has never been deployed, and its one release, 0.1.0, came before it had a Worker, so a reset costs nothing real, though marking the kit's migrations applied would have kept a database's rows, since its schema matches the kit's; its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how.
+   The kit needed no new version for it, and what the move found is in the kit's issues:
+   - skysa-kit#20: twelve findings in code the kit carries, five from reviewing memoriam's stack and seven from the move, among them that no test now holds the server's answers to the client's schemas, which memoriam's own test did;
+   - skysa-kit#21: a device holding one library, over which memoriam runs the client's suites but for 23 tests skipped by title, and six parts memoriam tested and the kit does not;
+   - skysa-kit#22: the two parts copied, the relay's link asking again and again for a ticket where a browser refuses the socket, and a refusal cleared at the start of each run, so this app's `Denied` unmounts and comes back with every run.
+
+   What is left on memoriam's side is in its own issues (memoriam#38, memoriam#43, memoriam#45, memoriam#47).
+   One of them is the owner's to decide: Connect again under a refusal is not behind the gate, here or in memoriam (memoriam#45).
 
 Later, where two apps show the shape: frontmatter (this app and memoriam), a device's sources as silos (this app and skysa-draw), the catalog's machinery, and the gate's logic without its screens.
 
