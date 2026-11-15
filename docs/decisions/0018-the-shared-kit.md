@@ -143,7 +143,7 @@ Each is a pull request of its own in this repository, released as usual, so that
   What they had that this lacked was tests, and four of their cases are mutations no test here caught: a file the format refuses, met by the pull's and the push's reads of a file as a document, and the hidden paths an engine syncs, asked of a deletion and of a scan's count.
   They came here, in core's `engine/document.test.ts` and `engine/hiddenFolders.test.ts`, with two that state a rule the suite held only in passing: a pull writes nothing into a file whose id it invents, and every migration holds one statement between breakpoints.
   Each went to the kit with the layer it tests (step 3).
-  This part is done.
+  This part is done; memoriam's own move found nine more of its tests of the shared layers that had not come (step 5).
 - **A lint rule fenced what was to move** from what stayed, and once it passed the move could be made.
   It was `kit/fence` in `eslint.config.js`, over `KIT`, which was the table above in code; both went in step 3 with the last of what they fenced.
   A module bound for one package imported only what went to it or to a package it uses: protocol is beneath storage, storage beneath sync and the server, and sync beneath the client.
@@ -269,8 +269,8 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    Memoriam merged the stack that brought its copy, ported from here on 2026-10-13, up to this app's layout after the audit (memoriam#22 to memoriam#35); then took the kit at 1.1.0 (memoriam#39 to memoriam#42), had the relay, the gate and connect codes from it (memoriam#44), and wrote it down (memoriam#46).
    The sync section of its [`docs/ARCHITECTURE.md`](https://github.com/skysa-org/memoriam/blob/main/docs/ARCHITECTURE.md) says how, and what it keeps of its own, and its roadmap has the step as S7.
    The relay's Durable Object came with the kit's server, and the relay's link, `/config`'s gate and the connect-code store with its client.
-   What came by copy, as this app and skysa-draw have it: the gate's logic, which is the rules for asking about a typed code, asking again about a held one, telling when a refusal is about the code, and the timer that follows a hold; and the Worker's refusal to boot with `RELAY` on and no `RELAY_HUB`.
-   A database from its earlier builds is reset onto the kit's migrations (decided 2026-11-15): memoriam has never been deployed, and its one release, 0.1.0, came before it had a Worker, so a reset costs nothing real, though marking the kit's migrations applied would have kept a database's rows, since its schema matches the kit's; its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how.
+   What came by copy, as this app and skysa-draw have it: the gate's logic, which is the rules for asking about a typed code, asking again about a held one, telling when a refusal is about the code, and the timer that follows a hold; when a source needs connecting again (`needsReconnect`); and the Worker's refusal to boot with `RELAY` on and no `RELAY_HUB`.
+   A database from its earlier builds is reset onto the kit's migrations (decided 2026-11-15): memoriam has never been deployed, and its one release, 0.1.0, came before it had a Worker, so only a Worker someone deployed from its main branch has such a database, though marking the kit's migrations applied would have kept its rows, since its schema matches the kit's; its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how, and what a reset costs.
    What is left on memoriam's side is in its own issues (memoriam#38, memoriam#43, memoriam#45, memoriam#47), one of them a question below.
    The kit needed no new version for it, and what the move found is in the kit's issues:
    - skysa-kit#20: twelve findings in code the kit carries, five from reviewing memoriam's stack and seven from the move, among them that no test now holds the server's answers to the client's schemas, which memoriam's own test did;
@@ -288,5 +288,5 @@ Where anything is keyed on a storage account, the descriptor's account-id rule s
 **Open.**
 - Whether Connect again, where a source needs connecting again (`needsReconnect`), goes behind the operator's gate, in all three apps (memoriam#45).
   It sends the code held, if any, so a policy that decides by a code at every callback, rather than remembering the accounts it let in, refuses it where no code is held or the one held no longer counts.
-  Here and in skysa-draw a new code can be typed first where a source is added; in memoriam, which shows the gate only while unbound, the way to the code's field is then Disconnect.
-  The Connect again under a policy's own refusal is behind the gate in memoriam, and this app shows none there.
+  Here and in skysa-draw a new code can be typed first where a source is added; in memoriam, whose code field shows only while unbound or under a policy's refusal, the way to it is then Disconnect.
+  Under a policy's own refusal, memoriam shows a Connect again behind the gate, and this app and skysa-draw show none.
