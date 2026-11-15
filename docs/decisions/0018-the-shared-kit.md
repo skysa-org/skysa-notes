@@ -271,7 +271,8 @@ The operator's seams do not change: `EntitlementProvider` with its gate, `checkC
    The relay's Durable Object came with the kit's server, and the relay's link, `/config`'s gate and the connect-code store with its client.
    What came by copy, as this app and skysa-draw have it: the gate's logic, which is the rules for asking about a typed code, asking again about a held one, telling when a refusal is about the code, and the timer that follows a hold; when a source needs connecting again (`needsReconnect`); and the Worker's refusal to boot with `RELAY` on and no `RELAY_HUB`.
    A database from its earlier builds is reset onto the kit's migrations (decided 2026-11-15): memoriam has never been deployed, and its one release, 0.1.0, came before it had a Worker, so only a Worker someone deployed from its main branch has such a database, though marking the kit's migrations applied would have kept its rows, since its schema matches the kit's; its [`self-hosting.md`](https://github.com/skysa-org/memoriam/blob/main/docs/self-hosting.md#a-database-from-before-the-kit) says how, and what a reset costs.
-   What is left on memoriam's side is in its own issues (memoriam#38, memoriam#43, memoriam#45, memoriam#47), one of them a question below.
+   What is left on memoriam's side is in its own issues (memoriam#38, memoriam#43, memoriam#45, memoriam#47).
+   One was a question for the owner, decided 2026-11-15 (memoriam#45): Connect again, where a source needs connecting again (`needsReconnect`), stays out from behind the operator's gate in all three apps, and memoriam offers the code's field beside it, as this app and skysa-draw offer it where a source is added.
    The kit needed no new version for it, and what the move found is in the kit's issues:
    - skysa-kit#20: twelve findings in code the kit carries, five from reviewing memoriam's stack and seven from the move, among them that no test now holds the server's answers to the client's schemas, which memoriam's own test did;
    - skysa-kit#21: memoriam's device, over which it runs the client's suites but for 23 tests skipped by title, since it holds one library, keeps none detached, has none to resume, makes no first import and follows no other tab's transactions; and nine tests of six parts that memoriam had and the kit does not, six of which memoriam keeps over the kit's functions and three of which now run nowhere;
@@ -284,9 +285,3 @@ One Worker and one origin per app: the Content-Security-Policy, the device's cre
 Each app is registered with each provider on its own.
 Google revokes per Cloud project, so a project shared by two apps would let disconnecting one take away the other's access, and Dropbox and OneDrive name the app folder after the registration.
 Where anything is keyed on a storage account, the descriptor's account-id rule says whether the same account can arrive from two apps under one id.
-
-**Open.**
-- Whether Connect again, where a source needs connecting again (`needsReconnect`), goes behind the operator's gate, in all three apps (memoriam#45).
-  It sends the code held, if any, so a policy that decides by a code at every callback, rather than remembering the accounts it let in, refuses it where no code is held or the one held no longer counts.
-  Here and in skysa-draw a new code can be typed first where a source is added; in memoriam, whose code field shows only while unbound or under a policy's refusal, the way to it is then Disconnect.
-  Under a policy's own refusal, memoriam shows a Connect again behind the gate, and this app and skysa-draw show none.
